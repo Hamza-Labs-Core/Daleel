@@ -263,7 +263,7 @@ Daleel/
 ├── tests/                      # Core / Pipeline / Search / Agent / Web test suites
 ├── Dockerfile                  # multi-stage build -> ASP.NET 8 runtime (port 8080)
 ├── Makefile                    # build / test / docker / deploy / setup-vps shortcuts
-├── deploy/                     # production compose, VPS bootstrap + deploy scripts
+├── deploy/                     # production compose, Caddy, VPS bootstrap + deploy scripts
 └── docs/
     └── architecture.md
 ```
@@ -273,10 +273,8 @@ Daleel/
 ## Deployment
 
 Daleel ships as a single container image (`ghcr.io/hamza-labs-core/daleel`) running the
-`Daleel.Web` Blazor app. The origin serves plain **HTTP on port 80** (host `80` → container
-`8080`); **TLS is terminated by Cloudflare** at the org level, which proxies to the origin —
-so there's no reverse proxy or certificate management on the box. CI/CD is GitHub Actions;
-the target is a **Hetzner CX23** VPS (Ubuntu 22.04/24.04).
+`Daleel.Web` Blazor app on port **8080** behind **Caddy** (automatic HTTPS via Let's
+Encrypt). CI/CD is GitHub Actions; the target is a **Hetzner CX23** VPS (Ubuntu 22.04/24.04).
 
 ### Pipelines
 
@@ -293,12 +291,11 @@ ssh root@your-server 'bash -s' < deploy/setup.sh
 ```
 
 `deploy/setup.sh` installs Docker + Compose, creates the `daleel` service user, lays out
-`/opt/daleel`, installs a `daleel.service` systemd unit, opens UFW ports (22/80), and
+`/opt/daleel`, installs a `daleel.service` systemd unit, opens UFW ports (22/80/443), and
 configures log rotation. Then on the server:
 
 1. Edit `/opt/daleel/.env` and fill in all secrets (template: [`deploy/.env.example`](deploy/.env.example)).
-2. In Cloudflare, add a **proxied** (orange-cloud) DNS record for your hostname pointing at
-   the server IP. Cloudflare terminates TLS and proxies to the origin over HTTP on port 80.
+2. Point DNS `*.daleel.yourdomain.com` → the server IP (and update the host in `deploy/Caddyfile`).
 3. If the GHCR image is private: `sudo -u daleel docker login ghcr.io`.
 4. Start it: `sudo systemctl start daleel.service` (or `sudo -u daleel /opt/daleel/deploy.sh latest`).
 
