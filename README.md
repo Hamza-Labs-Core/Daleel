@@ -319,8 +319,6 @@ real values under **Settings → Secrets and variables → Actions**.
 | `SERPAPI_KEY` | app | SerpApi web/shopping search |
 | `CONTEXT_DEV_API_KEY` | app | context.dev provider |
 | `GOOGLE_PLACES_API_KEY` | app | Google Places lookups |
-| `CLOUDFLARE_ACCOUNT_ID` | app | Cloudflare browser rendering |
-| `CLOUDFLARE_API_TOKEN` | app | Cloudflare browser rendering |
 | `APIFY_TOKEN` | app | Apify social scraping actors |
 | `DEPLOY_SSH_HOST` | `deploy.yml` | VPS hostname / IP |
 | `DEPLOY_SSH_USER` | `deploy.yml` | SSH user for deployment |
@@ -328,3 +326,7 @@ real values under **Settings → Secrets and variables → Actions**.
 
 > Pushing to GHCR uses the built-in `GITHUB_TOKEN` (`packages: write`) — no PAT needed.
 > App secrets are injected at runtime via `/opt/daleel/.env`, **not** baked into the image.
+>
+> `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are **not** per-repo secrets — they're
+> provided at the GitHub org level. The app still reads them at runtime from `/opt/daleel/.env`
+> (documented in [`deploy/.env.example`](deploy/.env.example)).

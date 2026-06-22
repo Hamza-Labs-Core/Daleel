@@ -21,14 +21,16 @@ SECRETS=(
   SERPAPI_KEY
   CONTEXT_DEV_API_KEY
   GOOGLE_PLACES_API_KEY
-  CLOUDFLARE_ACCOUNT_ID
-  CLOUDFLARE_API_TOKEN
   APIFY_TOKEN
   # Deploy (consumed by .github/workflows/deploy.yml)
   DEPLOY_SSH_HOST
   DEPLOY_SSH_USER
   DEPLOY_SSH_KEY
 )
+
+# NOTE: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are intentionally NOT created
+# here — they are provided at the GitHub org level, so they don't need a per-repo secret.
+# The app still reads them at runtime via /opt/daleel/.env (see deploy/.env.example).
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "ERROR: GitHub CLI (gh) is not installed. See https://cli.github.com/" >&2
