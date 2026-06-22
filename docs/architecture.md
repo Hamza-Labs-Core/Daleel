@@ -136,3 +136,97 @@ matching, so the hash set only ever holds posts we actually care about.
 
 External I/O (`ApifyClient` HTTP, real network) is kept behind interfaces so the
 deterministic logic is fully testable offline.
+
+---
+
+# The intelligence layer (agent + search)
+
+The monitoring pipeline above answers "did anyone mention keyword X?". The agent layer
+answers open questions like "what's the best AC in Jordan?" by making the LLM both the
+**query planner** and the **analyst**, with concrete providers doing the data gathering in
+between.
+
+## Dependency direction
+
+`ILlmClient` lives in `Daleel.Core` (a domain abstraction), so `Daleel.Pipeline`'s
+LLM-powered `OpinionExtractor` can depend on it without a cycle. The concrete LLM clients
+(`OpenAiClient`, `AnthropicClient`) live in `Daleel.Agent`. `Daleel.Agent` references Core,
+Search, Apify, and Pipeline; nothing references Agent except the CLI. This keeps the graph
+acyclic while satisfying "LLM provider implementations live in the Agent project".
+
+## Agent flow
+
+```
+question + geo
+      │
+      ▼
+LLM PLANNER  (PromptTemplates.Plan*  →  SearchStrategy JSON)
+      │   classifies QueryType, emits bilingual web/shopping/social/places queries
+      ▼
+GATHER (parallel, failure-isolated)
+   ├─ ISearchProvider   (SerpAPI / Bing)      → web + shopping results
+   ├─ IPlacesProvider   (Google Places)       → store locations + reviews
+   ├─ IPostFetcher      (Apify)               → social posts → Arabic matcher filters
+   └─ IScrapeProvider   (Context.dev→CF)      → deep-read specific URLs
+      │
+      ▼
+ANALYZE & PROJECT
+   ├─ OpinionExtractor (LLM)  → structured CustomerOpinion[]
+   ├─ PriceTracker / MarketplaceAggregator → price points + comparison
+   ├─ DealScorer → ranked deals
+   └─ LLM ANALYST (PromptTemplates.Analyze) → narrative summary
+      │
+      ▼
+  BrandReport / ProductIntelligence / AgentAnswer / StoreLocation[]
+```
+
+## Provider design
+
+All HTTP providers extend `HttpProviderBase` (injectable `HttpClient` + retry/backoff with
+an injectable delay), so every provider is testable with a stub `HttpMessageHandler` and no
+real waits. Providers normalize their wire formats into shared shapes (`SearchResult`,
+`StoreLocation`, `ScrapedPage`, `PricePoint`) so the agent never sees a provider's raw JSON.
+
+- **SerpAPI** (`SerpApiProvider`) — primary search; one key covers Google Web/Shopping/Maps,
+  geo via `gl`/`hl`.
+- **Bing** (`BingProvider`) — web/news fallback; market code `mkt` (e.g. `ar-JO`).
+- **Google Shopping** (`GoogleShoppingProvider`) — composes over any shopping-capable
+  `ISearchProvider`, emitting `PricePoint`s.
+- **OpenSooq** (`OpenSooqProvider`) — Jordan/Gulf classifieds; JS-heavy + anti-bot, so it
+  scrapes via an `IScrapeProvider` and extracts listings from markdown (price taken from the
+  text *after* each listing link, so a "24000 BTU" title isn't mistaken for a price).
+- **Google Places** (`GooglePlacesProvider`) — text/nearby search, details, reviews; computes
+  distance locally with haversine.
+- **Context.dev** (`ContextDevProvider`) — primary scraper: scrape→markdown, AI extract
+  against a schema, brand enrichment, crawl. (Replaced the earlier Firecrawl integration.)
+- **Cloudflare Browser** (`CloudflareBrowserProvider`) — fallback scraper; edge-rendered
+  headless browser for the toughest pages, plus screenshots and custom JS.
+- **`ScrapeRouter`** chains scrapers (Context.dev → Cloudflare), falling through on empty/error.
+
+## Geo profiles
+
+`GeoProfile` encodes "how to research this country": language priority (drives bilingual
+query generation), currency (drives price defaults), local social platforms + Apify actors,
+marketplaces, and a city-center `GeoPoint` for proximity search. `GeoProfiles` ships
+`jordan`, `saudi`, `uae`, `egypt`, `usa` and resolves by key, ISO code, country, or city.
+
+## Robustness choices
+
+- **Planner output is parsed leniently** (`LlmJson`) — code fences and surrounding prose are
+  tolerated; unparseable output yields an empty strategy rather than a crash.
+- **Every gather call is wrapped** — a failing or unconfigured provider contributes nothing
+  instead of failing the run.
+- **Clocks and delays are injected** — `AgentOptions.Clock`, provider `delay` — so timing is
+  deterministic in tests.
+
+## Testing strategy (intelligence layer)
+
+- **Core** — `PriceParser` (currencies, Arabic digits, separators), `GeoProfiles`, `LlmJson`.
+- **Search** — `MarketplaceAggregator`, `OpenSooqProvider` extraction (fake scraper),
+  `GooglePlacesProvider` parsing + haversine (stub handler), `SerpApiProvider` parsing +
+  geo params (stub handler), `ScrapeRouter` fallback.
+- **Pipeline** — `DealScorer`, `PriceTracker`, `OpinionExtractor` (fake LLM).
+- **Agent** — `AgentService` plan→gather→analyze with a fake LLM (routed by system prompt)
+  and fake search; `AnthropicClient`/`OpenAiClient` response parsing (stub handler).
+
+No test touches the network; 159 tests run in well under a second.

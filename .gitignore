@@ -28,6 +28,7 @@ coverage*.info
 
 # Daleel runtime output
 daleel-results.jsonl
+daleel-*.jsonl
 *.local.jsonl
 .env
 

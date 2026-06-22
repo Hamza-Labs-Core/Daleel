@@ -11,11 +11,19 @@ using Daleel.Pipeline;
 
 Console.OutputEncoding = Encoding.UTF8;
 
-var root = new RootCommand("Daleel — Arabic social media monitoring & intelligence tool.");
+var root = new RootCommand("Daleel — Arabic market & social-media intelligence tool.");
+
+// Core matching/monitoring commands.
 root.AddCommand(BuildSearchCommand());
 root.AddCommand(BuildMonitorCommand());
 root.AddCommand(BuildTestMatchCommand());
 root.AddCommand(BuildDryRunCommand());
+
+// LLM-agent intelligence commands (ask, brand, product, stores, deals, compare, reviews, nearby).
+foreach (var agentCommand in Daleel.Cli.AgentCommands.All())
+{
+    root.AddCommand(agentCommand);
+}
 
 return await root.InvokeAsync(args);
 
@@ -108,48 +116,70 @@ static Command BuildSearchCommand()
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// monitor: run a full job described by a JSON config file.
+// monitor: run a job from a config file, OR monitor a keyword in a market on an
+// optional repeating interval.
 // ─────────────────────────────────────────────────────────────────────────────
 static Command BuildMonitorCommand()
 {
-    var config = new Option<FileInfo>("--config", "Path to a JSON job/sources config file.")
-    {
-        IsRequired = true
-    };
+    var keyword = new Argument<string?>("keyword", () => null, "Keyword to monitor (omit when using --config).");
+    var config = new Option<FileInfo?>("--config", "Path to a JSON job/sources config file.");
     config.AddAlias("-c");
+    var geo = new Option<string?>("--geo", () => "jordan", "Market profile for keyword monitoring.");
+    geo.AddAlias("-g");
+    var interval = new Option<string?>("--interval", "Repeat interval, e.g. 30m, 6h, 24h (omit to run once).");
 
-    var cmd = new Command("monitor", "Run a monitoring job from a config file.") { config };
+    var cmd = new Command("monitor", "Run a monitoring job (config file or keyword + market).")
+    {
+        keyword, config, geo, interval
+    };
 
     cmd.SetHandler(async (context) =>
     {
-        var file = context.ParseResult.GetValueForOption(config)!;
-        if (!file.Exists)
-        {
-            Console.Error.WriteLine($"Config file not found: {file.FullName}");
-            context.ExitCode = 2;
-            return;
-        }
+        var kw = context.ParseResult.GetValueForArgument(keyword);
+        var file = context.ParseResult.GetValueForOption(config);
+        var geoKey = context.ParseResult.GetValueForOption(geo);
+        var intervalRaw = context.ParseResult.GetValueForOption(interval);
 
         MonitoringJob? job;
-        try
+        if (file is not null)
         {
-            var json = await File.ReadAllTextAsync(file.FullName);
-            job = JsonSerializer.Deserialize<MonitoringJob>(json, new JsonSerializerOptions
+            if (!file.Exists)
             {
-                PropertyNameCaseInsensitive = true,
-                Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
-            });
+                Console.Error.WriteLine($"Config file not found: {file.FullName}");
+                context.ExitCode = 2;
+                return;
+            }
+
+            try
+            {
+                var json = await File.ReadAllTextAsync(file.FullName);
+                job = JsonSerializer.Deserialize<MonitoringJob>(json, new JsonSerializerOptions
+                {
+                    PropertyNameCaseInsensitive = true,
+                    Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+                });
+            }
+            catch (JsonException ex)
+            {
+                Console.Error.WriteLine($"Invalid config JSON: {ex.Message}");
+                context.ExitCode = 2;
+                return;
+            }
         }
-        catch (JsonException ex)
+        else if (!string.IsNullOrWhiteSpace(kw))
         {
-            Console.Error.WriteLine($"Invalid config JSON: {ex.Message}");
+            job = BuildJobFromKeyword(kw, geoKey);
+        }
+        else
+        {
+            Console.Error.WriteLine("Provide a keyword argument or --config.");
             context.ExitCode = 2;
             return;
         }
 
         if (job is null || job.Sources.Count == 0)
         {
-            Console.Error.WriteLine("Config has no sources.");
+            Console.Error.WriteLine("No sources to monitor.");
             context.ExitCode = 2;
             return;
         }
@@ -162,27 +192,105 @@ static Command BuildMonitorCommand()
             return;
         }
 
+        TimeSpan? every = null;
+        if (!string.IsNullOrWhiteSpace(intervalRaw))
+        {
+            if (!TryParseInterval(intervalRaw, out var parsed))
+            {
+                Console.Error.WriteLine($"Could not parse interval '{intervalRaw}'. Use forms like 30m, 6h, 24h.");
+                context.ExitCode = 2;
+                return;
+            }
+            every = parsed;
+        }
+
         using var client = new ApifyClient(token);
         var fetcher = new ApifyPostFetcher(client);
         var matcher = new ArabicMatcher();
-        await using var writer = new JsonlResultWriter(job.OutputPath);
 
-        var pipeline = new MonitoringPipeline(fetcher, matcher, writer, Console.WriteLine);
-        try
+        do
         {
-            var report = await pipeline.RunAsync(job);
-            Console.WriteLine(
-                $"\nJob '{job.Name}' complete. Matches: {report.Matches}, " +
-                $"sources: {report.SourcesProcessed}, output: {job.OutputPath}");
+            await using var writer = new JsonlResultWriter(job.OutputPath, append: true);
+            var pipeline = new MonitoringPipeline(fetcher, matcher, writer, Console.WriteLine);
+            try
+            {
+                var report = await pipeline.RunAsync(job);
+                Console.WriteLine(
+                    $"\nJob '{job.Name}' run complete. Matches: {report.Matches}, " +
+                    $"sources: {report.SourcesProcessed}, output: {job.OutputPath}");
+            }
+            catch (ApifyException ex)
+            {
+                Console.Error.WriteLine($"Apify error: {ex.Message}");
+                context.ExitCode = 1;
+                return;
+            }
+
+            if (every is { } wait)
+            {
+                Console.WriteLine($"Next run in {intervalRaw}. Press Ctrl+C to stop.");
+                await Task.Delay(wait);
+            }
         }
-        catch (ApifyException ex)
-        {
-            Console.Error.WriteLine($"Apify error: {ex.Message}");
-            context.ExitCode = 1;
-        }
+        while (every is not null);
     });
 
     return cmd;
+}
+
+/// <summary>Builds a single-source keyword monitoring job for a market profile.</summary>
+static MonitoringJob BuildJobFromKeyword(string keyword, string? geoKey)
+{
+    var profile = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geoKey);
+    var actor = profile.ApifyActors.FirstOrDefault() ?? "scrapeforge/facebook-search-posts";
+
+    return new MonitoringJob
+    {
+        Name = $"monitor-{profile.Key}",
+        Keywords = new[] { keyword },
+        Mode = MatchMode.Contains,
+        OutputPath = $"daleel-{profile.Key}-monitor.jsonl",
+        Sources = new[]
+        {
+            new Source
+            {
+                Name = $"{profile.Key}-facebook",
+                Kind = SourceKind.Search,
+                Target = keyword,
+                ActorId = actor,
+                MaxItems = 50
+            }
+        }
+    };
+}
+
+/// <summary>Parses an interval like "30m", "6h", "24h", "45s", "2d".</summary>
+static bool TryParseInterval(string raw, out TimeSpan interval)
+{
+    interval = default;
+    raw = raw.Trim().ToLowerInvariant();
+    if (raw.Length < 2)
+    {
+        return false;
+    }
+
+    var unit = raw[^1];
+    if (!double.TryParse(raw[..^1], System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture, out var value))
+    {
+        return false;
+    }
+
+    interval = unit switch
+    {
+        's' => TimeSpan.FromSeconds(value),
+        'm' => TimeSpan.FromMinutes(value),
+        'h' => TimeSpan.FromHours(value),
+        'd' => TimeSpan.FromDays(value),
+        _ => TimeSpan.Zero
+    };
+
+    return interval > TimeSpan.Zero;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

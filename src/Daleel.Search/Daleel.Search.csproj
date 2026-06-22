@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Daleel.Core\Daleel.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Expose internal helpers (e.g. GooglePlacesProvider.Haversine) to the test project. -->
+    <InternalsVisibleTo Include="Daleel.Search.Tests" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
