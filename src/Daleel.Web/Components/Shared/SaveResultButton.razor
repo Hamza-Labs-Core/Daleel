@@ -1,0 +1,97 @@
+@* Bookmark button shown beside every result. Saves the full result JSON for the signed-in user. *@
+@inject ICurrentUser CurrentUser
+@inject ISavedResultRepository Saved
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+@if (_savedId is not null)
+{
+    <MudButton Variant="Variant.Text" Color="Color.Success" StartIcon="@Icons.Material.Filled.BookmarkAdded"
+               Disabled="true">محفوظ · Saved</MudButton>
+}
+else
+{
+    <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.BookmarkBorder"
+               OnClick="OpenAsync" Disabled="_busy">حفظ النتيجة · Save</MudButton>
+}
+
+@code {
+    /// <summary>The result object to serialize (AgentAnswer, BrandReport, ProductComparison, …).</summary>
+    [Parameter, EditorRequired] public object? Result { get; set; }
+
+    /// <summary>Discriminator used by the viewer to deserialize: ask/brand/stores/deals/product/compare/reviews.</summary>
+    [Parameter, EditorRequired] public string ResultType { get; set; } = string.Empty;
+
+    /// <summary>Default title for the save dialog (typically the query).</summary>
+    [Parameter] public string DefaultTitle { get; set; } = string.Empty;
+
+    /// <summary>History row this result came from, linked for back-reference.</summary>
+    [Parameter] public int? SearchHistoryId { get; set; }
+
+    private bool _busy;
+    private int? _savedId;
+
+    private async Task OpenAsync()
+    {
+        if (Result is null)
+        {
+            return;
+        }
+
+        if (!await CurrentUser.IsAuthenticatedAsync())
+        {
+            Snackbar.Add("Sign in to save your searches.", Severity.Info);
+            return;
+        }
+
+        var parameters = new DialogParameters<SaveResultDialog>
+        {
+            { x => x.DefaultTitle, string.IsNullOrWhiteSpace(DefaultTitle) ? ResultType : DefaultTitle }
+        };
+        var dialog = await Dialogs.ShowAsync<SaveResultDialog>("حفظ النتيجة · Save result", parameters);
+        var result = await dialog.Result;
+        if (result is null || result.Canceled || result.Data is not SaveResultDialog.SaveDetails details)
+        {
+            return;
+        }
+
+        await SaveAsync(details);
+    }
+
+    private async Task SaveAsync(SaveResultDialog.SaveDetails details)
+    {
+        _busy = true;
+        try
+        {
+            var userId = await CurrentUser.GetUserIdAsync();
+            if (userId is null)
+            {
+                Snackbar.Add("Sign in to save your searches.", Severity.Info);
+                return;
+            }
+
+            var entity = new SavedResult
+            {
+                UserId = userId,
+                SearchHistoryId = SearchHistoryId,
+                Title = details.Title,
+                Notes = details.Notes,
+                ResultType = ResultType,
+                ResultJson = ResultSerialization.Serialize(Result),
+                CreatedAt = DateTimeOffset.UtcNow
+            };
+
+            var stored = await Saved.AddAsync(entity);
+            _savedId = stored.Id;
+            Snackbar.Add("Saved to your bookmarks.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Could not save: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

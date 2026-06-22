@@ -1,0 +1,133 @@
+@* Re-renders a saved result from its stored JSON, dispatching on ResultType. *@
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined">@_error</MudAlert>
+}
+else
+{
+    @switch (Saved.ResultType)
+    {
+        case "brand" when _brand is not null:
+            <MudGrid Spacing="3">
+                <MudItem xs="12" md="8"><ReportView Title="@($"نظرة عامة · {_brand.Brand}")" Text="@_brand.Summary" /></MudItem>
+                <MudItem xs="12" md="4"><SentimentView Summary="_brand.Sentiment" /></MudItem>
+            </MudGrid>
+            @if (_brand.Competitors.Count > 0)
+            {
+                <MudText Typo="Typo.h6" Class="mt-4 mb-2">المنافسون · Competitors</MudText>
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var c in _brand.Competitors)
+                    {
+                        <MudChip T="string" Color="Color.Tertiary" Variant="Variant.Outlined">@c.Competitor</MudChip>
+                    }
+                </div>
+            }
+            <SourceChips Sources="_brand.Sources" />
+            break;
+
+        case "compare" when _compare is not null:
+            <ReportView Title="@_compareTitle" Text="@_compare.Summary" />
+            @if (!string.IsNullOrWhiteSpace(_compare.Winner))
+            {
+                <MudChip T="string" Color="Color.Success" Variant="Variant.Filled" Class="mt-2">
+                    🏆 @_compare.Winner
+                </MudChip>
+            }
+            <SourceChips Sources="_compare.Sources" />
+            break;
+
+        case "product" when _product is not null:
+            <ReportView Title="@($"المنتجات · {_product.Category}")" Text="@_product.Summary" />
+            @foreach (var p in _product.TopProducts.Take(8))
+            {
+                <MudText Typo="Typo.subtitle2" Class="mt-2">#@p.Rank · @p.Name</MudText>
+            }
+            <SourceChips Sources="_product.Sources" />
+            break;
+
+        case "stores" when _stores is not null:
+            <MudGrid Spacing="3">
+                @foreach (var s in _stores)
+                {
+                    <MudItem xs="12" sm="6" md="4"><StoreCard Store="s" /></MudItem>
+                }
+            </MudGrid>
+            break;
+
+        case "ask":
+        case "deals":
+            @if (_answer is not null)
+            {
+                <ReportView Title="الملخص · Summary" Text="@_answer.Summary" />
+                <SourceChips Sources="_answer.Research.Sources" />
+            }
+            break;
+
+        default:
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">
+                Showing raw saved data for type "@Saved.ResultType".
+            </MudAlert>
+            break;
+    }
+
+    @if (!string.IsNullOrWhiteSpace(Saved.Notes))
+    {
+        <MudPaper Class="pa-3 mt-3" Outlined="true" Elevation="0">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Notes</MudText>
+            <MudText Typo="Typo.body2">@Saved.Notes</MudText>
+        </MudPaper>
+    }
+
+    <MudExpansionPanels Class="mt-4" Elevation="0">
+        <MudExpansionPanel Text="Raw JSON">
+            <pre style="white-space:pre-wrap;word-break:break-word;font-size:0.8rem;">@_pretty</pre>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+}
+
+@code {
+    [Parameter, EditorRequired] public SavedResult Saved { get; set; } = default!;
+
+    private string? _error;
+    private string _pretty = string.Empty;
+    private string _compareTitle = "قارن · Compare";
+
+    private BrandReport? _brand;
+    private ProductComparison? _compare;
+    private ProductIntelligence? _product;
+    private AgentAnswer? _answer;
+    private IReadOnlyList<StoreLocation>? _stores;
+
+    protected override void OnParametersSet()
+    {
+        _error = null;
+        try
+        {
+            // Pretty-print the stored blob for the raw view.
+            using var doc = System.Text.Json.JsonDocument.Parse(Saved.ResultJson);
+            _pretty = System.Text.Json.JsonSerializer.Serialize(doc.RootElement,
+                new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+            switch (Saved.ResultType)
+            {
+                case "brand": _brand = ResultSerialization.Deserialize<BrandReport>(Saved.ResultJson); break;
+                case "compare":
+                    _compare = ResultSerialization.Deserialize<ProductComparison>(Saved.ResultJson);
+                    if (_compare is not null)
+                    {
+                        _compareTitle = "قارن · " + string.Join(" vs ", _compare.Products);
+                    }
+                    break;
+                case "product": _product = ResultSerialization.Deserialize<ProductIntelligence>(Saved.ResultJson); break;
+                case "stores": _stores = ResultSerialization.Deserialize<List<StoreLocation>>(Saved.ResultJson); break;
+                case "ask":
+                case "deals": _answer = ResultSerialization.Deserialize<AgentAnswer>(Saved.ResultJson); break;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"This saved result could not be read: {ex.Message}";
+        }
+    }
+}

@@ -48,6 +48,10 @@
 
 @if (_result is not null && !Busy)
 {
+    <div class="d-flex my-3">
+        <MudSpacer />
+        <SaveResultButton Result="_result" ResultType="compare" DefaultTitle="@_compareTitle" SearchHistoryId="LastHistoryId" />
+    </div>
     <MudGrid Spacing="3" Class="mt-2">
         @foreach (var (product, index) in _result.Products.Select((p, i) => (p, i)))
         {
@@ -91,9 +95,34 @@
 }
 
 @code {
+    [SupplyParameterFromQuery] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "geo")] private string? GeoParam { get; set; }
+
     private string _a = string.Empty;
     private string _b = string.Empty;
     private ProductComparison? _result;
+
+    private string _compareTitle => string.IsNullOrWhiteSpace(_a) && string.IsNullOrWhiteSpace(_b)
+        ? "Compare"
+        : $"{_a} vs {_b}";
+
+    // History stores compare queries as "A vs B"; split them back into the two fields on re-run.
+    protected override Task OnReadyAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Q))
+        {
+            var parts = Q!.Split(" vs ", 2, StringSplitOptions.TrimEntries);
+            _a = parts.ElementAtOrDefault(0) ?? string.Empty;
+            _b = parts.ElementAtOrDefault(1) ?? string.Empty;
+        }
+
+        if (!string.IsNullOrWhiteSpace(GeoParam))
+        {
+            Geo = GeoParam!;
+        }
+
+        return Task.CompletedTask;
+    }
 
     private async Task Run()
     {
@@ -106,6 +135,13 @@
         await Store.SetAsync("geo", Geo);
         await Store.SetAsync("model", Model);
         var products = new[] { _a.Trim(), _b.Trim() };
-        await RunAsync(async (agent, ct) => _result = await agent.CompareAsync(products, Geo, ct));
+        await RunAsync(
+            async (agent, ct) => _result = await agent.CompareAsync(products, Geo, ct),
+            () => _result is null ? null : new SearchHistoryEntry
+            {
+                Query = $"{_a.Trim()} vs {_b.Trim()}",
+                QueryType = "compare",
+                ResultSummary = _result.Summary
+            });
     }
 }

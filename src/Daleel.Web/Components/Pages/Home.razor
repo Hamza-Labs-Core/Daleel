@@ -50,6 +50,8 @@
         <div class="d-flex align-center gap-2 my-3">
             <MudChip T="string" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small">@_answer.QueryType</MudChip>
             <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">@Catalog.ResolveGeo(_answer.Geo).Display</MudChip>
+            <MudSpacer />
+            <SaveResultButton Result="_answer" ResultType="ask" DefaultTitle="@_answer.Question" SearchHistoryId="LastHistoryId" />
         </div>
 
         <ReportView Title="الملخص · Summary" Text="@_answer.Summary" />
@@ -99,8 +101,27 @@
 }
 
 @code {
+    [SupplyParameterFromQuery] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "geo")] private string? GeoParam { get; set; }
+
     private string _question = string.Empty;
     private AgentAnswer? _answer;
+
+    // Prefill from a History "re-run" deep link (?q=…&geo=…); the user presses Ask to run it.
+    protected override Task OnReadyAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Q))
+        {
+            _question = Q!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(GeoParam))
+        {
+            Geo = GeoParam!;
+        }
+
+        return Task.CompletedTask;
+    }
 
     private async Task OnKey(KeyboardEventArgs e)
     {
@@ -120,7 +141,14 @@
         _answer = null;
         await Store.SetAsync("geo", Geo);
         await Store.SetAsync("model", Model);
-        await RunAsync(async (agent, ct) => _answer = await agent.AskAsync(_question, Geo, ct));
+        await RunAsync(
+            async (agent, ct) => _answer = await agent.AskAsync(_question, Geo, ct),
+            () => _answer is null ? null : new SearchHistoryEntry
+            {
+                Query = _question,
+                QueryType = "ask",
+                ResultSummary = _answer.Summary
+            });
     }
 
     private static string Trim(string s, int max) => s.Length <= max ? s : s[..max] + "…";

@@ -39,6 +39,11 @@
 {
     var deals = _answer.Research.ShoppingResults.Where(r => r.Price is not null).ToList();
 
+    <div class="d-flex my-3">
+        <MudSpacer />
+        <SaveResultButton Result="_answer" ResultType="deals" DefaultTitle="@($"Deals · {_subject}")" SearchHistoryId="LastHistoryId" />
+    </div>
+
     <ReportView Title="أفضل العروض · Best deals" Text="@_answer.Summary" />
 
     @if (deals.Count > 0)
@@ -104,6 +109,31 @@
         await Store.SetAsync("geo", Geo);
         await Store.SetAsync("model", Model);
         var query = $"current deals, discounts and promotions for {_subject}";
-        await RunAsync(async (agent, ct) => _answer = await agent.AskAsync(query, Geo, ct));
+        await RunAsync(
+            async (agent, ct) => _answer = await agent.AskAsync(query, Geo, ct),
+            () => _answer is null ? null : new SearchHistoryEntry
+            {
+                Query = _subject,
+                QueryType = "deals",
+                ResultSummary = _answer.Summary
+            });
     }
+
+    protected override Task OnReadyAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Q))
+        {
+            _subject = Q!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(GeoParam))
+        {
+            Geo = GeoParam!;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [SupplyParameterFromQuery] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "geo")] private string? GeoParam { get; set; }
 }

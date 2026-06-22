@@ -1,0 +1,52 @@
+@* App-bar account control: a Sign-in button when anonymous, avatar + menu when signed in. *@
+
+<AuthorizeView>
+    <Authorized>
+        <MudMenu AnchorOrigin="Origin.BottomRight" TransformOrigin="Origin.TopRight" Dense="true">
+            <ActivatorContent>
+                <MudTooltip Text="@DisplayName(context)">
+                    <MudAvatar Size="Size.Small" Color="Color.Primary">
+                        @if (Avatar(context) is { } url)
+                        {
+                            <MudImage Src="@url" Alt="avatar" />
+                        }
+                        else
+                        {
+                            @Initial(context)
+                        }
+                    </MudAvatar>
+                </MudTooltip>
+            </ActivatorContent>
+            <ChildContent>
+                <MudText Typo="Typo.body2" Class="px-4 py-2">@DisplayName(context)</MudText>
+                <MudDivider />
+                <MudMenuItem Href="/history" Icon="@Icons.Material.Filled.History">History</MudMenuItem>
+                <MudMenuItem Href="/saved" Icon="@Icons.Material.Filled.Bookmarks">Saved</MudMenuItem>
+                <MudDivider />
+                <MudMenuItem Href="/auth/logout" Icon="@Icons.Material.Filled.Logout" ForceLoad="true">
+                    Sign out
+                </MudMenuItem>
+            </ChildContent>
+        </MudMenu>
+    </Authorized>
+    <NotAuthorized>
+        <MudButton Href="/login" Variant="Variant.Outlined" Color="Color.Inherit" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Login">Sign in</MudButton>
+    </NotAuthorized>
+</AuthorizeView>
+
+@code {
+    private static string DisplayName(AuthenticationState ctx) =>
+        ctx.User.FindFirst("display_name")?.Value
+        ?? ctx.User.Identity?.Name
+        ?? "Account";
+
+    private static string? Avatar(AuthenticationState ctx) =>
+        ctx.User.FindFirst("avatar_url")?.Value;
+
+    private static string Initial(AuthenticationState ctx)
+    {
+        var name = DisplayName(ctx);
+        return string.IsNullOrWhiteSpace(name) ? "?" : name[..1].ToUpperInvariant();
+    }
+}

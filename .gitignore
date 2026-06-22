@@ -35,3 +35,8 @@ daleel-*.jsonl
 # OS
 .DS_Store
 Thumbs.db
+
+# Local SQLite database files
+daleel.db
+*.db-shm
+*.db-wal

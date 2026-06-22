@@ -1,0 +1,18 @@
+@* Hosts SavedResultView inside a MudDialog so saved reports can be viewed in place. *@
+
+<MudDialog>
+    <DialogContent>
+        <SavedResultView Saved="Saved" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">إغلاق · Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance Dialog { get; set; } = default!;
+
+    [Parameter, EditorRequired] public SavedResult Saved { get; set; } = default!;
+
+    private void Close() => Dialog.Close();
+}

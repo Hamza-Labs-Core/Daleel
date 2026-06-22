@@ -70,7 +70,11 @@
     }
     else
     {
-        <MudText Typo="Typo.subtitle1" Class="mb-2">@_stores.Count stores · @Catalog.ResolveGeo(Geo).English</MudText>
+        <div class="d-flex align-center mb-2">
+            <MudText Typo="Typo.subtitle1">@_stores.Count stores · @Catalog.ResolveGeo(Geo).English</MudText>
+            <MudSpacer />
+            <SaveResultButton Result="_stores" ResultType="stores" DefaultTitle="@_subject" SearchHistoryId="LastHistoryId" />
+        </div>
         <MudGrid Spacing="3">
             @foreach (var s in Sorted)
             {
@@ -136,8 +140,33 @@
         _stores = null;
         await Store.SetAsync("geo", Geo);
         GeoPoint? near = _coords is { } c ? new GeoPoint(c.Lat, c.Lng) : null;
-        await RunAsync(async (agent, ct) => _stores = await agent.FindStoresAsync(_subject, Geo, near, ct));
+        await RunAsync(
+            async (agent, ct) => _stores = await agent.FindStoresAsync(_subject, Geo, near, ct),
+            () => _stores is null ? null : new SearchHistoryEntry
+            {
+                Query = _subject,
+                QueryType = "stores",
+                ResultSummary = $"{_stores.Count} store(s) found"
+            });
     }
+
+    protected override Task OnReadyAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Q))
+        {
+            _subject = Q!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(GeoParam))
+        {
+            Geo = GeoParam!;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [SupplyParameterFromQuery] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "geo")] private string? GeoParam { get; set; }
 
     private readonly record struct Coords(double Lat, double Lng);
 }

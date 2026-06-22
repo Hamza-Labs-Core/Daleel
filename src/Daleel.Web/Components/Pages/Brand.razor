@@ -37,6 +37,10 @@
 
 @if (_report is not null && !Busy)
 {
+    <div class="d-flex my-3">
+        <MudSpacer />
+        <SaveResultButton Result="_report" ResultType="brand" DefaultTitle="@_report.Brand" SearchHistoryId="LastHistoryId" />
+    </div>
     <MudGrid Spacing="3" Class="mt-2">
         <MudItem xs="12" md="8">
             <ReportView Title="@($"نظرة عامة · {_report.Brand}")" Text="@_report.Summary" />
@@ -110,8 +114,26 @@
 }
 
 @code {
+    [SupplyParameterFromQuery] private string? Q { get; set; }
+    [SupplyParameterFromQuery(Name = "geo")] private string? GeoParam { get; set; }
+
     private string _brand = string.Empty;
     private BrandReport? _report;
+
+    protected override Task OnReadyAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Q))
+        {
+            _brand = Q!;
+        }
+
+        if (!string.IsNullOrWhiteSpace(GeoParam))
+        {
+            Geo = GeoParam!;
+        }
+
+        return Task.CompletedTask;
+    }
 
     private async Task OnKey(KeyboardEventArgs e)
     {
@@ -131,6 +153,13 @@
         _report = null;
         await Store.SetAsync("geo", Geo);
         await Store.SetAsync("model", Model);
-        await RunAsync(async (agent, ct) => _report = await agent.ResearchBrandAsync(_brand, Geo, ct));
+        await RunAsync(
+            async (agent, ct) => _report = await agent.ResearchBrandAsync(_brand, Geo, ct),
+            () => _report is null ? null : new SearchHistoryEntry
+            {
+                Query = _brand,
+                QueryType = "brand",
+                ResultSummary = _report.Summary
+            });
     }
 }

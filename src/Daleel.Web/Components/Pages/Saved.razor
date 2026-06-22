@@ -1,0 +1,151 @@
+@page "/saved"
+@rendermode InteractiveServer
+@inject ICurrentUser CurrentUser
+@inject ISavedResultRepository SavedRepo
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject IJSRuntime JS
+
+<PageTitle>دليل · Saved</PageTitle>
+
+<div class="d-flex align-center mb-1">
+    <MudText Typo="Typo.h4">النتائج المحفوظة · Saved Results</MudText>
+    <MudSpacer />
+    @if (_items.Count > 0)
+    {
+        <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="ExportAllAsync">
+            Export all (JSON)
+        </MudButton>
+    }
+</div>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Bookmarked reports, re-rendered from their saved data — no re-running required.
+</MudText>
+
+@if (_ready && !_authenticated)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        <MudText>Sign in to save your searches.</MudText>
+        <MudButton Href="/login" Variant="Variant.Text" Color="Color.Primary" Class="mt-2">Sign in</MudButton>
+    </MudAlert>
+}
+else if (_authenticated)
+{
+    @if (_items.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            Nothing saved yet. Run a search and click <b>Save</b> on any result.
+        </MudAlert>
+    }
+    else
+    {
+        <MudGrid Spacing="3">
+            @foreach (var item in _items)
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                        <MudCardContent>
+                            <div class="d-flex align-center gap-2 mb-1">
+                                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@item.ResultType</MudChip>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@item.CreatedAt.LocalDateTime.ToString("g")</MudText>
+                            </div>
+                            <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(item.Title)">@item.Title</MudText>
+                            @if (!string.IsNullOrWhiteSpace(item.Notes))
+                            {
+                                <MudText Typo="Typo.body2" Color="Color.Secondary" dir="@Catalog.Dir(item.Notes)">@item.Notes</MudText>
+                            }
+                        </MudCardContent>
+                        <MudCardActions>
+                            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Visibility"
+                                       OnClick="@(() => ViewAsync(item))">View</MudButton>
+                            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                                       OnClick="@(() => ExportOneAsync(item))">JSON</MudButton>
+                            <MudSpacer />
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                           OnClick="@(() => DeleteAsync(item))" />
+                        </MudCardActions>
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+}
+
+@code {
+    private string? _userId;
+    private bool _ready;
+    private bool _authenticated;
+    private List<SavedResult> _items = new();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _userId = await CurrentUser.GetUserIdAsync();
+        _authenticated = _userId is not null;
+        if (_authenticated)
+        {
+            await ReloadAsync();
+        }
+
+        _ready = true;
+        StateHasChanged();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_userId is null)
+        {
+            return;
+        }
+
+        _items = (await SavedRepo.ListAsync(_userId)).ToList();
+    }
+
+    private async Task ViewAsync(SavedResult item)
+    {
+        var parameters = new DialogParameters<SavedResultDialogHost> { { x => x.Saved, item } };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
+        await Dialogs.ShowAsync<SavedResultDialogHost>(item.Title, parameters, options);
+    }
+
+    private async Task DeleteAsync(SavedResult item)
+    {
+        if (_userId is null)
+        {
+            return;
+        }
+
+        await SavedRepo.DeleteAsync(_userId, item.Id);
+        Snackbar.Add("Deleted.", Severity.Success);
+        await ReloadAsync();
+        StateHasChanged();
+    }
+
+    private async Task ExportOneAsync(SavedResult item)
+    {
+        var name = Slug(item.Title) + ".json";
+        await JS.InvokeVoidAsync("daleel.download", name, item.ResultJson, "application/json");
+    }
+
+    private async Task ExportAllAsync()
+    {
+        var export = _items.Select(i => new
+        {
+            i.Title, i.ResultType, i.Notes, i.CreatedAt,
+            Result = System.Text.Json.JsonSerializer.Deserialize<object>(i.ResultJson)
+        });
+        var json = System.Text.Json.JsonSerializer.Serialize(export,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+        await JS.InvokeVoidAsync("daleel.download", "daleel-saved-results.json", json, "application/json");
+    }
+
+    private static string Slug(string s)
+    {
+        var clean = new string(s.Select(c => char.IsLetterOrDigit(c) ? c : '-').ToArray());
+        return string.IsNullOrWhiteSpace(clean) ? "saved-result" : clean.Trim('-').ToLowerInvariant();
+    }
+}

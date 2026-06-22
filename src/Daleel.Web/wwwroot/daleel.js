@@ -14,5 +14,18 @@ window.daleel = {
                 function (err) { reject(err.message || 'Location permission denied.'); },
                 { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 });
         });
+    },
+
+    // Triggers a client-side file download of the given text (used to export saved results).
+    download: function (filename, text, mime) {
+        const blob = new Blob([text], { type: mime || 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 };

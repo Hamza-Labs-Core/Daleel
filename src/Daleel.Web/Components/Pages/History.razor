@@ -1,0 +1,163 @@
+@page "/history"
+@rendermode InteractiveServer
+@inject ICurrentUser CurrentUser
+@inject ISearchHistoryRepository HistoryRepo
+@inject NavigationManager Nav
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+
+<PageTitle>دليل · History</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">سجل البحث · Search History</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Every query you run is saved here automatically. Re-run it or open a saved copy.
+</MudText>
+
+@if (_ready && !_authenticated)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        <MudText>Sign in to save your searches.</MudText>
+        <MudButton Href="/login" Variant="Variant.Text" Color="Color.Primary" Class="mt-2">Sign in</MudButton>
+    </MudAlert>
+}
+else if (_authenticated)
+{
+    <MudPaper Class="pa-3 mb-3" Elevation="0" Outlined="true">
+        <div class="d-flex flex-wrap gap-3 align-center">
+            <MudTextField @bind-Value="_search" @bind-Value:after="OnSearchChanged"
+                          Placeholder="Filter by query text…" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.FilterList"
+                          Immediate="false" DebounceInterval="300" Style="flex:1;min-width:240px;" />
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearAllAsync">
+                Clear all
+            </MudButton>
+        </div>
+    </MudPaper>
+
+    <MudTable T="SearchHistoryEntry" ServerData="LoadAsync" @ref="_table" Hover="true"
+              Dense="true" Bordered="false" Striped="true">
+        <HeaderContent>
+            <MudTh>When</MudTh>
+            <MudTh>Type</MudTh>
+            <MudTh>Query</MudTh>
+            <MudTh>Market</MudTh>
+            <MudTh>Summary</MudTh>
+            <MudTh Style="text-align:right;">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="When">
+                <MudText Typo="Typo.caption">@context.CreatedAt.LocalDateTime.ToString("g")</MudText>
+            </MudTd>
+            <MudTd DataLabel="Type">
+                <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@context.QueryType</MudChip>
+            </MudTd>
+            <MudTd DataLabel="Query">
+                <MudText Typo="Typo.body2" dir="@Catalog.Dir(context.Query)">@context.Query</MudText>
+            </MudTd>
+            <MudTd DataLabel="Market">@Catalog.ResolveGeo(context.Geo).English</MudTd>
+            <MudTd DataLabel="Summary">
+                <MudText Typo="Typo.caption" Color="Color.Secondary" dir="@Catalog.Dir(context.ResultSummary ?? "")">
+                    @context.ResultSummary
+                </MudText>
+            </MudTd>
+            <MudTd Style="text-align:right;">
+                <MudTooltip Text="Re-run">
+                    <MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small"
+                                   OnClick="@(() => Rerun(context))" />
+                </MudTooltip>
+                <MudTooltip Text="Delete">
+                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                   OnClick="@(() => DeleteAsync(context))" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Class="pa-4" Color="Color.Secondary">No history yet — run a search to get started.</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudTablePager PageSizeOptions="new[] { 10, 20, 50 }" />
+        </PagerContent>
+    </MudTable>
+}
+
+@code {
+    private MudTable<SearchHistoryEntry>? _table;
+    private string? _userId;
+    private bool _ready;
+    private bool _authenticated;
+    private string _search = string.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _userId = await CurrentUser.GetUserIdAsync();
+        _authenticated = _userId is not null;
+        _ready = true;
+        StateHasChanged();
+    }
+
+    private async Task<TableData<SearchHistoryEntry>> LoadAsync(TableState state, CancellationToken token)
+    {
+        if (_userId is null)
+        {
+            return new TableData<SearchHistoryEntry> { Items = Array.Empty<SearchHistoryEntry>(), TotalItems = 0 };
+        }
+
+        var page = await HistoryRepo.ListAsync(_userId, _search, state.Page + 1, state.PageSize, token);
+        return new TableData<SearchHistoryEntry> { Items = page.Items, TotalItems = page.TotalCount };
+    }
+
+    private Task OnSearchChanged() => _table?.ReloadServerData() ?? Task.CompletedTask;
+
+    private async Task DeleteAsync(SearchHistoryEntry entry)
+    {
+        if (_userId is null)
+        {
+            return;
+        }
+
+        await HistoryRepo.DeleteAsync(_userId, entry.Id);
+        Snackbar.Add("Deleted.", Severity.Success);
+        if (_table is not null)
+        {
+            await _table.ReloadServerData();
+        }
+    }
+
+    private async Task ClearAllAsync()
+    {
+        var ok = await Dialogs.ShowMessageBox("Clear all history?",
+            "This permanently removes all of your search history.", yesText: "Clear all", cancelText: "Cancel");
+        if (ok != true || _userId is null)
+        {
+            return;
+        }
+
+        var count = await HistoryRepo.ClearAsync(_userId);
+        Snackbar.Add($"Cleared {count} item(s).", Severity.Success);
+        if (_table is not null)
+        {
+            await _table.ReloadServerData();
+        }
+    }
+
+    // Re-run sends the visitor to the originating feature page with the query pre-filled (?q=).
+    private void Rerun(SearchHistoryEntry entry)
+    {
+        var route = entry.QueryType switch
+        {
+            "brand" => "/brand",
+            "stores" => "/stores",
+            "deals" => "/deals",
+            "compare" => "/compare",
+            _ => "/"
+        };
+        Nav.NavigateTo($"{route}?q={Uri.EscapeDataString(entry.Query)}&geo={Uri.EscapeDataString(entry.Geo)}");
+    }
+}
