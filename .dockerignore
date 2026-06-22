@@ -1,0 +1,29 @@
+# Build output — rebuilt inside the image
+**/bin/
+**/obj/
+**/out/
+artifacts/
+
+# Local tooling / IDE
+.git/
+.github/
+.idea/
+.vs/
+.vscode/
+*.user
+
+# Runtime artifacts & secrets — never bake into the image
+**/*.local.jsonl
+daleel-results.jsonl
+daleel-*.jsonl
+.env
+deploy/.env
+
+# Test results
+**/TestResults/
+*.trx
+coverage*.*
+
+# OS
+.DS_Store
+Thumbs.db

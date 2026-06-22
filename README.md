@@ -1,5 +1,8 @@
 # Daleel (دليل)
 
+[![CI](https://github.com/Hamza-Labs-Core/Daleel/actions/workflows/ci.yml/badge.svg)](https://github.com/Hamza-Labs-Core/Daleel/actions/workflows/ci.yml)
+[![Deploy](https://github.com/Hamza-Labs-Core/Daleel/actions/workflows/deploy.yml/badge.svg)](https://github.com/Hamza-Labs-Core/Daleel/actions/workflows/deploy.yml)
+
 **Daleel** — Arabic for *"guide"* — is an **Arabic-first market & social-media intelligence
 tool**. It answers questions like *"What's the best AC in Jordan?"* / *"أفضل مكيف في الأردن"*
 by letting an LLM plan a bilingual research strategy, executing it across web search,
@@ -258,6 +261,70 @@ Daleel/
 │   ├── Daleel.Web/             # Blazor Web App UI (MudBlazor, Interactive Server + WASM)
 │   └── Daleel.Web.Client/      # WebAssembly companion (Auto render mode)
 ├── tests/                      # Core / Pipeline / Search / Agent / Web test suites
+├── Dockerfile                  # multi-stage build -> ASP.NET 8 runtime (port 8080)
+├── Makefile                    # build / test / docker / deploy / setup-vps shortcuts
+├── deploy/                     # production compose, Caddy, VPS bootstrap + deploy scripts
 └── docs/
     └── architecture.md
 ```
+
+---
+
+## Deployment
+
+Daleel ships as a single container image (`ghcr.io/hamza-labs-core/daleel`) running the
+`Daleel.Web` Blazor app on port **8080** behind **Caddy** (automatic HTTPS via Let's
+Encrypt). CI/CD is GitHub Actions; the target is a **Hetzner CX23** VPS (Ubuntu 22.04/24.04).
+
+### Pipelines
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| [`ci.yml`](.github/workflows/ci.yml) | push to `main`, PRs | `dotnet build -warnaserror` → `dotnet test` → (main only) build + push image to GHCR |
+| [`deploy.yml`](.github/workflows/deploy.yml) | `workflow_dispatch`, tags `v*` | build + test → push image → **deploy to VPS** (manual approval via the `production` environment), with health-check + automatic rollback |
+
+### One-time VPS setup
+
+```bash
+# On a fresh Hetzner CX23 (Ubuntu 22.04/24.04), as root:
+ssh root@your-server 'bash -s' < deploy/setup.sh
+```
+
+`deploy/setup.sh` installs Docker + Compose, creates the `daleel` service user, lays out
+`/opt/daleel`, installs a `daleel.service` systemd unit, opens UFW ports (22/80/443), and
+configures log rotation. Then on the server:
+
+1. Edit `/opt/daleel/.env` and fill in all secrets (template: [`deploy/.env.example`](deploy/.env.example)).
+2. Point DNS `*.daleel.yourdomain.com` → the server IP (and update the host in `deploy/Caddyfile`).
+3. If the GHCR image is private: `sudo -u daleel docker login ghcr.io`.
+4. Start it: `sudo systemctl start daleel.service` (or `sudo -u daleel /opt/daleel/deploy.sh latest`).
+
+### Deploying a new version
+
+- **Automatic:** push a `v*` tag (or run the **Deploy** workflow manually) → approve the
+  `production` gate → the runner SSHes in and runs `deploy.sh`.
+- **Manual on the box:** `cd /opt/daleel && ./deploy.sh <tag>` — pulls the image, restarts
+  with `--wait`, health-checks `/health`, and **rolls back to the previous image** on failure.
+
+`make` shortcuts: `make build`, `make test`, `make docker`, `make deploy`, `make setup-vps`.
+
+### Required GitHub secrets
+
+Create with `./deploy/create-secrets.sh` (seeds every secret to `CHANGE_ME`), then fill in
+real values under **Settings → Secrets and variables → Actions**.
+
+| Secret | Used by | Purpose |
+|--------|---------|---------|
+| `OPENROUTER_API_KEY` | app | LLM provider (preferred) |
+| `SERPAPI_KEY` | app | SerpApi web/shopping search |
+| `CONTEXT_DEV_API_KEY` | app | context.dev provider |
+| `GOOGLE_PLACES_API_KEY` | app | Google Places lookups |
+| `CLOUDFLARE_ACCOUNT_ID` | app | Cloudflare browser rendering |
+| `CLOUDFLARE_API_TOKEN` | app | Cloudflare browser rendering |
+| `APIFY_TOKEN` | app | Apify social scraping actors |
+| `DEPLOY_SSH_HOST` | `deploy.yml` | VPS hostname / IP |
+| `DEPLOY_SSH_USER` | `deploy.yml` | SSH user for deployment |
+| `DEPLOY_SSH_KEY` | `deploy.yml` | SSH private key for deployment |
+
+> Pushing to GHCR uses the built-in `GITHUB_TOKEN` (`packages: write`) — no PAT needed.
+> App secrets are injected at runtime via `/opt/daleel/.env`, **not** baked into the image.
