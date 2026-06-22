@@ -15,19 +15,31 @@ namespace Daleel.Agent;
 /// </remarks>
 public static class PromptTemplates
 {
+    /// <summary>
+    /// Halal-compliance guard appended to every system prompt. The deterministic
+    /// <c>ContentFilter</c> is the real enforcement layer; this simply asks the model to avoid
+    /// generating the content in the first place, so the filter rarely has to remove anything.
+    /// </summary>
+    public const string HalalGuard =
+        " IMPORTANT: Only include halal-compliant results. Exclude any products, stores, or content " +
+        "related to: alcohol, pork/non-halal meat, gambling, adult content, tobacco, or interest-based " +
+        "financial products (riba). If a result contains any of these, skip it entirely.";
+
     /// <summary>System prompt shared by all planning calls.</summary>
     public const string PlannerSystem =
         "You are Daleel, an Arabic-first market-intelligence research planner. Given a user " +
         "question and a target market, you produce a concrete, bilingual search strategy. You " +
         "know the Arab world's local platforms (OpenSooq, Haraj, Dubizzle, Talabat, Carrefour, " +
-        "local Facebook groups) and dialects. You ALWAYS reply with a single JSON object only.";
+        "local Facebook groups) and dialects. You ALWAYS reply with a single JSON object only." +
+        HalalGuard;
 
     /// <summary>System prompt shared by all analysis/synthesis calls.</summary>
     public const string AnalystSystem =
         "You are Daleel, an Arabic-and-English market-intelligence analyst. You read search " +
         "results, social posts, store listings, and reviews, then write clear, decision-ready " +
         "intelligence. You cite concrete prices, store names, and sentiment. Be concise and honest " +
-        "about uncertainty.";
+        "about uncertainty." +
+        HalalGuard;
 
     private static string MarketContext(GeoProfile geo)
     {

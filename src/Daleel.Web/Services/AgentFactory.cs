@@ -2,6 +2,7 @@ using Daleel.Agent;
 using Daleel.Agent.Llm;
 using Daleel.Apify;
 using Daleel.Core.Llm;
+using Daleel.Core.Moderation;
 using Daleel.Core.Pipeline;
 using Daleel.Pipeline;
 using Daleel.Search;
@@ -27,6 +28,9 @@ public sealed record AgentRequest
 
     /// <summary>Progress sink — streamed to the UI as the agent works.</summary>
     public Action<string>? Log { get; init; }
+
+    /// <summary>Halal content-filter strictness for this request (default: Strict).</summary>
+    public FilterStrictness Strictness { get; init; } = FilterStrictness.Strict;
 }
 
 /// <summary>A snapshot of which capabilities are available given the current keys.</summary>
@@ -99,8 +103,9 @@ public sealed class AgentFactory : IAgentFactory
 
         var opinions = new OpinionExtractor(llm);
         var options = new AgentOptions { DefaultGeo = request.Geo, Log = request.Log };
+        var filter = new ContentFilter(request.Strictness);
 
-        return new AgentService(llm, options, search, places, scraper, social, matcher: null, opinions);
+        return new AgentService(llm, options, search, places, scraper, social, matcher: null, opinions, filter);
     }
 
     /// <summary>Selects an LLM client, preferring OpenRouter (one key, every model), then OpenAI, then Anthropic.</summary>

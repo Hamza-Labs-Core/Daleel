@@ -83,6 +83,8 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
         sb.Append("engine=").Append(Uri.EscapeDataString(engine));
         sb.Append("&q=").Append(Uri.EscapeDataString(query.Query));
         sb.Append("&num=").Append(query.MaxResults);
+        // Halal/safety: always request Google SafeSearch so adult/unsafe hits never reach us.
+        sb.Append("&safe=active");
         if (!string.IsNullOrWhiteSpace(query.CountryCode))
         {
             sb.Append("&gl=").Append(Uri.EscapeDataString(query.CountryCode));

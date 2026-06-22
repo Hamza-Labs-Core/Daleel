@@ -14,6 +14,9 @@ public interface ICurrentUser
 
     /// <summary>Display name for the UI (falls back to the name claim, then email).</summary>
     Task<string?> GetDisplayNameAsync();
+
+    /// <summary>True when the signed-in user is in the Admin role.</summary>
+    Task<bool> IsAdminAsync();
 }
 
 /// <summary>
@@ -54,6 +57,12 @@ public sealed class CurrentUser : ICurrentUser
             ?? principal.FindFirst(ClaimTypes.Name)?.Value
             ?? principal.Identity.Name
             ?? principal.FindFirst(ClaimTypes.Email)?.Value;
+    }
+
+    public async Task<bool> IsAdminAsync()
+    {
+        var principal = await PrincipalAsync();
+        return principal.IsInRole("Admin");
     }
 
     private async Task<ClaimsPrincipal> PrincipalAsync()

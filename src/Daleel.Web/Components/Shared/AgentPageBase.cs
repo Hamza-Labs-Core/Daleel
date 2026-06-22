@@ -49,6 +49,10 @@ public abstract class AgentPageBase : ComponentBase
     /// <summary>Whether an LLM key is resolvable (server env or BYO).</summary>
     protected bool HasLlm => Agents.HasLlm(Keys);
 
+    /// <summary>Halal filter strictness, hydrated from the browser (default Strict).</summary>
+    protected Daleel.Core.Moderation.FilterStrictness Strictness { get; private set; } =
+        Daleel.Core.Moderation.FilterStrictness.Strict;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender)
@@ -59,9 +63,32 @@ public abstract class AgentPageBase : ComponentBase
         Keys = await Store.GetKeysAsync();
         Geo = await Store.GetAsync("geo") ?? Geo;
         Model = await Store.GetAsync("model") ?? Model;
+        Strictness = await ResolveStrictnessAsync();
         Ready = true;
         await OnReadyAsync();
         StateHasChanged();
+    }
+
+    /// <summary>
+    /// Reads the visitor's filter preference, but never trusts the browser to disable filtering:
+    /// "Off" is honored only for admins (enforced here, server-side).
+    /// </summary>
+    private async Task<Daleel.Core.Moderation.FilterStrictness> ResolveStrictnessAsync()
+    {
+        var pref = await Store.GetAsync("filter.strictness");
+        var requested = pref switch
+        {
+            "off" => Daleel.Core.Moderation.FilterStrictness.Off,
+            "moderate" => Daleel.Core.Moderation.FilterStrictness.Moderate,
+            _ => Daleel.Core.Moderation.FilterStrictness.Strict
+        };
+
+        if (requested == Daleel.Core.Moderation.FilterStrictness.Off && !await CurrentUser.IsAdminAsync())
+        {
+            return Daleel.Core.Moderation.FilterStrictness.Strict;
+        }
+
+        return requested;
     }
 
     /// <summary>Hook for derived pages to run once settings are loaded (e.g. prefill from query string).</summary>
@@ -101,7 +128,8 @@ public abstract class AgentPageBase : ComponentBase
                 Geo = Geo,
                 Model = Model,
                 Keys = Keys,
-                Log = AppendLog
+                Log = AppendLog,
+                Strictness = Strictness
             });
 
             await work(agent, CancellationToken.None);

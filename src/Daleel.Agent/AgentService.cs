@@ -4,9 +4,11 @@ using Daleel.Core.Arabic;
 using Daleel.Core.Geo;
 using Daleel.Core.Llm;
 using Daleel.Core.Models;
+using Daleel.Core.Moderation;
 using Daleel.Core.Pipeline;
 using Daleel.Pipeline;
 using Daleel.Search.Abstractions;
+using Daleel.Search.Moderation;
 
 namespace Daleel.Agent;
 
@@ -32,6 +34,7 @@ public sealed class AgentService
     private readonly IPostFetcher? _social;
     private readonly IPostMatcher _matcher;
     private readonly OpinionExtractor? _opinions;
+    private readonly ContentFilter _filter;
 
     public AgentService(
         ILlmClient llm,
@@ -41,7 +44,8 @@ public sealed class AgentService
         IScrapeProvider? scraper = null,
         IPostFetcher? social = null,
         IPostMatcher? matcher = null,
-        OpinionExtractor? opinions = null)
+        OpinionExtractor? opinions = null,
+        ContentFilter? contentFilter = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _options = options ?? new AgentOptions();
@@ -51,7 +55,12 @@ public sealed class AgentService
         _social = social;
         _matcher = matcher ?? new ArabicMatcher();
         _opinions = opinions;
+        // Default to Strict so callers that don't supply a filter still get halal-compliant output.
+        _filter = contentFilter ?? new ContentFilter(FilterStrictness.Strict);
     }
+
+    /// <summary>The halal content filter applied to gathered results (audit log lives on it).</summary>
+    public ContentFilter ContentFilter => _filter;
 
     // ── Planning ───────────────────────────────────────────────────────────────
 
@@ -148,7 +157,10 @@ public sealed class AgentService
 
         var queries = strategy.PlacesQueries.Count > 0 ? strategy.PlacesQueries : new[] { subject };
         var stores = await RunPlacesAsync(queries, geo, point, cancellationToken).ConfigureAwait(false);
-        return stores;
+        // Strip bars, liquor stores, and other non-halal venues before returning.
+        var halal = _filter.FilterStores(stores);
+        LogFilteredCount();
+        return halal;
     }
 
     /// <summary>Compares two or more products head-to-head.</summary>
@@ -188,11 +200,14 @@ public sealed class AgentService
 
         await Task.WhenAll(webTask, shopTask, placesTask, socialTask, readTask).ConfigureAwait(false);
 
-        var web = webTask.Result;
-        var shopping = shopTask.Result;
-        var stores = placesTask.Result;
-        var social = socialTask.Result;
+        // Halal moderation chokepoint: every report builder projects from this bundle, so filtering
+        // here removes non-halal web/shopping/store/social content from ALL downstream reports at once.
+        var web = _filter.FilterSearchResults(webTask.Result);
+        var shopping = _filter.FilterSearchResults(shopTask.Result);
+        var stores = _filter.FilterStores(placesTask.Result);
+        var social = _filter.FilterSocialPosts(socialTask.Result);
         var pages = readTask.Result;
+        LogFilteredCount();
 
         var prices = shopping
             .Where(r => r.Price is not null)
@@ -484,6 +499,18 @@ public sealed class AgentService
         s.Length <= max ? s : s[..max] + "…";
 
     private void Log(string message) => _options.Log?.Invoke(message);
+
+    /// <summary>Surfaces how many items the halal filter removed (audited, never the items themselves).</summary>
+    private int _lastFilteredCount;
+    private void LogFilteredCount()
+    {
+        var total = _filter.AuditLog.Count;
+        if (total > _lastFilteredCount)
+        {
+            Log($"🧹 Halal filter removed {total - _lastFilteredCount} non-compliant item(s).");
+            _lastFilteredCount = total;
+        }
+    }
 
     /// <summary>Wire shape for the planner's JSON output.</summary>
     private sealed class StrategyDto

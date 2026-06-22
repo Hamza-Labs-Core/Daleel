@@ -3,6 +3,8 @@
 @inject BrowserStore Store
 @inject LayoutState Layout
 @inject ISnackbar Snackbar
+@inject ICurrentUser CurrentUser
+@using Daleel.Core.Moderation
 
 <PageTitle>دليل · Settings</PageTitle>
 
@@ -72,6 +74,31 @@
                 Preferences apply instantly and persist in this browser.
             </MudAlert>
         </MudPaper>
+
+        <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
+            <div class="d-flex align-center mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Class="mr-2" Color="Color.Success" />
+                <MudText Typo="Typo.h6">فلتر المحتوى · Content Filter</MudText>
+            </div>
+
+            <MudSelect T="FilterStrictness" Value="_strictness" ValueChanged="OnStrictnessChanged"
+                       Label="Halal filtering · تصفية حلال" Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="FilterStrictness.Strict">Strict (recommended) · صارم</MudSelectItem>
+                <MudSelectItem Value="FilterStrictness.Moderate">Moderate · معتدل</MudSelectItem>
+                @if (_isAdmin)
+                {
+                    <MudSelectItem Value="FilterStrictness.Off">Off (admin only) · إيقاف</MudSelectItem>
+                }
+            </MudSelect>
+
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                Filters alcohol, pork, gambling, adult, drugs@(_strictness == FilterStrictness.Strict ? ", tobacco and riba" : "") from all results.
+                @if (!_isAdmin)
+                {
+                    <text> Turning the filter off requires an admin account.</text>
+                }
+            </MudText>
+        </MudPaper>
     </MudItem>
 </MudGrid>
 
@@ -83,6 +110,8 @@
     private string _model = Catalog.DefaultModel;
     private bool _dark = true;
     private bool _rtl;
+    private FilterStrictness _strictness = FilterStrictness.Strict;
+    private bool _isAdmin;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -100,6 +129,13 @@
         _model = await Store.GetAsync("model") ?? _model;
         _dark = (await Store.GetAsync("theme") ?? "dark") != "light";
         _rtl = await Store.GetAsync("rtl") == "1";
+        _isAdmin = await CurrentUser.IsAdminAsync();
+        _strictness = (await Store.GetAsync("filter.strictness")) switch
+        {
+            "off" when _isAdmin => FilterStrictness.Off,
+            "moderate" => FilterStrictness.Moderate,
+            _ => FilterStrictness.Strict
+        };
 
         Layout.SetDarkMode(_dark);
         Layout.SetRightToLeft(_rtl);
@@ -163,5 +199,18 @@
         _rtl = value;
         Layout.SetRightToLeft(value);
         await Store.SetAsync("rtl", value ? "1" : "0");
+    }
+
+    private async Task OnStrictnessChanged(FilterStrictness value)
+    {
+        // Defensive: never let a non-admin persist "Off" even if the option leaks into the DOM.
+        if (value == FilterStrictness.Off && !_isAdmin)
+        {
+            value = FilterStrictness.Strict;
+        }
+
+        _strictness = value;
+        await Store.SetAsync("filter.strictness", value.ToString().ToLowerInvariant());
+        Snackbar.Add($"Content filter: {value}.", Severity.Success);
     }
 }
