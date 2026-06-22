@@ -1,0 +1,23 @@
+{
+  "name": "telecom-watch",
+  "keywords": ["شركة الاتصالات", "أخبار", "الوزارة"],
+  "mode": "Contains",
+  "fuzzyThreshold": 0.25,
+  "outputPath": "daleel-results.jsonl",
+  "sources": [
+    {
+      "name": "fb-search-telecom",
+      "kind": "Search",
+      "target": "شركة الاتصالات",
+      "actorId": "scrapeforge/facebook-search-posts",
+      "maxItems": 25
+    },
+    {
+      "name": "fb-group-news",
+      "kind": "Group",
+      "target": "https://www.facebook.com/groups/123456789",
+      "actorId": "apify/facebook-groups-scraper",
+      "maxItems": 50
+    }
+  ]
+}
