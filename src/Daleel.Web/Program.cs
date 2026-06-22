@@ -1,6 +1,7 @@
 using Daleel.Web.Auth;
 using Daleel.Web.Components;
 using Daleel.Web.Data;
+using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.HttpOverrides;
@@ -62,6 +63,11 @@ builder.Services.AddScoped<LayoutState>();               // shared theme + RTL s
 builder.Services.AddScoped<ICurrentUser, CurrentUser>(); // authenticated id, from the circuit
 builder.Services.AddScoped<ISearchHistoryRepository, SearchHistoryRepository>();
 builder.Services.AddScoped<ISavedResultRepository, SavedResultRepository>();
+builder.Services.AddScoped<IQuotaService, QuotaService>();
+
+// IP rate limiting (in-memory fixed-window — no Redis at this scale).
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<IIpRateLimiter, IpRateLimiter>();
 builder.Services.AddSingleton<IAgentFactory, AgentFactory>();
 builder.Services.AddSingleton<MonitorService>();
 
@@ -83,6 +89,9 @@ var app = builder.Build();
 EnsureDatabase(app);
 
 app.UseForwardedHeaders();
+
+// 1. Rate limiting first — reject abusive IPs before any auth/quota/render work.
+app.UseMiddleware<Daleel.Web.RateLimiting.IpRateLimitMiddleware>();
 
 // Mapped before HTTPS redirection so the internal http://localhost:8080/health probe gets 200, not 307.
 app.MapHealthChecks("/health");

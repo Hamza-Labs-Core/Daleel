@@ -2,6 +2,7 @@ using Daleel.Agent;
 using Daleel.Web.Data;
 using Daleel.Web.Services;
 using Microsoft.AspNetCore.Components;
+using MudBlazor;
 
 namespace Daleel.Web.Components.Shared;
 
@@ -21,9 +22,18 @@ public abstract class AgentPageBase : ComponentBase
     [Inject] protected BrowserStore Store { get; set; } = default!;
     [Inject] protected ICurrentUser CurrentUser { get; set; } = default!;
     [Inject] protected ISearchHistoryRepository History { get; set; } = default!;
+    [Inject] protected IQuotaService Quota { get; set; } = default!;
+    [Inject] protected IDialogService Dialogs { get; set; } = default!;
+    [Inject] protected NavigationManager Nav { get; set; } = default!;
 
     /// <summary>Id of the history row written for the most recent run (null if signed out).</summary>
     protected int? LastHistoryId { get; private set; }
+
+    /// <summary>The current user's quota snapshot (null until loaded / when anonymous).</summary>
+    protected QuotaStatus? Quota_Status { get; private set; }
+
+    /// <summary>True when the user may run another search (quota not exhausted).</summary>
+    protected bool CanSearch => Quota_Status?.CanSearch ?? true;
 
     /// <summary>BYO keys read from the browser; merged with server env by the factory.</summary>
     protected Dictionary<string, string> Keys { get; private set; } = new();
@@ -64,9 +74,19 @@ public abstract class AgentPageBase : ComponentBase
         Geo = await Store.GetAsync("geo") ?? Geo;
         Model = await Store.GetAsync("model") ?? Model;
         Strictness = await ResolveStrictnessAsync();
+        await RefreshQuotaAsync();
         Ready = true;
         await OnReadyAsync();
         StateHasChanged();
+    }
+
+    /// <summary>Reloads the quota snapshot for the signed-in user (no-op when anonymous).</summary>
+    protected async Task RefreshQuotaAsync()
+    {
+        var userId = await CurrentUser.GetUserIdAsync();
+        Quota_Status = userId is null
+            ? null
+            : await Quota.GetStatusAsync(userId, await CurrentUser.IsAdminAsync());
     }
 
     /// <summary>
@@ -109,11 +129,31 @@ public abstract class AgentPageBase : ComponentBase
             return;
         }
 
+        // Registration gate: searching requires an account (test-match/dry-run stay public elsewhere).
+        var userId = await CurrentUser.GetUserIdAsync();
+        if (userId is null)
+        {
+            await PromptSignInAsync();
+            return;
+        }
+
         if (!Agents.HasLlm(Keys))
         {
             Error = "No LLM key configured. Add one on the Settings page, or set OPENROUTER_API_KEY on the server.";
             return;
         }
+
+        // Per-user monthly quota (reads the user's plan limit; admins bypass).
+        var isAdmin = await CurrentUser.IsAdminAsync();
+        if (!await Quota.TryConsumeAsync(userId, isAdmin))
+        {
+            Quota_Status = await Quota.GetStatusAsync(userId, isAdmin);
+            Error = $"You've used all {Quota_Status.Limit} free searches this month. Upgrade for unlimited access.";
+            StateHasChanged();
+            return;
+        }
+
+        Quota_Status = await Quota.GetStatusAsync(userId, isAdmin);
 
         Busy = true;
         Error = null;
@@ -176,6 +216,21 @@ public abstract class AgentPageBase : ComponentBase
 
         var saved = await History.AddAsync(entry);
         return saved.Id;
+    }
+
+    /// <summary>Shows a "sign in to search" modal and routes to login (with return URL) on accept.</summary>
+    private async Task PromptSignInAsync()
+    {
+        var result = await Dialogs.ShowMessageBox(
+            "Sign in to search",
+            "Create a free account to run searches — you get 5 free searches every month.",
+            yesText: "Sign in", cancelText: "Cancel");
+
+        if (result == true)
+        {
+            var returnUrl = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+            Nav.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}");
+        }
     }
 
     /// <summary>Truncates to <paramref name="max"/> characters with an ellipsis.</summary>

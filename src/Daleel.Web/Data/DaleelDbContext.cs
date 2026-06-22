@@ -20,6 +20,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
 
     public DbSet<SearchHistoryEntry> SearchHistory => Set<SearchHistoryEntry>();
     public DbSet<SavedResult> SavedResults => Set<SavedResult>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
+    public DbSet<UserQuota> UserQuotas => Set<UserQuota>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -47,6 +50,42 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany(h => h.SavedResults)
                 .HasForeignKey(x => x.SearchHistoryId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<UserSubscription>(e =>
+        {
+            e.HasIndex(x => x.UserId);
+            e.Property(x => x.Status).HasMaxLength(20);
+            e.HasOne(x => x.Plan).WithMany().HasForeignKey(x => x.PlanId);
+        });
+
+        builder.Entity<UserQuota>(e => e.HasIndex(x => x.UserId).IsUnique());
+
+        builder.Entity<SubscriptionPlan>(e =>
+        {
+            e.Property(x => x.PriceMonthly).HasColumnType("decimal(10,2)");
+            e.Property(x => x.PriceYearly).HasColumnType("decimal(10,2)");
+
+            // The three configurable tiers (admin can edit these later via /admin/plans).
+            e.HasData(
+                new SubscriptionPlan
+                {
+                    Id = SubscriptionPlan.BasicId, Name = "Basic", SearchesPerMonth = 5,
+                    PriceMonthly = 0m, IsActive = true, SortOrder = 1,
+                    FeaturesJson = "[\"5 searches per month\",\"Halal-filtered results\",\"Up to 10 saved results\"]"
+                },
+                new SubscriptionPlan
+                {
+                    Id = SubscriptionPlan.ProId, Name = "Pro", SearchesPerMonth = 100,
+                    PriceMonthly = 9.99m, IsActive = true, SortOrder = 2,
+                    FeaturesJson = "[\"100 searches per month\",\"Full results & JSON export\",\"Unlimited saved results\",\"Priority models\"]"
+                },
+                new SubscriptionPlan
+                {
+                    Id = SubscriptionPlan.UnlimitedId, Name = "Unlimited", SearchesPerMonth = null,
+                    PriceMonthly = 100m, IsActive = true, SortOrder = 3,
+                    FeaturesJson = "[\"Unlimited searches\",\"Everything in Pro\",\"Priority support\"]"
+                });
         });
     }
 }

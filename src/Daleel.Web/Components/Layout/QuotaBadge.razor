@@ -1,0 +1,48 @@
+@* Shows the signed-in user's monthly search usage in the app bar (e.g. "2/5"). *@
+@inject ICurrentUser CurrentUser
+@inject IQuotaService Quota
+
+<AuthorizeView>
+    <Authorized>
+        @if (_status is not null)
+        {
+            <MudTooltip Text="@Tooltip">
+                <MudChip T="string" Size="Size.Small"
+                         Color="@(_status.CanSearch ? Color.Success : Color.Error)"
+                         Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Bolt">
+                    @Label
+                </MudChip>
+            </MudTooltip>
+        }
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    private QuotaStatus? _status;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        var userId = await CurrentUser.GetUserIdAsync();
+        if (userId is null)
+        {
+            return;
+        }
+
+        _status = await Quota.GetStatusAsync(userId, await CurrentUser.IsAdminAsync());
+        StateHasChanged();
+    }
+
+    private string Label => _status is null ? string.Empty
+        : _status.IsAdmin ? "∞ admin"
+        : _status.Unlimited ? "Unlimited"
+        : $"{_status.Used}/{_status.Limit}";
+
+    private string Tooltip => _status is null ? string.Empty
+        : _status.IsAdmin || _status.Unlimited ? "Unlimited searches"
+        : $"{_status.Remaining} of {_status.Limit} searches remaining this month";
+}
