@@ -99,6 +99,35 @@
                 }
             </MudText>
         </MudPaper>
+
+        <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
+            <div class="d-flex align-center mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.HideImage" Class="mr-2" Color="Color.Info" />
+                <MudText Typo="Typo.h6">أمان الصور · Image Safety</MudText>
+            </div>
+
+            <MudSwitch T="bool" Value="_blurImages" ValueChanged="OnBlurChanged" Color="Color.Primary"
+                       Label="Blur all external images · إخفاء الصور الخارجية"
+                       ThumbIcon="@Icons.Material.Filled.BlurOn" />
+            <MudSwitch T="bool" Value="_haramBlurPrompt" ValueChanged="OnHaramBlurPromptChanged" Color="Color.Primary"
+                       Label="Show HaramBlur install prompt"
+                       ThumbIcon="@Icons.Material.Filled.Extension" />
+
+            <MudText Typo="Typo.subtitle2" Class="mt-3">Trusted image domains</MudText>
+            @if (_trustedDomains.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">None yet. Reveal an image and choose "Trust source".</MudText>
+            }
+            else
+            {
+                <div class="d-flex flex-wrap gap-2 mt-1">
+                    @foreach (var d in _trustedDomains)
+                    {
+                        <MudChip T="string" Size="Size.Small" OnClose="@(() => RemoveTrusted(d))">@d</MudChip>
+                    }
+                </div>
+            }
+        </MudPaper>
     </MudItem>
 </MudGrid>
 
@@ -112,6 +141,9 @@
     private bool _rtl;
     private FilterStrictness _strictness = FilterStrictness.Strict;
     private bool _isAdmin;
+    private bool _blurImages = true;
+    private bool _haramBlurPrompt = true;
+    private List<string> _trustedDomains = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -136,6 +168,10 @@
             "moderate" => FilterStrictness.Moderate,
             _ => FilterStrictness.Strict
         };
+        _blurImages = (await Store.GetAsync("img.blur") ?? "1") != "0";
+        _haramBlurPrompt = (await Store.GetAsync("img.haramblur_prompt") ?? "1") != "0";
+        _trustedDomains = (await Store.GetAsync("img.trusted") ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
         Layout.SetDarkMode(_dark);
         Layout.SetRightToLeft(_rtl);
@@ -212,5 +248,23 @@
         _strictness = value;
         await Store.SetAsync("filter.strictness", value.ToString().ToLowerInvariant());
         Snackbar.Add($"Content filter: {value}.", Severity.Success);
+    }
+
+    private async Task OnBlurChanged(bool value)
+    {
+        _blurImages = value;
+        await Store.SetAsync("img.blur", value ? "1" : "0");
+    }
+
+    private async Task OnHaramBlurPromptChanged(bool value)
+    {
+        _haramBlurPrompt = value;
+        await Store.SetAsync("img.haramblur_prompt", value ? "1" : "0");
+    }
+
+    private async Task RemoveTrusted(string domain)
+    {
+        _trustedDomains.Remove(domain);
+        await Store.SetAsync("img.trusted", string.Join(",", _trustedDomains));
     }
 }

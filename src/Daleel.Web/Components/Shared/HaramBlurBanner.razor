@@ -1,0 +1,66 @@
+@* First-visit prompt recommending the HaramBlur extension. Hidden once dismissed or if the
+   extension is detected on the page. Honors the "show install prompt" setting. *@
+@inject BrowserStore Store
+@inject IJSRuntime JS
+
+@if (_show)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3"
+              ShowCloseIcon="true" CloseIconClicked="Dismiss">
+        <div class="d-flex flex-wrap align-center gap-2">
+            <MudIcon Icon="@Icons.Material.Filled.Shield" Color="Color.Success" />
+            <MudText Typo="Typo.body2">
+                For the best experience, install the
+                <b>HaramBlur</b> extension — it blurs inappropriate images across the web in real time.
+            </MudText>
+            <MudSpacer />
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                       Href="https://chromewebstore.google.com/detail/haramblur-blur-haram-nsfw/pbcoegikffnadpahojjhgdladmmddeji"
+                       Target="_blank" StartIcon="@Icons.Custom.Brands.Chrome">
+                Install HaramBlur
+            </MudButton>
+        </div>
+    </MudAlert>
+}
+
+@code {
+    private bool _show;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        var promptEnabled = (await Store.GetAsync("img.haramblur_prompt") ?? "1") != "0";
+        var dismissed = await Store.GetAsync("haramblur.dismissed") == "1";
+        if (!promptEnabled || dismissed)
+        {
+            return;
+        }
+
+        // Hide the banner if the extension is already doing its job on this page.
+        bool installed;
+        try
+        {
+            installed = await JS.InvokeAsync<bool>("daleel.haramBlurInstalled");
+        }
+        catch
+        {
+            installed = false;
+        }
+
+        if (!installed)
+        {
+            _show = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task Dismiss()
+    {
+        _show = false;
+        await Store.SetAsync("haramblur.dismissed", "1");
+    }
+}

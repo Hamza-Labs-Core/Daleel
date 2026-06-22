@@ -16,6 +16,20 @@ window.daleel = {
         });
     },
 
+    // Best-effort detection of the HaramBlur browser extension. The extension injects elements
+    // and a global marker into the page; if any are present we hide the install banner.
+    haramBlurInstalled: function () {
+        try {
+            if (window.__haramblur || window.haramBlur) {
+                return true;
+            }
+            return document.querySelector(
+                '[class*="haramblur" i],[id*="haramblur" i],[data-haramblur]') !== null;
+        } catch (e) {
+            return false;
+        }
+    },
+
     // Triggers a client-side file download of the given text (used to export saved results).
     download: function (filename, text, mime) {
         const blob = new Blob([text], { type: mime || 'application/json' });

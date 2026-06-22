@@ -1,0 +1,89 @@
+@* Blurs external images by default (HaramBlur-style). User must actively reveal each one,
+   or trust the whole source domain. Trusted domains + the global blur toggle live in localStorage. *@
+@inject BrowserStore Store
+
+@if (string.IsNullOrWhiteSpace(Src))
+{
+    @* nothing to show *@
+}
+else if (_revealed)
+{
+    <img src="@Src" alt="@Alt" class="@Class" style="@Style" loading="lazy" />
+}
+else
+{
+    <div class="safe-image-wrap @Class" style="@Style">
+        <img src="@Src" alt="@Alt" class="safe-image-blur" loading="lazy" />
+        <div class="safe-image-overlay">
+            <MudIcon Icon="@Icons.Material.Filled.VisibilityOff" Color="Color.Surface" />
+            <MudText Typo="Typo.caption" Style="color:#fff;">Image hidden</MudText>
+            <div class="d-flex gap-1 mt-1">
+                <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                           OnClick="Reveal">Show image</MudButton>
+                @if (_domain is not null)
+                {
+                    <MudButton Size="Size.Small" Variant="Variant.Text" Style="color:#fff;"
+                               OnClick="TrustDomain">Trust source</MudButton>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public string? Src { get; set; }
+    [Parameter] public string? Alt { get; set; }
+    [Parameter] public string? Class { get; set; }
+    [Parameter] public string? Style { get; set; }
+
+    private bool _revealed;
+    private string? _domain;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        _domain = ExtractDomain(Src);
+
+        // Blur is ON unless the user disabled it; a trusted domain also reveals automatically.
+        var blurOn = (await Store.GetAsync("img.blur") ?? "1") != "0";
+        var trusted = await TrustedDomainsAsync();
+        var reveal = !blurOn || (_domain is not null && trusted.Contains(_domain));
+        if (reveal && !_revealed)
+        {
+            _revealed = true;
+            StateHasChanged();
+        }
+    }
+
+    private void Reveal() => _revealed = true;
+
+    private async Task TrustDomain()
+    {
+        if (_domain is null)
+        {
+            return;
+        }
+
+        var trusted = await TrustedDomainsAsync();
+        if (!trusted.Contains(_domain))
+        {
+            trusted.Add(_domain);
+            await Store.SetAsync("img.trusted", string.Join(",", trusted));
+        }
+
+        _revealed = true;
+    }
+
+    private async Task<List<string>> TrustedDomainsAsync()
+    {
+        var raw = await Store.GetAsync("img.trusted") ?? string.Empty;
+        return raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+    }
+
+    private static string? ExtractDomain(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : null;
+}
