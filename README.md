@@ -55,7 +55,7 @@ A .NET 8 solution, clean architecture — dependencies point inward toward the d
 | `Daleel.Search`   | Search & scrape providers: SerpAPI, Bing, Google Shopping, Google Places, OpenSooq, Context.dev, Cloudflare Browser; marketplace aggregation. |
 | `Daleel.Apify`    | Apify actor integration for social platforms (Facebook/Instagram/Twitter). |
 | `Daleel.Pipeline` | Orchestration: monitoring pipeline, dedup, JSONL output, price tracking, deal scoring, LLM opinion extraction. |
-| `Daleel.Agent`    | The intelligence engine: LLM clients (OpenAI/Anthropic), prompt templates, `AgentService` (planner + analyst). |
+| `Daleel.Agent`    | The intelligence engine: LLM clients (OpenRouter/OpenAI/Anthropic), prompt templates, `AgentService` (planner + analyst). |
 | `Daleel.Cli`      | Console entry point. |
 
 See [docs/architecture.md](docs/architecture.md) for the full design and data flow.
@@ -95,7 +95,7 @@ Requires the **.NET 8 SDK**.
 
 ```bash
 dotnet build          # build the solution
-dotnet test           # run all 159 tests (xUnit + FluentAssertions)
+dotnet test           # run all 162 tests (xUnit + FluentAssertions)
 ```
 
 ### Offline commands (no API keys)
@@ -140,8 +140,9 @@ you want — the agent wires up whatever is available and skips the rest.
 
 | Variable | Used for | Required for |
 |----------|----------|--------------|
-| `ANTHROPIC_API_KEY` | Anthropic Claude (preferred LLM) | any agent command |
-| `OPENAI_API_KEY` | OpenAI (LLM fallback) | any agent command (if no Anthropic key) |
+| `OPENROUTER_API_KEY` | OpenRouter — one key, **every** model (preferred LLM) | any agent command |
+| `OPENAI_API_KEY` | OpenAI directly (LLM fallback) | any agent command (if no OpenRouter key) |
+| `ANTHROPIC_API_KEY` | Anthropic Claude directly (LLM fallback) | any agent command (if no OpenRouter/OpenAI key) |
 | `SERPAPI_KEY` | SerpAPI — Google Web/Shopping/Maps in one | web/shopping/maps search |
 | `BING_SEARCH_KEY` | Bing Web Search (search fallback) | web/news search (if no SerpAPI) |
 | `GOOGLE_PLACES_API_KEY` | Google Places API (New) | `stores`, `nearby`, store enrichment |
@@ -150,13 +151,48 @@ you want — the agent wires up whatever is available and skips the rest.
 | `APIFY_TOKEN` | Apify actors | social monitoring (`search`, `monitor`), social fetch in agent |
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+export OPENROUTER_API_KEY=sk-or-...
 export SERPAPI_KEY=...
 export GOOGLE_PLACES_API_KEY=...
 export CONTEXT_DEV_API_KEY=...
 export CLOUDFLARE_ACCOUNT_ID=...   CLOUDFLARE_API_TOKEN=...
 export APIFY_TOKEN=apify_...
 ```
+
+### LLM provider: OpenRouter (recommended)
+
+[OpenRouter](https://openrouter.ai) is an LLM gateway: a **single key** that reaches Claude,
+GPT, Gemini, Llama, Mistral and hundreds of other models through one OpenAI-compatible API.
+Daleel prefers it because you can switch models per command without juggling separate
+provider accounts.
+
+1. Sign up at **[openrouter.ai](https://openrouter.ai)** and add credit (pay-as-you-go).
+2. Create an API key at **[openrouter.ai/keys](https://openrouter.ai/keys)**.
+3. Export it: `export OPENROUTER_API_KEY=sk-or-...`
+
+Pick the model per run with `--model` (alias `-m`); omit it to use the default
+(`anthropic/claude-sonnet-4`):
+
+```bash
+daleel ask "أفضل مكيف في الأردن" --geo jordan --model anthropic/claude-sonnet-4
+daleel product "مكيف" --geo jordan -m google/gemini-2.5-flash   # cheaper / faster
+```
+
+**Recommended models for Arabic intelligence work:**
+
+| Model id | Why |
+|----------|-----|
+| `anthropic/claude-sonnet-4` | Strong Arabic comprehension & reasoning — the default. |
+| `anthropic/claude-opus-4` | Highest quality for deep brand/competitor analysis. |
+| `google/gemini-2.5-flash` | Fast and inexpensive; good for high-volume/batch runs. |
+| `google/gemini-2.5-pro` | Solid Arabic with a very large context window. |
+| `openai/gpt-4o` | Reliable bilingual fallback. |
+
+Provider selection order is **OpenRouter → OpenAI → Anthropic**: if `OPENROUTER_API_KEY` is
+set it wins. The direct `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` paths remain as fallbacks for
+anyone who prefers calling those providers natively. `--model` overrides the chosen
+provider's default model (most useful with OpenRouter, where model ids are namespaced like
+`anthropic/claude-sonnet-4`).
 
 ### Scraping priority
 
@@ -200,7 +236,7 @@ Daleel/
 │   ├── Daleel.Pipeline/        # orchestration, dedup, price/deal/opinion analysis
 │   ├── Daleel.Agent/           # LLM clients, prompts, AgentService
 │   └── Daleel.Cli/             # console entry point
-├── tests/                      # Core / Pipeline / Search / Agent test suites (159 tests)
+├── tests/                      # Core / Pipeline / Search / Agent test suites (162 tests)
 └── docs/
     └── architecture.md
 ```
