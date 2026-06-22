@@ -1,0 +1,32 @@
+@* Renders the LLM narrative. Direction auto-detects Arabic so RTL summaries read correctly. *@
+@if (!string.IsNullOrWhiteSpace(Text))
+{
+    <MudPaper Class="pa-6 my-4" Elevation="0" Outlined="true">
+        @if (!string.IsNullOrWhiteSpace(Title))
+        {
+            <div class="d-flex align-center mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.AutoAwesome" Color="Color.Secondary" Class="mr-2" />
+                <MudText Typo="Typo.h6">@Title</MudText>
+            </div>
+            <MudDivider Class="mb-4" />
+        }
+
+        <div class="daleel-report" dir="@Catalog.Dir(Text)" style="text-align:@(Catalog.IsArabic(Text) ? "right" : "start");">
+            @foreach (var para in Paragraphs)
+            {
+                <p>@para</p>
+            }
+        </div>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public string? Text { get; set; }
+    [Parameter] public string? Title { get; set; }
+
+    private IEnumerable<string> Paragraphs =>
+        (Text ?? string.Empty)
+            .Replace("\r\n", "\n")
+            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .SelectMany(block => block.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+}

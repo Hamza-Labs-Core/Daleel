@@ -1,0 +1,26 @@
+@* OpenRouter model picker with a short note per model. *@
+<MudSelect T="string" Value="Value" ValueChanged="OnChanged" Label="@Label"
+           Dense="true" Variant="Variant.Outlined" Adornment="Adornment.Start"
+           AdornmentIcon="@Icons.Material.Filled.Memory" AnchorOrigin="Origin.BottomCenter">
+    @foreach (var model in Catalog.Models)
+    {
+        <MudSelectItem T="string" Value="@model.Id">
+            <div class="d-flex flex-column">
+                <MudText Typo="Typo.body2">@model.Label</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@model.Note</MudText>
+            </div>
+        </MudSelectItem>
+    }
+</MudSelect>
+
+@code {
+    [Parameter] public string Value { get; set; } = Catalog.DefaultModel;
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "Model · النموذج";
+
+    private Task OnChanged(string value)
+    {
+        Value = value;
+        return ValueChanged.InvokeAsync(value);
+    }
+}

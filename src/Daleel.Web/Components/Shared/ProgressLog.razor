@@ -1,0 +1,35 @@
+@* Loading animation + streamed agent progress lines. Shown while a query runs. *@
+@if (Busy || Lines.Count > 0)
+{
+    <MudPaper Class="pa-4 my-4 daleel-card" Elevation="0" Outlined="true">
+        <div class="d-flex align-center mb-2">
+            @if (Busy)
+            {
+                <MudProgressCircular Color="Color.Primary" Size="Size.Small" Indeterminate="true" Class="mr-3" />
+            }
+            else
+            {
+                <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Class="mr-3" />
+            }
+            <MudText Typo="Typo.subtitle2">
+                @(Busy ? "دليل يبحث… · Daleel is researching…" : "اكتمل البحث · Research complete")
+            </MudText>
+        </div>
+
+        <div class="daleel-log mud-text-secondary">
+            @foreach (var line in Lines)
+            {
+                <div class="log-line">› @line</div>
+            }
+            @if (Busy && Lines.Count == 0)
+            {
+                <div class="log-line">› planning the research strategy…</div>
+            }
+        </div>
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public bool Busy { get; set; }
+    [Parameter] public IReadOnlyList<string> Lines { get; set; } = Array.Empty<string>();
+}

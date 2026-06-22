@@ -1,0 +1,100 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject LayoutState State
+@inject BrowserStore Store
+
+@* MudBlazor providers must live once, at the layout root. *@
+<MudThemeProvider Theme="_theme" IsDarkMode="State.IsDarkMode" />
+<MudPopoverProvider />
+<MudSnackbarProvider />
+<MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Small" CloseButton="true" />
+
+<MudRTLProvider RightToLeft="State.RightToLeft">
+    <MudLayout>
+        <MudAppBar Elevation="1" Dense="true">
+            <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
+                           OnClick="ToggleDrawer" aria-label="Toggle navigation" />
+            <MudLink Href="/" Underline="Underline.None" Class="d-flex align-center ml-2">
+                <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Color="Color.Primary" Class="mr-2" />
+                <MudText Typo="Typo.h6" Class="daleel-wordmark">دليل · Daleel</MudText>
+            </MudLink>
+            <MudSpacer />
+            <MudTooltip Text="@(State.RightToLeft ? "Left-to-right" : "Right-to-left")">
+                <MudIconButton Icon="@Icons.Material.Filled.FormatTextdirectionRToL"
+                               Color="@(State.RightToLeft ? Color.Primary : Color.Inherit)"
+                               OnClick="ToggleRtl" aria-label="Toggle text direction" />
+            </MudTooltip>
+            <MudTooltip Text="@(State.IsDarkMode ? "Light theme" : "Dark theme")">
+                <MudIconButton Icon="@(State.IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                               Color="Color.Inherit"
+                               OnClick="ToggleTheme" aria-label="Toggle theme" />
+            </MudTooltip>
+            <MudTooltip Text="GitHub">
+                <MudIconButton Icon="@Icons.Custom.Brands.GitHub" Color="Color.Inherit"
+                               Href="https://github.com/Hamza-Labs-Core/Daleel" Target="_blank"
+                               aria-label="GitHub repository" />
+            </MudTooltip>
+        </MudAppBar>
+
+        <MudDrawer @bind-Open="_drawerOpen" Elevation="2" Variant="DrawerVariant.Responsive" ClipMode="DrawerClipMode.Always">
+            <NavMenu />
+        </MudDrawer>
+
+        <MudMainContent>
+            <MudContainer MaxWidth="MaxWidth.Large" Class="py-6">
+                @Body
+            </MudContainer>
+        </MudMainContent>
+    </MudLayout>
+</MudRTLProvider>
+
+<div id="blazor-error-ui">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">🗙</a>
+</div>
+
+@code {
+    private readonly MudTheme _theme = DaleelTheme.Build();
+    private bool _drawerOpen = true;
+
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // Restore the visitor's saved theme + direction (no-op during prerender).
+        var theme = await Store.GetAsync("theme");
+        var rtl = await Store.GetAsync("rtl");
+        if (theme is not null)
+        {
+            State.SetDarkMode(theme != "light");
+        }
+        if (rtl is not null)
+        {
+            State.SetRightToLeft(rtl == "1");
+        }
+    }
+
+    private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
+
+    private async Task ToggleTheme()
+    {
+        State.ToggleDarkMode();
+        await Store.SetAsync("theme", State.IsDarkMode ? "dark" : "light");
+    }
+
+    private async Task ToggleRtl()
+    {
+        State.ToggleRightToLeft();
+        await Store.SetAsync("rtl", State.RightToLeft ? "1" : "0");
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

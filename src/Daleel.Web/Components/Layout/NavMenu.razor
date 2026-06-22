@@ -1,0 +1,34 @@
+@* Primary navigation. Bilingual labels: Arabic lead, English secondary. *@
+<div class="pa-4 d-flex align-center">
+    <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Color="Color.Primary" Class="mr-2" />
+    <div>
+        <MudText Typo="Typo.subtitle1" Class="daleel-wordmark" Style="line-height:1.1;">دليل</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">market intelligence</MudText>
+    </div>
+</div>
+<MudDivider />
+
+<MudNavMenu Bordered="true">
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Search">
+        اسأل دليل · Ask
+    </MudNavLink>
+    <MudNavLink Href="/brand" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Verified">
+        العلامات · Brand
+    </MudNavLink>
+    <MudNavLink Href="/stores" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Storefront">
+        المتاجر · Stores
+    </MudNavLink>
+    <MudNavLink Href="/deals" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.LocalOffer">
+        العروض · Deals
+    </MudNavLink>
+    <MudNavLink Href="/compare" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Compare">
+        قارن · Compare
+    </MudNavLink>
+    <MudNavLink Href="/monitor" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Radar">
+        المراقبة · Monitor
+    </MudNavLink>
+    <MudDivider Class="my-2" />
+    <MudNavLink Href="/settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">
+        الإعدادات · Settings
+    </MudNavLink>
+</MudNavMenu>

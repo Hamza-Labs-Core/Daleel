@@ -1,0 +1,32 @@
+@* Capability chips: which providers are wired up given current keys. Warns when no LLM key. *@
+@inject IAgentFactory Agents
+
+@{
+    var status = Agents.Describe(Keys);
+}
+
+@if (!status.Llm)
+{
+    <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-4"
+              Icon="@Icons.Material.Filled.Key">
+        لا يوجد مفتاح ذكاء اصطناعي · No LLM key configured. Add one on the
+        <MudLink Href="/settings">Settings</MudLink> page, or set <code>OPENROUTER_API_KEY</code> on the server.
+    </MudAlert>
+}
+
+<div class="d-flex flex-wrap gap-2 mb-2">
+    @Chip("AI", status.Llm, Icons.Material.Filled.AutoAwesome)
+    @Chip("Web search", status.WebSearch, Icons.Material.Filled.Search)
+    @Chip("Places", status.Places, Icons.Material.Filled.Place)
+    @Chip("Scraper", status.Scraper, Icons.Material.Filled.Article)
+    @Chip("Social", status.Social, Icons.Material.Filled.Forum)
+</div>
+
+@code {
+    [Parameter] public IReadOnlyDictionary<string, string>? Keys { get; set; }
+
+    private RenderFragment Chip(string label, bool on, string icon) =>@<MudChip T="string" Size="Size.Small"
+        Color="@(on ? Color.Success : Color.Default)"
+        Variant="@(on ? Variant.Filled : Variant.Outlined)"
+        Icon="@icon">@label</MudChip>;
+}

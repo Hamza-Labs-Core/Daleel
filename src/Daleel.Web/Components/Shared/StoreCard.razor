@@ -1,0 +1,50 @@
+@* A Google-Places-enriched store: rating, contact, distance, map link. *@
+<MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+    <MudCardContent>
+        <div class="d-flex justify-space-between align-start">
+            <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(Store.Name)">@Store.Name</MudText>
+            @if (Store.Rating is { } rating)
+            {
+                <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled"
+                         Icon="@Icons.Material.Filled.Star">
+                    @rating.ToString("0.0") @(Store.ReviewCount is { } rc ? $"({rc})" : "")
+                </MudChip>
+            }
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Store.Address))
+        {
+            <div class="d-flex align-center mt-2">
+                <MudIcon Icon="@Icons.Material.Filled.Place" Size="Size.Small" Class="mr-1" Color="Color.Secondary" />
+                <MudText Typo="Typo.body2" Color="Color.Secondary" dir="@Catalog.Dir(Store.Address)">@Store.Address</MudText>
+            </div>
+        }
+        @if (Store.DistanceMeters is { } d)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@((d / 1000).ToString("0.0")) km away</MudText>
+        }
+        @if (!string.IsNullOrWhiteSpace(Store.Phone))
+        {
+            <div class="d-flex align-center mt-1">
+                <MudIcon Icon="@Icons.Material.Filled.Phone" Size="Size.Small" Class="mr-1" Color="Color.Secondary" />
+                <MudText Typo="Typo.body2">@Store.Phone</MudText>
+            </div>
+        }
+    </MudCardContent>
+    <MudCardActions>
+        @if (!string.IsNullOrWhiteSpace(Store.Website))
+        {
+            <MudButton Href="@Store.Website" Target="_blank" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Language">Website</MudButton>
+        }
+        @if (!string.IsNullOrWhiteSpace(Store.GoogleMapsUrl))
+        {
+            <MudButton Href="@Store.GoogleMapsUrl" Target="_blank" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Map">Map</MudButton>
+        }
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public StoreLocation Store { get; set; } = default!;
+}

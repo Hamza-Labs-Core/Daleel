@@ -1,0 +1,167 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject BrowserStore Store
+@inject LayoutState Layout
+@inject ISnackbar Snackbar
+
+<PageTitle>دليل · Settings</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">الإعدادات · Settings</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Everything here is stored in your browser only (localStorage) and sent straight to the agent — never written to server logs.
+</MudText>
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="7">
+        <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+            <div class="d-flex align-center mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.Key" Class="mr-2" />
+                <MudText Typo="Typo.h6">مفاتيح API · API Keys</MudText>
+                <MudSpacer />
+                <MudSwitch T="bool" @bind-Value="_showKeys" Color="Color.Primary" Label="Show" />
+            </div>
+
+            @if (!_ready)
+            {
+                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+            }
+            else
+            {
+                @foreach (var (name, label, help) in BrowserStore.ApiKeyNames)
+                {
+                    <MudTextField T="string" Value="@GetKey(name)" ValueChanged="@(v => _keys[name] = v ?? string.Empty)"
+                                  Label="@label" HelperText="@help"
+                                  InputType="@(_showKeys ? InputType.Text : InputType.Password)"
+                                  Variant="Variant.Outlined" Class="mb-3" Immediate="true"
+                                  Adornment="Adornment.End"
+                                  AdornmentIcon="@(string.IsNullOrWhiteSpace(GetKey(name)) ? Icons.Material.Filled.RadioButtonUnchecked : Icons.Material.Filled.CheckCircle)" />
+                }
+
+                <div class="d-flex gap-2 mt-2">
+                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                               StartIcon="@Icons.Material.Filled.Save" OnClick="SaveKeys">حفظ · Save keys</MudButton>
+                    <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                               StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearKeys">Clear all</MudButton>
+                </div>
+            }
+        </MudPaper>
+    </MudItem>
+
+    <MudItem xs="12" md="5">
+        <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+            <div class="d-flex align-center mb-3">
+                <MudIcon Icon="@Icons.Material.Filled.Tune" Class="mr-2" />
+                <MudText Typo="Typo.h6">التفضيلات · Preferences</MudText>
+            </div>
+
+            <GeoSelect Value="_geo" ValueChanged="OnGeoChanged" Label="Default market · السوق الافتراضي" />
+            <div class="mt-3">
+                <ModelSelect Value="_model" ValueChanged="OnModelChanged" Label="Default model · النموذج الافتراضي" />
+            </div>
+
+            <MudDivider Class="my-4" />
+
+            <MudSwitch T="bool" Value="_dark" ValueChanged="OnDarkChanged" Color="Color.Primary"
+                       Label="@(_dark ? "Dark theme · داكن" : "Light theme · فاتح")"
+                       ThumbIcon="@(_dark ? Icons.Material.Filled.DarkMode : Icons.Material.Filled.LightMode)" />
+            <MudSwitch T="bool" Value="_rtl" ValueChanged="OnRtlChanged" Color="Color.Primary"
+                       Label="Right-to-left UI · واجهة من اليمين"
+                       ThumbIcon="@Icons.Material.Filled.FormatTextdirectionRToL" />
+
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-4">
+                Preferences apply instantly and persist in this browser.
+            </MudAlert>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
+
+@code {
+    private bool _ready;
+    private bool _showKeys;
+    private readonly Dictionary<string, string> _keys = new(StringComparer.OrdinalIgnoreCase);
+    private string _geo = "jordan";
+    private string _model = Catalog.DefaultModel;
+    private bool _dark = true;
+    private bool _rtl;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        foreach (var (name, _, _) in BrowserStore.ApiKeyNames)
+        {
+            _keys[name] = await Store.GetAsync("key." + name) ?? string.Empty;
+        }
+
+        _geo = await Store.GetAsync("geo") ?? _geo;
+        _model = await Store.GetAsync("model") ?? _model;
+        _dark = (await Store.GetAsync("theme") ?? "dark") != "light";
+        _rtl = await Store.GetAsync("rtl") == "1";
+
+        Layout.SetDarkMode(_dark);
+        Layout.SetRightToLeft(_rtl);
+
+        _ready = true;
+        StateHasChanged();
+    }
+
+    private string GetKey(string name) => _keys.TryGetValue(name, out var v) ? v : string.Empty;
+
+    private async Task SaveKeys()
+    {
+        foreach (var (name, _, _) in BrowserStore.ApiKeyNames)
+        {
+            var value = GetKey(name);
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                await Store.RemoveAsync("key." + name);
+            }
+            else
+            {
+                await Store.SetAsync("key." + name, value.Trim());
+            }
+        }
+
+        Snackbar.Add("API keys saved to this browser.", Severity.Success);
+    }
+
+    private async Task ClearKeys()
+    {
+        foreach (var (name, _, _) in BrowserStore.ApiKeyNames)
+        {
+            await Store.RemoveAsync("key." + name);
+            _keys[name] = string.Empty;
+        }
+
+        Snackbar.Add("All keys cleared.", Severity.Info);
+    }
+
+    private async Task OnGeoChanged(string value)
+    {
+        _geo = value;
+        await Store.SetAsync("geo", value);
+    }
+
+    private async Task OnModelChanged(string value)
+    {
+        _model = value;
+        await Store.SetAsync("model", value);
+    }
+
+    private async Task OnDarkChanged(bool value)
+    {
+        _dark = value;
+        Layout.SetDarkMode(value);
+        await Store.SetAsync("theme", value ? "dark" : "light");
+    }
+
+    private async Task OnRtlChanged(bool value)
+    {
+        _rtl = value;
+        Layout.SetRightToLeft(value);
+        await Store.SetAsync("rtl", value ? "1" : "0");
+    }
+}

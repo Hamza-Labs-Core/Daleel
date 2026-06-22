@@ -1,0 +1,111 @@
+@page "/compare"
+@rendermode InteractiveServer
+@inherits AgentPageBase
+
+<PageTitle>دليل · Compare</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">قارن المنتجات · Product Compare</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Two products, head-to-head, with local context and a verdict.
+</MudText>
+
+<MudPaper Class="pa-4" Elevation="0" Outlined="true">
+    <MudGrid Spacing="3" Class="align-center">
+        <MudItem xs="12" md="5">
+            <MudTextField @bind-Value="_a" Label="Product A · المنتج الأول"
+                          Placeholder="e.g. iPhone 15" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Smartphone" />
+        </MudItem>
+        <MudItem xs="12" md="2" Class="text-center">
+            <MudChip T="string" Color="Color.Secondary" Variant="Variant.Filled">VS</MudChip>
+        </MudItem>
+        <MudItem xs="12" md="5">
+            <MudTextField @bind-Value="_b" Label="Product B · المنتج الثاني"
+                          Placeholder="e.g. Galaxy S24" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Smartphone" />
+        </MudItem>
+    </MudGrid>
+    <div class="d-flex flex-wrap gap-3 align-center mt-3">
+        <div style="min-width:230px;flex:1;"><GeoSelect @bind-Value="Geo" /></div>
+        <div style="min-width:230px;flex:1;"><ModelSelect @bind-Value="Model" /></div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                   StartIcon="@Icons.Material.Filled.Compare" OnClick="Run"
+                   Disabled="Busy || string.IsNullOrWhiteSpace(_a) || string.IsNullOrWhiteSpace(_b)">
+            قارن · Compare
+        </MudButton>
+    </div>
+</MudPaper>
+
+@if (Ready)
+{
+    <div class="mt-4"><ProviderStatusBar Keys="Keys" /></div>
+}
+@if (Error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-3">@Error</MudAlert>
+}
+<ProgressLog Busy="Busy" Lines="LogLines" />
+
+@if (_result is not null && !Busy)
+{
+    <MudGrid Spacing="3" Class="mt-2">
+        @foreach (var (product, index) in _result.Products.Select((p, i) => (p, i)))
+        {
+            <MudItem xs="12" md="6">
+                <MudPaper Class="pa-4 daleel-card" Elevation="0" Outlined="true"
+                          Style="@($"border-top:3px solid {(index == 0 ? "var(--mud-palette-primary)" : "var(--mud-palette-secondary)")};")">
+                    <div class="d-flex justify-space-between align-center">
+                        <MudText Typo="Typo.h6" dir="@Catalog.Dir(product)">@product</MudText>
+                        @if (string.Equals(_result.Winner, product, StringComparison.OrdinalIgnoreCase))
+                        {
+                            <MudChip T="string" Color="Color.Success" Size="Size.Small" Icon="@Icons.Material.Filled.EmojiEvents">Winner</MudChip>
+                        }
+                    </div>
+                    @{ var b = _result.Breakdown.FirstOrDefault(x => string.Equals(x.Name, product, StringComparison.OrdinalIgnoreCase)); }
+                    @if (b is not null)
+                    {
+                        @if (b.Pros.Count > 0)
+                        {
+                            <MudText Typo="Typo.subtitle2" Color="Color.Success" Class="mt-2">المزايا · Pros</MudText>
+                            @foreach (var pro in b.Pros)
+                            {
+                                <MudText Typo="Typo.body2" dir="@Catalog.Dir(pro)">＋ @pro</MudText>
+                            }
+                        }
+                        @if (b.Cons.Count > 0)
+                        {
+                            <MudText Typo="Typo.subtitle2" Color="Color.Error" Class="mt-2">العيوب · Cons</MudText>
+                            @foreach (var con in b.Cons)
+                            {
+                                <MudText Typo="Typo.body2" dir="@Catalog.Dir(con)">－ @con</MudText>
+                            }
+                        }
+                    }
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+
+    <ReportView Title="الحكم · Verdict" Text="@_result.Summary" />
+    <SourceChips Sources="_result.Sources" />
+}
+
+@code {
+    private string _a = string.Empty;
+    private string _b = string.Empty;
+    private ProductComparison? _result;
+
+    private async Task Run()
+    {
+        if (string.IsNullOrWhiteSpace(_a) || string.IsNullOrWhiteSpace(_b))
+        {
+            return;
+        }
+
+        _result = null;
+        await Store.SetAsync("geo", Geo);
+        await Store.SetAsync("model", Model);
+        var products = new[] { _a.Trim(), _b.Trim() };
+        await RunAsync(async (agent, ct) => _result = await agent.CompareAsync(products, Geo, ct));
+    }
+}

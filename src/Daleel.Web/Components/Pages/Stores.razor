@@ -1,0 +1,143 @@
+@page "/stores"
+@rendermode InteractiveServer
+@inherits AgentPageBase
+@inject IJSRuntime JS
+
+<PageTitle>دليل · Store Finder</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">باحث المتاجر · Store Finder</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Find physical stores selling a product near a location (Google Places).
+</MudText>
+
+<MudPaper Class="pa-4" Elevation="0" Outlined="true">
+    <div class="d-flex flex-wrap gap-3 align-center">
+        <div style="min-width:240px;flex:2;">
+            <MudTextField @bind-Value="_subject" Label="Product / category · المنتج"
+                          Placeholder="e.g. air conditioner, مكيف"
+                          Variant="Variant.Outlined" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.ShoppingBag" OnKeyDown="OnKey" />
+        </div>
+        <div style="min-width:230px;flex:1;"><GeoSelect @bind-Value="Geo" /></div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                   StartIcon="@Icons.Material.Filled.TravelExplore" OnClick="Run"
+                   Disabled="Busy || string.IsNullOrWhiteSpace(_subject)">بحث · Find</MudButton>
+    </div>
+    <div class="d-flex flex-wrap gap-3 align-center mt-3">
+        <MudButton Variant="Variant.Text" Color="@(_coords is null ? Color.Default : Color.Success)"
+                   StartIcon="@Icons.Material.Filled.MyLocation" OnClick="UseMyLocation" Disabled="_locating">
+            @(_coords is null ? "استخدم موقعي · Use my location" : $"📍 {_coords.Value.Lat:0.00}, {_coords.Value.Lng:0.00}")
+        </MudButton>
+        @if (_coords is not null)
+        {
+            <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="@(() => _coords = null)">clear</MudButton>
+        }
+        <MudSpacer />
+        <MudSelect T="StoreSort" @bind-Value="_sort" Label="Sort" Dense="true" Variant="Variant.Outlined" Style="max-width:220px;">
+            <MudSelectItem Value="StoreSort.Rating">★ Rating</MudSelectItem>
+            <MudSelectItem Value="StoreSort.Distance">📍 Distance</MudSelectItem>
+            <MudSelectItem Value="StoreSort.Reviews"># Reviews</MudSelectItem>
+        </MudSelect>
+    </div>
+</MudPaper>
+
+@if (Ready)
+{
+    <div class="mt-4"><ProviderStatusBar Keys="Keys" /></div>
+}
+@if (Error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-3">@Error</MudAlert>
+}
+<ProgressLog Busy="Busy" Lines="LogLines" />
+
+@* Map placeholder — wire a Google Maps embed here later. *@
+<MudPaper Class="my-4 d-flex align-center justify-center" Outlined="true" Elevation="0"
+          Style="height:200px;background:repeating-linear-gradient(45deg,var(--mud-palette-surface),var(--mud-palette-surface) 12px,var(--mud-palette-background-grey) 12px,var(--mud-palette-background-grey) 24px);">
+    <div class="text-center">
+        <MudIcon Icon="@Icons.Material.Filled.Map" Size="Size.Large" Color="Color.Secondary" />
+        <MudText Typo="Typo.body2" Color="Color.Secondary">خريطة · Map preview (Google Maps embed coming soon)</MudText>
+    </div>
+</MudPaper>
+
+@if (_stores is not null && !Busy)
+{
+    @if (_stores.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            No stores found. A Google Places key is required for this feature.
+        </MudAlert>
+    }
+    else
+    {
+        <MudText Typo="Typo.subtitle1" Class="mb-2">@_stores.Count stores · @Catalog.ResolveGeo(Geo).English</MudText>
+        <MudGrid Spacing="3">
+            @foreach (var s in Sorted)
+            {
+                <MudItem xs="12" sm="6" md="4"><StoreCard Store="s" /></MudItem>
+            }
+        </MudGrid>
+    }
+}
+
+@code {
+    private enum StoreSort { Rating, Distance, Reviews }
+
+    private string _subject = string.Empty;
+    private StoreSort _sort = StoreSort.Rating;
+    private (double Lat, double Lng)? _coords;
+    private bool _locating;
+    private IReadOnlyList<StoreLocation>? _stores;
+
+    private IEnumerable<StoreLocation> Sorted => (_stores ?? Array.Empty<StoreLocation>()) switch
+    {
+        var list => _sort switch
+        {
+            StoreSort.Rating => list.OrderByDescending(s => s.Rating ?? 0),
+            StoreSort.Reviews => list.OrderByDescending(s => s.ReviewCount ?? 0),
+            _ => list.OrderBy(s => s.DistanceMeters ?? double.MaxValue)
+        }
+    };
+
+    private async Task UseMyLocation()
+    {
+        _locating = true;
+        Error = null;
+        try
+        {
+            var c = await JS.InvokeAsync<Coords>("daleel.getLocation");
+            _coords = (c.Lat, c.Lng);
+        }
+        catch (Exception ex)
+        {
+            Error = $"Could not get your location: {ex.Message}";
+        }
+        finally
+        {
+            _locating = false;
+        }
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Run();
+        }
+    }
+
+    private async Task Run()
+    {
+        if (string.IsNullOrWhiteSpace(_subject))
+        {
+            return;
+        }
+
+        _stores = null;
+        await Store.SetAsync("geo", Geo);
+        GeoPoint? near = _coords is { } c ? new GeoPoint(c.Lat, c.Lng) : null;
+        await RunAsync(async (agent, ct) => _stores = await agent.FindStoresAsync(_subject, Geo, near, ct));
+    }
+
+    private readonly record struct Coords(double Lat, double Lng);
+}

@@ -1,0 +1,40 @@
+@* A shopping/deal listing: title, price, seller, optional rating + buy link. *@
+<MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+    <MudCardContent>
+        <MudText Typo="Typo.body1" dir="@Catalog.Dir(Result.Title)" Style="font-weight:500;">@Result.Title</MudText>
+
+        <div class="d-flex align-center gap-3 mt-2">
+            @if (Result.Price is { } price)
+            {
+                <MudText Typo="Typo.h6" Color="Color.Primary">@price.ToDisplay()</MudText>
+            }
+            @if (Result.Rating is { } rating)
+            {
+                <MudRating ReadOnly="true" SelectedValue="@((int)Math.Round(rating))" Size="Size.Small" />
+            }
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Result.Seller))
+        {
+            <div class="d-flex align-center mt-1">
+                <MudIcon Icon="@Icons.Material.Filled.Store" Size="Size.Small" Class="mr-1" Color="Color.Secondary" />
+                <MudText Typo="Typo.body2" Color="Color.Secondary">@Result.Seller</MudText>
+            </div>
+        }
+    </MudCardContent>
+    <MudCardActions>
+        @if (!string.IsNullOrWhiteSpace(Result.Url))
+        {
+            <MudButton Href="@Result.Url" Target="_blank" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.OpenInNew">View listing</MudButton>
+        }
+        @if (!string.IsNullOrWhiteSpace(Result.Source))
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@Result.Source</MudChip>
+        }
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public Daleel.Search.Abstractions.SearchResult Result { get; set; } = default!;
+}

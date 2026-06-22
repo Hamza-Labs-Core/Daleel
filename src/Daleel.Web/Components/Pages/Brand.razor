@@ -1,0 +1,136 @@
+@page "/brand"
+@rendermode InteractiveServer
+@inherits AgentPageBase
+
+<PageTitle>دليل · Brand Intelligence</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">ذكاء العلامات التجارية · Brand Intelligence</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Presence, sentiment, stores and competitors for a brand in one market.
+</MudText>
+
+<MudPaper Class="pa-4" Elevation="0" Outlined="true">
+    <div class="d-flex flex-wrap gap-3 align-center">
+        <div style="min-width:240px;flex:2;">
+            <MudTextField @bind-Value="_brand" Label="Brand · العلامة التجارية"
+                          Placeholder="e.g. Zain, Samsung, نون"
+                          Variant="Variant.Outlined" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Verified" OnKeyDown="OnKey" />
+        </div>
+        <div style="min-width:230px;flex:1;"><GeoSelect @bind-Value="Geo" /></div>
+        <div style="min-width:230px;flex:1;"><ModelSelect @bind-Value="Model" /></div>
+        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                   StartIcon="@Icons.Material.Filled.Insights" OnClick="Run"
+                   Disabled="Busy || string.IsNullOrWhiteSpace(_brand)">تحليل · Analyze</MudButton>
+    </div>
+</MudPaper>
+
+@if (Ready)
+{
+    <div class="mt-4"><ProviderStatusBar Keys="Keys" /></div>
+}
+@if (Error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-3">@Error</MudAlert>
+}
+<ProgressLog Busy="Busy" Lines="LogLines" />
+
+@if (_report is not null && !Busy)
+{
+    <MudGrid Spacing="3" Class="mt-2">
+        <MudItem xs="12" md="8">
+            <ReportView Title="@($"نظرة عامة · {_report.Brand}")" Text="@_report.Summary" />
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <SentimentView Summary="_report.Sentiment" />
+        </MudItem>
+    </MudGrid>
+
+    @if (_report.Stores.Count > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">حضور البيع · Where it sells</MudText>
+        <MudGrid Spacing="3">
+            @foreach (var s in _report.Stores.Take(9))
+            {
+                <MudItem xs="12" sm="6" md="4">
+                    <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                        <MudCardContent>
+                            <div class="d-flex justify-space-between align-center">
+                                <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(s.Name)">@s.Name</MudText>
+                                @if (s.IsOnline)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Outlined">online</MudChip>
+                                }
+                            </div>
+                            @if (s.Price is { } p)
+                            {
+                                <MudText Typo="Typo.h6" Color="Color.Primary" Class="mt-1">@p.ToDisplay()</MudText>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(s.Source))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@s.Source</MudText>
+                            }
+                        </MudCardContent>
+                        @if (!string.IsNullOrWhiteSpace(s.Url))
+                        {
+                            <MudCardActions>
+                                <MudButton Href="@s.Url" Target="_blank" Size="Size.Small"
+                                           StartIcon="@Icons.Material.Filled.OpenInNew">Visit</MudButton>
+                            </MudCardActions>
+                        }
+                    </MudCard>
+                </MudItem>
+            }
+        </MudGrid>
+    }
+
+    @if (_report.Locations.Count > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">المواقع · Physical locations</MudText>
+        <MudGrid Spacing="3">
+            @foreach (var loc in _report.Locations.Take(6))
+            {
+                <MudItem xs="12" sm="6" md="4"><StoreCard Store="loc" /></MudItem>
+            }
+        </MudGrid>
+    }
+
+    @if (_report.Competitors.Count > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">المنافسون · Competitors</MudText>
+        <div class="d-flex flex-wrap gap-2">
+            @foreach (var c in _report.Competitors)
+            {
+                <MudChip T="string" Color="Color.Tertiary" Variant="Variant.Outlined">@c.Competitor</MudChip>
+            }
+        </div>
+    }
+
+    <SourceChips Sources="_report.Sources" />
+}
+
+@code {
+    private string _brand = string.Empty;
+    private BrandReport? _report;
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            await Run();
+        }
+    }
+
+    private async Task Run()
+    {
+        if (string.IsNullOrWhiteSpace(_brand))
+        {
+            return;
+        }
+
+        _report = null;
+        await Store.SetAsync("geo", Geo);
+        await Store.SetAsync("model", Model);
+        await RunAsync(async (agent, ct) => _report = await agent.ResearchBrandAsync(_brand, Geo, ct));
+    }
+}

@@ -1,0 +1,186 @@
+@page "/monitor"
+@rendermode InteractiveServer
+@inherits AgentPageBase
+@inject MonitorService Monitors
+@inject ISnackbar Snackbar
+
+<PageTitle>دليل · Monitor</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">لوحة المراقبة · Monitor Dashboard</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Watch keywords across social platforms. "Run now" fetches matches via Apify when a token is set.
+</MudText>
+
+<MudGrid Spacing="3">
+    <MudItem xs="12" md="4">
+        <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+            <MudText Typo="Typo.h6" Class="mb-3">مراقبة جديدة · New monitor</MudText>
+            <MudTextField @bind-Value="_keyword" Label="Keyword · الكلمة"
+                          Placeholder="e.g. مكيف, iPhone" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Tag" Class="mb-3" />
+            <GeoSelect @bind-Value="Geo" />
+            <MudSelect T="int" @bind-Value="_interval" Label="Interval · الفترة" Dense="true"
+                       Variant="Variant.Outlined" Class="mt-3"
+                       Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Schedule">
+                <MudSelectItem T="int" Value="15">Every 15 min</MudSelectItem>
+                <MudSelectItem T="int" Value="30">Every 30 min</MudSelectItem>
+                <MudSelectItem T="int" Value="60">Hourly</MudSelectItem>
+                <MudSelectItem T="int" Value="360">Every 6 hours</MudSelectItem>
+                <MudSelectItem T="int" Value="1440">Daily</MudSelectItem>
+            </MudSelect>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-4"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="AddMonitor"
+                       Disabled="string.IsNullOrWhiteSpace(_keyword)">إضافة · Add monitor</MudButton>
+        </MudPaper>
+
+        @if (Ready)
+        {
+            <div class="mt-3"><ProviderStatusBar Keys="Keys" /></div>
+        }
+    </MudItem>
+
+    <MudItem xs="12" md="8">
+        <MudText Typo="Typo.h6" Class="mb-2">المراقبات النشطة · Active monitors (@Monitors.Monitors.Count)</MudText>
+        @if (Monitors.Monitors.Count == 0)
+        {
+            <MudPaper Class="pa-6 text-center" Elevation="0" Outlined="true">
+                <MudIcon Icon="@Icons.Material.Outlined.Radar" Size="Size.Large" Color="Color.Secondary" />
+                <MudText Color="Color.Secondary">No monitors yet — create one on the left.</MudText>
+            </MudPaper>
+        }
+        else
+        {
+            <MudGrid Spacing="2">
+                @foreach (var m in Monitors.Monitors)
+                {
+                    <MudItem xs="12">
+                        <MudPaper Class="pa-3 daleel-card" Elevation="0" Outlined="true">
+                            <div class="d-flex align-center gap-2 flex-wrap">
+                                <MudIcon Icon="@(m.Status == MonitorStatus.Active ? Icons.Material.Filled.PlayCircle : Icons.Material.Filled.PauseCircle)"
+                                         Color="@(m.Status == MonitorStatus.Active ? Color.Success : Color.Warning)" />
+                                <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(m.Keyword)">@m.Keyword</MudText>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Catalog.ResolveGeo(m.Geo).Flag @Catalog.ResolveGeo(m.Geo).English</MudChip>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Icon="@Icons.Material.Filled.Schedule">@FormatInterval(m.IntervalMinutes)</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">@m.MatchCount matches</MudChip>
+                                <MudSpacer />
+                                <MudTooltip Text="Run now">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
+                                                   OnClick="@(() => RunNow(m.Id))" Disabled="_running == m.Id" />
+                                </MudTooltip>
+                                <MudTooltip Text="@(m.Status == MonitorStatus.Active ? "Pause" : "Resume")">
+                                    <MudIconButton Icon="@(m.Status == MonitorStatus.Active ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
+                                                   Size="Size.Small" OnClick="@(() => Monitors.Toggle(m.Id))" />
+                                </MudTooltip>
+                                <MudTooltip Text="Delete">
+                                    <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                                   OnClick="@(() => Monitors.Remove(m.Id))" />
+                                </MudTooltip>
+                            </div>
+                            @if (m.LastRunAt is { } last)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">Last run @last.LocalDateTime.ToString("g")</MudText>
+                            }
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">سجل النتائج · Results feed (@Monitors.Feed.Count)</MudText>
+        @if (Monitors.Feed.Count == 0)
+        {
+            <MudText Color="Color.Secondary" Typo="Typo.body2">No matches yet. Run a monitor to populate the feed.</MudText>
+        }
+        else
+        {
+            <MudTimeline TimelinePosition="TimelinePosition.Start">
+                @foreach (var hit in Monitors.Feed.Take(50))
+                {
+                    <MudTimelineItem Color="@SentimentColor(hit.Sentiment)" Size="Size.Small">
+                        <MudText Typo="Typo.body2" dir="@Catalog.Dir(hit.Text)">@Trim(hit.Text, 260)</MudText>
+                        <div class="d-flex gap-2 align-center mt-1 flex-wrap">
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Icon="@Icons.Material.Filled.Tag">@hit.Keyword</MudChip>
+                            @if (!string.IsNullOrWhiteSpace(hit.Source))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@hit.Source</MudText>
+                            }
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">· @hit.MatchedAt.LocalDateTime.ToString("g")</MudText>
+                            @if (!string.IsNullOrWhiteSpace(hit.Url))
+                            {
+                                <MudLink Href="@hit.Url" Target="_blank" Typo="Typo.caption">open</MudLink>
+                            }
+                        </div>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+        }
+    </MudItem>
+</MudGrid>
+
+@code {
+    private string _keyword = string.Empty;
+    private int _interval = 60;
+    private string? _running;
+
+    private void AddMonitor()
+    {
+        if (string.IsNullOrWhiteSpace(_keyword))
+        {
+            return;
+        }
+
+        Monitors.Add(_keyword, Geo, _interval);
+        Snackbar.Add($"Monitoring “{_keyword}” in {Catalog.ResolveGeo(Geo).English}", Severity.Success);
+        _keyword = string.Empty;
+    }
+
+    private async Task RunNow(string id)
+    {
+        _running = id;
+        try
+        {
+            var count = await Monitors.RunOnceAsync(id, Keys);
+            if (count == -1)
+            {
+                Snackbar.Add("No Apify token — add APIFY_TOKEN in Settings to fetch posts.", Severity.Warning);
+            }
+            else
+            {
+                var word = count == 1 ? "match" : "matches";
+                Snackbar.Add($"{count} new {word} found.", count > 0 ? Severity.Success : Severity.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Run failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _running = null;
+        }
+    }
+
+    private static Color SentimentColor(Sentiment s) => s switch
+    {
+        Sentiment.Positive => Color.Success,
+        Sentiment.Negative => Color.Error,
+        _ => Color.Default
+    };
+
+    private static string FormatInterval(int minutes)
+    {
+        if (minutes == 60)
+        {
+            return "hourly";
+        }
+
+        if (minutes == 1440)
+        {
+            return "daily";
+        }
+
+        return minutes >= 60 ? $"{minutes / 60}h" : $"{minutes}m";
+    }
+
+    private static string Trim(string s, int max) => s.Length > max ? s[..max] + "…" : s;
+}

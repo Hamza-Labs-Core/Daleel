@@ -1,0 +1,44 @@
+@* Visualizes an aggregated SentimentSummary as a stacked bar + counts. *@
+@if (Summary.Total > 0)
+{
+    <MudPaper Class="pa-4 my-3" Elevation="0" Outlined="true">
+        <div class="d-flex justify-space-between align-center mb-2">
+            <MudText Typo="Typo.subtitle2">الانطباع العام · Sentiment</MudText>
+            <MudChip T="string" Size="Size.Small" Color="@LabelColor" Variant="Variant.Filled">@Summary.Label</MudChip>
+        </div>
+
+        <div class="d-flex" style="height:10px;border-radius:6px;overflow:hidden;">
+            <div style="@Seg(Summary.PositiveCount, "var(--mud-palette-success)")"></div>
+            <div style="@Seg(Summary.NeutralCount, "var(--mud-palette-lines-default)")"></div>
+            <div style="@Seg(Summary.NegativeCount, "var(--mud-palette-error)")"></div>
+        </div>
+
+        <div class="d-flex gap-4 mt-2">
+            <MudText Typo="Typo.caption" Color="Color.Success">▲ @Summary.PositiveCount positive</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Default">● @Summary.NeutralCount neutral</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Error">▼ @Summary.NegativeCount negative</MudText>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(Summary.Summary))
+        {
+            <MudText Typo="Typo.body2" Class="mt-2" dir="@Catalog.Dir(Summary.Summary)">@Summary.Summary</MudText>
+        }
+    </MudPaper>
+}
+
+@code {
+    [Parameter] public SentimentSummary Summary { get; set; } = new();
+
+    private Color LabelColor => Summary.NetScore switch
+    {
+        >= 0.1 => Color.Success,
+        > -0.1 => Color.Default,
+        _ => Color.Error
+    };
+
+    private string Seg(int count, string color)
+    {
+        var pct = Summary.Total == 0 ? 0 : (double)count / Summary.Total * 100;
+        return $"width:{pct.ToString(System.Globalization.CultureInfo.InvariantCulture)}%;background:{color};";
+    }
+}

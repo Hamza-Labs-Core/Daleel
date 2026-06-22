@@ -57,6 +57,8 @@ A .NET 8 solution, clean architecture — dependencies point inward toward the d
 | `Daleel.Pipeline` | Orchestration: monitoring pipeline, dedup, JSONL output, price tracking, deal scoring, LLM opinion extraction. |
 | `Daleel.Agent`    | The intelligence engine: LLM clients (OpenRouter/OpenAI/Anthropic), prompt templates, `AgentService` (planner + analyst). |
 | `Daleel.Cli`      | Console entry point. |
+| `Daleel.Web`      | Blazor Web App (.NET 8, Interactive Server + WebAssembly) UI built on MudBlazor: Ask, Brand, Stores, Deals, Compare, Monitor, Settings. Bilingual (Arabic/English), RTL-aware, dark by default. |
+| `Daleel.Web.Client` | WebAssembly companion for the Auto render mode. |
 
 See [docs/architecture.md](docs/architecture.md) for the full design and data flow.
 
@@ -94,8 +96,8 @@ and **fuzzy** (token-level Levenshtein) modes. The same normalizer powers price 
 Requires the **.NET 8 SDK**.
 
 ```bash
-dotnet build          # build the solution
-dotnet test           # run all 162 tests (xUnit + FluentAssertions)
+dotnet build          # build the solution (0 warnings)
+dotnet test           # run all tests (xUnit + FluentAssertions + bUnit)
 ```
 
 ### Offline commands (no API keys)
@@ -130,6 +132,23 @@ daleel search --keyword "شركة الاتصالات" --actor scrapeforge/facebo
 daleel monitor --config sources.json                   # job from a config file
 daleel monitor "اسم_الشركة" --geo jordan --interval 24h # keyword monitoring on a loop
 ```
+
+### Web UI (Daleel.Web)
+
+A polished Blazor front-end over the same `AgentService`. Dark by default, bilingual
+(Arabic/English) with automatic RTL for Arabic content, responsive on mobile.
+
+```bash
+dotnet run --project src/Daleel.Web        # then open the printed https/http URL
+```
+
+Pages: **Ask** (`/`) free-form research with a Google-style box, **Brand** (`/brand`),
+**Stores** (`/stores`, with browser geolocation), **Deals** (`/deals`), **Compare**
+(`/compare`), **Monitor** (`/monitor`), and **Settings** (`/settings`).
+
+Long-running agent queries stream live progress to the page over the Interactive Server
+circuit. API keys can come from server environment variables **or** be entered on the
+Settings page (stored in the browser's `localStorage` only, never written to server logs).
 
 ---
 
@@ -235,8 +254,10 @@ Daleel/
 │   ├── Daleel.Apify/           # social platform integration
 │   ├── Daleel.Pipeline/        # orchestration, dedup, price/deal/opinion analysis
 │   ├── Daleel.Agent/           # LLM clients, prompts, AgentService
-│   └── Daleel.Cli/             # console entry point
-├── tests/                      # Core / Pipeline / Search / Agent test suites (162 tests)
+│   ├── Daleel.Cli/             # console entry point
+│   ├── Daleel.Web/             # Blazor Web App UI (MudBlazor, Interactive Server + WASM)
+│   └── Daleel.Web.Client/      # WebAssembly companion (Auto render mode)
+├── tests/                      # Core / Pipeline / Search / Agent / Web test suites
 └── docs/
     └── architecture.md
 ```

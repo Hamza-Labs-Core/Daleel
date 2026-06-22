@@ -1,0 +1,21 @@
+@* Market picker — bilingual labels, two-way bound to a geo key. *@
+<MudSelect T="string" Value="Value" ValueChanged="OnChanged" Label="@Label"
+           Dense="true" Variant="Variant.Outlined" Adornment="Adornment.Start"
+           AdornmentIcon="@Icons.Material.Filled.Public" AnchorOrigin="Origin.BottomCenter">
+    @foreach (var geo in Catalog.Geos)
+    {
+        <MudSelectItem T="string" Value="@geo.Key">@geo.Display</MudSelectItem>
+    }
+</MudSelect>
+
+@code {
+    [Parameter] public string Value { get; set; } = "jordan";
+    [Parameter] public EventCallback<string> ValueChanged { get; set; }
+    [Parameter] public string Label { get; set; } = "Market · السوق";
+
+    private Task OnChanged(string value)
+    {
+        Value = value;
+        return ValueChanged.InvokeAsync(value);
+    }
+}

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.22" />
+    <PackageReference Include="MudBlazor" Version="8.15.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Daleel.Web.Client\Daleel.Web.Client.csproj" />
+    <ProjectReference Include="..\Daleel.Core\Daleel.Core.csproj" />
+    <ProjectReference Include="..\Daleel.Search\Daleel.Search.csproj" />
+    <ProjectReference Include="..\Daleel.Apify\Daleel.Apify.csproj" />
+    <ProjectReference Include="..\Daleel.Pipeline\Daleel.Pipeline.csproj" />
+    <ProjectReference Include="..\Daleel.Agent\Daleel.Agent.csproj" />
+  </ItemGroup>
+
+</Project>
