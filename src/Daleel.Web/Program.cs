@@ -20,14 +20,14 @@ builder.Services.AddScoped<LayoutState>();               // shared theme + RTL s
 builder.Services.AddSingleton<IAgentFactory, AgentFactory>();
 builder.Services.AddSingleton<MonitorService>();
 
-// Liveness probe consumed by the Docker HEALTHCHECK, deploy.sh, and Caddy upstream checks.
+// Liveness probe consumed by the Docker HEALTHCHECK and deploy.sh (host :80 -> container :8080).
 builder.Services.AddHealthChecks();
 
-// Running behind Caddy (TLS terminator), so honour X-Forwarded-* to keep redirects/HSTS correct.
+// Behind Cloudflare (TLS terminator), so honour X-Forwarded-* to keep redirects/HSTS correct.
 builder.Services.Configure<ForwardedHeadersOptions>(options =>
 {
     options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
-    // The proxy is a known peer on the container network; clearing these accepts the hop from Caddy.
+    // Cloudflare is the trusted upstream; clearing these accepts the forwarded hop.
     options.KnownNetworks.Clear();
     options.KnownProxies.Clear();
 });

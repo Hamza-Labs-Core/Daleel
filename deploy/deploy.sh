@@ -29,10 +29,15 @@ err()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; }
 # docker compose v2 (plugin) is required.
 compose() { docker compose "$@"; }
 
+# Health-check the published origin port (host :80 -> container :8080).
+# Cloudflare proxies to this same HTTP origin, so a green check here means the
+# path Cloudflare uses is healthy.
+HEALTH_URL="http://localhost:80/health"
+
 health_check() {
   local i
   for i in $(seq 1 "$HEALTH_RETRIES"); do
-    if compose exec -T daleel curl --fail --silent http://localhost:8080/health >/dev/null 2>&1; then
+    if curl --fail --silent "$HEALTH_URL" >/dev/null 2>&1; then
       log "Health check passed (attempt $i)."
       return 0
     fi

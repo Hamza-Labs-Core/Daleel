@@ -71,8 +71,9 @@ usermod -aG docker "$APP_USER"
 log "Setting up $APP_DIR ..."
 mkdir -p "$APP_DIR"
 
-# Copy compose + Caddyfile + deploy script from this repo's deploy/ dir.
-for f in docker-compose.yml Caddyfile deploy.sh; do
+# Copy compose + deploy script from this repo's deploy/ dir.
+# (No reverse proxy — Cloudflare terminates TLS; the app serves HTTP on :80.)
+for f in docker-compose.yml deploy.sh; do
   if [ -f "$SCRIPT_DIR/$f" ]; then
     install -m 0644 "$SCRIPT_DIR/$f" "$APP_DIR/$f"
   fi
@@ -117,13 +118,11 @@ systemctl daemon-reload
 systemctl enable daleel.service
 
 # ---------------------------------------------------------------------------
-# 6. UFW firewall — SSH + HTTP + HTTPS only
+# 6. UFW firewall — SSH + HTTP only (Cloudflare terminates TLS, no 443 origin)
 # ---------------------------------------------------------------------------
-log "Configuring UFW firewall (22, 80, 443)..."
+log "Configuring UFW firewall (22, 80)..."
 ufw allow 22/tcp
 ufw allow 80/tcp
-ufw allow 443/tcp
-ufw allow 443/udp           # HTTP/3 (QUIC)
 ufw --force enable
 
 # ---------------------------------------------------------------------------
@@ -162,7 +161,9 @@ cat <<NEXT
 
 Next steps:
   1. Edit ${APP_DIR}/.env and fill in all secrets (see .env.example).
-  2. Point DNS: *.daleel.yourdomain.com -> this server's IP.
+  2. In Cloudflare, add a proxied (orange-cloud) DNS record for your hostname
+     pointing at this server's IP. Cloudflare terminates TLS and proxies to the
+     origin over HTTP on port 80. No certs are needed on this box.
   3. Log in to GHCR if the image is private:
        sudo -u ${APP_USER} docker login ghcr.io
   4. Start the stack:
