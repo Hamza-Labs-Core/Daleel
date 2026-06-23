@@ -58,7 +58,12 @@ public sealed class OpenRouterClient : HttpProviderBase, ILlmClient
 
     private static HttpClient ConfigureClient(HttpClient? client)
     {
-        client ??= new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        if (client is null)
+        {
+            client = SharedHttpHandler.CreateClient();
+            client.Timeout = TimeSpan.FromMinutes(2);
+        }
+
         client.BaseAddress ??= new Uri(DefaultBaseUrl);
         return client;
     }
@@ -86,8 +91,7 @@ public sealed class OpenRouterClient : HttpProviderBase, ILlmClient
             cancellationToken).ConfigureAwait(false);
 
         var root = doc.RootElement;
-        var content = root.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()
-                      ?? string.Empty;
+        var content = ChatCompletionParsing.ExtractContent(root, Provider);
 
         // OpenRouter echoes the resolved model id; fall back to the requested one if absent.
         var model = root.TryGetProperty("model", out var modelEl) ? modelEl.GetString() ?? _model : _model;

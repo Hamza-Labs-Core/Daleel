@@ -41,7 +41,7 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
 
     private static HttpClient ConfigureClient(HttpClient? client)
     {
-        client ??= new HttpClient();
+        client ??= SharedHttpHandler.CreateClient();
         client.BaseAddress ??= new Uri(DefaultBaseUrl);
         return client;
     }

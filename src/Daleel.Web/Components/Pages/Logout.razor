@@ -1,0 +1,25 @@
+@page "/logout"
+@* Static SSR sign-out confirmation. Logout is POST-only (see AuthEndpoints) so it can't be triggered
+   by a cross-site GET/<img>; the explicit button below submits an antiforgery-tokened form. *@
+
+<PageTitle>دليل · Sign out</PageTitle>
+
+<div class="d-flex justify-center mt-8">
+    <MudPaper Class="pa-8 text-center" Elevation="0" Outlined="true" Style="max-width:420px;width:100%;border-radius:18px;">
+        <MudText Typo="Typo.h5" Class="mb-2">تسجيل الخروج · Sign out</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+            Are you sure you want to sign out?
+        </MudText>
+
+        <form method="post" action="/auth/logout">
+            <AntiforgeryToken />
+            <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
+                Sign out
+            </MudButton>
+        </form>
+
+        <MudButton Href="/" Variant="Variant.Text" Color="Color.Default" FullWidth="true" Class="mt-2">
+            Cancel
+        </MudButton>
+    </MudPaper>
+</div>

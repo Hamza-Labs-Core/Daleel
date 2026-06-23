@@ -1,6 +1,8 @@
 @* Bookmark button shown beside every result. Saves the full result JSON for the signed-in user. *@
 @inject ICurrentUser CurrentUser
 @inject ISavedResultRepository Saved
+@inject IQuotaService Quota
+@inject ISystemConfigService Config
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 
@@ -68,6 +70,21 @@ else
             {
                 Snackbar.Add("Sign in to save your searches.", Severity.Info);
                 return;
+            }
+
+            // Enforce the admin-configured saved-results cap. Admins and unlimited-plan users are exempt;
+            // everyone else is held to limit.saved_results_free.
+            var isAdmin = await CurrentUser.IsAdminAsync();
+            var status = await Quota.GetStatusAsync(userId, isAdmin);
+            if (!isAdmin && !status.Unlimited)
+            {
+                var cap = await Config.GetIntAsync("limit.saved_results_free", 10);
+                if (await Saved.CountForUserAsync(userId) >= cap)
+                {
+                    Snackbar.Add($"You've reached your saved-results limit ({cap}). Delete some, or upgrade your plan.",
+                        Severity.Warning);
+                    return;
+                }
             }
 
             var entity = new SavedResult

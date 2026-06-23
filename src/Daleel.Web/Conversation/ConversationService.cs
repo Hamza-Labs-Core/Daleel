@@ -21,12 +21,17 @@ public sealed class ConversationService : IConversationService
     private readonly DaleelDbContext _db;
     private readonly IQuotaService _quota;
     private readonly ISearchJobQueue _queue;
+    private readonly ISystemConfigService? _config;
 
-    public ConversationService(DaleelDbContext db, IQuotaService quota, ISearchJobQueue queue)
+    // _config is optional so tests can construct without it; DI supplies it in the app, where it
+    // provides the per-plan default model ids (model.default_free / model.default_pro).
+    public ConversationService(
+        DaleelDbContext db, IQuotaService quota, ISearchJobQueue queue, ISystemConfigService? config = null)
     {
         _db = db;
         _quota = quota;
         _queue = queue;
+        _config = config;
     }
 
     public async Task<SubmitResult> SubmitAsync(
@@ -37,25 +42,46 @@ public sealed class ConversationService : IConversationService
             return new SubmitResult(false, null, "Query is required.", 400);
         }
 
-        if (!await _quota.TryConsumeAsync(userId, isAdmin, ct))
+        // Cheap pre-check so we don't even create a job row for a user who is clearly over limit.
+        var status = await _quota.GetStatusAsync(userId, isAdmin, ct);
+        if (!status.CanSearch)
         {
-            var status = await _quota.GetStatusAsync(userId, isAdmin, ct);
             return new SubmitResult(false, null,
                 $"You've used all {status.Limit} free searches this month. Upgrade for unlimited access.", 429);
         }
 
+        // When the caller didn't pick a model, fall back to the admin-configured per-plan default.
+        var resolvedModel = model;
+        if (string.IsNullOrWhiteSpace(resolvedModel) && _config is not null)
+        {
+            var key = status.PlanName == "Basic" ? "model.default_free" : "model.default_pro";
+            resolvedModel = await _config.GetAsync(key, ct);
+        }
+
+        // Create and COMMIT the job row before consuming quota. If persistence fails the user is never
+        // charged for a search that didn't start; quota is only consumed once the job durably exists.
         var job = new SearchJob
         {
             UserId = userId,
             Query = query.Trim(),
             QueryType = "ask",
             Geo = string.IsNullOrWhiteSpace(geo) ? "jordan" : geo,
-            Model = model ?? string.Empty,
+            Model = resolvedModel ?? string.Empty,
             Status = JobStatus.Queued,
             CreatedAt = DateTimeOffset.UtcNow
         };
         _db.SearchJobs.Add(job);
         await _db.SaveChangesAsync(ct);
+
+        // Atomic consume. If we lost a concurrency race for the last slot, roll back the job we created.
+        if (!await _quota.TryConsumeAsync(userId, isAdmin, ct))
+        {
+            _db.SearchJobs.Remove(job);
+            await _db.SaveChangesAsync(ct);
+            var refreshed = await _quota.GetStatusAsync(userId, isAdmin, ct);
+            return new SubmitResult(false, null,
+                $"You've used all {refreshed.Limit} free searches this month. Upgrade for unlimited access.", 429);
+        }
 
         await _queue.EnqueueAsync(job.Id, ct);
         return new SubmitResult(true, job.Id, null, 202);

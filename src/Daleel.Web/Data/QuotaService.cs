@@ -55,9 +55,29 @@ public sealed class QuotaService : IQuotaService
             return false;
         }
 
-        // Admins and unlimited plans still count usage (for analytics) but are never blocked above.
-        quota.SearchesUsed++;
-        await _db.SaveChangesAsync(ct);
+        var bounded = !isAdmin && !plan.IsUnlimited;
+        var limit = plan.SearchesPerMonth ?? 0;
+
+        // Atomic check-and-increment. The WHERE guard folds the limit test into the UPDATE so two
+        // concurrent requests can't both pass the check and over-consume by one — the database does
+        // the comparison and the increment in a single statement. Admins and unlimited plans still
+        // count usage (for analytics) but are never gated, so they increment unconditionally.
+        var affected = bounded
+            ? await _db.UserQuotas
+                .Where(q => q.UserId == userId && q.SearchesUsed < limit)
+                .ExecuteUpdateAsync(s => s.SetProperty(q => q.SearchesUsed, q => q.SearchesUsed + 1), ct)
+            : await _db.UserQuotas
+                .Where(q => q.UserId == userId)
+                .ExecuteUpdateAsync(s => s.SetProperty(q => q.SearchesUsed, q => q.SearchesUsed + 1), ct);
+
+        if (affected == 0)
+        {
+            return false; // lost the race for the last slot under concurrency
+        }
+
+        // ExecuteUpdate bypasses the change tracker; refresh the tracked entity so a follow-up
+        // GetStatusAsync on this same scoped context reflects the new count.
+        await _db.Entry(quota).ReloadAsync(ct);
         return true;
     }
 

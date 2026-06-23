@@ -108,8 +108,13 @@ public sealed class SearchJobService : BackgroundService
         }
         catch (Exception ex)
         {
+            // Log the full exception server-side; show the user a generic message so provider/LLM/DB
+            // detail (hostnames, partial keys in URLs, SQL text) never reaches the browser. The raw
+            // message is kept in the job row (server-only) for operator diagnostics.
+            _logger.LogError(ex, "Search job {JobId} failed", job.Id);
             await FinishAsync(db, convos, job, JobStatus.Failed, "error", ex.Message, stoppingToken);
-            await _broadcaster.CompletedAsync(job.UserId, job.Id, "failed", null, null, ex.Message);
+            await _broadcaster.CompletedAsync(job.UserId, job.Id, "failed", null, null,
+                "Search failed. Please try again.");
         }
         finally
         {

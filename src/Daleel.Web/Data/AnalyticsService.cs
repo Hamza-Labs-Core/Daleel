@@ -110,26 +110,24 @@ public sealed class AnalyticsService : IAnalyticsService
             planBreakdown.Insert(0, ("Basic", basicCount));
         }
 
-        var monthSearches = await searches
-            .Where(e => e.Timestamp >= monthStart)
-            .Select(e => new { e.Query, e.UserId })
-            .ToListAsync(ct);
-
-        var topQueries = monthSearches
-            .Where(e => !string.IsNullOrWhiteSpace(e.Query))
+        // Group + count + top-10 in the database (translatable: keys are plain string columns).
+        var topQueriesRaw = await searches
+            .Where(e => e.Timestamp >= monthStart && e.Query != null && e.Query != "")
             .GroupBy(e => e.Query!)
-            .Select(g => (g.Key, g.Count()))
-            .OrderByDescending(t => t.Item2)
+            .Select(g => new { Key = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
             .Take(10)
-            .ToList();
+            .ToListAsync(ct);
+        var topQueries = topQueriesRaw.Select(x => (x.Key, x.Count)).ToList();
 
-        var topUsers = monthSearches
-            .Where(e => e.UserId is not null)
+        var topUsersRaw = await searches
+            .Where(e => e.Timestamp >= monthStart && e.UserId != null)
             .GroupBy(e => e.UserId!)
-            .Select(g => (g.Key, g.Count()))
-            .OrderByDescending(t => t.Item2)
+            .Select(g => new { Key = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
             .Take(10)
-            .ToList();
+            .ToListAsync(ct);
+        var topUsers = topUsersRaw.Select(x => (x.Key, x.Count)).ToList();
 
         return new AdminDashboardStats(usersTotal, usersToday, usersWeek, usersMonth,
             sToday, sWeek, sMonth, planBreakdown, topQueries, topUsers);
@@ -137,12 +135,14 @@ public sealed class AnalyticsService : IAnalyticsService
 
     public async Task<IReadOnlyList<(string Type, int Count)>> SearchesByTypeAsync(DateTime since, CancellationToken ct = default)
     {
+        // GROUP BY runs in the database — only the small aggregated result set is materialized.
         var rows = await _db.AnalyticsEvents
             .Where(e => e.EventType == "search" && e.Timestamp >= since && e.QueryType != null)
-            .Select(e => e.QueryType!)
+            .GroupBy(e => e.QueryType!)
+            .Select(g => new { Key = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
             .ToListAsync(ct);
-        return rows.GroupBy(t => t).Select(g => (g.Key, g.Count()))
-            .OrderByDescending(t => t.Item2).ToList();
+        return rows.Select(x => (x.Key, x.Count)).ToList();
     }
 
     public async Task<IReadOnlyList<(DateTime Day, int Count)>> SearchesPerDayAsync(int days, CancellationToken ct = default)
@@ -161,12 +161,14 @@ public sealed class AnalyticsService : IAnalyticsService
 
     public async Task<IReadOnlyList<(string Geo, int Count)>> GeoDistributionAsync(DateTime since, CancellationToken ct = default)
     {
+        // GROUP BY runs in the database — only the small aggregated result set is materialized.
         var rows = await _db.AnalyticsEvents
             .Where(e => e.EventType == "search" && e.Timestamp >= since && e.Geo != null)
-            .Select(e => e.Geo!)
+            .GroupBy(e => e.Geo!)
+            .Select(g => new { Key = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
             .ToListAsync(ct);
-        return rows.GroupBy(g => g).Select(g => (g.Key, g.Count()))
-            .OrderByDescending(t => t.Item2).ToList();
+        return rows.Select(x => (x.Key, x.Count)).ToList();
     }
 
     public async Task<(int TotalFiltered, int SearchesWithFilters, IReadOnlyList<(string Category, int Count)> ByCategory)>

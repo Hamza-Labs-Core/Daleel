@@ -45,7 +45,17 @@ public sealed class SearchJobQueue : ISearchJobQueue
     {
         if (_running.TryGetValue(jobId, out var cts))
         {
-            cts.Cancel();
+            try
+            {
+                cts.Cancel();
+            }
+            catch (ObjectDisposedException)
+            {
+                // The job finished and disposed its CTS in the narrow window after TryGetValue —
+                // nothing left to cancel. Treat as a no-op rather than throwing into the caller.
+                return false;
+            }
+
             return true;
         }
 

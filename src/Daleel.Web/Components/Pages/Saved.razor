@@ -1,7 +1,9 @@
 @page "/saved"
+@attribute [Authorize]
 @rendermode InteractiveServer
 @inject ICurrentUser CurrentUser
 @inject ISavedResultRepository SavedRepo
+@inject ISystemConfigService Config
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
@@ -11,7 +13,7 @@
 <div class="d-flex align-center mb-1">
     <MudText Typo="Typo.h4">النتائج المحفوظة · Saved Results</MudText>
     <MudSpacer />
-    @if (_items.Count > 0)
+    @if (_items.Count > 0 && _exportEnabled)
     {
         <MudButton Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.Download" OnClick="ExportAllAsync">
             Export all (JSON)
@@ -58,8 +60,11 @@ else if (_authenticated)
                         <MudCardActions>
                             <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Visibility"
                                        OnClick="@(() => ViewAsync(item))">View</MudButton>
-                            <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
-                                       OnClick="@(() => ExportOneAsync(item))">JSON</MudButton>
+                            @if (_exportEnabled)
+                            {
+                                <MudButton Size="Size.Small" StartIcon="@Icons.Material.Filled.Download"
+                                           OnClick="@(() => ExportOneAsync(item))">JSON</MudButton>
+                            }
                             <MudSpacer />
                             <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                            OnClick="@(() => DeleteAsync(item))" />
@@ -75,6 +80,7 @@ else if (_authenticated)
     private string? _userId;
     private bool _ready;
     private bool _authenticated;
+    private bool _exportEnabled = true;
     private List<SavedResult> _items = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -86,6 +92,7 @@ else if (_authenticated)
 
         _userId = await CurrentUser.GetUserIdAsync();
         _authenticated = _userId is not null;
+        _exportEnabled = await Config.GetBoolAsync("feature.export_enabled", true);
         if (_authenticated)
         {
             await ReloadAsync();
@@ -127,12 +134,22 @@ else if (_authenticated)
 
     private async Task ExportOneAsync(SavedResult item)
     {
+        if (!_exportEnabled)
+        {
+            return;
+        }
+
         var name = Slug(item.Title) + ".json";
         await JS.InvokeVoidAsync("daleel.download", name, item.ResultJson, "application/json");
     }
 
     private async Task ExportAllAsync()
     {
+        if (!_exportEnabled)
+        {
+            return;
+        }
+
         var export = _items.Select(i => new
         {
             i.Title, i.ResultType, i.Notes, i.CreatedAt,

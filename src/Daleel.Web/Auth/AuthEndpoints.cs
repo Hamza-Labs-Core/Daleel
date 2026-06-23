@@ -104,9 +104,10 @@ public static class AuthEndpoints
             return Results.LocalRedirect(target);
         });
 
-        // Clear the auth cookie. GET keeps the nav-bar link trivial; signing out is not a sensitive
-        // state change, and the cookie is HttpOnly + SameSite so this can't leak anything.
-        app.MapGet("/auth/logout", async (SignInManager<ApplicationUser> signInManager) =>
+        // Clear the auth cookie. POST-only so a third-party page can't force a logout with an <img>/GET
+        // (a state change must not be triggerable by a simple cross-site navigation). The /logout page
+        // renders the submitting form with an antiforgery token.
+        app.MapPost("/auth/logout", async (SignInManager<ApplicationUser> signInManager) =>
         {
             await signInManager.SignOutAsync();
             return Results.LocalRedirect("/");
@@ -122,9 +123,18 @@ public static class AuthEndpoints
         return admins.Any(a => string.Equals(a, email, StringComparison.OrdinalIgnoreCase));
     }
 
-    /// <summary>Coerces a return URL to a safe local path, defaulting to the home page.</summary>
+    /// <summary>
+    /// Coerces a return URL to a safe local path, defaulting to the home page. Must start with a
+    /// single '/', and explicitly rejects protocol-relative (<c>//evil.com</c>) and backslash
+    /// (<c>/\evil.com</c>) forms that browsers treat as absolute — so this can't become an open redirect.
+    /// </summary>
     private static string Local(string? returnUrl) =>
-        !string.IsNullOrWhiteSpace(returnUrl) && returnUrl.StartsWith('/') ? returnUrl : "/";
+        !string.IsNullOrWhiteSpace(returnUrl)
+        && returnUrl.StartsWith('/')
+        && !returnUrl.StartsWith("//", StringComparison.Ordinal)
+        && !returnUrl.StartsWith("/\\", StringComparison.Ordinal)
+            ? returnUrl
+            : "/";
 
     /// <summary>Best-effort avatar URL across the various provider claim conventions.</summary>
     private static string? Picture(ClaimsPrincipal principal)

@@ -33,7 +33,12 @@ public sealed class OpenAiClient : HttpProviderBase, ILlmClient
 
     private static HttpClient ConfigureClient(HttpClient? client)
     {
-        client ??= new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        if (client is null)
+        {
+            client = SharedHttpHandler.CreateClient();
+            client.Timeout = TimeSpan.FromMinutes(2);
+        }
+
         client.BaseAddress ??= new Uri(DefaultBaseUrl);
         return client;
     }
@@ -58,8 +63,7 @@ public sealed class OpenAiClient : HttpProviderBase, ILlmClient
             cancellationToken).ConfigureAwait(false);
 
         var root = doc.RootElement;
-        var content = root.GetProperty("choices")[0].GetProperty("message").GetProperty("content").GetString()
-                      ?? string.Empty;
+        var content = ChatCompletionParsing.ExtractContent(root, Provider);
 
         int? inTok = null, outTok = null;
         if (root.TryGetProperty("usage", out var usage))

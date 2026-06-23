@@ -1,4 +1,5 @@
 using Daleel.Apify;
+using Daleel.Core.Analysis;
 using Daleel.Core.Arabic;
 using Daleel.Core.Geo;
 using Daleel.Core.Models;
@@ -164,7 +165,7 @@ public sealed class MonitorService
                 Source = p.Source ?? profile.Key,
                 Url = p.Url,
                 MatchedAt = p.Timestamp ?? DateTimeOffset.UtcNow,
-                Sentiment = ScoreSentiment(p.Text)
+                Sentiment = KeywordSentiment.Score(p.Text)
             })
             .ToList();
 
@@ -176,16 +177,5 @@ public sealed class MonitorService
         }
 
         return hits.Count;
-    }
-
-    /// <summary>Coarse keyword sentiment (Arabic + English), mirroring the agent's fallback scorer.</summary>
-    private static Sentiment ScoreSentiment(string text)
-    {
-        var n = ArabicNormalizer.Normalize(text);
-        var positive = new[] { "ممتاز", "رائع", "جيد", "افضل", "احسن", "good", "great", "best", "excellent", "love" };
-        var negative = new[] { "سيء", "رديء", "مشكله", "خربان", "bad", "worst", "broken", "problem", "hate" };
-        var pos = positive.Count(w => n.Contains(ArabicNormalizer.Normalize(w), StringComparison.Ordinal));
-        var neg = negative.Count(w => n.Contains(ArabicNormalizer.Normalize(w), StringComparison.Ordinal));
-        return pos > neg ? Sentiment.Positive : neg > pos ? Sentiment.Negative : Sentiment.Neutral;
     }
 }

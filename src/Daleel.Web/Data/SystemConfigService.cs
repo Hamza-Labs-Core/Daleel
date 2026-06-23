@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace Daleel.Web.Data;
 
@@ -17,8 +18,40 @@ public interface ISystemConfigService
 
 public sealed class SystemConfigService : ISystemConfigService
 {
+    private const string CacheKey = "systemconfig:snapshot";
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(30);
+
     private readonly DaleelDbContext _db;
-    public SystemConfigService(DaleelDbContext db) => _db = db;
+    private readonly IMemoryCache? _cache;
+
+    // The cache is optional so unit tests can `new SystemConfigService(db)`; in the app DI supplies
+    // the registered IMemoryCache so hot-path readers (the rate-limit middleware) avoid a DB hit.
+    public SystemConfigService(DaleelDbContext db, IMemoryCache? cache = null)
+    {
+        _db = db;
+        _cache = cache;
+    }
+
+    /// <summary>All config as a key→value map, cached briefly and evicted on <see cref="SetAsync"/>.</summary>
+    private async Task<IReadOnlyDictionary<string, string>> SnapshotAsync(CancellationToken ct)
+    {
+        if (_cache is null)
+        {
+            return await LoadAsync(ct);
+        }
+
+        if (_cache.TryGetValue(CacheKey, out IReadOnlyDictionary<string, string>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var loaded = await LoadAsync(ct);
+        _cache.Set(CacheKey, loaded, CacheTtl);
+        return loaded;
+    }
+
+    private async Task<IReadOnlyDictionary<string, string>> LoadAsync(CancellationToken ct) =>
+        await _db.SystemConfig.AsNoTracking().ToDictionaryAsync(c => c.Key, c => c.Value, ct);
 
     /// <summary>Defaults seeded on first run; admins can override any of these at /admin/settings.</summary>
     public static readonly IReadOnlyList<SystemConfig> Defaults = new[]
@@ -34,7 +67,7 @@ public sealed class SystemConfigService : ISystemConfigService
     };
 
     public async Task<string?> GetAsync(string key, CancellationToken ct = default) =>
-        (await _db.SystemConfig.FirstOrDefaultAsync(c => c.Key == key, ct))?.Value;
+        (await SnapshotAsync(ct)).TryGetValue(key, out var v) ? v : null;
 
     public async Task<int> GetIntAsync(string key, int fallback, CancellationToken ct = default) =>
         int.TryParse(await GetAsync(key, ct), out var v) ? v : fallback;
@@ -56,6 +89,7 @@ public sealed class SystemConfigService : ISystemConfigService
         }
 
         await _db.SaveChangesAsync(ct);
+        _cache?.Remove(CacheKey); // invalidate so the next read reflects the admin's change immediately
     }
 
     public async Task<IReadOnlyList<SystemConfig>> AllAsync(CancellationToken ct = default) =>
@@ -65,7 +99,12 @@ public sealed class SystemConfigService : ISystemConfigService
     public async Task SeedDefaultsAsync(CancellationToken ct = default)
     {
         var existing = await _db.SystemConfig.Select(c => c.Key).ToListAsync(ct);
-        var missing = Defaults.Where(d => !existing.Contains(d.Key)).ToList();
+        // Insert COPIES, never the shared static Defaults instances — otherwise EF would track the
+        // static objects and a later SetAsync mutation would corrupt the process-wide defaults.
+        var missing = Defaults
+            .Where(d => !existing.Contains(d.Key))
+            .Select(d => new SystemConfig { Key = d.Key, Value = d.Value, Type = d.Type })
+            .ToList();
         if (missing.Count > 0)
         {
             _db.SystemConfig.AddRange(missing);

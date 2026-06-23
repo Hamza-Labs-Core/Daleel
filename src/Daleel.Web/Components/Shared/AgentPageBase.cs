@@ -3,6 +3,7 @@ using Daleel.Agent;
 using Daleel.Web.Data;
 using Daleel.Web.Services;
 using Microsoft.AspNetCore.Components;
+using Microsoft.Extensions.Logging;
 using MudBlazor;
 
 namespace Daleel.Web.Components.Shared;
@@ -27,6 +28,7 @@ public abstract class AgentPageBase : ComponentBase
     [Inject] protected IAnalyticsService Analytics { get; set; } = default!;
     [Inject] protected IDialogService Dialogs { get; set; } = default!;
     [Inject] protected NavigationManager Nav { get; set; } = default!;
+    [Inject] protected ILogger<AgentPageBase> Logger { get; set; } = default!;
 
     /// <summary>Id of the history row written for the most recent run (null if signed out).</summary>
     protected int? LastHistoryId { get; private set; }
@@ -187,7 +189,10 @@ public abstract class AgentPageBase : ComponentBase
         }
         catch (Exception ex)
         {
-            Error = ex.Message;
+            // Log the full exception server-side; show the user a generic message so internal detail
+            // (provider hostnames, partial keys in URLs, SQL text) never leaks to the browser.
+            Logger.LogError(ex, "Agent run failed for user {UserId}", userId);
+            Error = "Something went wrong while running your search. Please try again.";
         }
         finally
         {

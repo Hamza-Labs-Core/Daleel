@@ -99,6 +99,7 @@ else
         }
 
         Snackbar.Add("Account deleted.", Severity.Info);
-        Nav.NavigateTo("/auth/logout", forceLoad: true);
+        // Logout is POST-only now; send them to the sign-out page to clear the (now-orphaned) cookie.
+        Nav.NavigateTo("/logout", forceLoad: true);
     }
 }

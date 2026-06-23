@@ -30,7 +30,25 @@ public enum FilterStrictness
 public sealed class ContentFilter
 {
     /// <summary>A blocked category and its bilingual trigger terms.</summary>
-    public sealed record Category(string Name, FilterStrictness MinLevel, string[] English, string[] Arabic);
+    public sealed record Category(string Name, FilterStrictness MinLevel, string[] English, string[] Arabic)
+    {
+        /// <summary>
+        /// The English terms compiled once into a single word-boundaried alternation
+        /// (<c>\b(?:beer|wine|…)s?\b</c>). Built lazily on first use and cached for the process —
+        /// this avoids recompiling a regex per term per item on the hot filtering path.
+        /// </summary>
+        public Regex EnglishPattern { get; } = BuildEnglishPattern(English);
+
+        /// <summary>The Arabic trigger terms, pre-normalized once via <see cref="ArabicNormalizer"/>.</summary>
+        public string[] NormalizedArabic { get; } = Array.ConvertAll(Arabic, ArabicNormalizer.Normalize);
+
+        private static Regex BuildEnglishPattern(string[] terms)
+        {
+            var alternation = string.Join('|', terms.Select(Regex.Escape));
+            return new Regex($@"\b(?:{alternation})s?\b",
+                RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+    }
 
     private static readonly Category[] Categories =
     {
@@ -168,17 +186,14 @@ public sealed class ContentFilter
                 continue; // category not active at this strictness
             }
 
-            foreach (var term in category.English)
+            if (category.EnglishPattern.IsMatch(latin))
             {
-                if (Regex.IsMatch(latin, $@"\b{Regex.Escape(term)}s?\b"))
-                {
-                    return category.Name;
-                }
+                return category.Name;
             }
 
-            foreach (var term in category.Arabic)
+            foreach (var term in category.NormalizedArabic)
             {
-                if (arabic.Contains(ArabicNormalizer.Normalize(term), StringComparison.Ordinal))
+                if (arabic.Contains(term, StringComparison.Ordinal))
                 {
                     return category.Name;
                 }

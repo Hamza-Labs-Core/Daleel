@@ -90,6 +90,31 @@ public class RepositoryTests
         (await repo.ListAsync(User)).Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task Saved_CountForUser_IsScopedToOwner()
+    {
+        using var ctx = new SqliteTestContext();
+        var repo = new SavedResultRepository(ctx.Db);
+
+        for (var i = 0; i < 3; i++)
+        {
+            await repo.AddAsync(new SavedResult
+            {
+                UserId = User, Title = $"r{i}", ResultType = "brand",
+                ResultJson = "{}", CreatedAt = DateTimeOffset.UtcNow
+            });
+        }
+        await repo.AddAsync(new SavedResult
+        {
+            UserId = "other", Title = "theirs", ResultType = "brand",
+            ResultJson = "{}", CreatedAt = DateTimeOffset.UtcNow
+        });
+
+        // The cap check (limit.saved_results_free) relies on this count being per-user.
+        (await repo.CountForUserAsync(User)).Should().Be(3);
+        (await repo.CountForUserAsync("other")).Should().Be(1);
+    }
+
     private static SearchHistoryEntry Make(string query, DateTimeOffset? at = null) => new()
     {
         UserId = User,

@@ -38,7 +38,12 @@ public sealed class AnthropicClient : HttpProviderBase, ILlmClient
 
     private static HttpClient ConfigureClient(HttpClient? client)
     {
-        client ??= new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+        if (client is null)
+        {
+            client = SharedHttpHandler.CreateClient();
+            client.Timeout = TimeSpan.FromMinutes(2);
+        }
+
         client.BaseAddress ??= new Uri(DefaultBaseUrl);
         return client;
     }

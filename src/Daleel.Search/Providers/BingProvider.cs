@@ -30,7 +30,7 @@ public sealed class BingProvider : HttpProviderBase, ISearchProvider
 
     private static HttpClient ConfigureClient(HttpClient? client)
     {
-        client ??= new HttpClient();
+        client ??= SharedHttpHandler.CreateClient();
         client.BaseAddress ??= new Uri(DefaultBaseUrl);
         return client;
     }

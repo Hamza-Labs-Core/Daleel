@@ -19,6 +19,9 @@ public interface ISavedResultRepository
     /// <summary>Deletes one saved result if owned by the user. Returns true when a row was removed.</summary>
     Task<bool> DeleteAsync(string userId, int id, CancellationToken ct = default);
 
+    /// <summary>How many results this user has saved — used to enforce the per-plan saved-results cap.</summary>
+    Task<int> CountForUserAsync(string userId, CancellationToken ct = default);
+
     /// <summary>Aggregate count across all users — for admin stats only.</summary>
     Task<int> TotalCountAsync(CancellationToken ct = default);
 }
@@ -58,6 +61,9 @@ public sealed class SavedResultRepository : ISavedResultRepository
         await _db.SaveChangesAsync(ct);
         return true;
     }
+
+    public Task<int> CountForUserAsync(string userId, CancellationToken ct = default) =>
+        _db.SavedResults.CountAsync(x => x.UserId == userId, ct);
 
     public Task<int> TotalCountAsync(CancellationToken ct = default) => _db.SavedResults.CountAsync(ct);
 }
