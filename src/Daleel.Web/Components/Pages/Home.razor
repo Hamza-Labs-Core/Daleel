@@ -1,155 +1,252 @@
 @page "/"
 @rendermode InteractiveServer
-@inherits AgentPageBase
+@implements IDisposable
+@inject ICurrentUser CurrentUser
+@inject IConversationService Conversations
+@inject IConversationStore ConvoStore
+@inject IConversationNotifier Notifier
+@inject ISearchHistoryRepository History
+@inject BrowserStore Store
+@inject IDialogService Dialogs
+@inject NavigationManager Nav
 
-<PageTitle>دليل · Daleel — Ask</PageTitle>
+<PageTitle>دليل · Daleel</PageTitle>
 
-<div class="daleel-hero">
-    <div class="daleel-logo">دليل</div>
-    <MudText Typo="Typo.subtitle1" Color="Color.Secondary" Class="mt-1">
-        Arabic market &amp; social intelligence · ذكاء الأسواق ووسائل التواصل
-    </MudText>
-</div>
+<MudGrid Spacing="3">
+    <!-- Conversation history sidebar -->
+    <MudItem xs="12" md="3">
+        <MudPaper Class="pa-3" Outlined="true" Elevation="0" Style="position:sticky;top:80px;">
+            <MudText Typo="Typo.subtitle2" Class="mb-2">المحادثات · Recent</MudText>
+            @if (_recent.Count == 0)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary">No searches yet.</MudText>
+            }
+            else
+            {
+                <MudList T="string" Dense="true">
+                    @foreach (var h in _recent)
+                    {
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.ChatBubbleOutline"
+                                     OnClick="@(() => Prefill(h.Query))">
+                            <MudText Typo="Typo.body2" dir="@Catalog.Dir(h.Query)" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@h.Query</MudText>
+                        </MudListItem>
+                    }
+                </MudList>
+                <MudButton Href="/history" Size="Size.Small" Variant="Variant.Text" Class="mt-1">View all</MudButton>
+            }
+        </MudPaper>
+    </MudItem>
 
-<MudPaper Class="pa-4 mx-auto" Elevation="0" Outlined="true" Style="max-width:820px;border-radius:18px;">
-    <MudTextField @bind-Value="_question" Lines="2" AutoGrow="true"
-                  Placeholder="اسأل دليل… / Ask Daleel…"
-                  Variant="Variant.Text" Immediate="true"
-                  Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-                  OnKeyDown="OnKey" Class="mt-1" />
-
-    <div class="d-flex flex-wrap gap-3 mt-3 align-center">
-        <div style="min-width:230px;flex:1;"><GeoSelect @bind-Value="Geo" /></div>
-        <div style="min-width:230px;flex:1;"><ModelSelect @bind-Value="Model" /></div>
-        <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
-                   StartIcon="@Icons.Material.Filled.AutoAwesome"
-                   OnClick="Ask" Disabled="Busy || string.IsNullOrWhiteSpace(_question)">
-            اسأل · Ask
-        </MudButton>
-    </div>
-</MudPaper>
-
-<div class="mx-auto mt-4" style="max-width:820px;">
-    @if (Ready)
-    {
-        <ProviderStatusBar Keys="Keys" />
-    }
-
-    @if (Error is not null)
-    {
-        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="my-3">@Error</MudAlert>
-    }
-
-    <ProgressLog Busy="Busy" Lines="LogLines" />
-</div>
-
-@if (_answer is not null && !Busy)
-{
-    var bundle = _answer.Research;
-    <div class="mx-auto" style="max-width:980px;">
-        <div class="d-flex align-center gap-2 my-3">
-            <MudChip T="string" Color="Color.Primary" Variant="Variant.Filled" Size="Size.Small">@_answer.QueryType</MudChip>
-            <MudChip T="string" Color="Color.Default" Variant="Variant.Outlined" Size="Size.Small">@Catalog.ResolveGeo(_answer.Geo).Display</MudChip>
-            <MudSpacer />
-            <SaveResultButton Result="_answer" ResultType="ask" DefaultTitle="@_answer.Question" SearchHistoryId="LastHistoryId" />
-        </div>
-
-        <ReportView Title="الملخص · Summary" Text="@_answer.Summary" />
-
-        @{ var prices = bundle.ShoppingResults.Where(r => r.Price is not null).Take(9).ToList(); }
-        @if (prices.Count > 0)
+    <!-- Main conversation column -->
+    <MudItem xs="12" md="9">
+        @if (_query is null && _status is "idle" or null)
         {
-            <MudText Typo="Typo.h6" Class="mt-6 mb-2">الأسعار والعروض · Prices &amp; deals</MudText>
-            <MudGrid Spacing="3">
-                @foreach (var r in prices)
-                {
-                    <MudItem xs="12" sm="6" md="4"><ShoppingCard Result="r" /></MudItem>
-                }
-            </MudGrid>
+            <div class="daleel-hero">
+                <div class="daleel-logo">دليل</div>
+                <MudText Typo="Typo.subtitle1" Color="Color.Secondary" Class="mt-1">
+                    Arabic market &amp; social intelligence · ذكاء الأسواق ووسائل التواصل
+                </MudText>
+            </div>
         }
 
-        @if (bundle.Stores.Count > 0)
+        @if (_query is not null)
         {
-            <MudText Typo="Typo.h6" Class="mt-6 mb-2">المتاجر · Stores</MudText>
-            <MudGrid Spacing="3">
-                @foreach (var s in bundle.Stores.Take(6))
-                {
-                    <MudItem xs="12" sm="6" md="4"><StoreCard Store="s" /></MudItem>
-                }
-            </MudGrid>
+            <MudPaper Class="pa-4 mb-3" Outlined="true" Elevation="0">
+                <div class="d-flex align-center gap-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Person" />
+                    <MudText Typo="Typo.h6" dir="@Catalog.Dir(_query)">@_query</MudText>
+                </div>
+            </MudPaper>
         }
 
-        @if (bundle.SocialPosts.Count > 0)
+        @if (_status == "running")
         {
-            <MudText Typo="Typo.h6" Class="mt-6 mb-2">آراء الناس · Opinions (@bundle.SocialPosts.Count)</MudText>
-            <MudList T="string" Dense="true">
-                @foreach (var p in bundle.SocialPosts.Take(8))
-                {
-                    <MudListItem T="string" Icon="@Icons.Material.Filled.ChatBubbleOutline">
-                        <MudText Typo="Typo.body2" dir="@Catalog.Dir(p.Text)">@Trim(p.Text, 240)</MudText>
-                        @if (!string.IsNullOrWhiteSpace(p.Author))
-                        {
-                            <MudText Typo="Typo.caption" Color="Color.Secondary">— @p.Author</MudText>
-                        }
-                    </MudListItem>
-                }
-            </MudList>
+            <MudPaper Class="pa-4 mb-3" Outlined="true" Elevation="0">
+                <div class="d-flex align-center mb-2">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                    <MudText Typo="Typo.subtitle2">جارٍ البحث · Searching…</MudText>
+                    <MudSpacer />
+                    <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
+                               OnClick="CancelAsync">Cancel</MudButton>
+                </div>
+                <MudList T="string" Dense="true">
+                    @foreach (var line in _progress)
+                    {
+                        <MudListItem T="string" Icon="@Icons.Material.Filled.ChevronRight">
+                            <MudText Typo="Typo.body2">@line</MudText>
+                        </MudListItem>
+                    }
+                </MudList>
+            </MudPaper>
         }
 
-        <SourceChips Sources="bundle.Sources" />
-    </div>
-}
+        @if (_status == "error")
+        {
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">@(_error ?? "Search failed.")</MudAlert>
+        }
+
+        @if (_status == "completed" && _answer is not null)
+        {
+            <ReportView Title="الملخص · Summary" Text="@_answer.Summary" />
+            <SourceChips Sources="_answer.Research.Sources" />
+        }
+
+        <!-- Chat input -->
+        <MudPaper Class="pa-3 mt-4" Outlined="true" Elevation="0" Style="position:sticky;bottom:12px;border-radius:14px;">
+            <div class="d-flex align-center gap-2">
+                <MudTextField @bind-Value="_input" Placeholder="اسأل دليل… / Ask Daleel…" Variant="Variant.Text"
+                              Immediate="true" OnKeyDown="OnKey" Class="mt-0" Disabled="_running" />
+                <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
+                               OnClick="SubmitAsync" Disabled="@(_running || string.IsNullOrWhiteSpace(_input))" />
+            </div>
+        </MudPaper>
+    </MudItem>
+</MudGrid>
 
 @code {
     [SupplyParameterFromQuery] private string? Q { get; set; }
-    [SupplyParameterFromQuery(Name = "geo")] private string? GeoParam { get; set; }
 
-    private string _question = string.Empty;
+    private string? _userId;
+    private string _input = string.Empty;
+    private string? _query;
+    private string? _status; // idle | running | completed | error
+    private string? _error;
+    private int? _jobId;
+    private bool _running => _status == "running";
+    private readonly List<string> _progress = new();
     private AgentAnswer? _answer;
+    private List<SearchHistoryEntry> _recent = new();
 
-    // Prefill from a History "re-run" deep link (?q=…&geo=…); the user presses Ask to run it.
-    protected override Task OnReadyAsync()
+    protected override void OnInitialized()
     {
-        if (!string.IsNullOrWhiteSpace(Q))
+        Notifier.Progress += OnProgress;
+        Notifier.Completed += OnCompleted;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _userId = await CurrentUser.GetUserIdAsync();
+        if (!string.IsNullOrWhiteSpace(Q)) _input = Q!;
+
+        if (_userId is not null)
         {
-            _question = Q!;
+            await LoadStateAsync();
         }
 
-        if (!string.IsNullOrWhiteSpace(GeoParam))
+        StateHasChanged();
+    }
+
+    private async Task LoadStateAsync()
+    {
+        var convo = await ConvoStore.GetAsync(_userId!);
+        if (convo is not null)
         {
-            Geo = GeoParam!;
+            _query = convo.CurrentQuery;
+            _status = convo.CurrentStatus;
+            _jobId = convo.CurrentJobId;
+            if (convo.CurrentStatus == "completed" && convo.CurrentResultJson is not null)
+            {
+                _answer = ResultSerialization.Deserialize<AgentAnswer>(convo.CurrentResultJson);
+            }
         }
 
-        return Task.CompletedTask;
+        _recent = (await History.ListAsync(_userId!, page: 1, pageSize: 15)).Items.ToList();
     }
 
     private async Task OnKey(KeyboardEventArgs e)
     {
-        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey))
+        if (e.Key == "Enter" && !e.ShiftKey)
         {
-            await Ask();
+            await SubmitAsync();
         }
     }
 
-    private async Task Ask()
+    private async Task SubmitAsync()
     {
-        if (string.IsNullOrWhiteSpace(_question))
+        if (string.IsNullOrWhiteSpace(_input) || _status == "running") return;
+
+        if (_userId is null)
         {
+            await PromptSignInAsync();
             return;
         }
 
+        var geo = await Store.GetAsync("geo") ?? "jordan";
+        var model = await Store.GetAsync("model");
+        var isAdmin = await CurrentUser.IsAdminAsync();
+
+        var result = await Conversations.SubmitAsync(_userId, isAdmin, _input, geo, model);
+        if (!result.Accepted)
+        {
+            _status = "error";
+            _error = result.Error;
+            return;
+        }
+
+        _query = _input.Trim();
+        _input = string.Empty;
+        _jobId = result.JobId;
+        _status = "running";
+        _error = null;
         _answer = null;
-        await Store.SetAsync("geo", Geo);
-        await Store.SetAsync("model", Model);
-        await RunAsync(
-            async (agent, ct) => _answer = await agent.AskAsync(_question, Geo, ct),
-            () => _answer is null ? null : new SearchHistoryEntry
-            {
-                Query = _question,
-                QueryType = "ask",
-                ResultSummary = _answer.Summary
-            });
+        _progress.Clear();
+        _progress.Add("🔍 Generating search strategy…");
     }
 
-    private static string Trim(string s, int max) => s.Length <= max ? s : s[..max] + "…";
+    private async Task CancelAsync()
+    {
+        if (_userId is not null && _jobId is { } id)
+        {
+            await Conversations.CancelAsync(_userId, id);
+        }
+    }
+
+    // Real-time updates from the background worker — fan out to every device of this user.
+    private void OnProgress(string userId, int jobId, string message)
+    {
+        if (userId != _userId || jobId != _jobId) return;
+        InvokeAsync(() =>
+        {
+            _status = "running";
+            _query ??= "…";
+            if (_progress.Count == 0 || _progress[^1] != message) _progress.Add(message);
+            StateHasChanged();
+        });
+    }
+
+    private void OnCompleted(string userId, int jobId, string status, string? resultJson, string? resultType, string? error)
+    {
+        if (userId != _userId || jobId != _jobId) return;
+        InvokeAsync(async () =>
+        {
+            _status = status == "completed" ? "completed" : "error";
+            _error = error;
+            _answer = status == "completed" && resultJson is not null
+                ? ResultSerialization.Deserialize<AgentAnswer>(resultJson)
+                : null;
+            _recent = (await History.ListAsync(_userId!, page: 1, pageSize: 15)).Items.ToList();
+            StateHasChanged();
+        });
+    }
+
+    private void Prefill(string query) => _input = query;
+
+    private async Task PromptSignInAsync()
+    {
+        var ok = await Dialogs.ShowMessageBox("Sign in to search",
+            "Create a free account to run searches — you get 5 free searches every month.",
+            yesText: "Sign in", cancelText: "Cancel");
+        if (ok == true)
+        {
+            Nav.NavigateTo("/login?returnUrl=%2F");
+        }
+    }
+
+    public void Dispose()
+    {
+        Notifier.Progress -= OnProgress;
+        Notifier.Completed -= OnCompleted;
+    }
 }

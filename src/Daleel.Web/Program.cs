@@ -1,5 +1,6 @@
 using Daleel.Web.Auth;
 using Daleel.Web.Components;
+using Daleel.Web.Conversation;
 using Daleel.Web.Data;
 using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
@@ -35,12 +36,27 @@ var authentication = builder.Services.AddAuthentication(options =>
 authentication.AddIdentityCookies();
 authentication.AddExternalProviders(builder.Configuration);
 
-// Unauthenticated visitors are sent to /login instead of a 404 when a [Authorize] page is hit.
+// Unauthenticated visitors are sent to /login instead of a 404 when a [Authorize] page is hit —
+// except API/hub calls, which get a clean 401/403 instead of an HTML redirect.
 builder.Services.ConfigureApplicationCookie(o =>
 {
     o.LoginPath = "/login";
     o.AccessDeniedPath = "/login";
+    o.Events.OnRedirectToLogin = ctx => ApiAwareRedirect(ctx, StatusCodes.Status401Unauthorized);
+    o.Events.OnRedirectToAccessDenied = ctx => ApiAwareRedirect(ctx, StatusCodes.Status403Forbidden);
 });
+
+static Task ApiAwareRedirect(Microsoft.AspNetCore.Authentication.RedirectContext<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions> ctx, int statusCode)
+{
+    if (ctx.Request.Path.StartsWithSegments("/api") || ctx.Request.Path.StartsWithSegments("/hubs"))
+    {
+        ctx.Response.StatusCode = statusCode;
+        return Task.CompletedTask;
+    }
+
+    ctx.Response.Redirect(ctx.RedirectUri);
+    return Task.CompletedTask;
+}
 
 builder.Services.AddIdentityCore<ApplicationUser>(options =>
     {
@@ -67,6 +83,17 @@ builder.Services.AddScoped<IQuotaService, QuotaService>();
 builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
 builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
 builder.Services.AddHttpContextAccessor();
+
+// Async conversation backend: SignalR + a queue + a background worker run searches off the request.
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<Daleel.Web.Conversation.ISearchJobQueue, Daleel.Web.Conversation.SearchJobQueue>();
+builder.Services.AddSingleton<Daleel.Web.Conversation.SignalRConversationBroadcaster>();
+builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationBroadcaster>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
+builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
+builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.AgentSearchRunner>();
+builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
+builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
+builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 
 // IP rate limiting (in-memory fixed-window — no Redis at this scale).
 builder.Services.AddMemoryCache();
@@ -120,6 +147,8 @@ app.UseAuthorization();
 app.UseAntiforgery();
 
 app.MapAuthEndpoints();
+app.MapConversationEndpoints();
+app.MapHub<Daleel.Web.Conversation.ConversationHub>("/hubs/conversation");
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()

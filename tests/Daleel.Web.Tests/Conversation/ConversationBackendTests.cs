@@ -1,0 +1,191 @@
+using System.Collections.Concurrent;
+using Daleel.Web.Conversation;
+using Daleel.Web.Data;
+using FluentAssertions;
+using Microsoft.Data.Sqlite;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Xunit;
+
+namespace Daleel.Web.Tests.Conversation;
+
+public class ConversationBackendTests : IDisposable
+{
+    private readonly SqliteConnection _conn;
+    private readonly ServiceProvider _provider;
+    private readonly RecordingBroadcaster _broadcaster = new();
+
+    public ConversationBackendTests()
+    {
+        _conn = new SqliteConnection("Data Source=:memory:");
+        _conn.Open();
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(_conn));
+        services.AddScoped<IConversationStore, ConversationStore>();
+        services.AddScoped<IAnalyticsService>(sp => new AnalyticsService(sp.GetRequiredService<DaleelDbContext>()));
+        services.AddScoped<ISearchHistoryRepository, SearchHistoryRepository>();
+        services.AddScoped<IQuotaService>(sp => new QuotaService(sp.GetRequiredService<DaleelDbContext>()));
+        services.AddScoped<ISearchRunner, FakeRunner>();
+        services.AddSingleton<ISearchJobQueue, SearchJobQueue>();
+        _provider = services.BuildServiceProvider();
+
+        using var scope = _provider.CreateScope();
+        scope.ServiceProvider.GetRequiredService<DaleelDbContext>().Database.EnsureCreated();
+    }
+
+    private DaleelDbContext NewDb() => _provider.CreateScope().ServiceProvider.GetRequiredService<DaleelDbContext>();
+    private ISearchJobQueue Queue => _provider.GetRequiredService<ISearchJobQueue>();
+
+    private SearchJobService Worker() => new(
+        _provider.GetRequiredService<IServiceScopeFactory>(), Queue, _broadcaster, NullLogger<SearchJobService>.Instance);
+
+    private async Task<int> SeedJobAsync(string userId = "u1")
+    {
+        await using var db = NewDb();
+        var job = new SearchJob { UserId = userId, Query = "best AC", Status = JobStatus.Queued, CreatedAt = DateTimeOffset.UtcNow };
+        db.SearchJobs.Add(job);
+        await db.SaveChangesAsync();
+        return job.Id;
+    }
+
+    [Fact]
+    public async Task Queue_EnqueueAndRead_Works()
+    {
+        await Queue.EnqueueAsync(7);
+        await Queue.EnqueueAsync(8);
+
+        using var cts = new CancellationTokenSource();
+        var read = new List<int>();
+        await foreach (var id in Queue.ReadAllAsync(cts.Token))
+        {
+            read.Add(id);
+            if (read.Count == 2) { cts.Cancel(); break; }
+        }
+
+        read.Should().Equal(7, 8);
+    }
+
+    [Fact]
+    public async Task Worker_ProcessesJob_ToCompletion_AndPersistsConversation()
+    {
+        var jobId = await SeedJobAsync();
+
+        await Worker().ProcessAsync(jobId, CancellationToken.None);
+
+        await using var db = NewDb();
+        var job = await db.SearchJobs.FindAsync(jobId);
+        job!.Status.Should().Be(JobStatus.Completed);
+        job.ResultJson.Should().Contain("FAKE-RESULT");
+
+        var convo = await db.UserConversations.FindAsync("u1");
+        convo!.CurrentStatus.Should().Be("completed");
+        convo.CurrentResultType.Should().Be("ask");
+
+        // History + analytics recorded; all of the user's devices were notified.
+        (await db.SearchHistory.CountAsync()).Should().Be(1);
+        (await db.AnalyticsEvents.CountAsync(e => e.EventType == "search")).Should().Be(1);
+        _broadcaster.Completed.Should().ContainSingle(c => c.UserId == "u1" && c.Status == "completed");
+        _broadcaster.Progress.Should().Contain(p => p.UserId == "u1");
+    }
+
+    [Fact]
+    public async Task Worker_Cancellation_MarksJobCancelled()
+    {
+        var jobId = await SeedJobAsync();
+        var runner = (FakeRunner)_provider.GetRequiredService<IServiceScopeFactory>()
+            .CreateScope().ServiceProvider.GetRequiredService<ISearchRunner>();
+        // All FakeRunner instances share the same static gate so the test can coordinate timing.
+        FakeRunner.BlockUntilCancelled = true;
+        FakeRunner.Started = new TaskCompletionSource();
+
+        var processing = Worker().ProcessAsync(jobId, CancellationToken.None);
+
+        await FakeRunner.Started.Task; // runner has begun and the job's CTS is registered
+        Queue.RequestCancel(jobId).Should().BeTrue();
+        await processing;
+
+        await using var db = NewDb();
+        (await db.SearchJobs.FindAsync(jobId))!.Status.Should().Be(JobStatus.Cancelled);
+
+        FakeRunner.BlockUntilCancelled = false;
+    }
+
+    [Fact]
+    public async Task ConversationService_OverQuota_Returns429_AndDoesNotEnqueue()
+    {
+        // Exhaust the Basic (5) quota for the user.
+        using (var scope = _provider.CreateScope())
+        {
+            var quota = scope.ServiceProvider.GetRequiredService<IQuotaService>();
+            for (var i = 0; i < 5; i++) { await quota.TryConsumeAsync("heavy", false); }
+        }
+
+        await using var db = NewDb();
+        var svc = new ConversationService(db, new QuotaService(db), Queue);
+        var result = await svc.SubmitAsync("heavy", isAdmin: false, "another search", "jordan", null);
+
+        result.Accepted.Should().BeFalse();
+        result.StatusCode.Should().Be(429);
+        (await db.SearchJobs.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ConversationService_Submit_CreatesQueuedJob()
+    {
+        await using var db = NewDb();
+        var svc = new ConversationService(db, new QuotaService(db), Queue);
+
+        var result = await svc.SubmitAsync("u2", isAdmin: false, "best fridge", "jordan", "m");
+
+        result.Accepted.Should().BeTrue();
+        result.JobId.Should().NotBeNull();
+        result.StatusCode.Should().Be(202);
+        (await db.SearchJobs.FindAsync(result.JobId!.Value))!.Status.Should().Be(JobStatus.Queued);
+    }
+
+    public void Dispose()
+    {
+        _provider.Dispose();
+        _conn.Dispose();
+    }
+
+    /// <summary>Fake runner: returns a canned result, or blocks until cancelled for the cancel test.</summary>
+    private sealed class FakeRunner : ISearchRunner
+    {
+        public static bool BlockUntilCancelled;
+        public static TaskCompletionSource? Started;
+
+        public async Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct)
+        {
+            progress("🌐 searching…");
+            if (BlockUntilCancelled)
+            {
+                Started?.TrySetResult();
+                await Task.Delay(Timeout.Infinite, ct); // throws when cancelled
+            }
+
+            return new SearchRunResult("{\"Summary\":\"FAKE-RESULT\"}", "ask", 0, string.Empty);
+        }
+    }
+
+    private sealed class RecordingBroadcaster : IConversationBroadcaster
+    {
+        public ConcurrentBag<(string UserId, int JobId, string Message)> Progress { get; } = new();
+        public ConcurrentBag<(string UserId, int JobId, string Status)> Completed { get; } = new();
+
+        public Task ProgressAsync(string userId, int jobId, string message)
+        {
+            Progress.Add((userId, jobId, message));
+            return Task.CompletedTask;
+        }
+
+        public Task CompletedAsync(string userId, int jobId, string status, string? resultJson, string? resultType, string? error)
+        {
+            Completed.Add((userId, jobId, status));
+            return Task.CompletedTask;
+        }
+    }
+}

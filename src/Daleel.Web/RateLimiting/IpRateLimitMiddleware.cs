@@ -71,6 +71,7 @@ public sealed class IpRateLimitMiddleware
         path.StartsWith("/_framework", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith("/_content", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith("/_blazor", StringComparison.OrdinalIgnoreCase) ||
+        path.StartsWith("/hubs", StringComparison.OrdinalIgnoreCase) ||
         path.StartsWith("/health", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/app.css", StringComparison.OrdinalIgnoreCase) ||
         path.Equals("/daleel.js", StringComparison.OrdinalIgnoreCase) ||

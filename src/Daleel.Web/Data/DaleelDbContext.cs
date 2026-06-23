@@ -25,6 +25,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<UserQuota> UserQuotas => Set<UserQuota>();
     public DbSet<AnalyticsEvent> AnalyticsEvents => Set<AnalyticsEvent>();
     public DbSet<SystemConfig> SystemConfig => Set<SystemConfig>();
+    public DbSet<SearchJob> SearchJobs => Set<SearchJob>();
+    public DbSet<UserConversation> UserConversations => Set<UserConversation>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -67,6 +69,13 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
         {
             e.HasIndex(x => new { x.EventType, x.Timestamp });
             e.Property(x => x.EventType).HasMaxLength(20);
+            e.Property(x => x.Query).HasMaxLength(2000);
+        });
+
+        builder.Entity<SearchJob>(e =>
+        {
+            e.HasIndex(x => new { x.UserId, x.Status });
+            e.Property(x => x.Status).HasMaxLength(20);
             e.Property(x => x.Query).HasMaxLength(2000);
         });
 
