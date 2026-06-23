@@ -16,6 +16,10 @@ public enum MonitorStatus
 public sealed class MonitorDefinition
 {
     public string Id { get; init; } = Guid.NewGuid().ToString("N")[..8];
+
+    /// <summary>Owner of this monitor — the isolation key. Set by the service, never the client.</summary>
+    public required string UserId { get; init; }
+
     public required string Keyword { get; set; }
     public string Geo { get; set; } = "jordan";
     public int IntervalMinutes { get; set; } = 60;
@@ -29,6 +33,10 @@ public sealed class MonitorDefinition
 public sealed record MonitorHit
 {
     public required string MonitorId { get; init; }
+
+    /// <summary>Owner of the monitor that produced this hit — the feed's isolation key.</summary>
+    public required string UserId { get; init; }
+
     public required string Keyword { get; init; }
     public string Text { get; init; } = string.Empty;
     public string? Author { get; init; }
@@ -39,9 +47,11 @@ public sealed record MonitorHit
 }
 
 /// <summary>
-/// In-memory store of monitoring jobs and the matched-post feed, shared across all circuits
-/// (registered as a singleton). A "run now" pass uses the real Apify fetcher + Arabic matcher
-/// when a token is available, and otherwise reports that social monitoring is unconfigured.
+/// In-memory store of monitoring jobs and the matched-post feed (registered as a singleton).
+/// Although the store is process-wide, every operation is scoped to the caller's <c>userId</c> so a
+/// user only ever sees, mutates, or runs their own monitors — the same isolation the persisted
+/// repositories enforce. A "run now" pass uses the real Apify fetcher + Arabic matcher when a token
+/// is available, and otherwise reports that social monitoring is unconfigured.
 /// </summary>
 public sealed class MonitorService
 {
@@ -52,21 +62,24 @@ public sealed class MonitorService
 
     public MonitorService(IAgentFactory factory) => _factory = factory;
 
-    /// <summary>Snapshot of all monitors, newest first.</summary>
-    public IReadOnlyList<MonitorDefinition> Monitors
+    /// <summary>Snapshot of one user's monitors, newest first.</summary>
+    public IReadOnlyList<MonitorDefinition> MonitorsFor(string userId)
     {
-        get { lock (_gate) { return _monitors.OrderByDescending(m => m.CreatedAt).ToList(); } }
+        lock (_gate) { return _monitors.Where(m => m.UserId == userId).OrderByDescending(m => m.CreatedAt).ToList(); }
     }
 
-    /// <summary>Snapshot of the results feed, newest first (capped).</summary>
-    public IReadOnlyList<MonitorHit> Feed
+    /// <summary>Snapshot of one user's results feed, newest first (capped).</summary>
+    public IReadOnlyList<MonitorHit> FeedFor(string userId)
     {
-        get { lock (_gate) { return _feed.OrderByDescending(h => h.MatchedAt).Take(200).ToList(); } }
+        lock (_gate) { return _feed.Where(h => h.UserId == userId).OrderByDescending(h => h.MatchedAt).Take(200).ToList(); }
     }
 
-    public MonitorDefinition Add(string keyword, string geo, int intervalMinutes)
+    public MonitorDefinition Add(string userId, string keyword, string geo, int intervalMinutes)
     {
-        var monitor = new MonitorDefinition { Keyword = keyword.Trim(), Geo = geo, IntervalMinutes = intervalMinutes };
+        var monitor = new MonitorDefinition
+        {
+            UserId = userId, Keyword = keyword.Trim(), Geo = geo, IntervalMinutes = intervalMinutes
+        };
         lock (_gate)
         {
             _monitors.Add(monitor);
@@ -75,20 +88,21 @@ public sealed class MonitorService
         return monitor;
     }
 
-    public void Remove(string id)
+    public void Remove(string userId, string id)
     {
         lock (_gate)
         {
-            _monitors.RemoveAll(m => m.Id == id);
-            _feed.RemoveAll(h => h.MonitorId == id);
+            // The userId predicate is the isolation boundary: a request can only delete its own rows.
+            _monitors.RemoveAll(m => m.Id == id && m.UserId == userId);
+            _feed.RemoveAll(h => h.MonitorId == id && h.UserId == userId);
         }
     }
 
-    public void Toggle(string id)
+    public void Toggle(string userId, string id)
     {
         lock (_gate)
         {
-            var m = _monitors.FirstOrDefault(x => x.Id == id);
+            var m = _monitors.FirstOrDefault(x => x.Id == id && x.UserId == userId);
             if (m is not null)
             {
                 m.Status = m.Status == MonitorStatus.Active ? MonitorStatus.Paused : MonitorStatus.Active;
@@ -99,14 +113,15 @@ public sealed class MonitorService
     /// <summary>
     /// Runs one monitoring pass: fetches recent posts for the keyword from the market's primary
     /// Apify actor, keeps Arabic-aware matches, scores a coarse sentiment, and appends to the feed.
-    /// Returns the number of new hits, or -1 when no Apify token is configured.
+    /// Returns the number of new hits, or -1 when no Apify token is configured. The monitor must be
+    /// owned by <paramref name="userId"/>, else this is a no-op (returns 0).
     /// </summary>
-    public async Task<int> RunOnceAsync(string id, IReadOnlyDictionary<string, string>? keys, CancellationToken ct = default)
+    public async Task<int> RunOnceAsync(string userId, string id, IReadOnlyDictionary<string, string>? keys, CancellationToken ct = default)
     {
         MonitorDefinition? monitor;
         lock (_gate)
         {
-            monitor = _monitors.FirstOrDefault(m => m.Id == id);
+            monitor = _monitors.FirstOrDefault(m => m.Id == id && m.UserId == userId);
         }
 
         if (monitor is null)
@@ -142,6 +157,7 @@ public sealed class MonitorService
             .Select(p => new MonitorHit
             {
                 MonitorId = monitor.Id,
+                UserId = monitor.UserId,
                 Keyword = monitor.Keyword,
                 Text = p.Text,
                 Author = p.Author,

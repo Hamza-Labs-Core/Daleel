@@ -139,13 +139,20 @@ else
     {
         row.User.IsAdmin = !row.User.IsAdmin;
         await Users.UpdateAsync(row.User);
-        Snackbar.Add(row.User.IsAdmin ? "Granted admin (effective on next sign-in)." : "Revoked admin.", Severity.Success);
+        // Rotate the security stamp so live sessions/circuits are revalidated and the role change
+        // (especially a *revocation*) takes effect without waiting for the cookie to expire.
+        await Users.UpdateSecurityStampAsync(row.User);
+        Snackbar.Add(row.User.IsAdmin ? "Granted admin (effective on next sign-in)." : "Revoked admin (signed out everywhere).", Severity.Success);
     }
 
     private async Task ToggleDisableAsync(Row row)
     {
         row.User.IsDisabled = !row.User.IsDisabled;
         await Users.UpdateAsync(row.User);
-        Snackbar.Add(row.User.IsDisabled ? "Account disabled." : "Account enabled.", Severity.Success);
+        // Rotate the security stamp: disabling must terminate the user's existing sessions, not just
+        // block the next sign-in. The revalidating auth-state provider picks this up and tears down
+        // their live circuits; the cookie's stamp validation rejects subsequent requests.
+        await Users.UpdateSecurityStampAsync(row.User);
+        Snackbar.Add(row.User.IsDisabled ? "Account disabled (signed out everywhere)." : "Account enabled.", Severity.Success);
     }
 }

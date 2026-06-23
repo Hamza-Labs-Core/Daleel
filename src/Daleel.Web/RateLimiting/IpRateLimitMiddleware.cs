@@ -81,15 +81,14 @@ public sealed class IpRateLimitMiddleware
         path.EndsWith(".ico", StringComparison.OrdinalIgnoreCase) ||
         path.EndsWith(".woff2", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Honors the proxy's X-Forwarded-For first hop, falling back to the socket address.</summary>
-    private static string ClientIp(HttpContext context)
-    {
-        var fwd = context.Request.Headers["X-Forwarded-For"].FirstOrDefault();
-        if (!string.IsNullOrWhiteSpace(fwd))
-        {
-            return fwd.Split(',')[0].Trim();
-        }
-
-        return context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-    }
+    /// <summary>
+    /// The resolved client address. We deliberately use <see cref="ConnectionInfo.RemoteIpAddress"/>
+    /// — which <c>UseForwardedHeaders</c> (run earlier in the pipeline) has already set from the
+    /// trusted proxy hop — rather than re-parsing the raw <c>X-Forwarded-For</c> header. Reading the
+    /// header's first entry is spoofable: a client can send <c>X-Forwarded-For: 1.2.3.4</c> and the
+    /// proxy appends the real address after it, so the first entry is attacker-controlled and would
+    /// let a single client rotate it to evade every per-IP limit (including the 5/hour search guard).
+    /// </summary>
+    private static string ClientIp(HttpContext context) =>
+        context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
 }

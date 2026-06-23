@@ -1,4 +1,5 @@
 @page "/monitor"
+@attribute [Authorize]
 @rendermode InteractiveServer
 @inherits AgentPageBase
 @inject MonitorService Monitors
@@ -40,8 +41,8 @@
     </MudItem>
 
     <MudItem xs="12" md="8">
-        <MudText Typo="Typo.h6" Class="mb-2">المراقبات النشطة · Active monitors (@Monitors.Monitors.Count)</MudText>
-        @if (Monitors.Monitors.Count == 0)
+        <MudText Typo="Typo.h6" Class="mb-2">المراقبات النشطة · Active monitors (@_monitors.Count)</MudText>
+        @if (_monitors.Count == 0)
         {
             <MudPaper Class="pa-6 text-center" Elevation="0" Outlined="true">
                 <MudIcon Icon="@Icons.Material.Outlined.Radar" Size="Size.Large" Color="Color.Secondary" />
@@ -51,7 +52,7 @@
         else
         {
             <MudGrid Spacing="2">
-                @foreach (var m in Monitors.Monitors)
+                @foreach (var m in _monitors)
                 {
                     <MudItem xs="12">
                         <MudPaper Class="pa-3 daleel-card" Elevation="0" Outlined="true">
@@ -69,11 +70,11 @@
                                 </MudTooltip>
                                 <MudTooltip Text="@(m.Status == MonitorStatus.Active ? "Pause" : "Resume")">
                                     <MudIconButton Icon="@(m.Status == MonitorStatus.Active ? Icons.Material.Filled.Pause : Icons.Material.Filled.PlayArrow)"
-                                                   Size="Size.Small" OnClick="@(() => Monitors.Toggle(m.Id))" />
+                                                   Size="Size.Small" OnClick="@(() => ToggleMonitor(m.Id))" />
                                 </MudTooltip>
                                 <MudTooltip Text="Delete">
                                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
-                                                   OnClick="@(() => Monitors.Remove(m.Id))" />
+                                                   OnClick="@(() => RemoveMonitor(m.Id))" />
                                 </MudTooltip>
                             </div>
                             @if (m.LastRunAt is { } last)
@@ -86,15 +87,15 @@
             </MudGrid>
         }
 
-        <MudText Typo="Typo.h6" Class="mt-6 mb-2">سجل النتائج · Results feed (@Monitors.Feed.Count)</MudText>
-        @if (Monitors.Feed.Count == 0)
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">سجل النتائج · Results feed (@_feed.Count)</MudText>
+        @if (_feed.Count == 0)
         {
             <MudText Color="Color.Secondary" Typo="Typo.body2">No matches yet. Run a monitor to populate the feed.</MudText>
         }
         else
         {
             <MudTimeline TimelinePosition="TimelinePosition.Start">
-                @foreach (var hit in Monitors.Feed.Take(50))
+                @foreach (var hit in _feed.Take(50))
                 {
                     <MudTimelineItem Color="@SentimentColor(hit.Sentiment)" Size="Size.Small">
                         <MudText Typo="Typo.body2" dir="@Catalog.Dir(hit.Text)">@Trim(hit.Text, 260)</MudText>
@@ -121,25 +122,66 @@
     private string _keyword = string.Empty;
     private int _interval = 60;
     private string? _running;
+    private string? _userId;
 
-    private void AddMonitor()
+    // Per-user snapshots, refreshed after every mutation. The service is a process-wide singleton,
+    // so these are filtered to the signed-in user — never the whole tenant's monitors/feed.
+    private IReadOnlyList<MonitorDefinition> _monitors = Array.Empty<MonitorDefinition>();
+    private IReadOnlyList<MonitorHit> _feed = Array.Empty<MonitorHit>();
+
+    // AgentPageBase resolves auth on first render, then calls OnReadyAsync — load the owner here.
+    protected override async Task OnReadyAsync()
     {
-        if (string.IsNullOrWhiteSpace(_keyword))
+        // The page is [Authorize]-gated, so a user id is always present by the time we get here.
+        _userId = await CurrentUser.GetUserIdAsync();
+        Refresh();
+    }
+
+    private void Refresh()
+    {
+        if (_userId is null)
         {
             return;
         }
 
-        Monitors.Add(_keyword, Geo, _interval);
+        _monitors = Monitors.MonitorsFor(_userId);
+        _feed = Monitors.FeedFor(_userId);
+    }
+
+    private void AddMonitor()
+    {
+        if (string.IsNullOrWhiteSpace(_keyword) || _userId is null)
+        {
+            return;
+        }
+
+        Monitors.Add(_userId, _keyword, Geo, _interval);
         Snackbar.Add($"Monitoring “{_keyword}” in {Catalog.ResolveGeo(Geo).English}", Severity.Success);
         _keyword = string.Empty;
+        Refresh();
+    }
+
+    private void ToggleMonitor(string id)
+    {
+        if (_userId is null) return;
+        Monitors.Toggle(_userId, id);
+        Refresh();
+    }
+
+    private void RemoveMonitor(string id)
+    {
+        if (_userId is null) return;
+        Monitors.Remove(_userId, id);
+        Refresh();
     }
 
     private async Task RunNow(string id)
     {
+        if (_userId is null) return;
         _running = id;
         try
         {
-            var count = await Monitors.RunOnceAsync(id, Keys);
+            var count = await Monitors.RunOnceAsync(_userId, id, Keys);
             if (count == -1)
             {
                 Snackbar.Add("No Apify token — add APIFY_TOKEN in Settings to fetch posts.", Severity.Warning);
@@ -157,6 +199,7 @@
         finally
         {
             _running = null;
+            Refresh();
         }
     }
 
