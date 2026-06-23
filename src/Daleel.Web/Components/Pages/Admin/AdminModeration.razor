@@ -1,0 +1,58 @@
+@page "/admin/moderation"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IAnalyticsService Analytics
+
+<PageTitle>دليل · Admin · Moderation</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-4">Content Filter Stats</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="3">
+        <MudItem xs="12" sm="6" md="4"><Kpi Title="Items filtered (30d)" Value="_totalFiltered" Icon="@Icons.Material.Filled.FilterAlt" /></MudItem>
+        <MudItem xs="12" sm="6" md="4"><Kpi Title="Searches with removals" Value="_withFilters" Icon="@Icons.Material.Filled.Shield" /></MudItem>
+    </MudGrid>
+
+    <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
+        <MudText Typo="Typo.h6" Class="mb-2">Most filtered categories (30d)</MudText>
+        @if (_byCategory.Count == 0)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">Nothing has been filtered yet.</MudText>
+        }
+        else
+        {
+            @foreach (var (cat, count) in _byCategory)
+            {
+                <div class="d-flex justify-space-between"><span>@cat</span><b>@count</b></div>
+            }
+        }
+    </MudPaper>
+
+    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-3">
+        Filtered items are never displayed or stored — only category counts are recorded for auditing.
+    </MudText>
+}
+
+@code {
+    private bool _loading = true;
+    private int _totalFiltered;
+    private int _withFilters;
+    private IReadOnlyList<(string Category, int Count)> _byCategory = new List<(string, int)>();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var (total, withFilters, byCat) = await Analytics.ModerationStatsAsync(DateTime.UtcNow.AddDays(-30));
+        _totalFiltered = total;
+        _withFilters = withFilters;
+        _byCategory = byCat;
+        _loading = false;
+        StateHasChanged();
+    }
+}

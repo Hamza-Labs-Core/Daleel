@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Daleel.Agent;
 using Daleel.Web.Data;
 using Daleel.Web.Services;
@@ -23,6 +24,7 @@ public abstract class AgentPageBase : ComponentBase
     [Inject] protected ICurrentUser CurrentUser { get; set; } = default!;
     [Inject] protected ISearchHistoryRepository History { get; set; } = default!;
     [Inject] protected IQuotaService Quota { get; set; } = default!;
+    [Inject] protected IAnalyticsService Analytics { get; set; } = default!;
     [Inject] protected IDialogService Dialogs { get; set; } = default!;
     [Inject] protected NavigationManager Nav { get; set; } = default!;
 
@@ -172,11 +174,15 @@ public abstract class AgentPageBase : ComponentBase
                 Strictness = Strictness
             });
 
+            var sw = Stopwatch.StartNew();
             await work(agent, CancellationToken.None);
+            sw.Stop();
 
             if (recordHistory is not null)
             {
-                LastHistoryId = await SaveHistoryAsync(recordHistory());
+                var entry = recordHistory();
+                LastHistoryId = await SaveHistoryAsync(entry);
+                await RecordSearchAnalyticsAsync(entry, agent, userId, (int)sw.ElapsedMilliseconds);
             }
         }
         catch (Exception ex)
@@ -216,6 +222,32 @@ public abstract class AgentPageBase : ComponentBase
 
         var saved = await History.AddAsync(entry);
         return saved.Id;
+    }
+
+    /// <summary>Records an analytics row for a completed search, including how many results were filtered.</summary>
+    private async Task RecordSearchAnalyticsAsync(SearchHistoryEntry? entry, AgentService agent, string userId, int durationMs)
+    {
+        if (entry is null)
+        {
+            return;
+        }
+
+        var audit = agent.ContentFilter.AuditLog;
+        var categories = audit
+            .Select(a => a.Contains(':') ? a[(a.IndexOf(':') + 1)..] : a)
+            .Distinct();
+
+        await Analytics.RecordSearchAsync(new AnalyticsEvent
+        {
+            UserId = userId,
+            Query = Truncate(entry.Query, 2000),
+            QueryType = entry.QueryType,
+            Geo = Geo,
+            Model = Model,
+            DurationMs = durationMs,
+            FilteredCount = audit.Count,
+            FilteredCategories = string.Join(",", categories)
+        });
     }
 
     /// <summary>Shows a "sign in to search" modal and routes to login (with return URL) on accept.</summary>

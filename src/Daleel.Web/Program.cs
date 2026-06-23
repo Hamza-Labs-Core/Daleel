@@ -64,6 +64,9 @@ builder.Services.AddScoped<ICurrentUser, CurrentUser>(); // authenticated id, fr
 builder.Services.AddScoped<ISearchHistoryRepository, SearchHistoryRepository>();
 builder.Services.AddScoped<ISavedResultRepository, SavedResultRepository>();
 builder.Services.AddScoped<IQuotaService, QuotaService>();
+builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
+builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
+builder.Services.AddHttpContextAccessor();
 
 // IP rate limiting (in-memory fixed-window — no Redis at this scale).
 builder.Services.AddMemoryCache();
@@ -139,4 +142,7 @@ static void EnsureDatabase(WebApplication app)
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
     db.Database.Migrate();
+
+    // Seed admin-editable system settings (idempotent).
+    scope.ServiceProvider.GetRequiredService<ISystemConfigService>().SeedDefaultsAsync().GetAwaiter().GetResult();
 }

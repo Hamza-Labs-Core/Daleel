@@ -20,8 +20,13 @@
             <ChildContent>
                 <MudText Typo="Typo.body2" Class="px-4 py-2">@DisplayName(context)</MudText>
                 <MudDivider />
+                <MudMenuItem Href="/account" Icon="@Icons.Material.Filled.AccountCircle">Account</MudMenuItem>
                 <MudMenuItem Href="/history" Icon="@Icons.Material.Filled.History">History</MudMenuItem>
                 <MudMenuItem Href="/saved" Icon="@Icons.Material.Filled.Bookmarks">Saved</MudMenuItem>
+                @if (context.User.IsInRole("Admin"))
+                {
+                    <MudMenuItem Href="/admin" Icon="@Icons.Material.Filled.AdminPanelSettings">Admin</MudMenuItem>
+                }
                 <MudDivider />
                 <MudMenuItem Href="/auth/logout" Icon="@Icons.Material.Filled.Logout" ForceLoad="true">
                     Sign out

@@ -1,0 +1,77 @@
+@page "/admin/analytics"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IAnalyticsService Analytics
+
+<PageTitle>دليل · Admin · Analytics</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-4">Analytics</MudText>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Searches per day (last 14)</MudText>
+                @if (_perDay.Count == 0 || _perDay.All(d => d.Count == 0))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">No search activity yet.</MudText>
+                }
+                else
+                {
+                    <MudChart ChartType="ChartType.Line" ChartSeries="_series" XAxisLabels="_labels" Height="240px" />
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">By search type (30d)</MudText>
+                @foreach (var (type, count) in _byType)
+                {
+                    <div class="d-flex justify-space-between"><span>@type</span><b>@count</b></div>
+                }
+                @if (_byType.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No data.</MudText> }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Top markets (30d)</MudText>
+                @foreach (var (geo, count) in _byGeo)
+                {
+                    <div class="d-flex justify-space-between"><span>@geo</span><b>@count</b></div>
+                }
+                @if (_byGeo.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No data.</MudText> }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private bool _loading = true;
+    private IReadOnlyList<(DateTime Day, int Count)> _perDay = new List<(DateTime, int)>();
+    private IReadOnlyList<(string Type, int Count)> _byType = new List<(string, int)>();
+    private IReadOnlyList<(string Geo, int Count)> _byGeo = new List<(string, int)>();
+    private List<ChartSeries> _series = new();
+    private string[] _labels = Array.Empty<string>();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var since = DateTime.UtcNow.AddDays(-30);
+        _perDay = await Analytics.SearchesPerDayAsync(14);
+        _byType = await Analytics.SearchesByTypeAsync(since);
+        _byGeo = await Analytics.GeoDistributionAsync(since);
+
+        _labels = _perDay.Select(d => d.Day.ToString("MM/dd")).ToArray();
+        _series = new() { new ChartSeries { Name = "Searches", Data = _perDay.Select(d => (double)d.Count).ToArray() } };
+
+        _loading = false;
+        StateHasChanged();
+    }
+}

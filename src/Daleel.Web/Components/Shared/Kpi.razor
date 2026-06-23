@@ -1,0 +1,19 @@
+@* A single dashboard KPI tile. *@
+<MudPaper Class="pa-4" Outlined="true" Elevation="0" Style="height:100%;">
+    <div class="d-flex align-center justify-space-between">
+        <MudText Typo="Typo.overline" Color="Color.Secondary">@Title</MudText>
+        <MudIcon Icon="@Icon" Color="Color.Primary" />
+    </div>
+    <MudText Typo="Typo.h4">@Value</MudText>
+    @if (!string.IsNullOrWhiteSpace(Sub))
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@Sub</MudText>
+    }
+</MudPaper>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = string.Empty;
+    [Parameter] public int Value { get; set; }
+    [Parameter] public string? Sub { get; set; }
+    [Parameter] public string Icon { get; set; } = Icons.Material.Filled.Analytics;
+}

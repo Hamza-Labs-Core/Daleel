@@ -1,0 +1,151 @@
+@page "/admin/users"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject UserManager<ApplicationUser> Users
+@inject DaleelDbContext Db
+@inject ISnackbar Snackbar
+
+<PageTitle>دليل · Admin · Users</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-4">User Management</MudText>
+
+@if (_rows is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudTable Items="_rows" Hover="true" Dense="true" Striped="true" Filter="Matches">
+        <ToolBarContent>
+            <MudTextField @bind-Value="_search" Placeholder="Search name/email…" Immediate="true"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Class="mt-0" />
+        </ToolBarContent>
+        <HeaderContent>
+            <MudTh>User</MudTh>
+            <MudTh>Plan</MudTh>
+            <MudTh>Used</MudTh>
+            <MudTh>Joined</MudTh>
+            <MudTh>Last active</MudTh>
+            <MudTh>Roles/State</MudTh>
+            <MudTh Style="text-align:right;">Actions</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd>
+                <MudText Typo="Typo.body2">@(context.User.DisplayName ?? context.User.UserName)</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@context.User.Email</MudText>
+            </MudTd>
+            <MudTd>
+                <MudSelect T="int" Value="context.PlanId" ValueChanged="@(v => ChangePlanAsync(context, v))"
+                           Dense="true" Variant="Variant.Outlined" Style="min-width:130px;">
+                    @foreach (var p in _plans)
+                    {
+                        <MudSelectItem T="int" Value="p.Id">@p.Name</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudTd>
+            <MudTd>@context.Used</MudTd>
+            <MudTd><MudText Typo="Typo.caption">@context.User.CreatedAt.ToLocalTime().ToString("d")</MudText></MudTd>
+            <MudTd><MudText Typo="Typo.caption">@(context.User.LastActiveAt?.ToLocalTime().ToString("g") ?? "—")</MudText></MudTd>
+            <MudTd>
+                @if (context.User.IsAdmin) { <MudChip T="string" Size="Size.Small" Color="Color.Tertiary">admin</MudChip> }
+                @if (context.User.IsDisabled) { <MudChip T="string" Size="Size.Small" Color="Color.Error">disabled</MudChip> }
+            </MudTd>
+            <MudTd Style="text-align:right;">
+                <MudTooltip Text="@(context.User.IsAdmin ? "Revoke admin" : "Grant admin")">
+                    <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.AdminPanelSettings"
+                                   Color="@(context.User.IsAdmin ? Color.Tertiary : Color.Default)"
+                                   OnClick="@(() => ToggleAdminAsync(context))" />
+                </MudTooltip>
+                <MudTooltip Text="@(context.User.IsDisabled ? "Enable" : "Disable")">
+                    <MudIconButton Size="Size.Small"
+                                   Icon="@(context.User.IsDisabled ? Icons.Material.Filled.LockOpen : Icons.Material.Filled.Block)"
+                                   Color="@(context.User.IsDisabled ? Color.Success : Color.Error)"
+                                   OnClick="@(() => ToggleDisableAsync(context))" />
+                </MudTooltip>
+            </MudTd>
+        </RowTemplate>
+        <PagerContent><MudTablePager PageSizeOptions="new[] { 25, 50, 100 }" /></PagerContent>
+    </MudTable>
+}
+
+@code {
+    private sealed class Row
+    {
+        public ApplicationUser User { get; set; } = default!;
+        public int PlanId { get; set; }
+        public int Used { get; set; }
+    }
+
+    private List<Row>? _rows;
+    private List<SubscriptionPlan> _plans = new();
+    private string _search = string.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await LoadAsync();
+        StateHasChanged();
+    }
+
+    private async Task LoadAsync()
+    {
+        _plans = await Db.SubscriptionPlans.OrderBy(p => p.SortOrder).ToListAsync();
+        var users = await Users.Users.ToListAsync();
+
+        var activeSubs = await Db.UserSubscriptions.Where(s => s.Status == "active").ToListAsync();
+        var planByUser = activeSubs
+            .GroupBy(s => s.UserId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.StartedAt).First().PlanId);
+        var quotas = await Db.UserQuotas.ToListAsync();
+        var usedByUser = quotas.ToDictionary(q => q.UserId, q => q.SearchesUsed);
+
+        _rows = users.Select(u => new Row
+        {
+            User = u,
+            PlanId = planByUser.GetValueOrDefault(u.Id, SubscriptionPlan.BasicId),
+            Used = usedByUser.GetValueOrDefault(u.Id, 0)
+        }).ToList();
+    }
+
+    private bool Matches(Row r) =>
+        string.IsNullOrWhiteSpace(_search) ||
+        (r.User.Email?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+        (r.User.DisplayName?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false);
+
+    private async Task ChangePlanAsync(Row row, int planId)
+    {
+        // Cancel any current active subscriptions, then add the new one (Basic = no subscription row).
+        var current = await Db.UserSubscriptions
+            .Where(s => s.UserId == row.User.Id && s.Status == "active").ToListAsync();
+        foreach (var s in current) { s.Status = "cancelled"; }
+
+        if (planId != SubscriptionPlan.BasicId)
+        {
+            Db.UserSubscriptions.Add(new UserSubscription
+            {
+                UserId = row.User.Id, PlanId = planId, Status = "active", StartedAt = DateTimeOffset.UtcNow
+            });
+        }
+
+        await Db.SaveChangesAsync();
+        row.PlanId = planId;
+        Snackbar.Add("Plan updated.", Severity.Success);
+    }
+
+    private async Task ToggleAdminAsync(Row row)
+    {
+        row.User.IsAdmin = !row.User.IsAdmin;
+        await Users.UpdateAsync(row.User);
+        Snackbar.Add(row.User.IsAdmin ? "Granted admin (effective on next sign-in)." : "Revoked admin.", Severity.Success);
+    }
+
+    private async Task ToggleDisableAsync(Row row)
+    {
+        row.User.IsDisabled = !row.User.IsDisabled;
+        await Users.UpdateAsync(row.User);
+        Snackbar.Add(row.User.IsDisabled ? "Account disabled." : "Account enabled.", Severity.Success);
+    }
+}

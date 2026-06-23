@@ -1,0 +1,67 @@
+@page "/admin"
+@attribute [Authorize(Roles = "Admin")]
+@rendermode InteractiveServer
+@inject IAnalyticsService Analytics
+
+<PageTitle>دليل · Admin</PageTitle>
+
+<AdminNav />
+
+<MudText Typo="Typo.h4" Class="mb-4">Dashboard</MudText>
+
+@if (_d is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="3">
+        <MudItem xs="12" sm="6" md="3"><Kpi Title="Users" Value="@_d.UsersTotal" Sub="@($"+{_d.UsersToday} today")" Icon="@Icons.Material.Filled.People" /></MudItem>
+        <MudItem xs="12" sm="6" md="3"><Kpi Title="New this week" Value="@_d.UsersThisWeek" Sub="@($"{_d.UsersThisMonth} this month")" Icon="@Icons.Material.Filled.PersonAdd" /></MudItem>
+        <MudItem xs="12" sm="6" md="3"><Kpi Title="Searches today" Value="@_d.SearchesToday" Sub="@($"{_d.SearchesThisWeek} this week")" Icon="@Icons.Material.Filled.Search" /></MudItem>
+        <MudItem xs="12" sm="6" md="3"><Kpi Title="Searches/month" Value="@_d.SearchesThisMonth" Sub="revenue: connect Stripe" Icon="@Icons.Material.Filled.TrendingUp" /></MudItem>
+    </MudGrid>
+
+    <MudGrid Spacing="3" Class="mt-2">
+        <MudItem xs="12" md="4">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Active subscriptions</MudText>
+                @foreach (var (plan, count) in _d.PlanBreakdown)
+                {
+                    <div class="d-flex justify-space-between"><span>@plan</span><b>@count</b></div>
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Top queries (month)</MudText>
+                @if (_d.TopQueries.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No searches yet.</MudText> }
+                @foreach (var (q, c) in _d.TopQueries)
+                {
+                    <div class="d-flex justify-space-between gap-2"><span dir="@Catalog.Dir(q)" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@q</span><b>@c</b></div>
+                }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="4">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Top users (month)</MudText>
+                @if (_d.TopUsers.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No activity yet.</MudText> }
+                @foreach (var (u, c) in _d.TopUsers)
+                {
+                    <div class="d-flex justify-space-between gap-2"><span style="font-family:monospace;font-size:.8rem;">@u[..Math.Min(10, u.Length)]…</span><b>@c</b></div>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private AdminDashboardStats? _d;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _d = await Analytics.GetDashboardAsync();
+        StateHasChanged();
+    }
+}

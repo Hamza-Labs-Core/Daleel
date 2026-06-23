@@ -1,0 +1,104 @@
+@page "/account"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentUser CurrentUser
+@inject IQuotaService Quota
+@inject UserManager<ApplicationUser> Users
+@inject DaleelDbContext Db
+@inject IDialogService Dialogs
+@inject NavigationManager Nav
+@inject ISnackbar Snackbar
+
+<PageTitle>دليل · Account</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-4">حسابي · My Account</MudText>
+
+@if (_status is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudGrid Spacing="3">
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <div class="d-flex align-center gap-2 mb-2">
+                    <MudText Typo="Typo.h6">@_status.PlanName plan</MudText>
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">current</MudChip>
+                </div>
+
+                @if (_status.IsAdmin || _status.Unlimited)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Success">Unlimited searches</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="mb-1">@_status.Used / @_status.Limit searches used this month</MudText>
+                    <MudProgressLinear Color="Color.Primary" Value="@Percent" Class="my-1" Size="Size.Large" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@_status.Remaining remaining · resets @_status.PeriodEnd.LocalDateTime.ToString("d")</MudText>
+                }
+
+                <div class="mt-4 d-flex gap-2">
+                    <MudButton Href="/pricing" Variant="Variant.Filled" Color="Color.Primary" StartIcon="@Icons.Material.Filled.Upgrade">
+                        Upgrade / change plan
+                    </MudButton>
+                </div>
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Billing history</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">No invoices yet. Billing arrives with Stripe.</MudText>
+            </MudPaper>
+
+            <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Color="Color.Error" Class="mb-2">Danger zone</MudText>
+                <MudButton Color="Color.Error" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DeleteForever"
+                           OnClick="DeleteAccountAsync">Delete my account</MudButton>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private QuotaStatus? _status;
+    private string? _userId;
+
+    private double Percent => _status is { Limit: > 0 } s ? Math.Min(100, 100.0 * s.Used / s.Limit.Value) : 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _userId = await CurrentUser.GetUserIdAsync();
+        if (_userId is null) return;
+        _status = await Quota.GetStatusAsync(_userId, await CurrentUser.IsAdminAsync());
+        StateHasChanged();
+    }
+
+    private async Task DeleteAccountAsync()
+    {
+        var ok = await Dialogs.ShowMessageBox("Delete account?",
+            "This permanently deletes your account, history, and saved results.",
+            yesText: "Delete", cancelText: "Cancel");
+        if (ok != true || _userId is null) return;
+
+        // Remove the user's owned data first (UserId is a plain string, so there's no cascade).
+        Db.SavedResults.RemoveRange(Db.SavedResults.Where(x => x.UserId == _userId));
+        Db.SearchHistory.RemoveRange(Db.SearchHistory.Where(x => x.UserId == _userId));
+        Db.UserSubscriptions.RemoveRange(Db.UserSubscriptions.Where(x => x.UserId == _userId));
+        Db.UserQuotas.RemoveRange(Db.UserQuotas.Where(x => x.UserId == _userId));
+        await Db.SaveChangesAsync();
+
+        var user = await Users.FindByIdAsync(_userId);
+        if (user is not null)
+        {
+            await Users.DeleteAsync(user);
+        }
+
+        Snackbar.Add("Account deleted.", Severity.Info);
+        Nav.NavigateTo("/auth/logout", forceLoad: true);
+    }
+}

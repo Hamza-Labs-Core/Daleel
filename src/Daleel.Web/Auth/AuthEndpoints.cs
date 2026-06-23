@@ -35,8 +35,11 @@ public static class AuthEndpoints
         // Provider returns here. Sign in an existing login, or auto-provision a user on first visit.
         app.MapGet("/auth/callback", async (
             string? returnUrl,
+            HttpContext http,
             SignInManager<ApplicationUser> signInManager,
-            UserManager<ApplicationUser> userManager) =>
+            UserManager<ApplicationUser> userManager,
+            IConfiguration config,
+            Data.IAnalyticsService analytics) =>
         {
             var target = Local(returnUrl);
 
@@ -48,8 +51,25 @@ public static class AuthEndpoints
 
             var signin = await signInManager.ExternalLoginSignInAsync(
                 info.LoginProvider, info.ProviderKey, isPersistent: true, bypassTwoFactor: true);
+            var email = info.Principal.FindFirstValue(ClaimTypes.Email);
+            var ip = http.Connection.RemoteIpAddress?.ToString();
+
             if (signin.Succeeded)
             {
+                var existing = await userManager.FindByLoginAsync(info.LoginProvider, info.ProviderKey);
+                if (existing is { IsDisabled: true })
+                {
+                    await signInManager.SignOutAsync();
+                    return Results.Redirect("/login?error=disabled");
+                }
+
+                if (existing is not null)
+                {
+                    existing.LastActiveAt = DateTime.UtcNow;
+                    await userManager.UpdateAsync(existing);
+                    await analytics.RecordLoginAsync(existing.Id, info.LoginProvider, ip);
+                }
+
                 return Results.LocalRedirect(target);
             }
 
@@ -59,14 +79,17 @@ public static class AuthEndpoints
             }
 
             // First time this external identity is seen — create the local user and link the login.
-            var email = info.Principal.FindFirstValue(ClaimTypes.Email);
             var user = new ApplicationUser
             {
                 UserName = email ?? $"{info.LoginProvider.ToLowerInvariant()}:{info.ProviderKey}",
                 Email = email,
                 EmailConfirmed = email is not null,
                 DisplayName = info.Principal.FindFirstValue(ClaimTypes.Name),
-                AvatarUrl = Picture(info.Principal)
+                AvatarUrl = Picture(info.Principal),
+                CreatedAt = DateTime.UtcNow,
+                LastActiveAt = DateTime.UtcNow,
+                // Bootstrap admins from configuration (Admin:Emails) — first owner can't self-promote in UI.
+                IsAdmin = email is not null && IsBootstrapAdmin(config, email)
             };
 
             var created = await userManager.CreateAsync(user);
@@ -77,6 +100,7 @@ public static class AuthEndpoints
 
             await userManager.AddLoginAsync(user, info);
             await signInManager.SignInAsync(user, isPersistent: true);
+            await analytics.RecordLoginAsync(user.Id, info.LoginProvider, ip);
             return Results.LocalRedirect(target);
         });
 
@@ -89,6 +113,13 @@ public static class AuthEndpoints
         });
 
         return app;
+    }
+
+    /// <summary>True when the email is listed under Admin:Emails in configuration.</summary>
+    private static bool IsBootstrapAdmin(IConfiguration config, string email)
+    {
+        var admins = config.GetSection("Admin:Emails").Get<string[]>() ?? Array.Empty<string>();
+        return admins.Any(a => string.Equals(a, email, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>Coerces a return URL to a safe local path, defaulting to the home page.</summary>

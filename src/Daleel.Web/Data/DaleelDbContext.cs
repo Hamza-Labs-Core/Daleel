@@ -23,6 +23,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
     public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
     public DbSet<UserQuota> UserQuotas => Set<UserQuota>();
+    public DbSet<AnalyticsEvent> AnalyticsEvents => Set<AnalyticsEvent>();
+    public DbSet<SystemConfig> SystemConfig => Set<SystemConfig>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -60,6 +62,13 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
         });
 
         builder.Entity<UserQuota>(e => e.HasIndex(x => x.UserId).IsUnique());
+
+        builder.Entity<AnalyticsEvent>(e =>
+        {
+            e.HasIndex(x => new { x.EventType, x.Timestamp });
+            e.Property(x => x.EventType).HasMaxLength(20);
+            e.Property(x => x.Query).HasMaxLength(2000);
+        });
 
         builder.Entity<SubscriptionPlan>(e =>
         {
