@@ -23,11 +23,43 @@
 	email {$CADDY_ACME_EMAIL:admin@daleel.hamzalabs.dev}
 }
 
-# Public site — proxy daleel.hamzalabs.dev -> daleel:8080
+# Public site — proxy daleel.hamzalabs.dev -> daleel:8080 over automatic HTTPS.
+# Caddy terminates TLS and forwards X-Forwarded-Proto: https, so the app's
+# UseHttpsRedirection() correctly sees a secure request and does not redirect.
 {$CADDY_DOMAIN:daleel.hamzalabs.dev} {
 	encode zstd gzip
 
 	reverse_proxy daleel:8080 {
+		health_uri /health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+# Plain-HTTP catch-all (port 80, any host) so the app is also reachable by the
+# raw VPS IP — handy before DNS for the domain has propagated, or for a quick
+# smoke test. This block has NO host matcher, so Caddy inserts the domain's
+# automatic HTTP->HTTPS redirect and the ACME HTTP-01 challenge handler ahead of
+# it: requests for daleel.hamzalabs.dev still redirect to HTTPS and certificate
+# issuance is unaffected — only unmatched hosts (the IP) fall through to here.
+#
+# There is intentionally no HTTPS-by-IP: public CAs (Let's Encrypt) won't issue
+# certs for a bare IP, so reach the box by IP over http:// only; use the domain
+# for TLS.
+#
+# X-Forwarded-Proto is forced to https here so the app's UseHttpsRedirection()
+# treats IP traffic as already-secure and serves content, instead of 307'ing to
+# a nonexistent https://<ip>. The domain site above keeps Caddy's real scheme.
+http:// {
+	encode zstd gzip
+
+	reverse_proxy daleel:8080 {
+		header_up X-Forwarded-Proto https
 		health_uri /health
 		health_interval 30s
 		health_timeout 5s
