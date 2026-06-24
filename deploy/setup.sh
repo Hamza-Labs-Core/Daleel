@@ -7,13 +7,12 @@
 # or copy this repo's deploy/ dir to the box and run:
 #   sudo ./setup.sh
 #
-# Installs Docker + Compose, creates the daleel service user, lays out
-# /opt/daleel, installs a systemd unit, configures UFW + log rotation.
+# Installs Docker + Compose, lays out /opt/daleel, installs a systemd unit,
+# configures UFW + log rotation. Everything runs as root — no service user.
 # =============================================================================
 set -euo pipefail
 
 APP_DIR="/opt/daleel"
-APP_USER="daleel"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
@@ -56,17 +55,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Service user
-# ---------------------------------------------------------------------------
-if ! id "$APP_USER" >/dev/null 2>&1; then
-  log "Creating service user '$APP_USER'..."
-  useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
-fi
-# Allow the daleel user to talk to the Docker daemon.
-usermod -aG docker "$APP_USER"
-
-# ---------------------------------------------------------------------------
-# 4. /opt/daleel layout + deploy artifacts
+# 3. /opt/daleel layout + deploy artifacts (owned by root)
 # ---------------------------------------------------------------------------
 log "Setting up $APP_DIR ..."
 mkdir -p "$APP_DIR"
@@ -89,11 +78,10 @@ if [ ! -f "$APP_DIR/.env" ] && [ -f "$SCRIPT_DIR/.env.example" ]; then
   log "Seeded placeholder $APP_DIR/.env — the deploy workflow overwrites it from GitHub secrets."
 fi
 
-chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 chmod 0600 "$APP_DIR/.env" 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
-# 5. systemd unit — keeps the compose stack up across reboots
+# 4. systemd unit — keeps the compose stack up across reboots
 # ---------------------------------------------------------------------------
 log "Installing systemd unit daleel.service ..."
 cat > /etc/systemd/system/daleel.service <<UNIT
@@ -106,7 +94,6 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 RemainAfterExit=true
-User=${APP_USER}
 WorkingDirectory=${APP_DIR}
 ExecStart=/usr/bin/docker compose up -d --wait
 ExecStop=/usr/bin/docker compose down
@@ -121,7 +108,7 @@ systemctl daemon-reload
 systemctl enable daleel.service
 
 # ---------------------------------------------------------------------------
-# 6. UFW firewall — SSH + HTTP + HTTPS only
+# 5. UFW firewall — SSH + HTTP + HTTPS only
 # ---------------------------------------------------------------------------
 log "Configuring UFW firewall (22, 80, 443)..."
 ufw allow 22/tcp
@@ -131,7 +118,7 @@ ufw allow 443/udp           # HTTP/3 (QUIC)
 ufw --force enable
 
 # ---------------------------------------------------------------------------
-# 7. Log rotation for container json logs (belt-and-suspenders alongside
+# 6. Log rotation for container json logs (belt-and-suspenders alongside
 #    the per-service max-size limits in docker-compose.yml)
 # ---------------------------------------------------------------------------
 log "Configuring Docker daemon log rotation..."
@@ -170,10 +157,10 @@ Next steps:
      secrets are set (see deploy/create-secrets.sh and deploy/.env.example).
   2. Point DNS: daleel.hamzalabs.dev (A/AAAA) -> this server's IP.
   3. Log in to GHCR if the image is private:
-       sudo -u ${APP_USER} docker login ghcr.io
+       docker login ghcr.io
   4. Trigger a deploy from GitHub (Actions -> Deploy, or push a v* tag). It will
      write ${APP_DIR}/.env and bring the stack up. To start locally instead:
-       sudo systemctl start daleel.service
+       systemctl start daleel.service
      or run the deploy script directly:
-       sudo -u ${APP_USER} ${APP_DIR}/deploy.sh latest
+       ${APP_DIR}/deploy.sh latest
 NEXT

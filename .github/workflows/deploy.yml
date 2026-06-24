@@ -141,6 +141,37 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Deploying tag: $TAG"
 
+      # Preflight: confirm the box was bootstrapped before we try to mutate it.
+      # The deploy steps below assume /opt/daleel exists and Docker is installed
+      # (both are laid down by deploy/setup.sh). If a fresh/rebuilt VPS hasn't had
+      # setup.sh run yet, fail here with an actionable message instead of a
+      # confusing "no such file" or "docker: command not found" deep in deploy.sh.
+      - name: Preflight — verify VPS is bootstrapped
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            ok=true
+            if [ ! -d /opt/daleel ]; then
+              echo "::error::/opt/daleel does not exist on the VPS."
+              echo "  -> /opt/daleel is missing." >&2
+              ok=false
+            fi
+            if ! command -v docker >/dev/null 2>&1; then
+              echo "::error::Docker is not installed on the VPS."
+              echo "  -> docker command not found." >&2
+              ok=false
+            fi
+            if [ "$ok" != true ]; then
+              echo "The VPS has not been bootstrapped. Run deploy/setup.sh on the box first:" >&2
+              echo "    ssh root@<vps> 'bash -s' < deploy/setup.sh" >&2
+              exit 1
+            fi
+            echo "Preflight OK: /opt/daleel exists and Docker is installed."
+
       - name: Write /opt/daleel/.env from GitHub secrets
         uses: appleboy/ssh-action@v1
         with:
@@ -168,9 +199,9 @@ jobs:
             CADDY_DOMAIN=daleel.hamzalabs.dev
             CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
             EOF
-            # deploy.sh runs as the 'daleel' service user, so the file must be
-            # owned by it (not the SSH login user) and kept private (0600).
-            sudo install -o daleel -g daleel -m 0600 "/tmp/daleel.env.$$" /opt/daleel/.env
+            # Everything runs as root, so write the file directly. Keep it
+            # private (0600) since it holds API keys.
+            install -m 0600 "/tmp/daleel.env.$$" /opt/daleel/.env
             rm -f "/tmp/daleel.env.$$"
 
       # Ship the latest infra config (Caddyfile / compose / deploy.sh) to the box.
@@ -199,11 +230,10 @@ jobs:
           envs: DALEEL_TAG
           script: |
             set -euo pipefail
-            # Install the freshly-staged config with the daleel service user's
-            # ownership (deploy.sh and the compose stack run as that user).
-            sudo install -o daleel -g daleel -m 0644 /tmp/daleel-config/Caddyfile          /opt/daleel/Caddyfile
-            sudo install -o daleel -g daleel -m 0644 /tmp/daleel-config/docker-compose.yml  /opt/daleel/docker-compose.yml
-            sudo install -o daleel -g daleel -m 0755 /tmp/daleel-config/deploy.sh           /opt/daleel/deploy.sh
+            # Everything runs as root — install the freshly-staged config directly.
+            install -m 0644 /tmp/daleel-config/Caddyfile          /opt/daleel/Caddyfile
+            install -m 0644 /tmp/daleel-config/docker-compose.yml  /opt/daleel/docker-compose.yml
+            install -m 0755 /tmp/daleel-config/deploy.sh           /opt/daleel/deploy.sh
             rm -rf /tmp/daleel-config
             cd /opt/daleel
-            sudo -u daleel DALEEL_TAG="$DALEEL_TAG" ./deploy.sh "$DALEEL_TAG"
+            DALEEL_TAG="$DALEEL_TAG" ./deploy.sh "$DALEEL_TAG"

@@ -2,7 +2,7 @@
 # =============================================================================
 # Daleel deploy — pull a new image, restart the stack, health-check, rollback.
 #
-# Usage (run from /opt/daleel, as the daleel user):
+# Usage (run from /opt/daleel, as root):
 #   ./deploy.sh [TAG]        # TAG defaults to "latest"
 #
 # Mechanics:
