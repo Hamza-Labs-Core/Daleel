@@ -7,40 +7,37 @@ namespace Daleel.Core.Tests.Intelligence;
 public class ResultClassifierTests
 {
     [Fact]
-    public void BrandDomain_IsBrandPage()
+    public void Price_AnywhereMeansProductListing()
     {
-        ResultClassifier.Classify("https://www.samsung.com/jo/air-conditioners/", "Air Conditioners | Samsung Jordan", "")
-            .Should().Be(ResultType.BrandPage);
+        ResultClassifier.Classify("https://anything.example/x", "Samsung Split AC", "Brand new, 450 JOD")
+            .Should().Be(ResultType.ProductListing);
+        ResultClassifier.Classify("https://shop.example.com/x", "Cooling unit", "Now only 299 AED")
+            .Should().Be(ResultType.ProductListing);
+    }
 
-        ResultClassifier.Classify("https://www.lg.com/levant/air-conditioners", "LG Air Conditioners", "")
-            .Should().Be(ResultType.BrandPage);
+    [Theory]
+    [InlineData("https://m.site/en/listing/12345678")]
+    [InlineData("https://m.site/product/midea-ac")]
+    [InlineData("https://m.site/dp/B0ABCXYZ")]
+    public void ItemStylePath_IsProductListing(string url)
+    {
+        ResultClassifier.Classify(url, "Some AC", "no price here").Should().Be(ResultType.ProductListing);
     }
 
     [Fact]
-    public void MarketplaceCategoryPage_IsMarketplace()
+    public void ClassifiedsWording_IsMarketplace()
     {
-        ResultClassifier.Classify("https://jo.opensooq.com/en/air-conditioners", "Air Conditioners for sale in Jordan", "Browse ads")
+        ResultClassifier.Classify("https://m.example/en/air-conditioners", "Air Conditioners for sale in Jordan", "Browse ads")
             .Should().Be(ResultType.Marketplace);
     }
 
-    [Fact]
-    public void MarketplaceItemWithPrice_IsProductListing()
+    [Theory]
+    [InlineData("https://store.example/category/air-conditioners")]
+    [InlineData("https://store.example/shop/cooling")]
+    [InlineData("https://store.example/collections/ac")]
+    public void ShopOrCategoryPath_IsStorePage(string url)
     {
-        ResultClassifier.Classify(
-            "https://jo.opensooq.com/en/listing/12345678",
-            "Samsung Split AC AR24",
-            "Brand new, 450 JOD, Amman")
-            .Should().Be(ResultType.ProductListing);
-    }
-
-    [Fact]
-    public void StoreSection_IsStorePage_ButPricedIsListing()
-    {
-        ResultClassifier.Classify("https://www.carrefourjordan.com/electronics/air-conditioners", "Air Conditioners - Carrefour", "")
-            .Should().Be(ResultType.StorePage);
-
-        ResultClassifier.Classify("https://www.carrefourjordan.com/p/midea-ac", "Midea AC", "السعر 399 دينار")
-            .Should().Be(ResultType.ProductListing);
+        ResultClassifier.Classify(url, "Air Conditioners", "").Should().Be(ResultType.StorePage);
     }
 
     [Theory]
@@ -54,24 +51,28 @@ public class ResultClassifierTests
     }
 
     [Fact]
-    public void GenericPagewithPrice_IsProductListing()
+    public void PlainCommercialUrl_FallsBackToBrandPage()
     {
-        ResultClassifier.Classify("https://shop.example.com/x", "Cooling unit", "Now only 299 AED")
-            .Should().Be(ResultType.ProductListing);
-    }
-
-    [Fact]
-    public void BareUnknownDomain_IsBrandPageFallback()
-    {
+        // No price, no item/store path, no classifieds wording → treated generically as a brand page.
+        ResultClassifier.Classify("https://www.samsung.com/jo/air-conditioners/", "Air Conditioners | Samsung Jordan", "")
+            .Should().Be(ResultType.BrandPage);
         ResultClassifier.Classify("https://coolair.com", "CoolAir", "Home")
             .Should().Be(ResultType.BrandPage);
     }
 
     [Fact]
-    public void NoSignals_IsUnknown()
+    public void NoUrl_IsUnknown_ForLlmFallback()
     {
-        ResultClassifier.Classify("https://news.example.com/world/politics/article-about-something", "Weather today", "It is sunny")
-            .Should().Be(ResultType.Unknown);
+        ResultClassifier.Classify(null, "Weather today", "It is sunny").Should().Be(ResultType.Unknown);
+    }
+
+    [Fact]
+    public void IsGeoAgnostic_DoesNotDependOnSpecificDomains()
+    {
+        // The same structural signal classifies the same way regardless of which country/store it is.
+        var jordan = ResultClassifier.Classify("https://shop.jo/category/ac", "ACs", "");
+        var egypt = ResultClassifier.Classify("https://shop.eg/category/ac", "ACs", "");
+        jordan.Should().Be(egypt).And.Be(ResultType.StorePage);
     }
 
     [Theory]

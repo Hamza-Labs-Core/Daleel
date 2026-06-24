@@ -118,51 +118,85 @@ public static class PromptTemplates
     }
 
     /// <summary>Plan a product-category research query (e.g. "best AC in Jordan").</summary>
+    /// <remarks>
+    /// Source discovery is intentionally left to the search engine: it already knows which
+    /// sites rank for a query in a given <c>gl</c>/<c>hl</c>, so we never name specific stores
+    /// or marketplaces. The plan just describes the <em>shape</em> of searches to run.
+    /// </remarks>
     public static string PlanProduct(string category, GeoProfile geo)
     {
         var sb = new StringBuilder();
         sb.AppendLine(MarketContext(geo));
-        sb.Append("The user wants to BUY \"").Append(category).AppendLine("\" in this market — they need actual, " +
-            "purchasable product listings with prices and links, not just advice.");
-        sb.AppendLine("Design the search to surface CONCRETE LISTINGS:");
-        sb.AppendLine("- shoppingQueries: target marketplaces and price comparison directly (include the category " +
-            "in both Arabic and English, e.g. 'مكيفات للبيع', 'air conditioner price').");
-        sb.AppendLine("- webQueries: a mix of local-marketplace listing pages, brand catalog pages, store sections, " +
-            "and one or two buying-guide/review queries.");
-        sb.AppendLine("- placesQueries: physical stores selling it near the main city, both languages.");
-        sb.AppendLine(KnownSourcesHint(geo));
-        sb.AppendLine("Include BOTH local sellers AND international sites that ship to this market.");
+        sb.Append("The user wants to BUY \"").Append(category).Append("\" in ").Append(geo.Country)
+          .AppendLine(" — they need actual, purchasable listings with prices and links, not just advice.");
+        sb.AppendLine("Design the search to surface CONCRETE LISTINGS from whatever local sites rank in this market:");
+        sb.AppendLine("- shoppingQueries: price/marketplace-style queries in both the market language and English " +
+            "(e.g. the category + 'للبيع' / 'price').");
+        sb.AppendLine("- webQueries: a mix of local classifieds/marketplace pages, brand catalog pages, store " +
+            "sections, and one or two buying-guide/review queries.");
+        sb.AppendLine("- placesQueries: physical stores selling it near the main city, in both languages.");
+        sb.AppendLine("Do NOT assume which stores exist — let the search reveal the local sellers for this country.");
+        sb.Append("Prioritise sellers physically in ").Append(geo.Country)
+          .AppendLine(" or with local operations there; list local options first.");
         sb.AppendLine("Set queryType to ProductResearch.");
         sb.AppendLine(StrategySchema);
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Names the high-signal local + ships-here sources the planner should prioritise for a
-    /// given market, so listing queries land on sites we can actually extract from.
-    /// </summary>
-    private static string KnownSourcesHint(GeoProfile geo)
+    /// <summary>Plan a focused, exact-model deep search (price sources + spec sheet).</summary>
+    public static string PlanModel(string model, GeoProfile geo)
     {
-        var local = geo.Marketplaces.Count > 0
-            ? string.Join(", ", geo.Marketplaces)
-            : "the market's main classifieds and electronics retailers";
-
-        var shipsHere = geo.CountryCode.Equals("jo", StringComparison.OrdinalIgnoreCase)
-            ? " Also prioritise: OpenSooq, Carrefour Jordan, Samsung Jordan, LG Levant, Xcite, Safeway Electronics, " +
-              "and international sites that ship to Jordan (Amazon.ae, Noon.com)."
-            : string.Empty;
-
-        return $"Prioritise these local sources: {local}.{shipsHere}";
+        var sb = new StringBuilder();
+        sb.AppendLine(MarketContext(geo));
+        sb.Append("Find EVERY local place selling the exact model \"").Append(model).Append("\" in ")
+          .Append(geo.Country).AppendLine(", plus its full specification sheet.");
+        sb.AppendLine("- shoppingQueries: the exact model number/name to surface all priced offers.");
+        sb.AppendLine("- webQueries: the model's official brand spec page and local store/marketplace listings.");
+        sb.AppendLine("- urlsToRead: the brand's official product page for this model, if identifiable.");
+        sb.AppendLine("Set queryType to ProductResearch.");
+        sb.AppendLine(StrategySchema);
+        return sb.ToString();
     }
 
     /// <summary>System prompt for summarising a structured product search (grid-backed).</summary>
     public const string ProductAnalystSystem =
         "You are Daleel, a shopping assistant. You are given the actual product listings, stores, brands, and " +
-        "review sources gathered for a buy-intent query. Write a short, decision-ready summary that: names the " +
-        "concrete products worth considering and their prices; groups options into budget / mid-range / premium; " +
-        "and tells the user where to buy (local marketplaces, stores, and international sites that ship in). " +
-        "Reference real prices and sources from the context — never invent listings." +
+        "review sources gathered for a buy-intent query. Write a short, decision-ready summary. " +
+        "CRITICAL RULES: (1) For each distinct model, aggregate ALL its listings into ONE entry with its multiple " +
+        "price sources — never list the same model several times for several stores. (2) Only mention stores and " +
+        "listings confirmed to be in the target country or that serve it directly; do not present international " +
+        "stores as options unless certain they deliver there. (3) A brand page without prices is still useful — " +
+        "call it a 'Brand catalog'. A store with no visible products is a 'Store — check for availability'. " +
+        "(4) Group concrete options into budget / mid-range / premium and reference real prices from the context — " +
+        "never invent listings or prices." +
         HalalGuard;
+
+    /// <summary>System prompt for distilling per-model pros/cons from reviews.</summary>
+    public const string ModelDetailSystem =
+        "You are Daleel, a product analyst. Given reviews, specs and listings for a single product model, you " +
+        "distil an honest, concise pros/cons summary. You ALWAYS reply with a single JSON object only." +
+        HalalGuard;
+
+    /// <summary>Build the prompt asking the LLM for a model's pros/cons + one-line verdict.</summary>
+    public static string ModelProsCons(string modelName, string gatheredContext)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Model: ").AppendLine(modelName);
+        sb.AppendLine("Context (specs, listings, reviews):");
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine(gatheredContext);
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine("""
+            Reply with exactly this JSON object:
+            {
+              "pros": ["short pro", "..."],
+              "cons": ["short con", "..."],
+              "summary": "one or two sentence verdict"
+            }
+            Base everything on the context; if it's thin, return fewer points rather than inventing. No prose outside the JSON.
+            """);
+        return sb.ToString();
+    }
 
     /// <summary>Build the analyst prompt that turns gathered context into a final report.</summary>
     public static string Analyze(string task, GeoProfile geo, string gatheredContext)

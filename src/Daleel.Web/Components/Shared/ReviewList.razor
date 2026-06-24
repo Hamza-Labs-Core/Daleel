@@ -1,0 +1,35 @@
+@* Review / buying-guide articles with snippet and a read-through link. *@
+<MudGrid Spacing="3">
+    @foreach (var r in Reviews)
+    {
+        <MudItem xs="12" sm="6">
+            <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                <MudCardContent>
+                    <div class="d-flex align-center gap-2 mb-1">
+                        <MudIcon Icon="@Icons.Material.Filled.Article" Color="Color.Secondary" />
+                        <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(r.Title)">@r.Title</MudText>
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(r.Snippet))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" dir="@Catalog.Dir(r.Snippet)">@r.Snippet</MudText>
+                    }
+                </MudCardContent>
+                <MudCardActions>
+                    @if (!string.IsNullOrWhiteSpace(r.Url))
+                    {
+                        <MudButton Href="@r.Url" Target="_blank" Size="Size.Small" Variant="Variant.Text"
+                                   StartIcon="@Icons.Material.Filled.OpenInNew">Read full article</MudButton>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(r.Source))
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@r.Source</MudChip>
+                    }
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<ReviewSource> Reviews { get; set; } = Array.Empty<ReviewSource>();
+}

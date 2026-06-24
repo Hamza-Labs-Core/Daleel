@@ -100,10 +100,44 @@ public class AgentServiceTests
         answer.Products.Should().NotBeNull();
         var products = answer.Products!;
         products.Geo.Should().Be("jordan");
-        products.Listings.Should().Contain(l => l.Price == 450 && l.Currency == "JOD");
+        products.Country.Should().Be("Jordan");
+        products.IncludeInternational.Should().BeFalse();
+        // The priced Samsung hit is aggregated into a model carrying that offer.
+        products.Models.Should().Contain(m => m.Offers.Any(o => o.Price == 450 && o.Currency == "JOD"));
         products.Brands.Should().Contain(b => b.Name == "Samsung");
         products.Reviews.Should().Contain(r => r.Title.Contains("Best ACs"));
         products.GeneratedAt.Should().Be(FixedNow);
+    }
+
+    [Fact]
+    public async Task SearchProductsAsync_DropsNonLocalUnlessRequested()
+    {
+        // A non-local product listing (no country signal in the URL) plus a local one.
+        var search = new FakeSearchProvider(
+            new SearchResult
+            {
+                Title = "Local AC deal", Url = "https://shop.jo/product/local-ac", Kind = SearchKind.Web,
+                Snippet = "available now 400 JOD"
+            },
+            new SearchResult
+            {
+                Title = "Imported AC", Url = "https://global-store.com/product/imported-ac", Kind = SearchKind.Web,
+                Snippet = "ships from abroad 600 USD"
+            });
+
+        var agent = new AgentService(PlannerAndAnalyst(),
+            new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var local = await agent.SearchProductsAsync("ACs in Jordan", "jordan");
+        // The non-local web listing is dropped; the .jo one is kept.
+        local.IncludeInternational.Should().BeFalse();
+        local.Models.SelectMany(m => m.Offers).Should()
+            .Contain(o => (o.Url ?? "").Contains("shop.jo"))
+            .And.NotContain(o => (o.Url ?? "").Contains("global-store.com"));
+
+        var intl = await agent.SearchProductsAsync("ACs in Jordan, show international options too", "jordan");
+        intl.IncludeInternational.Should().BeTrue();
+        intl.Models.SelectMany(m => m.Offers).Should().Contain(o => (o.Url ?? "").Contains("global-store.com"));
     }
 
     [Fact]

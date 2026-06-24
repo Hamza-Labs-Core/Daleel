@@ -99,6 +99,7 @@ builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IIpRateLimiter, IpRateLimiter>();
 builder.Services.AddSingleton<IAgentFactory, AgentFactory>();
+builder.Services.AddScoped<IModelDetailService, ModelDetailService>();
 builder.Services.AddSingleton<MonitorService>();
 
 // Liveness probe consumed by the Docker HEALTHCHECK, deploy.sh, and Caddy upstream checks.

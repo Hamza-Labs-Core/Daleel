@@ -1,0 +1,48 @@
+@* Brand directory: one card per brand with its official site, how many models it covers,
+   and a drill-down into that brand's products. *@
+<MudGrid Spacing="3">
+    @foreach (var b in Brands)
+    {
+        <MudItem xs="12" sm="6" md="4">
+            <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                <MudCardContent>
+                    <div class="d-flex align-center gap-2">
+                        @if (!string.IsNullOrWhiteSpace(b.LogoUrl))
+                        {
+                            <SafeImage Src="@b.LogoUrl" Alt="@b.Name" Style="height:32px;width:32px;object-fit:contain;" />
+                        }
+                        else
+                        {
+                            <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Info" />
+                        }
+                        <MudText Typo="Typo.h6">@b.Name</MudText>
+                    </div>
+                    @if (b.ListingCount > 0)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
+                            @b.ListingCount @(b.ListingCount == 1 ? "model" : "models") in this market
+                        </MudText>
+                    }
+                </MudCardContent>
+                <MudCardActions>
+                    @if (b.ListingCount > 0)
+                    {
+                        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.ShoppingBag"
+                                   OnClick="@(() => OnViewProducts.InvokeAsync(b.Name))">View products</MudButton>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(b.Url))
+                    {
+                        <MudButton Href="@b.Url" Target="_blank" Size="Size.Small" Variant="Variant.Text"
+                                   StartIcon="@Icons.Material.Filled.OpenInNew">Official site</MudButton>
+                    }
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<BrandInfo> Brands { get; set; } = Array.Empty<BrandInfo>();
+    [Parameter] public EventCallback<string> OnViewProducts { get; set; }
+}

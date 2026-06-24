@@ -1,215 +1,146 @@
-@* Structured product-search view: filter/sort bar, product grid with compare selection,
-   pre-grouped comparison tiers, and brand/store/marketplace/review directories. *@
+@* Products tab: filter/sort bar, model grid (one card per model, aggregating all its
+   price sources), pre-grouped comparison tiers, and a 2–4 model compare flow. *@
 @inject IDialogService Dialogs
 
-@if (Result.HasListings)
+<MudPaper Class="pa-3 mb-3" Outlined="true" Elevation="0">
+    <div class="d-flex align-center mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.ShoppingBag" Color="Color.Primary" Class="mr-2" />
+        <MudText Typo="Typo.h6">@Result.Models.Count models · المنتجات</MudText>
+        <MudSpacer />
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success"
+                 Icon="@Icons.Material.Filled.Place">All local to @Result.Country</MudChip>
+    </div>
+
+    <MudGrid Spacing="2" Class="align-end">
+        <MudItem xs="6" sm="3">
+            <MudSelect T="string" @bind-Value="_brand" Label="Brand" Dense="true" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@AllValue">All brands</MudSelectItem>
+                @foreach (var b in _brands)
+                {
+                    <MudSelectItem T="string" Value="@b">@b</MudSelectItem>
+                }
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudSelect T="string" @bind-Value="_sourceType" Label="Source" Dense="true" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@AllValue">All sources</MudSelectItem>
+                <MudSelectItem T="string" Value="@("marketplace")">Marketplaces</MudSelectItem>
+                <MudSelectItem T="string" Value="@("brand")">Brand sites</MudSelectItem>
+                <MudSelectItem T="string" Value="@("store")">Stores</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudSelect T="string" @bind-Value="_condition" Label="Condition" Dense="true" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@AllValue">Any</MudSelectItem>
+                <MudSelectItem T="string" Value="@("new")">New</MudSelectItem>
+                <MudSelectItem T="string" Value="@("used")">Used</MudSelectItem>
+                <MudSelectItem T="string" Value="@("refurbished")">Refurbished</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="6" sm="3">
+            <MudSelect T="string" @bind-Value="_sort" Label="Sort by" Dense="true" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("relevance")">Relevance</MudSelectItem>
+                <MudSelectItem T="string" Value="@("price_asc")">Price: low → high</MudSelectItem>
+                <MudSelectItem T="string" Value="@("price_desc")">Price: high → low</MudSelectItem>
+                <MudSelectItem T="string" Value="@("sellers")">Most sellers</MudSelectItem>
+            </MudSelect>
+        </MudItem>
+        <MudItem xs="12" sm="6">
+            <div class="d-flex align-center gap-2">
+                <MudNumericField T="decimal?" @bind-Value="_minPrice" Label="Min price" Variant="Variant.Text"
+                                 Margin="Margin.Dense" Clearable="true" HideSpinButtons="true" />
+                <MudNumericField T="decimal?" @bind-Value="_maxPrice" Label="Max price" Variant="Variant.Text"
+                                 Margin="Margin.Dense" Clearable="true" HideSpinButtons="true" />
+            </div>
+        </MudItem>
+        <MudItem xs="12" sm="6" Class="d-flex align-center justify-end">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@Filtered.Count of @Result.Models.Count shown</MudText>
+        </MudItem>
+    </MudGrid>
+</MudPaper>
+
+@if (Result.Marketplaces.Count > 0)
 {
-    <MudPaper Class="pa-3 mb-3" Outlined="true" Elevation="0">
-        <div class="d-flex align-center mb-2">
-            <MudIcon Icon="@Icons.Material.Filled.ShoppingBag" Color="Color.Primary" Class="mr-2" />
-            <MudText Typo="Typo.h6">@Result.Listings.Count products · المنتجات</MudText>
-        </div>
-
-        <!-- Filter + sort bar -->
-        <MudGrid Spacing="2" Class="align-end">
-            <MudItem xs="6" sm="3">
-                <MudSelect T="string" @bind-Value="_brand" Label="Brand" Dense="true" Clearable="true" Margin="Margin.Dense">
-                    <MudSelectItem T="string" Value="@AllValue">All brands</MudSelectItem>
-                    @foreach (var b in _brands)
-                    {
-                        <MudSelectItem T="string" Value="@b">@b</MudSelectItem>
-                    }
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="6" sm="3">
-                <MudSelect T="string" @bind-Value="_sourceType" Label="Source" Dense="true" Margin="Margin.Dense">
-                    <MudSelectItem T="string" Value="@AllValue">All sources</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("marketplace")">Marketplaces</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("brand")">Brand sites</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("store")">Stores</MudSelectItem>
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="6" sm="2">
-                <MudSelect T="string" @bind-Value="_condition" Label="Condition" Dense="true" Margin="Margin.Dense">
-                    <MudSelectItem T="string" Value="@AllValue">Any</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("new")">New</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("used")">Used</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("refurbished")">Refurbished</MudSelectItem>
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="6" sm="4">
-                <MudSelect T="string" @bind-Value="_sort" Label="Sort by" Dense="true" Margin="Margin.Dense">
-                    <MudSelectItem T="string" Value="@("relevance")">Relevance</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("price_asc")">Price: low → high</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("price_desc")">Price: high → low</MudSelectItem>
-                    <MudSelectItem T="string" Value="@("source")">Source</MudSelectItem>
-                </MudSelect>
-            </MudItem>
-            <MudItem xs="12" sm="6">
-                <div class="d-flex align-center gap-2">
-                    <MudNumericField T="decimal?" @bind-Value="_minPrice" Label="Min price" Variant="Variant.Text"
-                                     Margin="Margin.Dense" Clearable="true" HideSpinButtons="true" />
-                    <MudNumericField T="decimal?" @bind-Value="_maxPrice" Label="Max price" Variant="Variant.Text"
-                                     Margin="Margin.Dense" Clearable="true" HideSpinButtons="true" />
-                </div>
-            </MudItem>
-            <MudItem xs="12" sm="6" Class="d-flex align-center justify-end">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">@Filtered.Count of @Result.Listings.Count shown</MudText>
-            </MudItem>
-        </MudGrid>
-    </MudPaper>
-
-    <!-- Marketplace "view all" links -->
-    @if (Result.Marketplaces.Count > 0)
-    {
-        <div class="d-flex align-center gap-2 mb-3" style="flex-wrap:wrap;">
-            <MudText Typo="Typo.body2" Color="Color.Secondary">Browse all on:</MudText>
-            @foreach (var m in Result.Marketplaces.Where(m => !string.IsNullOrWhiteSpace(m.Url)).Take(8))
-            {
-                <MudButton Href="@m.Url" Target="_blank" Size="Size.Small" Variant="Variant.Outlined"
-                           Color="Color.Success" StartIcon="@Icons.Material.Filled.Storefront">@m.Name</MudButton>
-            }
-        </div>
-    }
-
-    <!-- Product grid -->
-    @if (Filtered.Count == 0)
-    {
-        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">No products match the current filters.</MudAlert>
-    }
-    else
-    {
-        <MudGrid Spacing="3">
-            @foreach (var (idx, listing) in Filtered)
-            {
-                <MudItem xs="12" sm="6" md="4">
-                    <ProductCard Listing="listing"
-                                 Selected="@_selected.Contains(idx)"
-                                 CanSelectMore="@(_selected.Count < MaxCompare)"
-                                 SelectedChanged="@(v => ToggleCompare(idx, v))" />
-                </MudItem>
-            }
-        </MudGrid>
-    }
-
-    <!-- Comparison tiers (LLM/heuristic pre-grouped) -->
-    @if (Result.Comparisons.Count > 0)
-    {
-        <MudExpansionPanels Class="mt-4" Elevation="0">
-            <MudExpansionPanel Text="Pre-grouped comparison: budget · mid-range · premium">
-                <MudGrid Spacing="2">
-                    @foreach (var group in Result.Comparisons)
-                    {
-                        <MudItem xs="12" md="4">
-                            <MudPaper Class="pa-3" Outlined="true" Elevation="0" Style="height:100%;">
-                                <MudText Typo="Typo.subtitle1" Color="Color.Primary">@group.Category</MudText>
-                                @if (!string.IsNullOrWhiteSpace(group.Recommendation))
-                                {
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@group.Recommendation</MudText>
-                                }
-                                <MudList T="string" Dense="true" Class="mt-2">
-                                    @foreach (var item in group.Items)
-                                    {
-                                        <MudListItem T="string" Icon="@Icons.Material.Filled.ChevronRight"
-                                                     Href="@item.Url" Target="_blank">
-                                            <MudText Typo="Typo.body2" dir="@Catalog.Dir(item.Name)">
-                                                @item.Name @(item.AsMoney is { } mm ? $"— {mm.ToDisplay()}" : "")
-                                            </MudText>
-                                        </MudListItem>
-                                    }
-                                </MudList>
-                            </MudPaper>
-                        </MudItem>
-                    }
-                </MudGrid>
-            </MudExpansionPanel>
-        </MudExpansionPanels>
-    }
-
-    <!-- Brands / stores / reviews directories -->
-    <MudGrid Spacing="3" Class="mt-2">
-        @if (Result.Brands.Count > 0)
+    <div class="d-flex align-center gap-2 mb-3" style="flex-wrap:wrap;">
+        <MudText Typo="Typo.body2" Color="Color.Secondary">Browse all on:</MudText>
+        @foreach (var m in Result.Marketplaces.Where(m => !string.IsNullOrWhiteSpace(m.Url)).Take(8))
         {
-            <MudItem xs="12" md="4">
-                <MudPaper Class="pa-3" Outlined="true" Elevation="0">
-                    <MudText Typo="Typo.subtitle2" Class="mb-2"><MudIcon Icon="@Icons.Material.Filled.Verified" Size="Size.Small" Class="mr-1" />Brands</MudText>
-                    @foreach (var b in Result.Brands.Take(10))
-                    {
-                        <div class="d-flex align-center justify-space-between">
-                            @if (!string.IsNullOrWhiteSpace(b.Url))
-                            {
-                                <MudLink Href="@b.Url" Target="_blank" Typo="Typo.body2">@b.Name</MudLink>
-                            }
-                            else
-                            {
-                                <MudText Typo="Typo.body2">@b.Name</MudText>
-                            }
-                            @if (b.ListingCount > 0)
-                            {
-                                <MudText Typo="Typo.caption" Color="Color.Secondary">@b.ListingCount</MudText>
-                            }
-                        </div>
-                    }
-                </MudPaper>
-            </MudItem>
+            <MudButton Href="@m.Url" Target="_blank" Size="Size.Small" Variant="Variant.Outlined"
+                       Color="Color.Success" StartIcon="@Icons.Material.Filled.Storefront">@m.Name</MudButton>
         }
-        @if (Result.Stores.Count > 0)
+    </div>
+}
+
+@if (Filtered.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">No products match the current filters.</MudAlert>
+}
+else
+{
+    <MudGrid Spacing="3">
+        @foreach (var (idx, model) in Filtered)
         {
-            <MudItem xs="12" md="4">
-                <MudPaper Class="pa-3" Outlined="true" Elevation="0">
-                    <MudText Typo="Typo.subtitle2" Class="mb-2"><MudIcon Icon="@Icons.Material.Filled.Store" Size="Size.Small" Class="mr-1" />Stores</MudText>
-                    @foreach (var s in Result.Stores.Take(10))
-                    {
-                        <div class="mb-1">
-                            @if (!string.IsNullOrWhiteSpace(s.Url))
-                            {
-                                <MudLink Href="@s.Url" Target="_blank" Typo="Typo.body2">@s.Name</MudLink>
-                            }
-                            else
-                            {
-                                <MudText Typo="Typo.body2">@s.Name</MudText>
-                            }
-                            @if (!string.IsNullOrWhiteSpace(s.Address))
-                            {
-                                <MudText Typo="Typo.caption" Color="Color.Secondary" dir="@Catalog.Dir(s.Address)">@s.Address</MudText>
-                            }
-                        </div>
-                    }
-                </MudPaper>
-            </MudItem>
-        }
-        @if (Result.Reviews.Count > 0)
-        {
-            <MudItem xs="12" md="4">
-                <MudPaper Class="pa-3" Outlined="true" Elevation="0">
-                    <MudText Typo="Typo.subtitle2" Class="mb-2"><MudIcon Icon="@Icons.Material.Filled.Article" Size="Size.Small" Class="mr-1" />Reviews &amp; guides</MudText>
-                    @foreach (var r in Result.Reviews.Take(8))
-                    {
-                        <div class="mb-1">
-                            <MudLink Href="@r.Url" Target="_blank" Typo="Typo.body2" dir="@Catalog.Dir(r.Title)">@r.Title</MudLink>
-                        </div>
-                    }
-                </MudPaper>
+            <MudItem xs="12" sm="6" md="4">
+                <ModelCard Model="model"
+                           Selected="@_selected.Contains(idx)"
+                           CanSelectMore="@(_selected.Count < MaxCompare)"
+                           SelectedChanged="@(v => ToggleCompare(idx, v))"
+                           OnDetails="@(() => OpenDetails(model))" />
             </MudItem>
         }
     </MudGrid>
+}
 
-    <!-- Floating compare bar -->
-    @if (_selected.Count > 0)
-    {
-        <MudPaper Class="pa-2 px-4" Elevation="6"
-                  Style="position:sticky;bottom:80px;z-index:5;border-radius:24px;display:flex;align-items:center;gap:12px;width:fit-content;margin:16px auto 0;">
-            <MudText Typo="Typo.body2">@_selected.Count selected</MudText>
-            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
-                       StartIcon="@Icons.Material.Filled.Compare" Disabled="@(_selected.Count < 2)"
-                       OnClick="OpenComparison">Compare</MudButton>
-            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ClearCompare">Clear</MudButton>
-        </MudPaper>
-    }
+@if (Result.Comparisons.Count > 0)
+{
+    <MudExpansionPanels Class="mt-4" Elevation="0">
+        <MudExpansionPanel Text="Pre-grouped comparison: budget · mid-range · premium">
+            <MudGrid Spacing="2">
+                @foreach (var group in Result.Comparisons)
+                {
+                    <MudItem xs="12" md="4">
+                        <MudPaper Class="pa-3" Outlined="true" Elevation="0" Style="height:100%;">
+                            <MudText Typo="Typo.subtitle1" Color="Color.Primary">@group.Category</MudText>
+                            @if (!string.IsNullOrWhiteSpace(group.Recommendation))
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@group.Recommendation</MudText>
+                            }
+                            <MudList T="string" Dense="true" Class="mt-2">
+                                @foreach (var item in group.Items)
+                                {
+                                    <MudListItem T="string" Icon="@Icons.Material.Filled.ChevronRight"
+                                                 Href="@item.Url" Target="_blank">
+                                        <MudText Typo="Typo.body2" dir="@Catalog.Dir(item.Name)">
+                                            @item.Name @(item.AsMoney is { } mm ? $"— {mm.ToDisplay()}" : "")
+                                        </MudText>
+                                    </MudListItem>
+                                }
+                            </MudList>
+                        </MudPaper>
+                    </MudItem>
+                }
+            </MudGrid>
+        </MudExpansionPanel>
+    </MudExpansionPanels>
+}
+
+@if (_selected.Count > 0)
+{
+    <MudPaper Class="pa-2 px-4" Elevation="6"
+              Style="position:sticky;bottom:80px;z-index:5;border-radius:24px;display:flex;align-items:center;gap:12px;width:fit-content;margin:16px auto 0;">
+        <MudText Typo="Typo.body2">@_selected.Count selected</MudText>
+        <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                   StartIcon="@Icons.Material.Filled.Compare" Disabled="@(_selected.Count < 2)"
+                   OnClick="OpenComparison">Compare</MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ClearCompare">Clear</MudButton>
+    </MudPaper>
 }
 
 @code {
     [Parameter, EditorRequired] public ProductSearchResult Result { get; set; } = default!;
+
+    /// <summary>Optional brand to pre-filter by (set when drilling in from the Brands tab).</summary>
+    [Parameter] public string? InitialBrand { get; set; }
 
     private const string AllValue = "__all__";
     private const int MaxCompare = 4;
@@ -223,13 +154,18 @@
     private readonly HashSet<int> _selected = new();
 
     private List<string> _brands = new();
-    private List<(int Index, ProductListing Listing)> _indexed = new();
+    private List<(int Index, ProductModel Model)> _indexed = new();
 
     protected override void OnParametersSet()
     {
-        _indexed = Result.Listings.Select((l, i) => (i, l)).ToList();
-        _brands = Result.Listings
-            .Select(l => l.Brand)
+        if (!string.IsNullOrWhiteSpace(InitialBrand))
+        {
+            _brand = InitialBrand!;
+        }
+
+        _indexed = Result.Models.Select((m, i) => (i, m)).ToList();
+        _brands = Result.Models
+            .Select(m => m.Brand)
             .Where(b => !string.IsNullOrWhiteSpace(b))
             .Select(b => b!.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -237,32 +173,32 @@
             .ToList();
     }
 
-    private List<(int Index, ProductListing Listing)> Filtered
+    private List<(int Index, ProductModel Model)> Filtered
     {
         get
         {
-            IEnumerable<(int Index, ProductListing Listing)> q = _indexed;
+            IEnumerable<(int Index, ProductModel Model)> q = _indexed;
 
             if (_brand != AllValue)
-                q = q.Where(x => string.Equals(x.Listing.Brand, _brand, StringComparison.OrdinalIgnoreCase));
+                q = q.Where(x => string.Equals(x.Model.Brand, _brand, StringComparison.OrdinalIgnoreCase));
 
             if (_sourceType != AllValue)
-                q = q.Where(x => MatchesSourceType(x.Listing.SourceType));
+                q = q.Where(x => x.Model.Offers.Any(o => MatchesSourceType(o.SourceType)));
 
             if (_condition != AllValue)
-                q = q.Where(x => string.Equals(x.Listing.Condition, _condition, StringComparison.OrdinalIgnoreCase));
+                q = q.Where(x => x.Model.Offers.Any(o => string.Equals(o.Condition, _condition, StringComparison.OrdinalIgnoreCase)));
 
             if (_minPrice is { } min)
-                q = q.Where(x => x.Listing.Price is { } p && p >= min);
+                q = q.Where(x => x.Model.LowestPrice is { } p && p >= min);
 
             if (_maxPrice is { } max)
-                q = q.Where(x => x.Listing.Price is { } p && p <= max);
+                q = q.Where(x => x.Model.LowestPrice is { } p && p <= max);
 
             q = _sort switch
             {
-                "price_asc" => q.OrderBy(x => x.Listing.Price ?? decimal.MaxValue),
-                "price_desc" => q.OrderByDescending(x => x.Listing.Price ?? decimal.MinValue),
-                "source" => q.OrderBy(x => x.Listing.Source ?? string.Empty),
+                "price_asc" => q.OrderBy(x => x.Model.LowestPrice ?? decimal.MaxValue),
+                "price_desc" => q.OrderByDescending(x => x.Model.LowestPrice ?? decimal.MinValue),
+                "sellers" => q.OrderByDescending(x => x.Model.SellerCount),
                 _ => q
             };
 
@@ -292,9 +228,20 @@
 
     private void ClearCompare() => _selected.Clear();
 
+    private Task OpenDetails(ProductModel model)
+    {
+        var parameters = new DialogParameters<ModelDetailDialog>
+        {
+            { x => x.Model, model },
+            { x => x.Geo, Result.Geo }
+        };
+        var options = new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true };
+        return Dialogs.ShowAsync<ModelDetailDialog>(model.Name, parameters, options);
+    }
+
     private Task OpenComparison()
     {
-        var items = _selected.OrderBy(i => i).Select(i => Result.Listings[i]).ToList();
+        var items = _selected.OrderBy(i => i).Select(i => Result.Models[i]).ToList();
         var parameters = new DialogParameters<ComparisonDialog> { { x => x.Items, items } };
         var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
         return Dialogs.ShowAsync<ComparisonDialog>("Compare products", parameters, options);

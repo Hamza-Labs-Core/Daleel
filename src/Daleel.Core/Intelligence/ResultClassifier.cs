@@ -19,62 +19,54 @@ public enum ResultType
     /// <summary>A brand's own catalog/product page (e.g. samsung.com/jo air-conditioners).</summary>
     BrandPage,
 
-    /// <summary>A retailer selling many products (e.g. Carrefour electronics section).</summary>
+    /// <summary>A retailer selling many products (e.g. an electronics store's AC section).</summary>
     StorePage,
 
     /// <summary>A comparison/review/buying-guide article (e.g. "Best ACs in Jordan 2024").</summary>
     ReviewArticle,
 
-    /// <summary>A marketplace category/listing page (e.g. OpenSooq Air Conditioners).</summary>
+    /// <summary>A marketplace category/listing page (e.g. a classifieds Air-Conditioners section).</summary>
     Marketplace
 }
 
 /// <summary>
 /// Classifies a raw search hit (URL + title + snippet) into a <see cref="ResultType"/> so
-/// the agent can route it to the right bucket of a product report — actual listings vs.
-/// stores to visit vs. brand pages vs. reviews.
+/// the agent can route it to the right bucket of a product report.
 /// </summary>
 /// <remarks>
-/// The deterministic <see cref="Classify"/> is the workhorse and is fully unit-testable:
-/// it layers known-host patterns, then title/snippet keywords, then a price-pattern
-/// heuristic. <see cref="ClassifyAsync"/> only consults an <see cref="ILlmClient"/> when
-/// the deterministic pass yields <see cref="ResultType.Unknown"/>, so most calls cost
-/// nothing.
+/// Deliberately <strong>geo-agnostic</strong>: it knows nothing about which specific stores
+/// or marketplaces exist in any country. It reasons only from generic, structural signals —
+/// a quoted price, an item-style URL path, classifieds/listing keywords, a shop/category
+/// path — and falls back to "brand page" for an otherwise-plain commercial URL. Because the
+/// search engine already surfaces the right local sites for a geo, the classifier never
+/// needs a hardcoded source list. <see cref="ClassifyAsync"/> consults an
+/// <see cref="ILlmClient"/> only when there is no URL to reason about.
 /// </remarks>
 public static class ResultClassifier
 {
-    // Hosts whose pages are brand catalogs. Keyed on a host substring.
-    private static readonly string[] BrandHosts =
-    {
-        "samsung.com", "lg.com", "lge.com", "sharpme", "midea", "gree", "haier",
-        "panasonic.com", "daikin", "carrier", "hisense", "tcl.com", "toshiba"
-    };
-
-    // Marketplaces / classifieds: a bare category page is Marketplace, a single item is ProductListing.
-    private static readonly string[] MarketplaceHosts =
-    {
-        "opensooq.com", "dubizzle.com", "haraj.com", "olx.com", "amazon.", "noon.com",
-        "ebay.com", "souq.com", "jumia.com", "aliexpress.com", "craigslist.org"
-    };
-
-    // Multi-product retailers/stores.
-    private static readonly string[] StoreHosts =
-    {
-        "carrefour", "xcite.com", "safeway", "leaders.jo", "smartbuy", "bestbuy.com",
-        "homedepot.com", "lulu", "sharafdg", "jarir.com", "extra.com", "btc.com.jo"
-    };
-
     // Title/snippet keywords that mark editorial content (English + Arabic).
     private static readonly string[] ReviewKeywords =
     {
-        "best ", "top ", " review", "reviews", "vs ", "comparison", "compare",
-        "buying guide", "guide to", "أفضل", "مراجعة", "مقارنة", "دليل شراء", "أرخص"
+        "best ", "top ", " review", "reviews", " vs ", "comparison", "compare",
+        "buying guide", "buyer's guide", "guide to", "أفضل", "مراجعة", "مقارنة", "دليل شراء"
     };
 
-    // Title/snippet keywords that mark a marketplace category/listing page.
+    // Title/snippet keywords that mark a classifieds / marketplace category page.
     private static readonly string[] MarketplaceKeywords =
     {
-        "for sale", "listings", "classifieds", "ads", "للبيع", "إعلانات", "مستعمل"
+        "for sale", "classifieds", "listings", "ads in", "used ", "للبيع", "إعلانات", "مستعمل", "حراج"
+    };
+
+    // Generic URL path fragments that signal a single product page.
+    private static readonly string[] ItemPathFragments =
+    {
+        "/dp/", "/product/", "/products/", "/item/", "/listing/", "/p/", "/ad/", "/offer/"
+    };
+
+    // Generic URL path fragments that signal a multi-product store / category page.
+    private static readonly string[] StorePathFragments =
+    {
+        "/category/", "/categories/", "/shop/", "/store/", "/collections/", "/c/", "/catalog/", "/department/"
     };
 
     // Currency / price tokens (English + Arabic + Gulf) that signal a priced listing.
@@ -84,66 +76,59 @@ public static class ResultClassifier
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
-    /// Classifies a result deterministically. Returns <see cref="ResultType.Unknown"/>
-    /// when no rule fires (the caller may then fall back to the LLM).
+    /// Classifies a result deterministically from generic signals. Returns
+    /// <see cref="ResultType.Unknown"/> only when there is no URL at all.
     /// </summary>
     public static ResultType Classify(string? url, string? title, string? snippet)
     {
-        var host = HostOf(url);
         var text = $"{title} {snippet}".ToLowerInvariant();
-        var hasPrice = !string.IsNullOrEmpty(text) && PricePattern.IsMatch(text);
+        var hasPrice = !string.IsNullOrWhiteSpace(text) && PricePattern.IsMatch(text);
         var path = PathOf(url);
 
-        // 1) Brand sites are unambiguous regardless of price.
-        if (host.Length > 0 && BrandHosts.Any(h => host.Contains(h, StringComparison.Ordinal)))
-        {
-            return ResultType.BrandPage;
-        }
-
-        // 2) Editorial wins over host when the title clearly reads as a guide/review.
+        // 1) Editorial first — a guide/review title trumps everything.
         if (ContainsAny(text, ReviewKeywords))
         {
             return ResultType.ReviewArticle;
         }
 
-        // 3) Marketplaces: a deep item path or a price ⇒ a single listing; otherwise the
-        //    category page itself.
-        if (host.Length > 0 && MarketplaceHosts.Any(h => host.Contains(h, StringComparison.Ordinal)))
-        {
-            return hasPrice || LooksLikeItemPath(path) ? ResultType.ProductListing : ResultType.Marketplace;
-        }
-
-        // 4) Known multi-product retailers: a priced page is a listing, else the store.
-        if (host.Length > 0 && StoreHosts.Any(h => host.Contains(h, StringComparison.Ordinal)))
-        {
-            return hasPrice ? ResultType.ProductListing : ResultType.StorePage;
-        }
-
-        // 5) Generic signals from the text.
-        if (ContainsAny(text, MarketplaceKeywords))
-        {
-            return hasPrice ? ResultType.ProductListing : ResultType.Marketplace;
-        }
-
-        // 6) Any other page that quotes a price is treated as a listing.
+        // 2) A quoted price means a concrete, buyable listing.
         if (hasPrice)
         {
             return ResultType.ProductListing;
         }
 
-        // 7) A bare commercial domain (e.g. "{brand}.com") with no other signal reads as a brand page.
-        if (IsBareDomainHomepage(path) && host.Length > 0)
+        if (string.IsNullOrEmpty(path) && string.IsNullOrEmpty(HostOf(url)))
         {
-            return ResultType.BrandPage;
+            // No URL to reason about — leave for the LLM fallback.
+            return ResultType.Unknown;
         }
 
-        return ResultType.Unknown;
+        // 3) An item-style path (numeric id or a /product//item//dp/ fragment) is a single listing.
+        if (LooksLikeItemPath(path))
+        {
+            return ResultType.ProductListing;
+        }
+
+        // 4) Classifieds / "for sale" wording without a price is a marketplace category page.
+        if (ContainsAny(text, MarketplaceKeywords))
+        {
+            return ResultType.Marketplace;
+        }
+
+        // 5) A shop/category path is a multi-product store page.
+        if (ContainsAny(path, StorePathFragments))
+        {
+            return ResultType.StorePage;
+        }
+
+        // 6) Fallback: a plain commercial URL with no other signal reads as a brand page.
+        return ResultType.BrandPage;
     }
 
     /// <summary>
-    /// Classifies a result, consulting the LLM only when the deterministic pass is
-    /// inconclusive. The LLM is asked for a single label; anything it returns that doesn't
-    /// map to a known type collapses to <see cref="ResultType.Unknown"/>.
+    /// Classifies a result, consulting the LLM only when there is no URL to reason about.
+    /// Anything the LLM returns that doesn't map to a known type collapses to
+    /// <see cref="ResultType.Unknown"/>.
     /// </summary>
     public static async Task<ResultType> ClassifyAsync(
         string? url, string? title, string? snippet,
@@ -193,28 +178,16 @@ public static class ResultClassifier
     private static string HostOf(string? url)
     {
         if (string.IsNullOrWhiteSpace(url)) return string.Empty;
-        return Uri.TryCreate(url, UriKind.Absolute, out var u)
-            ? u.Host.ToLowerInvariant()
-            : string.Empty;
+        return Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host.ToLowerInvariant() : string.Empty;
     }
 
     private static string PathOf(string? url)
     {
         if (string.IsNullOrWhiteSpace(url)) return string.Empty;
-        return Uri.TryCreate(url, UriKind.Absolute, out var u)
-            ? u.AbsolutePath.ToLowerInvariant()
-            : string.Empty;
+        return Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.AbsolutePath.ToLowerInvariant() : string.Empty;
     }
 
-    // Marketplace item pages tend to carry a numeric id segment (e.g. /listing/12345678).
+    // Item pages tend to carry a numeric id segment (e.g. /listing/12345678) or a known item fragment.
     private static bool LooksLikeItemPath(string path) =>
-        Regex.IsMatch(path, @"/\d{5,}") ||
-        path.Contains("/item/", StringComparison.Ordinal) ||
-        path.Contains("/listing/", StringComparison.Ordinal) ||
-        path.Contains("/dp/", StringComparison.Ordinal) ||
-        path.Contains("/product/", StringComparison.Ordinal) ||
-        path.Contains("/p/", StringComparison.Ordinal);
-
-    private static bool IsBareDomainHomepage(string path) =>
-        path.Length == 0 || path == "/" || path.Count(c => c == '/') <= 1;
+        Regex.IsMatch(path, @"/\d{5,}") || ContainsAny(path, ItemPathFragments);
 }

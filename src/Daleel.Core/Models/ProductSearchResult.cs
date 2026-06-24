@@ -17,10 +17,25 @@ public record ProductSearchResult
     /// <summary>Market key the search ran in, e.g. "jordan".</summary>
     public string Geo { get; init; } = string.Empty;
 
+    /// <summary>Human-readable target country, e.g. "Jordan".</summary>
+    public string Country { get; init; } = string.Empty;
+
     /// <summary>LLM-generated narrative summarising the market and the picks.</summary>
     public string Summary { get; init; } = string.Empty;
 
-    /// <summary>Actual products found, with prices and direct links.</summary>
+    /// <summary>
+    /// Distinct product models, each aggregating all of its price sources. This is the
+    /// primary unit the UI renders (a model is shown once, with all its offers).
+    /// </summary>
+    public IReadOnlyList<ProductModel> Models { get; init; } = Array.Empty<ProductModel>();
+
+    /// <summary>
+    /// Whether non-local sources were included (the user explicitly asked for international).
+    /// When false, only results confirmed local to the market are present.
+    /// </summary>
+    public bool IncludeInternational { get; init; }
+
+    /// <summary>Raw (un-aggregated) listings retained for compatibility / debugging.</summary>
     public IReadOnlyList<ProductListing> Listings { get; init; } = Array.Empty<ProductListing>();
 
     /// <summary>Brands present in the market (their catalog pages).</summary>
@@ -40,8 +55,14 @@ public record ProductSearchResult
 
     public DateTimeOffset? GeneratedAt { get; init; }
 
-    /// <summary>True when at least one concrete listing was found.</summary>
-    public bool HasListings => Listings.Count > 0;
+    /// <summary>True when at least one aggregated product model was found.</summary>
+    public bool HasListings => Models.Count > 0;
+
+    /// <summary>Counts per bucket, used to drive the adaptive (tabbed) display.</summary>
+    public int ProductCount => Models.Count;
+    public int StoreCount => Stores.Count;
+    public int BrandCount => Brands.Count;
+    public int ReviewCount => Reviews.Count;
 }
 
 /// <summary>A single concrete product the user can buy, with a direct link.</summary>

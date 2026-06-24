@@ -34,9 +34,12 @@ public sealed class FakeSearchProvider : ISearchProvider
     public Task<SearchResults> SearchAsync(SearchQuery query, CancellationToken ct = default)
     {
         CallCount++;
+        // Return only results whose kind matches the requested kind, so web and shopping
+        // results don't bleed into each other (closer to how a real provider behaves).
+        var matching = _results.Where(r => r.Kind == query.Kind).ToList();
         return Task.FromResult(new SearchResults
         {
-            Provider = Name, Query = query.Query, Kind = query.Kind, Results = _results
+            Provider = Name, Query = query.Query, Kind = query.Kind, Results = matching
         });
     }
 }

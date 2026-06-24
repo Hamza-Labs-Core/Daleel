@@ -1,5 +1,5 @@
-@* Side-by-side comparison of 2–4 listings: price, where to buy, condition, specs.
-   The cheapest priced column is highlighted as best value. *@
+@* Side-by-side comparison of 2–4 models: lowest price, sources, condition, specs.
+   The cheapest column is highlighted as best value. *@
 
 <MudDialog>
     <TitleContent>
@@ -9,15 +9,15 @@
     </TitleContent>
     <DialogContent>
         <div style="overflow-x:auto;">
-            <MudSimpleTable Dense="true" Bordered="true" Striped="false" Style="min-width:480px;">
+            <MudSimpleTable Dense="true" Bordered="true" Style="min-width:480px;">
                 <thead>
                     <tr>
                         <th></th>
-                        @foreach (var l in Items)
+                        @foreach (var m in Items)
                         {
-                            <th style="@HeaderStyle(l)">
-                                <MudText Typo="Typo.subtitle2" dir="@Catalog.Dir(l.Name)">@l.Name</MudText>
-                                @if (IsCheapest(l))
+                            <th style="@HeaderStyle(m)">
+                                <MudText Typo="Typo.subtitle2" dir="@Catalog.Dir(m.Name)">@m.Name</MudText>
+                                @if (IsCheapest(m))
                                 {
                                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled"
                                              Icon="@Icons.Material.Filled.Savings">Best value</MudChip>
@@ -28,59 +28,46 @@
                 </thead>
                 <tbody>
                     <tr>
-                        <td><strong>Price</strong></td>
-                        @foreach (var l in Items)
+                        <td><strong>Lowest price</strong></td>
+                        @foreach (var m in Items)
                         {
-                            <td style="@HeaderStyle(l)">
-                                @if (l.AsMoney is { } m)
+                            <td style="@HeaderStyle(m)">
+                                @if (m.LowestPrice is { } p && m.LowestOffer?.Currency is { } c)
                                 {
-                                    <MudText Color="Color.Primary" Typo="Typo.body1" Style="font-weight:600;">@m.ToDisplay()</MudText>
+                                    <MudText Color="Color.Primary" Typo="Typo.body1" Style="font-weight:600;">@(new Money(p, c).ToDisplay())</MudText>
                                 }
-                                else
-                                {
-                                    <span>—</span>
-                                }
+                                else { <span>—</span> }
                             </td>
                         }
                     </tr>
                     <tr>
-                        <td><strong>Source</strong></td>
-                        @foreach (var l in Items)
+                        <td><strong>Sellers</strong></td>
+                        @foreach (var m in Items)
                         {
-                            <td><SourceBadge SourceType="l.SourceType" Source="@l.Source" /></td>
-                        }
-                    </tr>
-                    <tr>
-                        <td><strong>Condition</strong></td>
-                        @foreach (var l in Items)
-                        {
-                            <td>@(string.IsNullOrWhiteSpace(l.Condition) ? "—" : l.Condition)</td>
+                            <td>@m.SellerCount</td>
                         }
                     </tr>
                     @foreach (var key in SpecKeys)
                     {
                         <tr>
                             <td><strong>@Humanize(key)</strong></td>
-                            @foreach (var l in Items)
+                            @foreach (var m in Items)
                             {
-                                <td>@(l.Specs.TryGetValue(key, out var v) ? v : "—")</td>
+                                <td>@(m.Specs.TryGetValue(key, out var v) ? v : "—")</td>
                             }
                         </tr>
                     }
                     <tr>
                         <td><strong>Buy</strong></td>
-                        @foreach (var l in Items)
+                        @foreach (var m in Items)
                         {
                             <td>
-                                @if (!string.IsNullOrWhiteSpace(l.Url))
+                                @if (m.LowestOffer?.Url is { Length: > 0 } url)
                                 {
-                                    <MudButton Href="@l.Url" Target="_blank" Size="Size.Small" Variant="Variant.Filled"
+                                    <MudButton Href="@url" Target="_blank" Size="Size.Small" Variant="Variant.Filled"
                                                Color="Color.Primary" StartIcon="@Icons.Material.Filled.ShoppingCart">Buy</MudButton>
                                 }
-                                else
-                                {
-                                    <span>—</span>
-                                }
+                                else { <span>—</span> }
                             </td>
                         }
                     </tr>
@@ -95,18 +82,17 @@
 
 @code {
     [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
-    [Parameter] public IReadOnlyList<ProductListing> Items { get; set; } = Array.Empty<ProductListing>();
+    [Parameter] public IReadOnlyList<ProductModel> Items { get; set; } = Array.Empty<ProductModel>();
 
-    // Union of spec keys across the compared items, preserving first-seen order.
     private IReadOnlyList<string> SpecKeys =>
         Items.SelectMany(i => i.Specs.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
-    private decimal? MinPrice => Items.Where(i => i.Price is > 0).Select(i => i.Price).DefaultIfEmpty(null).Min();
+    private decimal? MinPrice => Items.Where(i => i.LowestPrice is not null).Select(i => i.LowestPrice).DefaultIfEmpty(null).Min();
 
-    private bool IsCheapest(ProductListing l) => MinPrice is { } min && l.Price == min;
+    private bool IsCheapest(ProductModel m) => MinPrice is { } min && m.LowestPrice == min;
 
-    private string HeaderStyle(ProductListing l) =>
-        IsCheapest(l) ? "background:var(--mud-palette-success-hover);" : string.Empty;
+    private string HeaderStyle(ProductModel m) =>
+        IsCheapest(m) ? "background:var(--mud-palette-success-hover);" : string.Empty;
 
     private static string Humanize(string key) =>
         string.Join(' ', key.Replace('_', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)

@@ -1,0 +1,54 @@
+@* Store directory: physical/online stores with address, phone, website and a map placeholder. *@
+<MudGrid Spacing="3">
+    @foreach (var s in Stores)
+    {
+        <MudItem xs="12" sm="6" md="4">
+            <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                <MudCardContent>
+                    <div class="d-flex align-center gap-2 mb-1">
+                        <MudIcon Icon="@Icons.Material.Filled.Store" Color="Color.Warning" />
+                        <MudText Typo="Typo.h6" dir="@Catalog.Dir(s.Name)">@s.Name</MudText>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(s.Address))
+                    {
+                        <div class="d-flex align-start gap-1 mt-1">
+                            <MudIcon Icon="@Icons.Material.Filled.Place" Size="Size.Small" Color="Color.Secondary" />
+                            <MudText Typo="Typo.body2" Color="Color.Secondary" dir="@Catalog.Dir(s.Address)">@s.Address</MudText>
+                        </div>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(s.Phone))
+                    {
+                        <div class="d-flex align-center gap-1 mt-1">
+                            <MudIcon Icon="@Icons.Material.Filled.Phone" Size="Size.Small" Color="Color.Secondary" />
+                            <MudLink Href="@($"tel:{s.Phone}")" Typo="Typo.body2">@s.Phone</MudLink>
+                        </div>
+                    }
+
+                    @if (string.IsNullOrWhiteSpace(s.Address))
+                    {
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="mt-1">Online store</MudChip>
+                    }
+                    else
+                    {
+                        <div class="mt-2" style="height:80px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);">
+                            <MudIcon Icon="@Icons.Material.Filled.Map" Color="Color.Secondary" />
+                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-1">Map</MudText>
+                        </div>
+                    }
+                </MudCardContent>
+                <MudCardActions>
+                    @if (!string.IsNullOrWhiteSpace(s.Url))
+                    {
+                        <MudButton Href="@s.Url" Target="_blank" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.OpenInNew">View store</MudButton>
+                    }
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+
+@code {
+    [Parameter, EditorRequired] public IReadOnlyList<StoreInfo> Stores { get; set; } = Array.Empty<StoreInfo>();
+}
