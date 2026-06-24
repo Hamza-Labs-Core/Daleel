@@ -30,6 +30,14 @@
 	encode zstd gzip
 
 	reverse_proxy daleel:8080 {
+		# Caddy sets these automatically, but make them explicit: the app's UseForwardedHeaders()
+		# relies on X-Forwarded-Proto (so UseHttpsRedirection/HSTS see the real https scheme) and
+		# X-Forwarded-For (real client IP for analytics + rate limiting). Without the correct scheme
+		# the auth pages can mis-render and SignInManager fails with "response has already started".
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Host {host}
+
 		health_uri /health
 		health_interval 30s
 		health_timeout 5s

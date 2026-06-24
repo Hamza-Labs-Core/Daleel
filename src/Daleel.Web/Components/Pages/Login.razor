@@ -1,4 +1,9 @@
 @page "/login"
+@* Belt-and-suspenders: pin this page to non-streaming static SSR. If anything ever flips the render
+   mode to streaming/interactive, the response would flush its headers before the form handler runs and
+   SignInManager.PasswordSignInAsync would throw "Headers are read-only, response has already started"
+   when it tries to write the auth cookie. (false) is the static-SSR default, made explicit here. *@
+@attribute [StreamRendering(false)]
 @using System.ComponentModel.DataAnnotations
 @using Daleel.Web.Data
 @using Microsoft.AspNetCore.Identity

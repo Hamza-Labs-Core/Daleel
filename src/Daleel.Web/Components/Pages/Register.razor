@@ -1,4 +1,8 @@
 @page "/register"
+@* Belt-and-suspenders: pin this page to non-streaming static SSR so the form post stays in a real
+   HTTP request where SignInManager can write the auth cookie. See Login.razor for the failure mode
+   this guards against ("Headers are read-only, response has already started"). *@
+@attribute [StreamRendering(false)]
 @using System.ComponentModel.DataAnnotations
 @using Daleel.Web.Data
 @using Microsoft.AspNetCore.Identity
