@@ -272,6 +272,8 @@ Daleel/
 
 ## Deployment
 
+Production: **https://daleel.hamzalabs.dev**
+
 Daleel ships as a single container image (`ghcr.io/hamza-labs-core/daleel`) running the
 `Daleel.Web` Blazor app on port **8080** behind **Caddy** (automatic HTTPS via Let's
 Encrypt). CI/CD is GitHub Actions; the target is a **Hetzner CX23** VPS (Ubuntu 22.04/24.04).
@@ -295,7 +297,7 @@ ssh root@your-server 'bash -s' < deploy/setup.sh
 configures log rotation. Then on the server:
 
 1. Edit `/opt/daleel/.env` and fill in all secrets (template: [`deploy/.env.example`](deploy/.env.example)).
-2. Point DNS `*.daleel.yourdomain.com` → the server IP (and update the host in `deploy/Caddyfile`).
+2. Point DNS `daleel.hamzalabs.dev` (A/AAAA) → the server IP. To use a different host, set `CADDY_DOMAIN` in `.env`.
 3. If the GHCR image is private: `sudo -u daleel docker login ghcr.io`.
 4. Start it: `sudo systemctl start daleel.service` (or `sudo -u daleel /opt/daleel/deploy.sh latest`).
 

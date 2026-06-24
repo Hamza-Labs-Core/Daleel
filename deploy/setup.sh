@@ -162,7 +162,7 @@ cat <<NEXT
 
 Next steps:
   1. Edit ${APP_DIR}/.env and fill in all secrets (see .env.example).
-  2. Point DNS: *.daleel.yourdomain.com -> this server's IP.
+  2. Point DNS: daleel.hamzalabs.dev (A/AAAA) -> this server's IP.
   3. Log in to GHCR if the image is private:
        sudo -u ${APP_USER} docker login ghcr.io
   4. Start the stack:
