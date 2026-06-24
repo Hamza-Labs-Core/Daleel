@@ -58,16 +58,16 @@
 @code {
     // App.razor is the only component guaranteed to render statically (it's the host document), so it
     // can read the request here and pick a render mode per page. Everything is InteractiveServer — that
-    // is what makes the layout's drawer toggle, theme switch and menus live — except /logout, which must
-    // stay static SSR so its <AntiforgeryToken /> form post keeps working. Login and register only emit
-    // OAuth redirect links (no form post), so they render interactively under the themed MainLayout.
+    // is what makes the layout's drawer toggle, theme switch and menus live — except the auth pages
+    // (/login, /register, /logout), which must stay static SSR so their antiforgery form posts work and
+    // so SignInManager can write the auth cookie during the POST. They still use the themed MainLayout.
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
 
     // The host document is static SSR, so the reconnection card (which lives outside the Blazor circuit)
     // can't be localized via IStringLocalizer at runtime — read the request culture directly instead.
     private static bool _rtl => System.Globalization.CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft;
 
-    private static readonly string[] StaticAuthPaths = { "/logout" };
+    private static readonly string[] StaticAuthPaths = { "/login", "/register", "/logout" };
 
     private IComponentRenderMode? PageRenderMode =>
         StaticAuthPaths.Any(p => HttpContext.Request.Path.StartsWithSegments(p))

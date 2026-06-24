@@ -322,3 +322,42 @@ html, body {
     text-align: center;
     padding: 8px;
 }
+
+/* ── Auth forms (static-SSR login / register) ────────────────────────────────
+   The login/register pages render statically, so they use framework <InputText>
+   instead of MudBlazor fields. These rules give those inputs a look consistent
+   with the MudBlazor dark theme via the same --mud-palette-* variables. */
+.daleel-field-label {
+    display: block;
+    font-size: 0.85rem;
+    color: var(--mud-palette-text-secondary, rgba(255, 255, 255, 0.7));
+    margin-top: 14px;
+    margin-bottom: 4px;
+}
+.daleel-field {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--mud-palette-lines-inputs, rgba(255, 255, 255, 0.3));
+    background: var(--mud-palette-background-gray, rgba(255, 255, 255, 0.05));
+    color: var(--mud-palette-text-primary, #e8eaf0);
+    font-size: 1rem;
+    font-family: inherit;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.daleel-field::placeholder {
+    color: var(--mud-palette-text-disabled, rgba(255, 255, 255, 0.4));
+}
+.daleel-field:focus {
+    outline: none;
+    border-color: var(--mud-palette-primary, #594ae2);
+    box-shadow: 0 0 0 2px rgba(var(--mud-palette-primary-rgb, 89, 74, 226), 0.25);
+}
+/* Blazor's <ValidationMessage> renders .validation-message; tint it as an error. */
+.validation-message {
+    display: block;
+    color: var(--mud-palette-error, #f44336);
+    font-size: 0.8rem;
+    margin-top: 4px;
+}

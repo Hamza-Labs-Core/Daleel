@@ -1,6 +1,16 @@
 @page "/login"
-@using Microsoft.AspNetCore.Authentication
-@inject IAuthenticationSchemeProvider SchemeProvider
+@using System.ComponentModel.DataAnnotations
+@using Daleel.Web.Data
+@using Microsoft.AspNetCore.Identity
+@inject SignInManager<ApplicationUser> SignInManager
+@inject UserManager<ApplicationUser> UserManager
+@inject IAnalyticsService Analytics
+@inject NavigationManager Nav
+
+@* Static SSR (App.razor renders /login without a render mode) so the EditForm below posts back to
+   this page in a real HTTP request — that's the only context where SignInManager can write the auth
+   cookie. Uses the themed MainLayout like the rest of the site; the text inputs are framework
+   <InputText> (MudBlazor fields don't round-trip in static form posts) styled to the dark theme. *@
 
 <PageTitle>دليل · Sign in</PageTitle>
 
@@ -14,11 +24,6 @@
             </MudText>
         </div>
 
-        @if (Error is not null)
-        {
-            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@ErrorText</MudAlert>
-        }
-
         <AuthorizeView>
             <Authorized>
                 <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-4">
@@ -29,76 +34,103 @@
                 </MudButton>
             </Authorized>
             <NotAuthorized>
-                @if (_providers.Count == 0)
+                @if (_error is not null)
                 {
-                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="text-center">
-                        <MudText Typo="Typo.subtitle2">Sign-in is coming soon</MudText>
-                        <MudText Typo="Typo.body2" Class="mt-1">
-                            تسجيل الدخول قريباً — We're putting the finishing touches on secure sign-in.
-                            Check back shortly to create your account.
-                        </MudText>
-                    </MudAlert>
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@_error</MudAlert>
                 }
-                else
-                {
-                    <div class="d-flex flex-column gap-3">
-                        @foreach (var p in _providers)
-                        {
-                            <MudButton Href="@SignInHref(p.Scheme)" rel="nofollow"
-                                       Variant="Variant.Outlined" Size="Size.Large" FullWidth="true"
-                                       StartIcon="@Icon(p.Scheme)">
-                                Continue with @p.Display
-                            </MudButton>
-                        }
+
+                <EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login" Context="editContext">
+                    <DataAnnotationsValidator />
+
+                    <label class="daleel-field-label" for="login-email">Email</label>
+                    <InputText id="login-email" class="daleel-field" type="email" autocomplete="username"
+                               @bind-Value="Input.Email" placeholder="you@example.com" />
+                    <ValidationMessage For="() => Input.Email" />
+
+                    <label class="daleel-field-label" for="login-password">Password</label>
+                    <InputText id="login-password" class="daleel-field" type="password" autocomplete="current-password"
+                               @bind-Value="Input.Password" placeholder="Your password" />
+                    <ValidationMessage For="() => Input.Password" />
+
+                    <div class="d-flex justify-end mt-2">
+                        <MudLink Href="/forgot-password" Typo="Typo.body2">Forgot password?</MudLink>
                     </div>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-4">
-                        New to Daleel? <MudLink Href="/register">Create a free account</MudLink>
-                    </MudText>
-                }
+
+                    <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
+                               Size="Size.Large" FullWidth="true" Class="mt-4">
+                        Sign in
+                    </MudButton>
+                </EditForm>
+
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-4">
+                    New to Daleel? <MudLink Href="/register">Create a free account</MudLink>
+                </MudText>
             </NotAuthorized>
         </AuthorizeView>
     </MudPaper>
 </div>
 
 @code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
-    [SupplyParameterFromQuery] private string? Error { get; set; }
 
-    private readonly List<(string Scheme, string Display)> _providers = new();
+    private string? _error;
 
-    protected override async Task OnInitializedAsync()
+    private async Task LoginUser()
     {
-        // Only schemes that were actually registered (i.e. configured) show up here.
-        var all = await SchemeProvider.GetAllSchemesAsync();
-        foreach (var s in all.Where(s => !string.IsNullOrEmpty(s.DisplayName)
-                                         && !s.Name.StartsWith("Identity.", StringComparison.Ordinal)))
+        var user = await UserManager.FindByEmailAsync(Input.Email);
+
+        // Identical message whether the email is unknown or the password is wrong — never reveal which
+        // accounts exist.
+        if (user is null)
         {
-            _providers.Add((s.Name, s.DisplayName!));
+            _error = "Invalid email or password.";
+            return;
         }
+
+        if (user.IsDisabled)
+        {
+            _error = "This account has been disabled. Contact support if you think this is a mistake.";
+            return;
+        }
+
+        var result = await SignInManager.PasswordSignInAsync(
+            user.UserName!, Input.Password, isPersistent: true, lockoutOnFailure: false);
+
+        if (result.Succeeded)
+        {
+            user.LastActiveAt = DateTime.UtcNow;
+            await UserManager.UpdateAsync(user);
+            await Analytics.RecordLoginAsync(user.Id, "Password", HttpContext.Connection.RemoteIpAddress?.ToString());
+            // NavigateTo on a static page issues a 302 carrying the freshly-set auth cookie.
+            Nav.NavigateTo(Local(ReturnUrl), forceLoad: true);
+            return;
+        }
+
+        _error = result.IsLockedOut
+            ? "This account is locked out. Please try again later."
+            : "Invalid email or password.";
     }
 
-    private string SignInHref(string scheme)
+    /// <summary>Coerces a return URL to a safe local path; rejects open-redirect forms.</summary>
+    private static string Local(string? returnUrl) =>
+        !string.IsNullOrWhiteSpace(returnUrl)
+        && returnUrl.StartsWith('/')
+        && !returnUrl.StartsWith("//", StringComparison.Ordinal)
+        && !returnUrl.StartsWith("/\\", StringComparison.Ordinal)
+            ? returnUrl
+            : "/";
+
+    private sealed class InputModel
     {
-        var target = string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : ReturnUrl;
-        return $"/auth/signin/{Uri.EscapeDataString(scheme)}?returnUrl={Uri.EscapeDataString(target)}";
+        [Required(ErrorMessage = "Email is required.")]
+        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
+        public string Email { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Password is required.")]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = string.Empty;
     }
-
-    private string ErrorText => Error switch
-    {
-        "external" => "The provider did not return a login. Please try again.",
-        "lockedout" => "This account is locked out.",
-        "disabled" => "This account has been disabled. Contact support if you think this is a mistake.",
-        "create" => "We couldn't create your account. Please try a different provider.",
-        _ => "Sign-in failed. Please try again."
-    };
-
-    private static string Icon(string scheme) => scheme switch
-    {
-        "Google" => Icons.Custom.Brands.Google,
-        "Microsoft" => Icons.Custom.Brands.MicrosoftWindows,
-        "Twitter" => Icons.Custom.Brands.Twitter,
-        "GitHub" => Icons.Custom.Brands.GitHub,
-        "Facebook" => Icons.Custom.Brands.Facebook,
-        _ => Icons.Material.Filled.Login
-    };
 }

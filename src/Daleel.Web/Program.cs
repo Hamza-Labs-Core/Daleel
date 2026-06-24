@@ -12,10 +12,6 @@ using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Fold the deploy pipeline's friendly OAuth env vars (GOOGLE_OAUTH_CLIENT_ID, …) onto the canonical
-// Authentication:<Provider>:ClientId/Secret config keys, so everything downstream reads one convention.
-builder.Configuration.AddOAuthEnvironmentVariables();
-
 // Razor components with both interactive runtimes (Server for the secret-bearing agent pages,
 // WebAssembly available for the Auto runtime).
 builder.Services.AddRazorComponents()
@@ -47,19 +43,11 @@ var connection = builder.Configuration.GetConnectionString("DefaultConnection")
                  ?? "Data Source=data/daleel.db";
 builder.Services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(connection));
 
-// Admin-set OAuth credentials live in the SystemConfig table and take precedence over env/appsettings.
-// Read once at startup (handlers register before app.Build(), so changes need a restart). Tolerates a
-// missing table on first boot — the seeding migration runs later, so first boot falls back to config.
-var oauthOverrides = OAuthConfigStore.LoadOverrides(connection);
-
-// ── Identity + external authentication ───────────────────────────────────────
-var authentication = builder.Services.AddAuthentication(options =>
-{
-    options.DefaultScheme = IdentityConstants.ApplicationScheme;
-    options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
-});
-authentication.AddIdentityCookies();
-authentication.AddExternalProviders(builder.Configuration, oauthOverrides);
+// ── Identity (cookie auth, email + password) ──────────────────────────────────
+// Standard Identity cookie schemes. Sign-in/registration happen on the static-SSR /login and
+// /register pages, which run in a real HTTP request and can therefore set the auth cookie.
+builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme)
+    .AddIdentityCookies();
 
 // Unauthenticated visitors are sent to /login instead of a 404 when a [Authorize] page is hit —
 // except API/hub calls, which get a clean 401/403 instead of an HTML redirect.
@@ -85,8 +73,14 @@ static Task ApiAwareRedirect(Microsoft.AspNetCore.Authentication.RedirectContext
 
 builder.Services.AddIdentityCore<ApplicationUser>(options =>
     {
-        options.SignIn.RequireConfirmedAccount = false; // external providers vouch for identity
-        options.User.RequireUniqueEmail = false;        // some providers don't return email
+        options.SignIn.RequireConfirmedAccount = false; // no email-confirmation step (yet)
+        options.User.RequireUniqueEmail = true;         // email is the login identifier — must be unique
+        // Password strength policy enforced by UserManager.CreateAsync on registration.
+        options.Password.RequiredLength = 8;
+        options.Password.RequireDigit = true;
+        options.Password.RequireLowercase = true;
+        options.Password.RequireUppercase = true;
+        options.Password.RequireNonAlphanumeric = false; // length + mixed case is enough friction
     })
     .AddEntityFrameworkStores<DaleelDbContext>()
     .AddSignInManager()
