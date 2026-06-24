@@ -1,0 +1,49 @@
+@* Interactive island for the app-bar controls: language, text direction, and theme.
+
+   MainLayout is static, so these buttons would never wire up their click handlers there (the live
+   symptom: the theme toggle and EN/عربي switch "did nothing"). Hosting them in an InteractiveServer
+   island makes the handlers fire; LanguageSwitcher is interactive simply by being rendered inside it.
+   They share the circuit's LayoutState with InteractiveProviders, so toggling theme here re-renders
+   the MudThemeProvider there. *@
+@rendermode InteractiveServer
+@implements IDisposable
+@inject LayoutState State
+@inject BrowserStore Store
+@inject IJSRuntime JS
+
+<div class="mr-2"><LanguageSwitcher /></div>
+
+<MudTooltip Text="@(State.RightToLeft ? "Left-to-right" : "Right-to-left")">
+    <MudIconButton Icon="@Icons.Material.Filled.FormatTextdirectionRToL"
+                   Color="@(State.RightToLeft ? Color.Primary : Color.Inherit)"
+                   OnClick="ToggleRtl" aria-label="Toggle text direction" />
+</MudTooltip>
+
+<MudTooltip Text="@(State.IsDarkMode ? "Light theme" : "Dark theme")">
+    <MudIconButton Icon="@(State.IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
+                   Color="Color.Inherit"
+                   OnClick="ToggleTheme" aria-label="Toggle theme" />
+</MudTooltip>
+
+@code {
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+
+    private async Task ToggleTheme()
+    {
+        State.ToggleDarkMode();
+        await Store.SetAsync("theme", State.IsDarkMode ? "dark" : "light");
+    }
+
+    private async Task ToggleRtl()
+    {
+        State.ToggleRightToLeft();
+        await Store.SetAsync("rtl", State.RightToLeft ? "1" : "0");
+        // The page's <html dir> drives direction document-wide; flip it directly so the manual toggle
+        // takes effect immediately (language switching sets it server-side on the next full reload).
+        await JS.InvokeVoidAsync("daleel.setDir", State.RightToLeft ? "rtl" : "ltr");
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

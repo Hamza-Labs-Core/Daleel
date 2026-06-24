@@ -22,7 +22,11 @@ builder.Services.AddRazorComponents()
 builder.Services.AddMudServices();
 
 // ── Localization (English + Arabic, cookie-based) ───────────────────────────
-builder.Services.AddLocalization(o => o.ResourcesPath = "Resources");
+// No ResourcesPath: the SharedResource marker type already lives in the Daleel.Web.Resources
+// namespace, so its translations embed as Daleel.Web.Resources.SharedResource[.ar]. Setting
+// ResourcesPath="Resources" here would make the localizer look for a *doubled* prefix
+// (Daleel.Web.Resources.Resources.SharedResource), miss every key, and render raw ids ("Nav.Home").
+builder.Services.AddLocalization();
 var supportedCultures = new[] { "en", "ar" };
 builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>(o =>
 {

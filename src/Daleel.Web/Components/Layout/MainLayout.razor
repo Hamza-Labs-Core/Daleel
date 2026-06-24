@@ -1,15 +1,12 @@
 @inherits LayoutComponentBase
-@implements IDisposable
-@inject LayoutState State
-@inject BrowserStore Store
 
-@* MudBlazor providers must live once, at the layout root. *@
-<MudThemeProvider Theme="_theme" IsDarkMode="State.IsDarkMode" />
-<MudPopoverProvider />
-<MudSnackbarProvider />
-<MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Small" CloseButton="true" />
+@* This layout is static SSR — it wraps @Body, which must stay static so each page keeps its own
+   @rendermode and the static auth pages (Login/Logout) keep working. Everything interactive lives
+   in two islands: InteractiveProviders (theme + dialogs/snackbars/popovers) and AppBarControls
+   (language, direction, theme toggle). Initial text direction follows the request culture. *@
+<InteractiveProviders />
 
-<MudRTLProvider RightToLeft="State.RightToLeft">
+<MudRTLProvider RightToLeft="@RightToLeft">
     <MudLayout>
         <MudAppBar Elevation="1" Dense="true">
             <MudIconButton Icon="@Icons.Material.Filled.Menu" Color="Color.Inherit" Edge="Edge.Start"
@@ -19,17 +16,7 @@
                 <MudText Typo="Typo.h6" Class="daleel-wordmark">دليل · Daleel</MudText>
             </MudLink>
             <MudSpacer />
-            <div class="mr-2"><LanguageSwitcher /></div>
-            <MudTooltip Text="@(State.RightToLeft ? "Left-to-right" : "Right-to-left")">
-                <MudIconButton Icon="@Icons.Material.Filled.FormatTextdirectionRToL"
-                               Color="@(State.RightToLeft ? Color.Primary : Color.Inherit)"
-                               OnClick="ToggleRtl" aria-label="Toggle text direction" />
-            </MudTooltip>
-            <MudTooltip Text="@(State.IsDarkMode ? "Light theme" : "Dark theme")">
-                <MudIconButton Icon="@(State.IsDarkMode ? Icons.Material.Filled.LightMode : Icons.Material.Filled.DarkMode)"
-                               Color="Color.Inherit"
-                               OnClick="ToggleTheme" aria-label="Toggle theme" />
-            </MudTooltip>
+            <AppBarControls />
             <MudTooltip Text="GitHub">
                 <MudIconButton Icon="@Icons.Custom.Brands.GitHub" Color="Color.Inherit"
                                Href="https://github.com/Hamza-Labs-Core/Daleel" Target="_blank"
@@ -59,54 +46,12 @@
 </div>
 
 @code {
-    private readonly MudTheme _theme = DaleelTheme.Build();
     private bool _drawerOpen = true;
 
-    protected override void OnInitialized()
-    {
-        State.Changed += OnStateChanged;
-        // Arabic UI defaults to RTL; the manual toggle (restored below) can still override.
-        if (System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ar")
-        {
-            State.SetRightToLeft(true);
-        }
-    }
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender)
-        {
-            return;
-        }
-
-        // Restore the visitor's saved theme + direction (no-op during prerender).
-        var theme = await Store.GetAsync("theme");
-        var rtl = await Store.GetAsync("rtl");
-        if (theme is not null)
-        {
-            State.SetDarkMode(theme != "light");
-        }
-        if (rtl is not null)
-        {
-            State.SetRightToLeft(rtl == "1");
-        }
-    }
+    // Arabic resolves to RTL; the request culture is set by the localization middleware (cookie →
+    // Accept-Language), so this is correct on every load and after a language switch's full reload.
+    private static bool RightToLeft =>
+        System.Globalization.CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft;
 
     private void ToggleDrawer() => _drawerOpen = !_drawerOpen;
-
-    private async Task ToggleTheme()
-    {
-        State.ToggleDarkMode();
-        await Store.SetAsync("theme", State.IsDarkMode ? "dark" : "light");
-    }
-
-    private async Task ToggleRtl()
-    {
-        State.ToggleRightToLeft();
-        await Store.SetAsync("rtl", State.RightToLeft ? "1" : "0");
-    }
-
-    private void OnStateChanged() => InvokeAsync(StateHasChanged);
-
-    public void Dispose() => State.Changed -= OnStateChanged;
 }

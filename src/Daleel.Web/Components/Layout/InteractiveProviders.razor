@@ -1,0 +1,45 @@
+@* MudBlazor's global providers, rendered as an interactive island.
+
+   MainLayout itself is static SSR: it wraps @Body, and @Body must stay static so that each page can
+   keep declaring its own @rendermode and so the static auth pages (Login/Logout with AntiforgeryToken)
+   keep working. A static MudThemeProvider can't react to the theme toggle, and static dialog/snackbar/
+   popover providers never fire for interactive pages — which is why theme switching looked dead.
+
+   These providers don't wrap page content (MudThemeProvider emits global CSS variables; the overlay
+   providers render their own roots), so they can live in their own InteractiveServer island. Every
+   interactive component in the circuit shares one scoped LayoutState, so the app-bar toggle and the
+   Settings page both drive this provider through State.Changed. *@
+@rendermode InteractiveServer
+@implements IDisposable
+@inject LayoutState State
+@inject BrowserStore Store
+
+<MudThemeProvider Theme="_theme" IsDarkMode="State.IsDarkMode" />
+<MudPopoverProvider />
+<MudSnackbarProvider />
+<MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Small" CloseButton="true" />
+
+@code {
+    private readonly MudTheme _theme = DaleelTheme.Build();
+
+    protected override void OnInitialized() => State.Changed += OnStateChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        // Restore the visitor's saved theme now that the circuit is live and JS interop works.
+        var theme = await Store.GetAsync("theme");
+        if (theme is not null)
+        {
+            State.SetDarkMode(theme != "light");
+        }
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => State.Changed -= OnStateChanged;
+}

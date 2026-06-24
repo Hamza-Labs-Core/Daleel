@@ -4,6 +4,7 @@
 @inject LayoutState Layout
 @inject ISnackbar Snackbar
 @inject ICurrentUser CurrentUser
+@inject IJSRuntime JS
 @using Daleel.Core.Moderation
 
 <PageTitle>دليل · Settings</PageTitle>
@@ -235,6 +236,8 @@
         _rtl = value;
         Layout.SetRightToLeft(value);
         await Store.SetAsync("rtl", value ? "1" : "0");
+        // Flip the document direction in place; the static RTL provider follows the request culture.
+        await JS.InvokeVoidAsync("daleel.setDir", value ? "rtl" : "ltr");
     }
 
     private async Task OnStrictnessChanged(FilterStrictness value)
