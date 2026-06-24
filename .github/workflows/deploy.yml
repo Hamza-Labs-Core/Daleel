@@ -297,6 +297,13 @@ jobs:
             CONTEXT_DEV_API_KEY=${{ secrets.CONTEXT_DEV_API_KEY }}
             GOOGLE_PLACES_API_KEY=${{ secrets.GOOGLE_PLACES_API_KEY }}
             APIFY_TOKEN=${{ secrets.APIFY_TOKEN }}
+            # Google OAuth (Sign in with Google). Optional — blank disables the
+            # provider cleanly. Program.cs maps these friendly names onto the
+            # Authentication:Google:ClientId/ClientSecret config keys the app reads.
+            # Admins can also override these at /admin/oauth (SystemConfig wins),
+            # so this is just the bootstrap/fallback source.
+            GOOGLE_OAUTH_CLIENT_ID=${{ secrets.GOOGLE_OAUTH_CLIENT_ID }}
+            GOOGLE_OAUTH_CLIENT_SECRET=${{ secrets.GOOGLE_OAUTH_CLIENT_SECRET }}
             # Cloudflare browser-rendering creds (org-level secrets). If unset they
             # resolve to empty, which the app treats as "absent" — harmless.
             CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

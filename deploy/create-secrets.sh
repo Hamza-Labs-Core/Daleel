@@ -22,6 +22,11 @@ SECRETS=(
   CONTEXT_DEV_API_KEY
   GOOGLE_PLACES_API_KEY
   APIFY_TOKEN
+  # OAuth sign-in (consumed by the app at runtime; optional — a CHANGE_ME
+  # placeholder leaves the provider disabled until a real value is set, and
+  # admins can instead manage these live at /admin/oauth without redeploying).
+  GOOGLE_OAUTH_CLIENT_ID
+  GOOGLE_OAUTH_CLIENT_SECRET
   # Deploy (consumed by .github/workflows/deploy.yml)
   DEPLOY_SSH_HOST
   DEPLOY_SSH_USER

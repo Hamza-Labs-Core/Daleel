@@ -5,33 +5,80 @@ namespace Daleel.Web.Auth;
 
 /// <summary>
 /// Wires up the external login providers. Each provider is registered <i>only</i> when its
-/// client id/secret are present in configuration, so the app boots cleanly with empty secrets and
+/// client id/secret resolve to non-empty values, so the app boots cleanly with empty secrets and
 /// the Login page (which enumerates registered schemes) shows exactly the configured providers.
+///
+/// Credentials resolve in this order: admin-set <see cref="Data.SystemConfig"/> overrides (passed in
+/// from the DB) first, then configuration (appsettings + the friendly env vars mapped in Program.cs).
+/// Because handlers are registered once at startup, changing a credential in the admin UI takes
+/// effect on the next app restart — which is required anyway to register a newly-enabled scheme.
 /// </summary>
 public static class AuthenticationConfig
 {
     public static AuthenticationBuilder AddExternalProviders(
-        this AuthenticationBuilder auth, IConfiguration config)
+        this AuthenticationBuilder auth,
+        IConfiguration config,
+        IReadOnlyDictionary<string, string>? sysOverrides = null)
     {
-        var section = config.GetSection("Authentication");
+        var defs = OAuthProviders.All.ToDictionary(p => p.Name, StringComparer.OrdinalIgnoreCase);
 
-        if (Has(section, "Google", "ClientId", "ClientSecret"))
+        // SystemConfig override wins when present and real; otherwise fall back to configuration.
+        string? Pick(string sysKey, string configKey)
+        {
+            if (sysOverrides is not null &&
+                sysOverrides.TryGetValue(sysKey, out var v) &&
+                OAuthProviders.IsRealValue(v))
+            {
+                return v.Trim();
+            }
+
+            var fromConfig = config[configKey];
+            return OAuthProviders.IsRealValue(fromConfig) ? fromConfig!.Trim() : null;
+        }
+
+        // Resolves both halves of a provider's credential, or null if either is missing.
+        (string Id, string Secret)? Resolve(string provider)
+        {
+            var def = defs[provider];
+            var id = Pick(def.IdSysKey, def.IdConfigKey);
+            var secret = Pick(def.SecretSysKey, def.SecretConfigKey);
+            return id is not null && secret is not null ? (id, secret) : null;
+        }
+
+        if (Resolve("Google") is { } g)
         {
             auth.AddGoogle(o =>
             {
-                o.ClientId = section["Google:ClientId"]!;
-                o.ClientSecret = section["Google:ClientSecret"]!;
+                o.ClientId = g.Id;
+                o.ClientSecret = g.Secret;
             });
         }
 
-        if (Has(section, "Microsoft", "ClientId", "ClientSecret"))
+        if (Resolve("Microsoft") is { } ms)
         {
             auth.AddMicrosoftAccount(o =>
             {
-                o.ClientId = section["Microsoft:ClientId"]!;
-                o.ClientSecret = section["Microsoft:ClientSecret"]!;
+                o.ClientId = ms.Id;
+                o.ClientSecret = ms.Secret;
             });
         }
+
+        if (Resolve("GitHub") is { } gh)
+        {
+            auth.AddGitHub(o =>
+            {
+                o.ClientId = gh.Id;
+                o.ClientSecret = gh.Secret;
+                o.Scope.Add("user:email"); // GitHub hides email behind this scope
+            });
+        }
+
+        // Apple is a placeholder: its credentials can be stored/shown in the admin UI, but no handler
+        // is wired up yet (it needs the SignInWithApple package + a JWT-signed client secret).
+
+        // Twitter and Facebook keep config-only wiring — they use differently-named credential fields
+        // (ConsumerKey/Secret, AppId/Secret) and aren't part of the SystemConfig-managed set.
+        var section = config.GetSection("Authentication");
 
         if (Has(section, "Twitter", "ConsumerKey", "ConsumerSecret"))
         {
@@ -40,16 +87,6 @@ public static class AuthenticationConfig
                 o.ConsumerKey = section["Twitter:ConsumerKey"]!;
                 o.ConsumerSecret = section["Twitter:ConsumerSecret"]!;
                 o.RetrieveUserDetails = true; // needed to surface email/name
-            });
-        }
-
-        if (Has(section, "GitHub", "ClientId", "ClientSecret"))
-        {
-            auth.AddGitHub(o =>
-            {
-                o.ClientId = section["GitHub:ClientId"]!;
-                o.ClientSecret = section["GitHub:ClientSecret"]!;
-                o.Scope.Add("user:email"); // GitHub hides email behind this scope
             });
         }
 
