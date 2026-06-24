@@ -88,7 +88,13 @@
 
         @if (_status == "error")
         {
-            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">@(_error ?? "Search failed.")</MudAlert>
+            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+                <div>@(_error ?? "Search failed.")</div>
+                <div class="mt-1 d-flex align-center gap-1">
+                    <MudText Typo="Typo.caption">@L["Search.Trouble"]</MudText>
+                    <MudLink Href="/status" Typo="Typo.caption">@L["Search.CheckStatus"]</MudLink>
+                </div>
+            </MudAlert>
         }
 
         @if (_status == "completed" && _answer is not null)

@@ -66,8 +66,11 @@
   <data name="Nav.Compare" xml:space="preserve"><value>Compare</value></data>
   <data name="Nav.Monitor" xml:space="preserve"><value>Monitor</value></data>
   <data name="Nav.Faq" xml:space="preserve"><value>FAQ</value></data>
+  <data name="Nav.Status" xml:space="preserve"><value>Status</value></data>
 
   <data name="Search.Placeholder" xml:space="preserve"><value>Ask Daleel…</value></data>
+  <data name="Search.Trouble" xml:space="preserve"><value>Having trouble?</value></data>
+  <data name="Search.CheckStatus" xml:space="preserve"><value>Check our status page</value></data>
   <data name="Search.Search" xml:space="preserve"><value>Search</value></data>
   <data name="Search.Searching" xml:space="preserve"><value>Searching…</value></data>
   <data name="Search.Results" xml:space="preserve"><value>Results</value></data>
@@ -149,24 +152,42 @@
   <data name="Landing.Pricing.Free" xml:space="preserve"><value>Free</value></data>
   <data name="Landing.Pricing.Popular" xml:space="preserve"><value>Most popular</value></data>
   <data name="Landing.Pricing.Cta" xml:space="preserve"><value>Get started</value></data>
+  <data name="Landing.Pricing.Includes" xml:space="preserve"><value>Every feature included:</value></data>
+  <data name="Landing.Pricing.Feature.Search" xml:space="preserve"><value>Smart product &amp; price search</value></data>
+  <data name="Landing.Pricing.Feature.Compare" xml:space="preserve"><value>Price &amp; store comparison</value></data>
+  <data name="Landing.Pricing.Feature.Reputation" xml:space="preserve"><value>Brand reputation &amp; reviews</value></data>
+  <data name="Landing.Pricing.Feature.Deals" xml:space="preserve"><value>Deal monitoring &amp; alerts</value></data>
+  <data name="Landing.Pricing.Feature.History" xml:space="preserve"><value>Search history &amp; saved results</value></data>
+  <data name="Landing.Pricing.Feature.Bilingual" xml:space="preserve"><value>English &amp; Arabic interface</value></data>
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>For getting started</value></data>
-  <data name="Landing.Plan.Basic.F1" xml:space="preserve"><value>5 searches per month</value></data>
-  <data name="Landing.Plan.Basic.F2" xml:space="preserve"><value>Smart product &amp; price search</value></data>
-  <data name="Landing.Plan.Basic.F3" xml:space="preserve"><value>English &amp; Arabic interface</value></data>
+  <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>5 searches per month</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>For regular shoppers</value></data>
-  <data name="Landing.Plan.Pro.F1" xml:space="preserve"><value>100 searches per month</value></data>
-  <data name="Landing.Plan.Pro.F2" xml:space="preserve"><value>Price &amp; store comparison</value></data>
-  <data name="Landing.Plan.Pro.F3" xml:space="preserve"><value>Brand reputation &amp; reviews</value></data>
-  <data name="Landing.Plan.Pro.F4" xml:space="preserve"><value>Search history &amp; saved results</value></data>
+  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>100 searches per month</value></data>
   <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>For power users &amp; teams</value></data>
-  <data name="Landing.Plan.Unlimited.F1" xml:space="preserve"><value>Unlimited searches</value></data>
-  <data name="Landing.Plan.Unlimited.F2" xml:space="preserve"><value>Everything in Pro</value></data>
-  <data name="Landing.Plan.Unlimited.F3" xml:space="preserve"><value>Deal monitoring &amp; alerts</value></data>
-  <data name="Landing.Plan.Unlimited.F4" xml:space="preserve"><value>Priority support</value></data>
+  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>Unlimited searches</value></data>
   <data name="Landing.Cta.Title" xml:space="preserve"><value>Ready to shop smarter?</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>Create a free account and run your first search in seconds.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>Create free account</value></data>
   <data name="Landing.Cta.Login" xml:space="preserve"><value>I already have an account</value></data>
+
+  <data name="Status.Title" xml:space="preserve"><value>System status</value></data>
+  <data name="Status.Subtitle" xml:space="preserve"><value>Live health of Daleel and the services it depends on.</value></data>
+  <data name="Status.Checking" xml:space="preserve"><value>Checking services…</value></data>
+  <data name="Status.AllOperational" xml:space="preserve"><value>All systems operational.</value></data>
+  <data name="Status.Degraded" xml:space="preserve"><value>Some services are degraded — searches may be slower or fail.</value></data>
+  <data name="Status.Website" xml:space="preserve"><value>Website</value></data>
+  <data name="Status.Providers" xml:space="preserve"><value>Service providers</value></data>
+  <data name="Status.Operational" xml:space="preserve"><value>Operational</value></data>
+  <data name="Status.Down" xml:space="preserve"><value>Unreachable</value></data>
+  <data name="Status.NotConfigured" xml:space="preserve"><value>Not configured</value></data>
+  <data name="Status.LastSearch" xml:space="preserve"><value>Last successful search</value></data>
+  <data name="Status.Never" xml:space="preserve"><value>No searches yet</value></data>
+  <data name="Status.Refresh" xml:space="preserve"><value>Refresh</value></data>
+  <data name="Status.CheckedAt" xml:space="preserve"><value>Last checked:</value></data>
+  <data name="Status.JustNow" xml:space="preserve"><value>just now</value></data>
+  <data name="Status.MinutesAgo" xml:space="preserve"><value>{0} min ago</value></data>
+  <data name="Status.HoursAgo" xml:space="preserve"><value>{0} h ago</value></data>
+  <data name="Status.DaysAgo" xml:space="preserve"><value>{0} d ago</value></data>
 
   <data name="Faq.Title" xml:space="preserve"><value>Frequently asked questions</value></data>
   <data name="Faq.Subtitle" xml:space="preserve"><value>Everything you might want to know about Daleel.</value></data>

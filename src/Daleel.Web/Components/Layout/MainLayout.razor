@@ -1,4 +1,5 @@
 @inherits LayoutComponentBase
+@inject IStringLocalizer<SharedResource> L
 
 @* This layout renders InteractiveServer (App.razor applies the render mode globally), so the drawer
    toggle, theme switch and menus are all live here. The auth pages opt out of interactivity via their
@@ -31,6 +32,19 @@
                 <HaramBlurBanner />
                 @Body
             </MudContainer>
+
+            @* Footer: lightweight links, including the public system-status page. *@
+            <footer class="daleel-footer">
+                <MudContainer MaxWidth="MaxWidth.Large" Class="d-flex flex-wrap align-center gap-4 py-4">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">© دليل · Daleel</MudText>
+                    <MudSpacer />
+                    <MudLink Href="/pricing" Typo="Typo.caption" Color="Color.Inherit">@L["Nav.Pricing"]</MudLink>
+                    <MudLink Href="/faq" Typo="Typo.caption" Color="Color.Inherit">@L["Nav.Faq"]</MudLink>
+                    <MudLink Href="/status" Typo="Typo.caption" Color="Color.Inherit">
+                        <span class="daleel-status-dot"></span>@L["Nav.Status"]
+                    </MudLink>
+                </MudContainer>
+            </footer>
         </MudMainContent>
     </MudLayout>
 </MudRTLProvider>

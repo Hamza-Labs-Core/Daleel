@@ -1,7 +1,9 @@
 @* Single source of truth for the pricing tiers, shared by the anonymous landing page
    (LandingPage.razor) and the standalone /pricing page (Pricing.razor) so the two never drift.
-   All copy is localized via the shared catalogue (EN/AR). The grid is mobile-first:
-   one column on xs, two on sm, three on md+. *@
+   Every plan unlocks the *same* features — the only thing that changes between tiers is how many
+   searches you get per month. So each card leads with its monthly search allowance and then shows
+   the identical "everything included" feature list. All copy is localized via the shared catalogue
+   (EN/AR). The grid is mobile-first: one column on xs, two on sm, three on md+. *@
 @inject IStringLocalizer<SharedResource> L
 
 <MudGrid Spacing="4" Justify="Justify.Center">
@@ -31,8 +33,16 @@
                     }
                 </div>
 
+                @* The one differentiator between tiers: the monthly search allowance. *@
+                <div class="daleel-price-searches mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.Search" Color="Color.Primary" Size="Size.Small" Class="me-2" />
+                    <MudText Typo="Typo.subtitle1" Style="display:inline;font-weight:600;">@t.Searches</MudText>
+                </div>
+
+                @* Everything below is identical for every plan — all features are included on all tiers. *@
+                <MudText Typo="Typo.overline" Color="Color.Secondary">@L["Landing.Pricing.Includes"]</MudText>
                 <MudList T="string" Dense="true" Class="mb-2">
-                    @foreach (var feature in t.Features)
+                    @foreach (var feature in _commonFeatures)
                     {
                         <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">
                             <MudText Typo="Typo.body2">@feature</MudText>
@@ -50,15 +60,24 @@
 </MudGrid>
 
 @code {
-    private sealed record Tier(string Name, string Tag, string Price, bool Free, bool Popular, string[] Features);
+    private sealed record Tier(string Name, string Tag, string Price, bool Free, bool Popular, string Searches);
 
+    // Tiers differ ONLY by name, price and monthly search allowance — nothing else.
     private Tier[] _tiers => new[]
     {
-        new Tier(L["Plan.Basic"], L["Landing.Plan.Basic.Tag"], "0", Free: true, Popular: false,
-            new[] { L["Landing.Plan.Basic.F1"].Value, L["Landing.Plan.Basic.F2"].Value, L["Landing.Plan.Basic.F3"].Value }),
-        new Tier(L["Plan.Pro"], L["Landing.Plan.Pro.Tag"], "9.99", Free: false, Popular: true,
-            new[] { L["Landing.Plan.Pro.F1"].Value, L["Landing.Plan.Pro.F2"].Value, L["Landing.Plan.Pro.F3"].Value, L["Landing.Plan.Pro.F4"].Value }),
-        new Tier(L["Plan.Unlimited"], L["Landing.Plan.Unlimited.Tag"], "100", Free: false, Popular: false,
-            new[] { L["Landing.Plan.Unlimited.F1"].Value, L["Landing.Plan.Unlimited.F2"].Value, L["Landing.Plan.Unlimited.F3"].Value, L["Landing.Plan.Unlimited.F4"].Value }),
+        new Tier(L["Plan.Basic"], L["Landing.Plan.Basic.Tag"], "0", Free: true, Popular: false, L["Landing.Plan.Basic.Searches"].Value),
+        new Tier(L["Plan.Pro"], L["Landing.Plan.Pro.Tag"], "9.99", Free: false, Popular: true, L["Landing.Plan.Pro.Searches"].Value),
+        new Tier(L["Plan.Unlimited"], L["Landing.Plan.Unlimited.Tag"], "100", Free: false, Popular: false, L["Landing.Plan.Unlimited.Searches"].Value),
+    };
+
+    // The full feature set — included on every plan, shown identically on each card.
+    private string[] _commonFeatures => new[]
+    {
+        L["Landing.Pricing.Feature.Search"].Value,
+        L["Landing.Pricing.Feature.Compare"].Value,
+        L["Landing.Pricing.Feature.Reputation"].Value,
+        L["Landing.Pricing.Feature.Deals"].Value,
+        L["Landing.Pricing.Feature.History"].Value,
+        L["Landing.Pricing.Feature.Bilingual"].Value,
     };
 }

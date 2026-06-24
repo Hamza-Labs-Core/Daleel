@@ -26,9 +26,31 @@
 <body>
     <Routes @rendermode="PageRenderMode" />
 
+    @* Custom reconnection card — hidden by default. boot.js retries the circuit silently and only adds
+       the .daleel-reconnect-show class here after every retry has failed, so users never see the old
+       "Attempting to connect…" flash during normal navigation. *@
+    <div id="daleel-reconnect">
+        <div class="daleel-reconnect-card">
+            <div class="daleel-reconnect-title">@(_rtl ? "انقطع الاتصال بالخادم" : "Connection lost")</div>
+            <div class="daleel-reconnect-text">
+                @(_rtl
+                    ? "تعذّر الوصول إلى الخادم بعد عدة محاولات."
+                    : "We couldn't reach the server after several attempts.")
+            </div>
+            <div class="daleel-reconnect-actions">
+                <button id="daleel-reconnect-retry" type="button" class="daleel-reconnect-btn">
+                    @(_rtl ? "إعادة المحاولة" : "Try again")
+                </button>
+                <a href="/status" class="daleel-reconnect-link">@(_rtl ? "حالة النظام" : "Check status")</a>
+            </div>
+        </div>
+    </div>
+
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
     <script src="daleel.js"></script>
-    <script src="_framework/blazor.web.js"></script>
+    @* autostart=false lets boot.js call Blazor.start() with our silent reconnection handler. *@
+    <script src="_framework/blazor.web.js" autostart="false"></script>
+    <script src="boot.js"></script>
 </body>
 
 </html>
@@ -40,6 +62,10 @@
     // stay static SSR so its <AntiforgeryToken /> form post keeps working. Login and register only emit
     // OAuth redirect links (no form post), so they render interactively under the themed MainLayout.
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    // The host document is static SSR, so the reconnection card (which lives outside the Blazor circuit)
+    // can't be localized via IStringLocalizer at runtime — read the request culture directly instead.
+    private static bool _rtl => System.Globalization.CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft;
 
     private static readonly string[] StaticAuthPaths = { "/logout" };
 

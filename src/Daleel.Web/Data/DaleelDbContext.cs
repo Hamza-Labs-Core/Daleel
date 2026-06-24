@@ -100,24 +100,35 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.PriceYearly).HasColumnType("decimal(10,2)");
 
             // The three configurable tiers (admin can edit these later via /admin/plans).
+            // Every tier unlocks the SAME features — the only thing that differs between plans is the
+            // monthly search allowance. So each plan's first bullet is its search count and the rest of
+            // the list is identical across all three. Keep this in sync with PricingTiers.razor.
+            const string CommonFeatures =
+                "\"Smart product & price search\"," +
+                "\"Price & store comparison\"," +
+                "\"Brand reputation & reviews\"," +
+                "\"Deal monitoring & alerts\"," +
+                "\"Search history & saved results\"," +
+                "\"English & Arabic interface\"";
+
             e.HasData(
                 new SubscriptionPlan
                 {
                     Id = SubscriptionPlan.BasicId, Name = "Basic", SearchesPerMonth = 5,
                     PriceMonthly = 0m, IsActive = true, SortOrder = 1,
-                    FeaturesJson = "[\"5 searches per month\",\"Halal-filtered results\",\"Up to 10 saved results\"]"
+                    FeaturesJson = "[\"5 searches per month\"," + CommonFeatures + "]"
                 },
                 new SubscriptionPlan
                 {
                     Id = SubscriptionPlan.ProId, Name = "Pro", SearchesPerMonth = 100,
                     PriceMonthly = 9.99m, IsActive = true, SortOrder = 2,
-                    FeaturesJson = "[\"100 searches per month\",\"Full results & JSON export\",\"Unlimited saved results\",\"Priority models\"]"
+                    FeaturesJson = "[\"100 searches per month\"," + CommonFeatures + "]"
                 },
                 new SubscriptionPlan
                 {
                     Id = SubscriptionPlan.UnlimitedId, Name = "Unlimited", SearchesPerMonth = null,
                     PriceMonthly = 100m, IsActive = true, SortOrder = 3,
-                    FeaturesJson = "[\"Unlimited searches\",\"Everything in Pro\",\"Priority support\"]"
+                    FeaturesJson = "[\"Unlimited searches\"," + CommonFeatures + "]"
                 });
         });
     }

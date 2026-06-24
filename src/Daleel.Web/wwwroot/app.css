@@ -128,6 +128,15 @@ html, body {
     flex-grow: 1;
 }
 
+/* The monthly search allowance — the one thing that differs between tiers, so it's highlighted. */
+.daleel-price-searches {
+    display: flex;
+    align-items: center;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(var(--mud-palette-primary-rgb), .08);
+}
+
 .daleel-price-popular {
     border: 2px solid var(--mud-palette-primary);
 }
@@ -164,6 +173,93 @@ html, body {
 
 .daleel-cta-sub {
     max-width: 48ch;
+}
+
+/* App footer */
+.daleel-footer {
+    border-top: 1px solid var(--mud-palette-divider, rgba(0, 0, 0, 0.12));
+    margin-top: 24px;
+}
+
+.daleel-footer a {
+    text-decoration: none;
+}
+
+/* Small green dot next to the Status link in the footer. */
+.daleel-status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--mud-palette-success, #2e7d32);
+    margin-inline-end: 6px;
+    vertical-align: middle;
+}
+
+/* Custom reconnection card (see boot.js). Hidden until every silent retry has failed; then .daleel-
+   reconnect-show is added and this overlay appears. The default Blazor reconnect modal is suppressed
+   because boot.js supplies a custom reconnectionHandler. */
+#daleel-reconnect {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    background: rgba(11, 15, 25, 0.55);
+    backdrop-filter: blur(2px);
+}
+
+#daleel-reconnect.daleel-reconnect-show {
+    display: flex;
+}
+
+.daleel-reconnect-card {
+    background: var(--mud-palette-surface, #fff);
+    color: var(--mud-palette-text-primary, #1a1a1a);
+    border-radius: 16px;
+    padding: 24px 28px;
+    max-width: 420px;
+    width: calc(100% - 32px);
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+    text-align: center;
+}
+
+.daleel-reconnect-title {
+    font-size: 1.15rem;
+    font-weight: 700;
+    margin-bottom: 8px;
+}
+
+.daleel-reconnect-text {
+    font-size: 0.95rem;
+    opacity: 0.8;
+    margin-bottom: 18px;
+}
+
+.daleel-reconnect-actions {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    justify-content: center;
+}
+
+.daleel-reconnect-btn {
+    background: var(--mud-palette-primary, #594ae2);
+    color: var(--mud-palette-primary-text, #fff);
+    border: none;
+    border-radius: 999px;
+    padding: 8px 22px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.daleel-reconnect-link {
+    color: var(--mud-palette-primary, #594ae2);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 600;
 }
 
 /* Blazor framework error toast */

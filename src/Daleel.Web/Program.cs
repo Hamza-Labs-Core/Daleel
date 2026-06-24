@@ -119,6 +119,10 @@ builder.Services.AddSingleton<IAgentFactory, AgentFactory>();
 builder.Services.AddScoped<IModelDetailService, ModelDetailService>();
 builder.Services.AddSingleton<MonitorService>();
 
+// /status page: HTTP probes against each provider's host + last-search lookup.
+builder.Services.AddHttpClient();
+builder.Services.AddScoped<IStatusService, StatusService>();
+
 // Liveness probe consumed by the Docker HEALTHCHECK, deploy.sh, and Caddy upstream checks.
 builder.Services.AddHealthChecks();
 

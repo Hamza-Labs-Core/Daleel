@@ -1,0 +1,132 @@
+@page "/status"
+@inject IStatusService StatusSvc
+@inject IStringLocalizer<SharedResource> L
+
+@* Public system-status page. Reachable when signed out (and intentionally simple) so it still works
+   when other parts of the app are struggling. Probes run client-side-triggered on the server circuit
+   via OnAfterRenderAsync, so the first paint is instant and results stream in. *@
+
+<PageTitle>دليل · @L["Status.Title"]</PageTitle>
+
+<div class="mb-6">
+    <MudText Typo="Typo.h4" Class="mb-1">@L["Status.Title"]</MudText>
+    <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Status.Subtitle"]</MudText>
+</div>
+
+@if (_status is null)
+{
+    <div class="d-flex align-center gap-3 my-6">
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+        <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Status.Checking"]</MudText>
+    </div>
+}
+else
+{
+    var degraded = !_status.AllOperational;
+
+    <MudAlert Severity="@(degraded ? Severity.Warning : Severity.Success)" Variant="Variant.Filled" Class="mb-5">
+        @(degraded ? L["Status.Degraded"] : L["Status.AllOperational"])
+    </MudAlert>
+
+    <MudPaper Outlined="true" Elevation="0" Class="pa-4 mb-4">
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Language" Class="me-3" Color="Color.Primary" />
+            <div class="flex-grow-1">
+                <MudText Typo="Typo.subtitle1">@L["Status.Website"]</MudText>
+            </div>
+            <MudChip T="string" Color="Color.Success" Size="Size.Small" Variant="Variant.Filled">@L["Status.Operational"]</MudChip>
+        </div>
+    </MudPaper>
+
+    <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mb-2">@L["Status.Providers"]</MudText>
+    <MudPaper Outlined="true" Elevation="0" Class="pa-2 mb-4">
+        <MudList T="string" Dense="false">
+            @foreach (var p in _status.Providers)
+            {
+                <MudListItem T="string">
+                    <div class="d-flex align-center">
+                        <MudIcon Icon="@StatusIcon(p)" Color="@StatusColor(p)" Class="me-3" />
+                        <div class="flex-grow-1">
+                            <MudText Typo="Typo.body1">@p.Name</MudText>
+                            @if (p.Configured && p.Reachable)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@($"{p.LatencyMs} ms")</MudText>
+                            }
+                        </div>
+                        <MudChip T="string" Color="@StatusColor(p)" Size="Size.Small" Variant="Variant.Text">@StatusLabel(p)</MudChip>
+                    </div>
+                </MudListItem>
+            }
+        </MudList>
+    </MudPaper>
+
+    <MudPaper Outlined="true" Elevation="0" Class="pa-4 mb-4">
+        <div class="d-flex align-center">
+            <MudIcon Icon="@Icons.Material.Filled.Schedule" Class="me-3" Color="Color.Primary" />
+            <div class="flex-grow-1">
+                <MudText Typo="Typo.subtitle1">@L["Status.LastSearch"]</MudText>
+            </div>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                @(_status.LastSuccessfulSearch is { } t ? FormatAgo(t) : L["Status.Never"])
+            </MudText>
+        </div>
+    </MudPaper>
+
+    <div class="d-flex align-center gap-3">
+        <MudButton StartIcon="@Icons.Material.Filled.Refresh" Variant="Variant.Outlined"
+                   Color="Color.Primary" OnClick="RefreshAsync" Disabled="_loading">
+            @L["Status.Refresh"]
+        </MudButton>
+        <MudText Typo="Typo.caption" Color="Color.Secondary">
+            @L["Status.CheckedAt"] @_status.CheckedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")
+        </MudText>
+    </div>
+}
+
+@code {
+    private SystemStatus? _status;
+    private bool _loading;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        _loading = true;
+        _status = null;
+        StateHasChanged();
+
+        _status = await StatusSvc.GetStatusAsync();
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private static string StatusIcon(ProviderHealth p) =>
+        !p.Configured ? Icons.Material.Filled.RemoveCircleOutline
+        : p.Reachable ? Icons.Material.Filled.CheckCircle
+        : Icons.Material.Filled.Error;
+
+    private static Color StatusColor(ProviderHealth p) =>
+        !p.Configured ? Color.Default
+        : p.Reachable ? Color.Success
+        : Color.Error;
+
+    private string StatusLabel(ProviderHealth p) =>
+        !p.Configured ? L["Status.NotConfigured"]
+        : p.Reachable ? L["Status.Operational"]
+        : L["Status.Down"];
+
+    // Short, locale-agnostic "x ago" rendering — good enough for an at-a-glance status page.
+    private string FormatAgo(DateTimeOffset when)
+    {
+        var span = DateTimeOffset.UtcNow - when;
+        if (span < TimeSpan.FromMinutes(1)) return L["Status.JustNow"];
+        if (span < TimeSpan.FromHours(1)) return string.Format(L["Status.MinutesAgo"], (int)span.TotalMinutes);
+        if (span < TimeSpan.FromDays(1)) return string.Format(L["Status.HoursAgo"], (int)span.TotalHours);
+        return string.Format(L["Status.DaysAgo"], (int)span.TotalDays);
+    }
+}

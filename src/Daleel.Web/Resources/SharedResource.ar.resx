@@ -66,8 +66,11 @@
   <data name="Nav.Compare" xml:space="preserve"><value>المقارنة</value></data>
   <data name="Nav.Monitor" xml:space="preserve"><value>المراقبة</value></data>
   <data name="Nav.Faq" xml:space="preserve"><value>الأسئلة الشائعة</value></data>
+  <data name="Nav.Status" xml:space="preserve"><value>الحالة</value></data>
 
   <data name="Search.Placeholder" xml:space="preserve"><value>اسأل دليل…</value></data>
+  <data name="Search.Trouble" xml:space="preserve"><value>تواجه مشكلة؟</value></data>
+  <data name="Search.CheckStatus" xml:space="preserve"><value>تحقّق من صفحة حالة النظام</value></data>
   <data name="Search.Search" xml:space="preserve"><value>بحث</value></data>
   <data name="Search.Searching" xml:space="preserve"><value>جارٍ البحث…</value></data>
   <data name="Search.Results" xml:space="preserve"><value>النتائج</value></data>
@@ -149,24 +152,42 @@
   <data name="Landing.Pricing.Free" xml:space="preserve"><value>مجانًا</value></data>
   <data name="Landing.Pricing.Popular" xml:space="preserve"><value>الأكثر شيوعًا</value></data>
   <data name="Landing.Pricing.Cta" xml:space="preserve"><value>ابدأ الآن</value></data>
+  <data name="Landing.Pricing.Includes" xml:space="preserve"><value>كل المزايا مشمولة:</value></data>
+  <data name="Landing.Pricing.Feature.Search" xml:space="preserve"><value>بحث ذكي عن المنتجات والأسعار</value></data>
+  <data name="Landing.Pricing.Feature.Compare" xml:space="preserve"><value>مقارنة الأسعار والمتاجر</value></data>
+  <data name="Landing.Pricing.Feature.Reputation" xml:space="preserve"><value>سمعة العلامات والتقييمات</value></data>
+  <data name="Landing.Pricing.Feature.Deals" xml:space="preserve"><value>متابعة العروض والتنبيهات</value></data>
+  <data name="Landing.Pricing.Feature.History" xml:space="preserve"><value>سجل البحث والنتائج المحفوظة</value></data>
+  <data name="Landing.Pricing.Feature.Bilingual" xml:space="preserve"><value>واجهة بالعربية والإنجليزية</value></data>
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>للبداية</value></data>
-  <data name="Landing.Plan.Basic.F1" xml:space="preserve"><value>٥ عمليات بحث شهريًا</value></data>
-  <data name="Landing.Plan.Basic.F2" xml:space="preserve"><value>بحث ذكي عن المنتجات والأسعار</value></data>
-  <data name="Landing.Plan.Basic.F3" xml:space="preserve"><value>واجهة بالعربية والإنجليزية</value></data>
+  <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>٥ عمليات بحث شهريًا</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>للمتسوّقين بانتظام</value></data>
-  <data name="Landing.Plan.Pro.F1" xml:space="preserve"><value>١٠٠ عملية بحث شهريًا</value></data>
-  <data name="Landing.Plan.Pro.F2" xml:space="preserve"><value>مقارنة الأسعار والمتاجر</value></data>
-  <data name="Landing.Plan.Pro.F3" xml:space="preserve"><value>سمعة العلامات والتقييمات</value></data>
-  <data name="Landing.Plan.Pro.F4" xml:space="preserve"><value>سجل البحث والنتائج المحفوظة</value></data>
+  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>١٠٠ عملية بحث شهريًا</value></data>
   <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>للمحترفين والفرق</value></data>
-  <data name="Landing.Plan.Unlimited.F1" xml:space="preserve"><value>عمليات بحث غير محدودة</value></data>
-  <data name="Landing.Plan.Unlimited.F2" xml:space="preserve"><value>كل مزايا الباقة الاحترافية</value></data>
-  <data name="Landing.Plan.Unlimited.F3" xml:space="preserve"><value>متابعة العروض والتنبيهات</value></data>
-  <data name="Landing.Plan.Unlimited.F4" xml:space="preserve"><value>دعم ذو أولوية</value></data>
+  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>عمليات بحث غير محدودة</value></data>
   <data name="Landing.Cta.Title" xml:space="preserve"><value>هل أنت مستعد لتتسوّق بذكاء؟</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>أنشئ حسابًا مجانيًا وابدأ أول عملية بحث خلال ثوانٍ.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>أنشئ حسابًا مجانيًا</value></data>
   <data name="Landing.Cta.Login" xml:space="preserve"><value>لدي حساب بالفعل</value></data>
+
+  <data name="Status.Title" xml:space="preserve"><value>حالة النظام</value></data>
+  <data name="Status.Subtitle" xml:space="preserve"><value>الحالة المباشرة لدليل والخدمات التي يعتمد عليها.</value></data>
+  <data name="Status.Checking" xml:space="preserve"><value>جارٍ فحص الخدمات…</value></data>
+  <data name="Status.AllOperational" xml:space="preserve"><value>جميع الأنظمة تعمل بشكل طبيعي.</value></data>
+  <data name="Status.Degraded" xml:space="preserve"><value>بعض الخدمات متعثّرة — قد تكون عمليات البحث أبطأ أو تفشل.</value></data>
+  <data name="Status.Website" xml:space="preserve"><value>الموقع</value></data>
+  <data name="Status.Providers" xml:space="preserve"><value>مزوّدو الخدمات</value></data>
+  <data name="Status.Operational" xml:space="preserve"><value>يعمل</value></data>
+  <data name="Status.Down" xml:space="preserve"><value>غير متاح</value></data>
+  <data name="Status.NotConfigured" xml:space="preserve"><value>غير مُهيّأ</value></data>
+  <data name="Status.LastSearch" xml:space="preserve"><value>آخر عملية بحث ناجحة</value></data>
+  <data name="Status.Never" xml:space="preserve"><value>لا توجد عمليات بحث بعد</value></data>
+  <data name="Status.Refresh" xml:space="preserve"><value>تحديث</value></data>
+  <data name="Status.CheckedAt" xml:space="preserve"><value>آخر فحص:</value></data>
+  <data name="Status.JustNow" xml:space="preserve"><value>الآن</value></data>
+  <data name="Status.MinutesAgo" xml:space="preserve"><value>قبل {0} دقيقة</value></data>
+  <data name="Status.HoursAgo" xml:space="preserve"><value>قبل {0} ساعة</value></data>
+  <data name="Status.DaysAgo" xml:space="preserve"><value>قبل {0} يوم</value></data>
 
   <data name="Faq.Title" xml:space="preserve"><value>الأسئلة الشائعة</value></data>
   <data name="Faq.Subtitle" xml:space="preserve"><value>كل ما قد ترغب بمعرفته عن دليل.</value></data>
