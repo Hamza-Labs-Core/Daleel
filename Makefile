@@ -28,8 +28,8 @@ run: ## Run the web app locally (http://localhost:5000)
 deploy: ## Run the deploy script (pull image, restart, health-check, rollback)
 	./deploy/deploy.sh $(TAG)
 
-setup-vps: ## Run the one-time VPS bootstrap script (needs sudo on the server)
-	sudo ./deploy/setup.sh
+setup-vps: ## VPS setup is automatic — the deploy workflow bootstraps the box
+	./deploy/setup.sh
 
 secrets: ## Create placeholder GitHub repo secrets (see deploy/create-secrets.sh)
 	./deploy/create-secrets.sh

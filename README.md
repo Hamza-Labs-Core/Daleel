@@ -285,30 +285,33 @@ Encrypt). CI/CD is GitHub Actions; the target is a **Hetzner CX23** VPS (Ubuntu 
 | [`ci.yml`](.github/workflows/ci.yml) | push to `main`, PRs | `dotnet build -warnaserror` → `dotnet test` → (main only) build + push image to GHCR |
 | [`deploy.yml`](.github/workflows/deploy.yml) | `workflow_dispatch`, tags `v*` | build + test → push image → **deploy to VPS** (manual approval via the `production` environment), with health-check + automatic rollback |
 
-### One-time VPS setup
+### VPS setup — automatic, no manual step
 
-```bash
-# On a fresh Hetzner CX23 (Ubuntu 22.04/24.04), as root:
-ssh root@your-server 'bash -s' < deploy/setup.sh
-```
+There is **no separate setup script to run**. The [`deploy.yml`](.github/workflows/deploy.yml)
+workflow's **Bootstrap VPS** step SSHes into the box and provisions it in-place, idempotently:
+it installs Docker + Compose, creates `/opt/daleel`, installs the `daleel.service` systemd unit,
+opens UFW ports (22/80/443), configures Docker log rotation, and logs in to GHCR (using the
+workflow's run-scoped `GITHUB_TOKEN`). On a fresh box it provisions everything; on an
+already-provisioned box every check is a fast no-op. The deploy is a single self-contained action.
 
-`deploy/setup.sh` installs Docker + Compose, creates the `daleel` service user, lays out
-`/opt/daleel`, installs a `daleel.service` systemd unit, opens UFW ports (22/80/443), and
-configures log rotation. Then on the server:
+To stand up a brand-new server, you only need to:
 
-1. Edit `/opt/daleel/.env` and fill in all secrets (template: [`deploy/.env.example`](deploy/.env.example)).
-2. Point DNS `daleel.hamzalabs.dev` (A/AAAA) → the server IP. To use a different host, set `CADDY_DOMAIN` in `.env`.
-3. If the GHCR image is private: `sudo -u daleel docker login ghcr.io`.
-4. Start it: `sudo systemctl start daleel.service` (or `sudo -u daleel /opt/daleel/deploy.sh latest`).
+1. Point DNS `daleel.hamzalabs.dev` (A/AAAA) → the server IP. To use a different host, set `CADDY_DOMAIN` in `.env`.
+2. Make sure the required GitHub secrets are set (see below) — including `DEPLOY_SSH_HOST`,
+   `DEPLOY_SSH_USER`, and `DEPLOY_SSH_KEY` for root SSH access to the box.
+3. Run the deploy (push a `v*` tag or run the **Deploy** workflow) and approve the `production` gate.
+
+The workflow writes `/opt/daleel/.env` from the GitHub secrets on every deploy, so you never
+hand-edit it. (`deploy/setup.sh` is now just a stub that points here.)
 
 ### Deploying a new version
 
 - **Automatic:** push a `v*` tag (or run the **Deploy** workflow manually) → approve the
-  `production` gate → the runner SSHes in and runs `deploy.sh`.
+  `production` gate → the runner bootstraps the box (idempotent) and runs `deploy.sh`.
 - **Manual on the box:** `cd /opt/daleel && ./deploy.sh <tag>` — pulls the image, restarts
   with `--wait`, health-checks `/health`, and **rolls back to the previous image** on failure.
 
-`make` shortcuts: `make build`, `make test`, `make docker`, `make deploy`, `make setup-vps`.
+`make` shortcuts: `make build`, `make test`, `make docker`, `make deploy`.
 
 ### Required GitHub secrets
 

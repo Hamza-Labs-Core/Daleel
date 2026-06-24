@@ -83,6 +83,11 @@ jobs:
     name: Deploy to VPS
     runs-on: ubuntu-latest
     needs: docker
+    # contents: read for the checkout; packages: read so the run-scoped
+    # GITHUB_TOKEN can `docker login ghcr.io` on the VPS and pull the private image.
+    permissions:
+      contents: read
+      packages: read
     # Manual approval gate — configure required reviewers on the "production"
     # environment in repo Settings -> Environments.
     environment: production
@@ -141,36 +146,137 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Deploying tag: $TAG"
 
-      # Preflight: confirm the box was bootstrapped before we try to mutate it.
-      # The deploy steps below assume /opt/daleel exists and Docker is installed
-      # (both are laid down by deploy/setup.sh). If a fresh/rebuilt VPS hasn't had
-      # setup.sh run yet, fail here with an actionable message instead of a
-      # confusing "no such file" or "docker: command not found" deep in deploy.sh.
-      - name: Preflight — verify VPS is bootstrapped
+      # Bootstrap the VPS in-place. This makes the deploy FULLY self-contained:
+      # on a fresh/rebuilt box it provisions everything Daleel needs to run; on an
+      # already-provisioned box every check is a fast no-op. There is no separate
+      # manual setup step — this replaces the old `deploy/setup.sh` entirely.
+      #
+      # Idempotency strategy: each section guards on the actual end state (does the
+      # binary/dir/unit/file already exist?) so re-runs cost a few `command -v`/
+      # `[ -f ]` checks, not a reinstall. `ufw allow` and `docker login` are
+      # themselves idempotent.
+      #
+      # GHCR auth uses the workflow's run-scoped GITHUB_TOKEN (packages: read),
+      # passed via envs: so it is NOT interpolated into the script body and never
+      # appears in the rendered command or logs.
+      - name: Bootstrap VPS (idempotent — provisions on first run, skips fast after)
         uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.DEPLOY_SSH_HOST }}
           username: ${{ secrets.DEPLOY_SSH_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN
           script: |
             set -euo pipefail
-            ok=true
-            if [ ! -d /opt/daleel ]; then
-              echo "::error::/opt/daleel does not exist on the VPS."
-              echo "  -> /opt/daleel is missing." >&2
-              ok=false
+            APP_DIR=/opt/daleel
+            log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+
+            # --- 1. Docker Engine + Compose plugin (official repo) ---------------
+            if command -v docker >/dev/null 2>&1; then
+              log "Docker already installed — skipping."
+            else
+              log "Installing Docker Engine + Compose plugin..."
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -y
+              apt-get install -y ca-certificates curl gnupg ufw
+              install -m 0755 -d /etc/apt/keyrings
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+                | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+              chmod a+r /etc/apt/keyrings/docker.gpg
+              . /etc/os-release
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+                > /etc/apt/sources.list.d/docker.list
+              apt-get update -y
+              apt-get install -y docker-ce docker-ce-cli containerd.io \
+                docker-buildx-plugin docker-compose-plugin
+              systemctl enable --now docker
             fi
-            if ! command -v docker >/dev/null 2>&1; then
-              echo "::error::Docker is not installed on the VPS."
-              echo "  -> docker command not found." >&2
-              ok=false
+
+            # --- 2. /opt/daleel layout -------------------------------------------
+            if [ -d "$APP_DIR" ]; then
+              log "$APP_DIR already exists — skipping."
+            else
+              log "Creating $APP_DIR ..."
+              mkdir -p "$APP_DIR"
             fi
-            if [ "$ok" != true ]; then
-              echo "The VPS has not been bootstrapped. Run deploy/setup.sh on the box first:" >&2
-              echo "    ssh root@<vps> 'bash -s' < deploy/setup.sh" >&2
-              exit 1
+
+            # --- 3. systemd unit — keeps the compose stack up across reboots -----
+            # Static content; write only when absent so re-runs stay fast. Heredoc
+            # body + terminator sit at the YAML block's base indent so they land
+            # flush-left after YAML strips it (else 'UNIT' would never match).
+            if [ ! -f /etc/systemd/system/daleel.service ]; then
+              log "Installing systemd unit daleel.service ..."
+              cat > /etc/systemd/system/daleel.service <<'UNIT'
+            [Unit]
+            Description=Daleel production stack (docker compose)
+            Requires=docker.service
+            After=docker.service network-online.target
+            Wants=network-online.target
+
+            [Service]
+            Type=oneshot
+            RemainAfterExit=true
+            WorkingDirectory=/opt/daleel
+            ExecStart=/usr/bin/docker compose up -d --wait
+            ExecStop=/usr/bin/docker compose down
+            ExecReload=/usr/bin/docker compose up -d --wait
+            TimeoutStartSec=300
+
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+              systemctl daemon-reload
+              systemctl enable daleel.service
+            else
+              log "systemd unit daleel.service already present — skipping."
             fi
-            echo "Preflight OK: /opt/daleel exists and Docker is installed."
+
+            # --- 4. UFW firewall — SSH + HTTP + HTTPS ----------------------------
+            # `ufw allow` is idempotent. CRITICAL: 22 must be allowed BEFORE we
+            # enable UFW, or enabling drops the SSH session this deploy rides on.
+            if command -v ufw >/dev/null 2>&1; then
+              log "Ensuring UFW allows 22, 80, 443 ..."
+              ufw allow 22/tcp
+              ufw allow 80/tcp
+              ufw allow 443/tcp
+              ufw allow 443/udp        # HTTP/3 (QUIC)
+              ufw status | grep -q "Status: active" || ufw --force enable
+            fi
+
+            # --- 5. Docker log rotation (belt-and-suspenders alongside the
+            #        per-service max-size limits in docker-compose.yml) ----------
+            mkdir -p /etc/docker
+            if [ ! -f /etc/docker/daemon.json ]; then
+              log "Configuring Docker daemon log rotation..."
+              cat > /etc/docker/daemon.json <<'JSON'
+            {
+              "log-driver": "json-file",
+              "log-opts": { "max-size": "10m", "max-file": "3" }
+            }
+            JSON
+              systemctl restart docker
+            fi
+            if [ ! -f /etc/logrotate.d/daleel ]; then
+              cat > /etc/logrotate.d/daleel <<'ROT'
+            /var/lib/docker/containers/*/*.log {
+              rotate 7
+              daily
+              compress
+              missingok
+              delaycompress
+              copytruncate
+            }
+            ROT
+            fi
+
+            # --- 6. GHCR login so `docker pull` of the private image works -------
+            log "Logging in to ghcr.io ..."
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+            log "Bootstrap complete — VPS is ready to deploy."
 
       - name: Write /opt/daleel/.env from GitHub secrets
         uses: appleboy/ssh-action@v1
@@ -205,10 +311,11 @@ jobs:
             rm -f "/tmp/daleel.env.$$"
 
       # Ship the latest infra config (Caddyfile / compose / deploy.sh) to the box.
-      # The deploy pipeline pulls a new IMAGE, but these are bind-mounted files
-      # placed by setup.sh — without this sync, repo changes to them (e.g. the
-      # Caddyfile) would never reach production without a manual setup.sh re-run.
-      # scp lands them in /tmp; the next step installs them with daleel ownership.
+      # The deploy pipeline pulls a new IMAGE, but these are bind-mounted files;
+      # without this sync, repo changes to them (e.g. the Caddyfile) would never
+      # reach production. The bootstrap step above only creates /opt/daleel — these
+      # files are installed fresh from the repo on every deploy by the next step.
+      # scp lands them in /tmp; the next step installs them into /opt/daleel.
       - name: Stage deploy config on the VPS
         uses: appleboy/scp-action@v1
         with:
