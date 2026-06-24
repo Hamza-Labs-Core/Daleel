@@ -162,9 +162,9 @@
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>للبداية</value></data>
   <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>٥ عمليات بحث شهريًا</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>للمتسوّقين بانتظام</value></data>
-  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>١٠٠ عملية بحث شهريًا</value></data>
+  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>٥٠ عملية بحث شهريًا</value></data>
   <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>للمحترفين والفرق</value></data>
-  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>عمليات بحث غير محدودة</value></data>
+  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>٢٥٠ عملية بحث شهريًا</value></data>
   <data name="Landing.Cta.Title" xml:space="preserve"><value>هل أنت مستعد لتتسوّق بذكاء؟</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>أنشئ حسابًا مجانيًا وابدأ أول عملية بحث خلال ثوانٍ.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>أنشئ حسابًا مجانيًا</value></data>

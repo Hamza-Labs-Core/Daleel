@@ -14,8 +14,15 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Razor components with both interactive runtimes (Server for the secret-bearing agent pages,
 // WebAssembly available for the Auto runtime).
+//
+// DetailedErrors surfaces the full server-side stack trace of any unhandled circuit exception to the
+// browser (instead of the opaque "Unhandled exception on the current circuit"). It's config-driven so
+// it can be toggled per environment: it defaults OFF (don't leak stack traces to clients), and is
+// currently enabled in appsettings.json to diagnose a production circuit error. Set "DetailedErrors"
+// back to false once the root cause is found.
 builder.Services.AddRazorComponents()
-    .AddInteractiveServerComponents()
+    .AddInteractiveServerComponents(options =>
+        options.DetailedErrors = builder.Configuration.GetValue("DetailedErrors", false))
     .AddInteractiveWebAssemblyComponents();
 
 // MudBlazor UI services (theme, dialogs, snackbars, popovers).

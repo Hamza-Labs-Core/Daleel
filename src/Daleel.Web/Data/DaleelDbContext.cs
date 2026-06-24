@@ -120,15 +120,15 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
                 },
                 new SubscriptionPlan
                 {
-                    Id = SubscriptionPlan.ProId, Name = "Pro", SearchesPerMonth = 100,
+                    Id = SubscriptionPlan.ProId, Name = "Pro", SearchesPerMonth = 50,
                     PriceMonthly = 9.99m, IsActive = true, SortOrder = 2,
-                    FeaturesJson = "[\"100 searches per month\"," + CommonFeatures + "]"
+                    FeaturesJson = "[\"50 searches per month\"," + CommonFeatures + "]"
                 },
                 new SubscriptionPlan
                 {
-                    Id = SubscriptionPlan.UnlimitedId, Name = "Unlimited", SearchesPerMonth = null,
+                    Id = SubscriptionPlan.UnlimitedId, Name = "Unlimited", SearchesPerMonth = 250,
                     PriceMonthly = 100m, IsActive = true, SortOrder = 3,
-                    FeaturesJson = "[\"Unlimited searches\"," + CommonFeatures + "]"
+                    FeaturesJson = "[\"250 searches per month\"," + CommonFeatures + "]"
                 });
         });
     }

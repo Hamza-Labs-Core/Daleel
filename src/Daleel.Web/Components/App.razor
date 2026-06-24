@@ -18,7 +18,10 @@
 
     <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
     <link rel="stylesheet" href="app.css" />
-    <link rel="stylesheet" href="Daleel.Web.styles.css" />
+    @* No Daleel.Web.styles.css link: this app has zero component-scoped (.razor.css) stylesheets —
+       all styling comes from MudBlazor + the global app.css — so the SDK's scoped-CSS bundle is never
+       emitted and linking it only yields a 404. If a *.razor.css file is ever added, re-add:
+       <link rel="stylesheet" href="Daleel.Web.styles.css" /> *@
     <link rel="icon" type="image/png" href="favicon.png" />
     <HeadOutlet @rendermode="PageRenderMode" />
 </head>

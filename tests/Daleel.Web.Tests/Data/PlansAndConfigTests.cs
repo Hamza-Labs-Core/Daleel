@@ -20,9 +20,9 @@ public class PlansAndConfigTests
         plans.Select(p => p.Name).Should().Equal("Basic", "Pro", "Unlimited");
         plans[0].SearchesPerMonth.Should().Be(5);
         plans[0].PriceMonthly.Should().Be(0m);
-        plans[1].SearchesPerMonth.Should().Be(100);
+        plans[1].SearchesPerMonth.Should().Be(50);
         plans[1].PriceMonthly.Should().Be(9.99m);
-        plans[2].IsUnlimited.Should().BeTrue();
+        plans[2].SearchesPerMonth.Should().Be(250);
         plans[2].PriceMonthly.Should().Be(100m);
     }
 
@@ -42,7 +42,7 @@ public class PlansAndConfigTests
         });
         await ctx.Db.SaveChangesAsync();
 
-        (await quota.GetStatusAsync("user", false)).Limit.Should().Be(100);
+        (await quota.GetStatusAsync("user", false)).Limit.Should().Be(50);
     }
 
     [Fact]

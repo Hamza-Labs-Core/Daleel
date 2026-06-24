@@ -31,7 +31,7 @@ public class QuotaServiceTests
     }
 
     [Fact]
-    public async Task ProSubscriber_GetsHundredSearches()
+    public async Task ProSubscriber_GetsFiftySearches()
     {
         using var ctx = new SqliteTestContext();
         ctx.Db.UserSubscriptions.Add(new UserSubscription
@@ -45,7 +45,7 @@ public class QuotaServiceTests
         var status = await svc.GetStatusAsync(User, false);
 
         status.PlanName.Should().Be("Pro");
-        status.Limit.Should().Be(100);
+        status.Limit.Should().Be(50);
         status.CanSearch.Should().BeTrue();
     }
 

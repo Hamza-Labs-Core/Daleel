@@ -162,9 +162,9 @@
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>For getting started</value></data>
   <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>5 searches per month</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>For regular shoppers</value></data>
-  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>100 searches per month</value></data>
+  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>50 searches per month</value></data>
   <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>For power users &amp; teams</value></data>
-  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>Unlimited searches</value></data>
+  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>250 searches per month</value></data>
   <data name="Landing.Cta.Title" xml:space="preserve"><value>Ready to shop smarter?</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>Create a free account and run your first search in seconds.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>Create free account</value></data>
