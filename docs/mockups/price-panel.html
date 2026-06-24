@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daleel — Price Detail</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.11.0/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0f172a;--surface:#1a2440;--surface-2:#212d4d;--border:#2a375c;
+    --accent:#6366f1;--accent-2:#818cf8;--accent-soft:rgba(99,102,241,.14);
+    --text:#e8ecf6;--text-dim:#94a3c4;--text-faint:#64708f;
+    --green:#34d399;--green-soft:rgba(52,211,153,.14);
+    --amber:#fbbf24;--red:#f87171;
+    --font-en:'Sora',sans-serif;--font-ar:'IBM Plex Sans Arabic',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{font-family:var(--font-en);
+    background:radial-gradient(1200px 600px at 50% -10%, #1b2747 0%, transparent 60%),#060a16;
+    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;color:var(--text)}
+
+  .phone{width:390px;height:844px;position:relative;background:var(--bg);border-radius:46px;
+    border:1px solid #243154;
+    box-shadow:0 0 0 11px #0a0f1e,0 0 0 12px #1c2746,0 40px 90px -20px rgba(0,0,0,.8);
+    overflow:hidden;display:flex;flex-direction:column}
+  .phone::before{content:"";position:absolute;top:11px;left:50%;transform:translateX(-50%);
+    width:108px;height:30px;background:#05080f;border-radius:18px;z-index:50}
+  .statusbar{height:50px;flex:0 0 50px;display:flex;align-items:flex-end;justify-content:space-between;
+    padding:0 28px 6px;font-size:13px;font-weight:600;letter-spacing:.3px}
+  .statusbar .right{display:flex;gap:7px;align-items:center;font-size:15px}
+
+  /* ===== Drag handle / sheet header ===== */
+  .sheet-grip{display:flex;justify-content:center;padding:8px 0 4px}
+  .sheet-grip span{width:40px;height:4px;border-radius:99px;background:var(--border)}
+
+  .phead{padding:6px 18px 14px;border-bottom:1px solid var(--border)}
+  .phead-top{display:flex;align-items:center;justify-content:space-between}
+  .phead .bname{font-size:11px;font-weight:700;letter-spacing:1px;color:var(--accent-2);text-transform:uppercase}
+  .phead .close{font-size:22px;color:var(--text-dim)}
+  .phead h1{font-size:18px;font-weight:800;margin-top:6px;line-height:1.2}
+  .phead .ar{font-family:var(--font-ar);direction:rtl;text-align:right;font-size:12.5px;color:var(--text-dim);margin-top:4px}
+  .phead .badge-row{display:flex;gap:8px;margin-top:11px}
+  .badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;padding:4px 9px;border-radius:999px}
+  .badge.green{background:var(--green-soft);color:var(--green)}
+  .badge.star{background:rgba(251,191,36,.14);color:var(--amber)}
+  .badge i{font-size:12px}
+
+  .screen{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px 18px 12px}
+  .screen::-webkit-scrollbar{display:none}
+
+  .sec-title{display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;
+    text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);margin:4px 2px 12px}
+  .sec-title i{font-size:15px;color:var(--accent-2)}
+  .sec-title.mt{margin-top:24px}
+  .sec-title .ar{font-family:var(--font-ar);font-weight:600;letter-spacing:0;color:var(--text-faint);text-transform:none;font-size:11px;margin-left:auto}
+
+  /* ===== Spec grid ===== */
+  .specs{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .spec{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:12px 13px}
+  .spec .ic{width:30px;height:30px;border-radius:9px;background:var(--accent-soft);
+    display:flex;align-items:center;justify-content:center;margin-bottom:9px}
+  .spec .ic i{font-size:16px;color:var(--accent-2)}
+  .spec .k{font-size:10px;color:var(--text-faint);text-transform:uppercase;letter-spacing:.5px}
+  .spec .v{font-size:15px;font-weight:700;margin-top:3px}
+  .spec .v small{font-size:11px;color:var(--text-dim);font-weight:500}
+
+  /* ===== Price list ===== */
+  .store{display:flex;align-items:center;gap:12px;background:var(--surface);border:1px solid var(--border);
+    border-radius:13px;padding:12px 13px;margin-bottom:9px;position:relative}
+  .store.best{border-color:var(--green);background:linear-gradient(90deg,var(--green-soft),var(--surface) 55%)}
+  .store .logo{width:40px;height:40px;flex:0 0 40px;border-radius:10px;background:var(--surface-2);
+    border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+  .store .logo i{font-size:20px;color:var(--text-dim)}
+  .store.best .logo i{color:var(--green)}
+  .store .meta{flex:1;min-width:0}
+  .store .nm{font-size:13.5px;font-weight:700;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .store .lowest{font-size:8.5px;font-weight:800;letter-spacing:.5px;background:var(--green);color:#04111a;
+    padding:2px 6px;border-radius:5px}
+  .store .used-tag{font-size:8.5px;font-weight:700;letter-spacing:.3px;background:var(--amber);color:#241a00;
+    padding:2px 6px;border-radius:5px}
+  .store .sub{font-size:10.5px;color:var(--text-faint);margin-top:3px;display:flex;align-items:center;gap:5px}
+  .store .sub i{font-size:12px}
+  .store .pr{text-align:right;flex:0 0 auto}
+  .store .pr .amt{font-size:16px;font-weight:800;line-height:1}
+  .store .pr .amt small{font-size:10px;color:var(--text-dim);font-weight:600}
+  .store.best .pr .amt{color:var(--green)}
+  .store .pr .delivery{font-size:9.5px;color:var(--text-faint);margin-top:4px}
+
+  /* MSRP row */
+  .msrp{display:flex;align-items:center;gap:12px;background:transparent;border:1px dashed var(--border);
+    border-radius:13px;padding:12px 13px;margin-top:4px}
+  .msrp .logo{width:40px;height:40px;flex:0 0 40px;border-radius:10px;background:rgba(99,102,241,.1);
+    border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+  .msrp .logo i{font-size:19px;color:var(--accent-2)}
+  .msrp .meta{flex:1}
+  .msrp .nm{font-size:13px;font-weight:700}
+  .msrp .sub{font-size:10.5px;color:var(--text-faint);margin-top:3px}
+  .msrp .pr .amt{font-size:15px;font-weight:700;color:var(--text-dim)}
+  .msrp .pr .amt small{font-size:10px}
+
+  /* ===== Review summary ===== */
+  .review{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:15px}
+  .rv-head{display:flex;align-items:center;gap:14px;padding-bottom:13px;border-bottom:1px solid var(--border)}
+  .rv-score{display:flex;flex-direction:column;align-items:center}
+  .rv-score .big{font-size:30px;font-weight:800;line-height:1}
+  .rv-score .st{color:var(--amber);font-size:11px;letter-spacing:-1px;margin-top:3px}
+  .rv-score .ct{font-size:9.5px;color:var(--text-faint);margin-top:3px}
+  .rv-votes{flex:1;display:flex;gap:10px}
+  .vote{flex:1;background:var(--surface-2);border:1px solid var(--border);border-radius:11px;padding:10px;text-align:center}
+  .vote i{font-size:18px}
+  .vote.up i{color:var(--green)}
+  .vote.down i{color:var(--red)}
+  .vote .n{font-size:16px;font-weight:800;margin-top:4px}
+  .vote .l{font-size:9.5px;color:var(--text-faint);margin-top:1px}
+
+  .proscons{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:13px}
+  .pc h4{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;display:flex;align-items:center;gap:5px}
+  .pc.pros h4{color:var(--green)}
+  .pc.cons h4{color:var(--red)}
+  .pc h4 i{font-size:13px}
+  .pc li{list-style:none;font-size:11px;color:var(--text-dim);line-height:1.4;margin-bottom:6px;
+    display:flex;gap:6px}
+  .pc li::before{content:"";width:5px;height:5px;border-radius:50%;margin-top:6px;flex:0 0 auto}
+  .pc.pros li::before{background:var(--green)}
+  .pc.cons li::before{background:var(--red)}
+
+  /* ===== Footer actions ===== */
+  .footer{flex:0 0 auto;display:flex;gap:10px;padding:13px 18px 22px;border-top:1px solid var(--border);
+    background:linear-gradient(0deg,var(--bg) 60%,transparent)}
+  .btn{flex:1;border:none;font-family:var(--font-en);font-weight:700;font-size:13.5px;border-radius:14px;
+    padding:15px;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}
+  .btn i{font-size:18px}
+  .btn.buy{background:var(--accent);color:#fff;flex:1.6;box-shadow:0 10px 24px -8px var(--accent)}
+  .btn.buy .sub{font-size:9.5px;font-weight:500;opacity:.85;display:block;margin-top:1px}
+  .btn.cmp{background:var(--surface-2);border:1px solid var(--border);color:var(--text)}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="statusbar">
+    <span>9:41</span>
+    <span class="right"><i class="ti ti-signal-4g"></i><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+
+  <div class="sheet-grip"><span></span></div>
+
+  <!-- Header -->
+  <div class="phead">
+    <div class="phead-top">
+      <span class="bname">LG · Dual Inverter</span>
+      <i class="ti ti-x close"></i>
+    </div>
+    <h1>LG S4-Q18KL3QD</h1>
+    <div class="ar">مكيف إل جي إنفرتر ١٨٠٠٠ وحدة</div>
+    <div class="badge-row">
+      <span class="badge green"><i class="ti ti-shield-check"></i> Excellent reputation</span>
+      <span class="badge star"><i class="ti ti-star-filled"></i> 4.7 · 312 reviews</span>
+    </div>
+  </div>
+
+  <!-- Scroll area -->
+  <div class="screen">
+    <!-- Specs -->
+    <div class="sec-title"><i class="ti ti-list-details"></i> Specifications <span class="ar">المواصفات</span></div>
+    <div class="specs">
+      <div class="spec">
+        <div class="ic"><i class="ti ti-snowflake"></i></div>
+        <div class="k">Cooling · BTU</div>
+        <div class="v">18,000 <small>BTU</small></div>
+      </div>
+      <div class="spec">
+        <div class="ic"><i class="ti ti-bolt"></i></div>
+        <div class="k">Energy class</div>
+        <div class="v">A++ <small>inverter</small></div>
+      </div>
+      <div class="spec">
+        <div class="ic"><i class="ti ti-volume"></i></div>
+        <div class="k">Noise level</div>
+        <div class="v">19 <small>dB min</small></div>
+      </div>
+      <div class="spec">
+        <div class="ic"><i class="ti ti-wifi"></i></div>
+        <div class="k">Connectivity</div>
+        <div class="v">WiFi <small>ThinQ app</small></div>
+      </div>
+    </div>
+
+    <!-- Price list -->
+    <div class="sec-title mt"><i class="ti ti-tag"></i> Local prices <span class="ar">الأسعار المحلية</span></div>
+
+    <div class="store best">
+      <div class="logo"><i class="ti ti-building-store"></i></div>
+      <div class="meta">
+        <div class="nm">Smart Buy <span class="lowest">LOWEST</span></div>
+        <div class="sub"><i class="ti ti-map-pin"></i> Amman · <span style="color:var(--green)">In stock</span></div>
+      </div>
+      <div class="pr">
+        <div class="amt">329 <small>JOD</small></div>
+        <div class="delivery">Free delivery</div>
+      </div>
+    </div>
+
+    <div class="store">
+      <div class="logo"><i class="ti ti-building-store"></i></div>
+      <div class="meta">
+        <div class="nm">Leaders Center</div>
+        <div class="sub"><i class="ti ti-map-pin"></i> Amman · <span style="color:var(--green)">In stock</span></div>
+      </div>
+      <div class="pr">
+        <div class="amt">344 <small>JOD</small></div>
+        <div class="delivery">+5 JOD delivery</div>
+      </div>
+    </div>
+
+    <div class="store">
+      <div class="logo"><i class="ti ti-building-store"></i></div>
+      <div class="meta">
+        <div class="nm">Zaatari Stores <span class="used-tag">USED · مستعمل</span></div>
+        <div class="sub"><i class="ti ti-map-pin"></i> Zarqa · Good condition</div>
+      </div>
+      <div class="pr">
+        <div class="amt">255 <small>JOD</small></div>
+        <div class="delivery">Pickup only</div>
+      </div>
+    </div>
+
+    <div class="store">
+      <div class="logo"><i class="ti ti-building-store"></i></div>
+      <div class="meta">
+        <div class="nm">Abu Khader Electronics</div>
+        <div class="sub"><i class="ti ti-map-pin"></i> Irbid · <span style="color:var(--amber)">Low stock</span></div>
+      </div>
+      <div class="pr">
+        <div class="amt">359 <small>JOD</small></div>
+        <div class="delivery">+8 JOD delivery</div>
+      </div>
+    </div>
+
+    <!-- Brand site MSRP -->
+    <div class="msrp">
+      <div class="logo"><i class="ti ti-world"></i></div>
+      <div class="meta">
+        <div class="nm">LG Jordan (official)</div>
+        <div class="sub">Manufacturer MSRP · سعر الشركة</div>
+      </div>
+      <div class="pr"><div class="amt">389 <small>JOD</small></div></div>
+    </div>
+
+    <!-- Review summary -->
+    <div class="sec-title mt"><i class="ti ti-messages"></i> Customer reviews <span class="ar">آراء العملاء</span></div>
+    <div class="review">
+      <div class="rv-head">
+        <div class="rv-score">
+          <div class="big">4.7</div>
+          <div class="st">★★★★★</div>
+          <div class="ct">312 reviews</div>
+        </div>
+        <div class="rv-votes">
+          <div class="vote up"><i class="ti ti-thumb-up"></i><div class="n">284</div><div class="l">Recommend</div></div>
+          <div class="vote down"><i class="ti ti-thumb-down"></i><div class="n">28</div><div class="l">Not for me</div></div>
+        </div>
+      </div>
+      <div class="proscons">
+        <div class="pc pros">
+          <h4><i class="ti ti-circle-check"></i> Top pros</h4>
+          <ul>
+            <li>Very low electricity bill</li>
+            <li>Quiet at night mode</li>
+            <li>Fast cooling in summer</li>
+          </ul>
+        </div>
+        <div class="pc cons">
+          <h4><i class="ti ti-circle-x"></i> Top cons</h4>
+          <ul>
+            <li>Installation costs extra</li>
+            <li>App can be buggy</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer actions -->
+  <div class="footer">
+    <button class="btn buy">
+      <i class="ti ti-shopping-cart"></i>
+      <span>Buy lowest <span class="sub">329 JOD · Smart Buy</span></span>
+    </button>
+    <button class="btn cmp"><i class="ti ti-arrows-diff"></i> Compare</button>
+  </div>
+</div>
+</body>
+</html>

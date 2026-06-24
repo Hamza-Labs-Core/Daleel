@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Daleel — Home</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3.11.0/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&family=Sora:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0f172a;
+    --bg-2:#131c33;
+    --surface:#1a2440;
+    --surface-2:#212d4d;
+    --border:#2a375c;
+    --accent:#6366f1;
+    --accent-2:#818cf8;
+    --accent-soft:rgba(99,102,241,.14);
+    --text:#e8ecf6;
+    --text-dim:#94a3c4;
+    --text-faint:#64708f;
+    --green:#34d399;
+    --amber:#fbbf24;
+    --font-en:'Sora',sans-serif;
+    --font-ar:'IBM Plex Sans Arabic',sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{
+    font-family:var(--font-en);
+    background:
+      radial-gradient(1200px 600px at 50% -10%, #1b2747 0%, transparent 60%),
+      #060a16;
+    min-height:100vh;
+    display:flex;align-items:center;justify-content:center;
+    padding:24px;color:var(--text);
+  }
+
+  /* ===== Phone frame ===== */
+  .phone{
+    width:390px;height:844px;position:relative;
+    background:var(--bg);
+    border-radius:46px;
+    border:1px solid #243154;
+    box-shadow:
+      0 0 0 11px #0a0f1e,
+      0 0 0 12px #1c2746,
+      0 40px 90px -20px rgba(0,0,0,.8);
+    overflow:hidden;
+    display:flex;flex-direction:column;
+  }
+  .phone::before{ /* dynamic island */
+    content:"";position:absolute;top:11px;left:50%;transform:translateX(-50%);
+    width:108px;height:30px;background:#05080f;border-radius:18px;z-index:50;
+  }
+  .statusbar{
+    height:50px;flex:0 0 50px;display:flex;align-items:flex-end;
+    justify-content:space-between;padding:0 28px 6px;font-size:13px;
+    font-weight:600;color:var(--text);letter-spacing:.3px;
+  }
+  .statusbar .right{display:flex;gap:7px;align-items:center;font-size:15px}
+
+  .screen{flex:1;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;position:relative}
+  .screen::-webkit-scrollbar{display:none}
+
+  /* ===== Top bar ===== */
+  .topbar{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:14px 22px 6px;
+  }
+  .brand{display:flex;align-items:center;gap:9px}
+  .brand .glyph{
+    width:38px;height:38px;border-radius:12px;
+    background:linear-gradient(145deg,var(--accent),#4f46e5);
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--font-ar);font-weight:700;font-size:22px;color:#fff;
+    box-shadow:0 6px 18px -4px var(--accent);
+  }
+  .brand .name-ar{font-family:var(--font-ar);font-weight:700;font-size:21px;line-height:1}
+  .brand .name-en{font-size:10.5px;color:var(--text-faint);letter-spacing:3px;text-transform:uppercase;margin-top:3px}
+
+  .lang-toggle{
+    display:flex;background:var(--surface);border:1px solid var(--border);
+    border-radius:999px;padding:3px;font-size:12px;font-weight:600;
+  }
+  .lang-toggle span{padding:5px 11px;border-radius:999px;color:var(--text-dim);cursor:pointer}
+  .lang-toggle span.active{background:var(--accent);color:#fff}
+  .lang-toggle .ar{font-family:var(--font-ar)}
+
+  /* ===== Hero ===== */
+  .hero{padding:30px 22px 10px;text-align:center;display:flex;flex-direction:column;align-items:center}
+  .hero .big-ar{font-family:var(--font-ar);font-weight:700;font-size:46px;line-height:1;
+    background:linear-gradient(180deg,#fff,#aeb8e0);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .tagline-en{font-size:15px;color:var(--text);font-weight:600;margin-top:14px}
+  .hero .tagline-ar{font-family:var(--font-ar);font-size:13.5px;color:var(--text-dim);margin-top:5px;direction:rtl}
+
+  /* ===== Search ===== */
+  .search-wrap{padding:22px 22px 6px}
+  .search{
+    display:flex;align-items:center;gap:10px;
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:16px;padding:15px 16px;
+    box-shadow:0 0 0 4px var(--accent-soft), 0 14px 30px -16px rgba(0,0,0,.7);
+  }
+  .search i{font-size:21px;color:var(--accent-2)}
+  .search input{
+    flex:1;background:transparent;border:none;outline:none;
+    color:var(--text);font-family:var(--font-en);font-size:14.5px;
+  }
+  .search input::placeholder{color:var(--text-faint)}
+  .search .mic{font-size:19px;color:var(--text-dim)}
+
+  /* ===== Context tags ===== */
+  .tags{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;padding:16px 22px 4px}
+  .tag{
+    display:flex;align-items:center;gap:6px;
+    background:var(--surface-2);border:1px solid var(--border);
+    padding:7px 12px;border-radius:999px;font-size:11.5px;font-weight:500;color:var(--text-dim);
+  }
+  .tag i{font-size:14px}
+  .tag.geo i{color:var(--green)}
+  .tag.model i{color:var(--accent-2)}
+  .tag b{color:var(--text);font-weight:600}
+
+  /* ===== Suggested queries ===== */
+  .suggest{padding:24px 22px 20px}
+  .suggest-head{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+  .suggest-head .line{flex:1;height:1px;background:var(--border)}
+  .suggest-head span{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text-faint);font-weight:600}
+
+  .chip{
+    display:flex;align-items:center;gap:13px;width:100%;
+    background:var(--surface);border:1px solid var(--border);
+    border-radius:14px;padding:14px 15px;margin-bottom:10px;cursor:pointer;
+    transition:.18s;
+  }
+  .chip:hover{border-color:var(--accent);transform:translateY(-1px);background:var(--surface-2)}
+  .chip .ic{
+    width:38px;height:38px;flex:0 0 38px;border-radius:11px;
+    background:var(--accent-soft);display:flex;align-items:center;justify-content:center;
+  }
+  .chip .ic i{font-size:19px;color:var(--accent-2)}
+  .chip .txt{flex:1;min-width:0}
+  .chip .en{font-size:13.5px;font-weight:600;color:var(--text)}
+  .chip .ar{font-family:var(--font-ar);font-size:12.5px;color:var(--text-dim);margin-top:3px;direction:rtl;text-align:right}
+  .chip .arr{font-size:18px;color:var(--text-faint)}
+
+  /* ===== Bottom nav ===== */
+  .nav{
+    flex:0 0 76px;display:flex;align-items:center;justify-content:space-around;
+    padding:0 10px 18px;background:linear-gradient(0deg,var(--bg) 70%,transparent);
+    border-top:1px solid var(--border);
+  }
+  .nav a{
+    display:flex;flex-direction:column;align-items:center;gap:4px;
+    color:var(--text-faint);text-decoration:none;font-size:10px;font-weight:600;
+    padding-top:12px;flex:1;
+  }
+  .nav a i{font-size:23px}
+  .nav a.active{color:var(--accent-2)}
+  .nav a.active i{filter:drop-shadow(0 4px 10px var(--accent))}
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="statusbar">
+    <span>9:41</span>
+    <span class="right"><i class="ti ti-signal-4g"></i><i class="ti ti-wifi"></i><i class="ti ti-battery-3"></i></span>
+  </div>
+
+  <div class="screen">
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="glyph">د</div>
+        <div>
+          <div class="name-ar">دليل</div>
+          <div class="name-en">Daleel</div>
+        </div>
+      </div>
+      <div class="lang-toggle">
+        <span class="active">EN</span>
+        <span class="ar">عربي</span>
+      </div>
+    </div>
+
+    <!-- Hero -->
+    <div class="hero">
+      <div class="big-ar">دليلك للأفضل</div>
+      <div class="tagline-en">Find the best, near you</div>
+      <div class="tagline-ar">ابحث عن الأفضل، بالقرب منك</div>
+    </div>
+
+    <!-- Search -->
+    <div class="search-wrap">
+      <div class="search">
+        <i class="ti ti-search"></i>
+        <input type="text" placeholder="Ask anything · اسأل عن أي شيء" />
+        <i class="ti ti-microphone mic"></i>
+      </div>
+    </div>
+
+    <!-- Context tags -->
+    <div class="tags">
+      <div class="tag geo"><i class="ti ti-map-pin"></i> <b>Amman, Jordan</b></div>
+      <div class="tag model"><i class="ti ti-sparkles"></i> Model · <b>Daleel&nbsp;Pro</b></div>
+    </div>
+
+    <!-- Suggested queries -->
+    <div class="suggest">
+      <div class="suggest-head">
+        <span>Try asking</span>
+        <span class="line"></span>
+      </div>
+
+      <div class="chip">
+        <div class="ic"><i class="ti ti-air-conditioning"></i></div>
+        <div class="txt">
+          <div class="en">Best ACs in Jordan</div>
+          <div class="ar">أفضل مكيفات الهواء في الأردن</div>
+        </div>
+        <i class="ti ti-arrow-up-left arr"></i>
+      </div>
+
+      <div class="chip">
+        <div class="ic"><i class="ti ti-device-mobile"></i></div>
+        <div class="txt">
+          <div class="en">Cheapest iPhone 15 prices</div>
+          <div class="ar">أرخص أسعار آيفون ١٥</div>
+        </div>
+        <i class="ti ti-arrow-up-left arr"></i>
+      </div>
+
+      <div class="chip">
+        <div class="ic"><i class="ti ti-fridge"></i></div>
+        <div class="txt">
+          <div class="en">Most reliable refrigerator brands</div>
+          <div class="ar">أكثر ماركات الثلاجات موثوقية</div>
+        </div>
+        <i class="ti ti-arrow-up-left arr"></i>
+      </div>
+
+      <div class="chip">
+        <div class="ic"><i class="ti ti-washing-machine"></i></div>
+        <div class="txt">
+          <div class="en">Washing machines under 300 JOD</div>
+          <div class="ar">غسالات بأقل من ٣٠٠ دينار</div>
+        </div>
+        <i class="ti ti-arrow-up-left arr"></i>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom nav -->
+  <div class="nav">
+    <a href="#" class="active"><i class="ti ti-home-2"></i> Home</a>
+    <a href="#"><i class="ti ti-history"></i> History</a>
+    <a href="#"><i class="ti ti-bookmark"></i> Saved</a>
+    <a href="#"><i class="ti ti-settings"></i> Settings</a>
+  </div>
+</div>
+</body>
+</html>
