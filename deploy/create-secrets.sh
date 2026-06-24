@@ -22,6 +22,13 @@ SECRETS=(
   CONTEXT_DEV_API_KEY
   GOOGLE_PLACES_API_KEY
   APIFY_TOKEN
+  # Cloudflare R2 — structured error logging (optional; blank values fall back to
+  # file logging at /app/data/logs/, so the deploy still succeeds without them).
+  R2_ACCOUNT_ID
+  R2_ACCESS_KEY
+  R2_SECRET_KEY
+  R2_BUCKET_NAME
+  R2_ENDPOINT
   # Deploy (consumed by .github/workflows/deploy.yml)
   DEPLOY_SSH_HOST
   DEPLOY_SSH_USER
