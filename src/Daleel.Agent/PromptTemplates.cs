@@ -135,6 +135,8 @@ public static class PromptTemplates
         sb.AppendLine("- webQueries: a mix of local classifieds/marketplace pages, brand catalog pages, store " +
             "sections, and one or two buying-guide/review queries.");
         sb.AppendLine("- placesQueries: physical stores selling it near the main city, in both languages.");
+        sb.AppendLine("- socialQueries / webQueries: also surface REAL user experiences — include social- and " +
+            "forum-scoped queries and opinion phrasing (e.g. 'site:facebook.com', 'تجربتي مع', 'رأي', 'مشاكل').");
         sb.AppendLine("Do NOT assume which stores exist — let the search reveal the local sellers for this country.");
         sb.Append("Prioritise sellers physically in ").Append(geo.Country)
           .AppendLine(" or with local operations there; list local options first.");
@@ -184,8 +186,11 @@ public static class PromptTemplates
         "You are Daleel, a market analyst. You assess how brands are regarded in a SPECIFIC country, with a focus " +
         "on what matters for a purchase: reliability, after-sales service, local warranty, and spare-parts " +
         "availability. You flag brands that have NO local service centre, since a cheap product from such a brand " +
-        "is a poor deal. Base judgements on the provided context and general market knowledge; be honest about " +
-        "uncertainty. You ALWAYS reply with a single JSON object only." +
+        "is a poor deal. You ALSO surface what REAL people say: from the social posts, forum threads and reviews in " +
+        "the context (especially Arabic ones — تجربتي, رأي, مشاكل), quote actual user opinions with their source, " +
+        "translating non-English quotes to English while keeping the original. Highlight recurring positive and " +
+        "negative themes. Base everything on the provided context and known market facts; be honest about " +
+        "uncertainty and never fabricate quotes. You ALWAYS reply with a single JSON object only." +
         HalalGuard;
 
     /// <summary>Build the prompt asking the LLM to rate the reputation of each brand in-market.</summary>
@@ -214,12 +219,24 @@ public static class PromptTemplates
                   "hasLocalService": true,
                   "serviceNote": "e.g. authorized service centre in the capital, or 'no local service found'",
                   "warranty": "e.g. 2-year local warranty, or null if unknown",
-                  "summary": "one or two sentence reputation verdict for this country"
+                  "summary": "one or two sentence reputation verdict for this country",
+                  "reviews": [
+                    {
+                      "quote": "the user's opinion in English (translate if needed)",
+                      "originalText": "original-language text if you translated, else null",
+                      "source": "platform/group, e.g. 'Facebook group'",
+                      "url": "link to the post if present in context, else null",
+                      "sentiment": "positive|negative|neutral",
+                      "date": "ISO date if known, else null",
+                      "language": "ar|en|..."
+                    }
+                  ]
                 }
               ]
             }
-            score is 1-5 (omit or null if you cannot judge). hasLocalService is true/false/null. Base everything on the
-            context and known market facts; do not invent specifics. No prose outside the JSON.
+            score is 1-5 (omit or null if you cannot judge). hasLocalService is true/false/null. Only include reviews
+            that are actually present in the context — never invent quotes; use an empty array if there are none.
+            No prose outside the JSON.
             """);
         return sb.ToString();
     }

@@ -115,7 +115,11 @@ public class AgentServiceTests
         const string repJson = """
             { "brands": [ {
               "brand": "Samsung", "score": 4.3, "pros": ["reliable"], "complaints": ["pricey"],
-              "hasLocalService": true, "warranty": "2-year local", "summary": "Well supported in-market."
+              "hasLocalService": true, "warranty": "2-year local", "summary": "Well supported in-market.",
+              "reviews": [
+                { "quote": "Works great after 2 years", "source": "Facebook group", "url": "https://fb.com/p/1", "sentiment": "positive", "date": "2026-01-10", "language": "en" },
+                { "quote": "Remote stopped working", "source": "Twitter", "sentiment": "negative", "language": "ar", "originalText": "الريموت تعطل" }
+              ]
             } ] }
             """;
 
@@ -141,6 +145,14 @@ public class AgentServiceTests
         samsung.BrandReputation.HasLocalService.Should().BeTrue();
         samsung.BrandReputation.Flag.Should().Be(ReputationFlag.StrongLocalPresence);
         llm.SystemPromptsSeen.Should().Contain(PromptTemplates.BrandReputationSystem);
+
+        // Social proof: real user quotes with sentiment breakdown.
+        var social = samsung.BrandReputation.Social;
+        social.Should().NotBeNull();
+        social!.Reviews.Should().HaveCount(2);
+        social.Positive.Should().Be(1);
+        social.Negative.Should().Be(1);
+        social.Reviews.Should().Contain(r => r.OriginalText == "الريموت تعطل" && r.Sentiment == Sentiment.Negative);
     }
 
     [Fact]

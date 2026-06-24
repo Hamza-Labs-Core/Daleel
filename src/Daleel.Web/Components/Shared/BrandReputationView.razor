@@ -88,6 +88,41 @@
                             </MudItem>
                         }
                     </MudGrid>
+
+                    @if (rep.Social is { HasReviews: true } social)
+                    {
+                        <MudDivider Class="my-2" />
+                        <div class="d-flex align-center gap-2 mb-2" style="flex-wrap:wrap;">
+                            <MudText Typo="Typo.subtitle2">What people say</MudText>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text" Icon="@Icons.Material.Filled.ThumbUp">@social.Positive positive</MudChip>
+                            <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text" Icon="@Icons.Material.Filled.ThumbDown">@social.Negative negative</MudChip>
+                            @if (social.Neutral > 0)
+                            {
+                                <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">@social.Neutral neutral</MudChip>
+                            }
+                        </div>
+                        @foreach (var r in social.Reviews)
+                        {
+                            <MudPaper Class="pa-2 mb-2" Outlined="true" Elevation="0"
+                                      Style="@($"border-left:3px solid var(--mud-palette-{SentimentColor(r.Sentiment)});")">
+                                <MudText Typo="Typo.body2" dir="@Catalog.Dir(r.Quote)" Style="font-style:italic;">“@r.Quote”</MudText>
+                                <div class="d-flex align-center gap-2 mt-1" style="flex-wrap:wrap;">
+                                    @if (!string.IsNullOrWhiteSpace(r.Source))
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@r.Source</MudText>
+                                    }
+                                    @if (r.Date is { } date)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">· @date.ToString("yyyy-MM-dd")</MudText>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(r.Url))
+                                    {
+                                        <MudLink Href="@r.Url" Target="_blank" Typo="Typo.caption">source</MudLink>
+                                    }
+                                </div>
+                            </MudPaper>
+                        }
+                    }
                 </ChildContent>
             </MudExpansionPanel>
         </MudExpansionPanels>
@@ -119,5 +154,12 @@
         ReputationFlag.StrongLocalPresence => Icons.Material.Filled.CheckCircle,
         ReputationFlag.LimitedLocalSupport => Icons.Material.Filled.Warning,
         _ => Icons.Material.Filled.Info
+    };
+
+    private static string SentimentColor(Sentiment s) => s switch
+    {
+        Sentiment.Positive => "success",
+        Sentiment.Negative => "error",
+        _ => "lines-default"
     };
 }

@@ -239,7 +239,8 @@ public sealed partial class AgentService
                     HasLocalService = b.HasLocalService,
                     ServiceNote = b.ServiceNote,
                     Warranty = b.Warranty,
-                    Summary = b.Summary
+                    Summary = b.Summary,
+                    Social = ToSocialProof(b.Reviews)
                 };
             }
 
@@ -251,6 +252,38 @@ public sealed partial class AgentService
             return empty;
         }
     }
+
+    /// <summary>Maps review DTOs into a <see cref="SocialProof"/>, or null when there are none.</summary>
+    private static SocialProof? ToSocialProof(List<UserReviewDto>? reviews)
+    {
+        if (reviews is null || reviews.Count == 0)
+        {
+            return null;
+        }
+
+        var mapped = reviews
+            .Where(r => !string.IsNullOrWhiteSpace(r.Quote))
+            .Select(r => new UserReview
+            {
+                Quote = r.Quote!.Trim(),
+                OriginalText = r.OriginalText,
+                Source = r.Source,
+                Url = r.Url,
+                Sentiment = ParseSentiment(r.Sentiment),
+                Date = DateTimeOffset.TryParse(r.Date, out var d) ? d : null,
+                Language = r.Language
+            })
+            .ToList();
+
+        return mapped.Count > 0 ? new SocialProof { Reviews = mapped } : null;
+    }
+
+    private static Sentiment ParseSentiment(string? s) => (s ?? string.Empty).Trim().ToLowerInvariant() switch
+    {
+        "positive" or "pos" => Sentiment.Positive,
+        "negative" or "neg" => Sentiment.Negative,
+        _ => Sentiment.Neutral
+    };
 
     /// <summary>Finds a brand's reputation by exact or fuzzy (contains) name match.</summary>
     private static BrandReputation? FindReputation(IReadOnlyDictionary<string, BrandReputation> map, string brand)
@@ -475,5 +508,17 @@ public sealed partial class AgentService
         [JsonPropertyName("serviceNote")] public string? ServiceNote { get; set; }
         [JsonPropertyName("warranty")] public string? Warranty { get; set; }
         [JsonPropertyName("summary")] public string? Summary { get; set; }
+        [JsonPropertyName("reviews")] public List<UserReviewDto>? Reviews { get; set; }
+    }
+
+    private sealed class UserReviewDto
+    {
+        [JsonPropertyName("quote")] public string? Quote { get; set; }
+        [JsonPropertyName("originalText")] public string? OriginalText { get; set; }
+        [JsonPropertyName("source")] public string? Source { get; set; }
+        [JsonPropertyName("url")] public string? Url { get; set; }
+        [JsonPropertyName("sentiment")] public string? Sentiment { get; set; }
+        [JsonPropertyName("date")] public string? Date { get; set; }
+        [JsonPropertyName("language")] public string? Language { get; set; }
     }
 }

@@ -44,6 +44,9 @@ public record BrandReputation
     /// <summary>One- or two-sentence reputation summary.</summary>
     public string? Summary { get; init; }
 
+    /// <summary>Real user reviews from social media / forums backing the reputation.</summary>
+    public SocialProof? Social { get; init; }
+
     /// <summary>How to surface this brand: highlight strong presence, or warn about limited support.</summary>
     public ReputationFlag Flag
     {
@@ -66,5 +69,6 @@ public record BrandReputation
     /// <summary>True when there's enough signal to show anything at all.</summary>
     public bool HasSignal =>
         Score is not null || Pros.Count > 0 || Complaints.Count > 0 ||
-        HasLocalService is not null || !string.IsNullOrWhiteSpace(Summary);
+        HasLocalService is not null || !string.IsNullOrWhiteSpace(Summary) ||
+        (Social?.HasReviews ?? false);
 }
