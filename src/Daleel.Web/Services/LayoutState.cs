@@ -1,19 +1,17 @@
 namespace Daleel.Web.Services;
 
 /// <summary>
-/// Shared, per-circuit UI state for theme (dark/light) and text direction (LTR/RTL). The
-/// <see cref="MainLayout"/> owns the <c>MudThemeProvider</c> and re-renders on <see cref="Changed"/>;
-/// the theme toggle, the Settings page, and result views all read/update this one source of truth.
+/// Shared, per-circuit UI state for the theme (dark/light). The <see cref="MainLayout"/> owns the
+/// <c>MudThemeProvider</c> and re-renders on <see cref="Changed"/>; the theme toggle and the Settings
+/// page read/update this one source of truth. Text direction is not stored here — it follows the
+/// request culture automatically (Arabic = RTL, English = LTR).
 /// </summary>
 public sealed class LayoutState
 {
     /// <summary>Dark by default — this is a media-intelligence console.</summary>
     public bool IsDarkMode { get; private set; } = true;
 
-    /// <summary>Whole-UI right-to-left mirroring (for Arabic-first users).</summary>
-    public bool RightToLeft { get; private set; }
-
-    /// <summary>Raised whenever theme or direction changes.</summary>
+    /// <summary>Raised whenever the theme changes.</summary>
     public event Action? Changed;
 
     public void SetDarkMode(bool value)
@@ -28,17 +26,4 @@ public sealed class LayoutState
     }
 
     public void ToggleDarkMode() => SetDarkMode(!IsDarkMode);
-
-    public void SetRightToLeft(bool value)
-    {
-        if (RightToLeft == value)
-        {
-            return;
-        }
-
-        RightToLeft = value;
-        Changed?.Invoke();
-    }
-
-    public void ToggleRightToLeft() => SetRightToLeft(!RightToLeft);
 }

@@ -91,7 +91,7 @@ builder.Services.AddAuthorization();
 
 // ── Daleel intelligence layer ─────────────────────────────────────────────────
 builder.Services.AddScoped<BrowserStore>();              // localStorage bridge (per circuit)
-builder.Services.AddScoped<LayoutState>();               // shared theme + RTL state
+builder.Services.AddScoped<LayoutState>();               // shared theme state
 builder.Services.AddScoped<ICurrentUser, CurrentUser>(); // authenticated id, from the circuit
 builder.Services.AddScoped<ISearchHistoryRepository, SearchHistoryRepository>();
 builder.Services.AddScoped<ISavedResultRepository, SavedResultRepository>();

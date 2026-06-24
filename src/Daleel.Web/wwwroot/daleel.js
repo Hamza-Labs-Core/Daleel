@@ -1,15 +1,5 @@
 // Small browser bridges used by Daleel pages.
 window.daleel = {
-    // Flips the document's text direction in place, so the manual RTL/LTR toggle takes effect
-    // without a reload (language switches set <html dir> server-side on the next request).
-    setDir: function (dir) {
-        try {
-            document.documentElement.setAttribute('dir', dir === 'rtl' ? 'rtl' : 'ltr');
-        } catch (e) {
-            /* ignore */
-        }
-    },
-
     // Resolves the visitor's current coordinates via the Geolocation API.
     // Returns { lat, lng } or rejects with a message the C# side surfaces to the user.
     getLocation: function () {

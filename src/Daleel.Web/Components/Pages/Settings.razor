@@ -3,7 +3,6 @@
 @inject LayoutState Layout
 @inject ISnackbar Snackbar
 @inject ICurrentUser CurrentUser
-@inject IJSRuntime JS
 @using Daleel.Core.Moderation
 
 <PageTitle>دليل · Settings</PageTitle>
@@ -66,9 +65,6 @@
             <MudSwitch T="bool" Value="_dark" ValueChanged="OnDarkChanged" Color="Color.Primary"
                        Label="@(_dark ? "Dark theme · داكن" : "Light theme · فاتح")"
                        ThumbIcon="@(_dark ? Icons.Material.Filled.DarkMode : Icons.Material.Filled.LightMode)" />
-            <MudSwitch T="bool" Value="_rtl" ValueChanged="OnRtlChanged" Color="Color.Primary"
-                       Label="Right-to-left UI · واجهة من اليمين"
-                       ThumbIcon="@Icons.Material.Filled.FormatTextdirectionRToL" />
 
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-4">
                 Preferences apply instantly and persist in this browser.
@@ -138,7 +134,6 @@
     private string _geo = "jordan";
     private string _model = Catalog.DefaultModel;
     private bool _dark = true;
-    private bool _rtl;
     private FilterStrictness _strictness = FilterStrictness.Strict;
     private bool _isAdmin;
     private bool _blurImages = true;
@@ -160,7 +155,6 @@
         _geo = await Store.GetAsync("geo") ?? _geo;
         _model = await Store.GetAsync("model") ?? _model;
         _dark = (await Store.GetAsync("theme") ?? "dark") != "light";
-        _rtl = await Store.GetAsync("rtl") == "1";
         _isAdmin = await CurrentUser.IsAdminAsync();
         _strictness = (await Store.GetAsync("filter.strictness")) switch
         {
@@ -174,7 +168,6 @@
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
         Layout.SetDarkMode(_dark);
-        Layout.SetRightToLeft(_rtl);
 
         _ready = true;
         StateHasChanged();
@@ -228,15 +221,6 @@
         _dark = value;
         Layout.SetDarkMode(value);
         await Store.SetAsync("theme", value ? "dark" : "light");
-    }
-
-    private async Task OnRtlChanged(bool value)
-    {
-        _rtl = value;
-        Layout.SetRightToLeft(value);
-        await Store.SetAsync("rtl", value ? "1" : "0");
-        // Flip the document direction in place; the static RTL provider follows the request culture.
-        await JS.InvokeVoidAsync("daleel.setDir", value ? "rtl" : "ltr");
     }
 
     private async Task OnStrictnessChanged(FilterStrictness value)
