@@ -39,7 +39,8 @@ public sealed partial class AgentService
     /// into per-model entries (one model, many price sources), and builds comparison tiers.
     /// </summary>
     internal async Task<ProductSearchResult> BuildProductSearchResultAsync(
-        string query, GeoProfile geo, ResearchBundle bundle, string summary, CancellationToken cancellationToken)
+        string query, GeoProfile geo, ResearchBundle bundle, string summary, CancellationToken cancellationToken,
+        bool assessReputation = true)
     {
         var cc = geo.CountryCode;
         var countryName = geo.Country;
@@ -96,13 +97,32 @@ public sealed partial class AgentService
 
         var models = ListingAggregator.Aggregate(listings);
 
+        // Follow-up step: assess each brand's reputation in-market (reliability, local service,
+        // warranty) so a cheap product from an unsupported brand can be flagged.
+        var reputations = assessReputation
+            ? await AssessBrandReputationsAsync(models, geo, bundle, cancellationToken).ConfigureAwait(false)
+            : new Dictionary<string, BrandReputation>(StringComparer.OrdinalIgnoreCase);
+
+        if (reputations.Count > 0)
+        {
+            models = models
+                .Select(m => m.Brand is { Length: > 0 } b && FindReputation(reputations, b) is { } rep
+                    ? m with { BrandReputation = rep }
+                    : m)
+                .ToList();
+        }
+
         // Comparison tiers off a representative (cheapest) listing per model.
         var representatives = models.Select(ToRepresentative).ToList();
         var comparisons = ComparisonGrouper.Group(representatives);
 
-        // Backfill brand counts from the aggregated models.
+        // Backfill brand counts from the aggregated models, and attach reputation.
         var brandsWithCounts = brands.Values
-            .Select(b => b with { ListingCount = models.Count(m => MatchesBrand(m, b.Name)) })
+            .Select(b => b with
+            {
+                ListingCount = models.Count(m => MatchesBrand(m, b.Name)),
+                Reputation = FindReputation(reputations, b.Name)
+            })
             .OrderByDescending(b => b.ListingCount)
             .ThenBy(b => b.Name)
             .ToList();
@@ -152,8 +172,10 @@ public sealed partial class AgentService
 
         var strategy = await PlanAsync(PromptTemplates.PlanModel(model, geo), cancellationToken).ConfigureAwait(false);
         var bundle = await GatherAsync(strategy, geo, cancellationToken).ConfigureAwait(false);
-        var result = await BuildProductSearchResultAsync(model, geo, bundle, string.Empty, cancellationToken)
-            .ConfigureAwait(false);
+        // Skip the per-brand reputation pass here — the detail panel is about one model, and we
+        // keep the on-demand deep scrape lean.
+        var result = await BuildProductSearchResultAsync(model, geo, bundle, string.Empty, cancellationToken,
+            assessReputation: false).ConfigureAwait(false);
 
         var best = PickBestModel(result.Models, model);
         if (best is null)
@@ -162,6 +184,90 @@ public sealed partial class AgentService
         }
 
         return await EnrichModelAsync(best, bundle, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Assesses the reputation of every brand in the result (one batched LLM call over the
+    /// gathered context), focusing on reliability, local after-sales service, and warranty.
+    /// Returns an empty map on any failure so the rest of the report is unaffected.
+    /// </summary>
+    private async Task<Dictionary<string, BrandReputation>> AssessBrandReputationsAsync(
+        IReadOnlyList<ProductModel> models, GeoProfile geo, ResearchBundle bundle, CancellationToken cancellationToken)
+    {
+        var brands = models
+            .Select(m => m.Brand)
+            .Where(b => !string.IsNullOrWhiteSpace(b))
+            .Select(b => b!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(10)
+            .ToList();
+
+        var empty = new Dictionary<string, BrandReputation>(StringComparer.OrdinalIgnoreCase);
+        if (brands.Count == 0)
+        {
+            return empty;
+        }
+
+        var context = BuildContext(bundle);
+        try
+        {
+            var text = await _llm.CompleteTextAsync(
+                PromptTemplates.BrandReputationSystem,
+                PromptTemplates.BrandReputations(brands, geo, context),
+                cancellationToken).ConfigureAwait(false);
+
+            var dto = LlmJson.Deserialize<BrandReputationsDto>(text);
+            if (dto?.Brands is null)
+            {
+                return empty;
+            }
+
+            var map = new Dictionary<string, BrandReputation>(StringComparer.OrdinalIgnoreCase);
+            foreach (var b in dto.Brands)
+            {
+                if (string.IsNullOrWhiteSpace(b.Brand))
+                {
+                    continue;
+                }
+
+                map[b.Brand.Trim()] = new BrandReputation
+                {
+                    Brand = b.Brand.Trim(),
+                    Score = b.Score,
+                    Pros = b.Pros ?? new List<string>(),
+                    Complaints = b.Complaints ?? new List<string>(),
+                    HasLocalService = b.HasLocalService,
+                    ServiceNote = b.ServiceNote,
+                    Warranty = b.Warranty,
+                    Summary = b.Summary
+                };
+            }
+
+            return map;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log($"brand reputation assessment failed: {ex.Message}");
+            return empty;
+        }
+    }
+
+    /// <summary>Finds a brand's reputation by exact or fuzzy (contains) name match.</summary>
+    private static BrandReputation? FindReputation(IReadOnlyDictionary<string, BrandReputation> map, string brand)
+    {
+        if (map.Count == 0 || string.IsNullOrWhiteSpace(brand))
+        {
+            return null;
+        }
+
+        if (map.TryGetValue(brand, out var exact))
+        {
+            return exact;
+        }
+
+        return map.FirstOrDefault(kv =>
+            kv.Key.Contains(brand, StringComparison.OrdinalIgnoreCase) ||
+            brand.Contains(kv.Key, StringComparison.OrdinalIgnoreCase)).Value;
     }
 
     /// <summary>Adds an LLM pros/cons verdict (and review summary) to a model from gathered context.</summary>
@@ -350,6 +456,24 @@ public sealed partial class AgentService
     {
         [JsonPropertyName("pros")] public List<string>? Pros { get; set; }
         [JsonPropertyName("cons")] public List<string>? Cons { get; set; }
+        [JsonPropertyName("summary")] public string? Summary { get; set; }
+    }
+
+    /// <summary>Wire shape for the batched brand-reputation LLM output.</summary>
+    private sealed class BrandReputationsDto
+    {
+        [JsonPropertyName("brands")] public List<BrandReputationDto>? Brands { get; set; }
+    }
+
+    private sealed class BrandReputationDto
+    {
+        [JsonPropertyName("brand")] public string? Brand { get; set; }
+        [JsonPropertyName("score")] public double? Score { get; set; }
+        [JsonPropertyName("pros")] public List<string>? Pros { get; set; }
+        [JsonPropertyName("complaints")] public List<string>? Complaints { get; set; }
+        [JsonPropertyName("hasLocalService")] public bool? HasLocalService { get; set; }
+        [JsonPropertyName("serviceNote")] public string? ServiceNote { get; set; }
+        [JsonPropertyName("warranty")] public string? Warranty { get; set; }
         [JsonPropertyName("summary")] public string? Summary { get; set; }
     }
 }

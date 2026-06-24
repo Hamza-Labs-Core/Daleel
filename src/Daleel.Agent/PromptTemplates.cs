@@ -168,7 +168,9 @@ public static class PromptTemplates
         "stores as options unless certain they deliver there. (3) A brand page without prices is still useful — " +
         "call it a 'Brand catalog'. A store with no visible products is a 'Store — check for availability'. " +
         "(4) Group concrete options into budget / mid-range / premium and reference real prices from the context — " +
-        "never invent listings or prices." +
+        "never invent listings or prices. (5) After identifying the products, assess each brand's reputation in the " +
+        "target country — reliability, after-sales service, local warranty, spare-parts availability — and flag any " +
+        "brand with no local service centre, since a cheap product from such a brand is a poor deal." +
         HalalGuard;
 
     /// <summary>System prompt for distilling per-model pros/cons from reviews.</summary>
@@ -176,6 +178,51 @@ public static class PromptTemplates
         "You are Daleel, a product analyst. Given reviews, specs and listings for a single product model, you " +
         "distil an honest, concise pros/cons summary. You ALWAYS reply with a single JSON object only." +
         HalalGuard;
+
+    /// <summary>System prompt for assessing brand reputation in a specific market.</summary>
+    public const string BrandReputationSystem =
+        "You are Daleel, a market analyst. You assess how brands are regarded in a SPECIFIC country, with a focus " +
+        "on what matters for a purchase: reliability, after-sales service, local warranty, and spare-parts " +
+        "availability. You flag brands that have NO local service centre, since a cheap product from such a brand " +
+        "is a poor deal. Base judgements on the provided context and general market knowledge; be honest about " +
+        "uncertainty. You ALWAYS reply with a single JSON object only." +
+        HalalGuard;
+
+    /// <summary>Build the prompt asking the LLM to rate the reputation of each brand in-market.</summary>
+    public static string BrandReputations(IReadOnlyList<string> brands, GeoProfile geo, string gatheredContext)
+    {
+        var sb = new StringBuilder();
+        sb.Append("Country: ").Append(geo.Country).Append(" (").Append(geo.CountryCode).AppendLine(").");
+        sb.Append("Assess the reputation of these brands IN ").Append(geo.Country).AppendLine(":");
+        sb.AppendLine(string.Join(", ", brands));
+        sb.AppendLine();
+        sb.AppendLine("For each brand consider: overall reliability, after-sales service quality, presence of LOCAL " +
+            "service centres and spare parts, and warranty terms in this country. Flag any brand with no local service.");
+        sb.AppendLine("Context (search results, social posts, reviews):");
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine(gatheredContext);
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine("""
+            Reply with exactly this JSON object:
+            {
+              "brands": [
+                {
+                  "brand": "string",
+                  "score": 4.2,
+                  "pros": ["short praise", "..."],
+                  "complaints": ["short complaint", "..."],
+                  "hasLocalService": true,
+                  "serviceNote": "e.g. authorized service centre in the capital, or 'no local service found'",
+                  "warranty": "e.g. 2-year local warranty, or null if unknown",
+                  "summary": "one or two sentence reputation verdict for this country"
+                }
+              ]
+            }
+            score is 1-5 (omit or null if you cannot judge). hasLocalService is true/false/null. Base everything on the
+            context and known market facts; do not invent specifics. No prose outside the JSON.
+            """);
+        return sb.ToString();
+    }
 
     /// <summary>Build the prompt asking the LLM for a model's pros/cons + one-line verdict.</summary>
     public static string ModelProsCons(string modelName, string gatheredContext)

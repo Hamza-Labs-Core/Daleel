@@ -119,6 +119,9 @@ public record BrandInfo
 
     /// <summary>How many of the gathered listings carry this brand.</summary>
     public int ListingCount { get; init; }
+
+    /// <summary>Reputation of this brand in the target market, when assessed.</summary>
+    public BrandReputation? Reputation { get; init; }
 }
 
 /// <summary>A store/retailer that sells the product.</summary>

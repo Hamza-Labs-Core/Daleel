@@ -33,6 +33,11 @@
             </MudText>
         }
 
+        @if (Model.BrandReputation is { HasSignal: true })
+        {
+            <div class="mt-1"><BrandReputationView Reputation="Model.BrandReputation" Compact="true" /></div>
+        }
+
         <div class="d-flex align-center gap-2 mt-2" style="flex-wrap:wrap;">
             @if (Model.LowestPrice is { } price && Model.LowestOffer?.Currency is { } cur)
             {

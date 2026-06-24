@@ -78,6 +78,9 @@ public record ProductModel
     /// <summary>LLM-generated pros/cons summary distilled from reviews.</summary>
     public string? ReviewSummary { get; init; }
 
+    /// <summary>Reputation of this model's brand in the target market, when assessed.</summary>
+    public BrandReputation? BrandReputation { get; init; }
+
     /// <summary>Every place the model is available, sorted cheapest-first.</summary>
     public IReadOnlyList<PriceOffer> Offers { get; init; } = Array.Empty<PriceOffer>();
 

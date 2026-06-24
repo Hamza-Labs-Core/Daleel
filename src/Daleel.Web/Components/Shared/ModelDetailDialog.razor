@@ -76,6 +76,16 @@
             </MudItem>
         </MudGrid>
 
+        <!-- About this brand (reputation in-market) -->
+        @if (_model.BrandReputation is { HasSignal: true })
+        {
+            <MudDivider Class="my-3" />
+            <MudText Typo="Typo.subtitle2" class="mb-1">
+                <MudIcon Icon="@Icons.Material.Filled.Verified" Size="Size.Small" Class="mr-1" />Brand reputation
+            </MudText>
+            <BrandReputationView Reputation="_model.BrandReputation" Compact="false" />
+        }
+
         <!-- Pros / cons (filled by deep scrape) -->
         @if (!string.IsNullOrWhiteSpace(_model.ReviewSummary) || _model.Pros.Count > 0 || _model.Cons.Count > 0)
         {

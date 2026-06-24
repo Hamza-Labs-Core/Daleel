@@ -23,6 +23,12 @@
                             @b.ListingCount @(b.ListingCount == 1 ? "model" : "models") in this market
                         </MudText>
                     }
+
+                    @if (b.Reputation is { HasSignal: true })
+                    {
+                        <div class="mt-1"><BrandReputationView Reputation="b.Reputation" Compact="true" /></div>
+                        <BrandReputationView Reputation="b.Reputation" Compact="false" />
+                    }
                 </MudCardContent>
                 <MudCardActions>
                     @if (b.ListingCount > 0)

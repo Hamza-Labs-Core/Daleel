@@ -1,0 +1,123 @@
+@* Brand reputation: a compact indicator (★ score + flag) or a full "About this brand"
+   panel (summary, pros, complaints, local service, warranty). *@
+
+@if (Reputation is { HasSignal: true } rep)
+{
+    @if (Compact)
+    {
+        <span class="d-inline-flex align-center" style="gap:4px;flex-wrap:wrap;">
+            @if (rep.Score is { } score)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@ScoreColor(score)"
+                         Icon="@Icons.Material.Filled.Star">@score.ToString("0.0")</MudChip>
+            }
+            @if (FlagLabel(rep.Flag) is { } flag)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@FlagColor(rep.Flag)"
+                         Icon="@FlagIcon(rep.Flag)">@flag</MudChip>
+            }
+        </span>
+    }
+    else
+    {
+        <MudExpansionPanels Elevation="0" Class="mt-1">
+            <MudExpansionPanel>
+                <TitleContent>
+                    <div class="d-flex align-center gap-2" style="flex-wrap:wrap;">
+                        <MudText Typo="Typo.body2">About @rep.Brand</MudText>
+                        @if (rep.Score is { } score)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@ScoreColor(score)"
+                                     Icon="@Icons.Material.Filled.Star">@score.ToString("0.0")</MudChip>
+                        }
+                        @if (FlagLabel(rep.Flag) is { } flag)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@FlagColor(rep.Flag)"
+                                     Icon="@FlagIcon(rep.Flag)">@flag</MudChip>
+                        }
+                    </div>
+                </TitleContent>
+                <ChildContent>
+                    @if (!string.IsNullOrWhiteSpace(rep.Summary))
+                    {
+                        <MudText Typo="Typo.body2" Class="mb-2" dir="@Catalog.Dir(rep.Summary)">@rep.Summary</MudText>
+                    }
+
+                    <div class="d-flex align-center gap-1 mb-1">
+                        <MudIcon Icon="@(rep.HasLocalService == true ? Icons.Material.Filled.CheckCircle : rep.HasLocalService == false ? Icons.Material.Filled.Warning : Icons.Material.Filled.Help)"
+                                 Size="Size.Small"
+                                 Color="@(rep.HasLocalService == true ? Color.Success : rep.HasLocalService == false ? Color.Warning : Color.Default)" />
+                        <MudText Typo="Typo.body2">
+                            @(rep.HasLocalService == true ? "Local service available"
+                                : rep.HasLocalService == false ? "No local service found"
+                                : "Local service unknown")@(string.IsNullOrWhiteSpace(rep.ServiceNote) ? "" : $" — {rep.ServiceNote}")
+                        </MudText>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(rep.Warranty))
+                    {
+                        <div class="d-flex align-center gap-1 mb-2">
+                            <MudIcon Icon="@Icons.Material.Filled.Shield" Size="Size.Small" Color="Color.Secondary" />
+                            <MudText Typo="Typo.body2">Warranty: @rep.Warranty</MudText>
+                        </div>
+                    }
+
+                    <MudGrid>
+                        @if (rep.Pros.Count > 0)
+                        {
+                            <MudItem xs="12" sm="6">
+                                <MudText Typo="Typo.subtitle2" Color="Color.Success">Praised for</MudText>
+                                <MudList T="string" Dense="true">
+                                    @foreach (var p in rep.Pros)
+                                    {
+                                        <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbUp"><MudText Typo="Typo.body2">@p</MudText></MudListItem>
+                                    }
+                                </MudList>
+                            </MudItem>
+                        }
+                        @if (rep.Complaints.Count > 0)
+                        {
+                            <MudItem xs="12" sm="6">
+                                <MudText Typo="Typo.subtitle2" Color="Color.Error">Common complaints</MudText>
+                                <MudList T="string" Dense="true">
+                                    @foreach (var c in rep.Complaints)
+                                    {
+                                        <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbDown"><MudText Typo="Typo.body2">@c</MudText></MudListItem>
+                                    }
+                                </MudList>
+                            </MudItem>
+                        }
+                    </MudGrid>
+                </ChildContent>
+            </MudExpansionPanel>
+        </MudExpansionPanels>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public BrandReputation? Reputation { get; set; }
+    [Parameter] public bool Compact { get; set; }
+
+    private static Color ScoreColor(double s) => s >= 4 ? Color.Success : s >= 3 ? Color.Warning : Color.Error;
+
+    private static string? FlagLabel(ReputationFlag flag) => flag switch
+    {
+        ReputationFlag.StrongLocalPresence => "Strong local presence",
+        ReputationFlag.LimitedLocalSupport => "Limited local support",
+        _ => null
+    };
+
+    private static Color FlagColor(ReputationFlag flag) => flag switch
+    {
+        ReputationFlag.StrongLocalPresence => Color.Success,
+        ReputationFlag.LimitedLocalSupport => Color.Warning,
+        _ => Color.Default
+    };
+
+    private static string FlagIcon(ReputationFlag flag) => flag switch
+    {
+        ReputationFlag.StrongLocalPresence => Icons.Material.Filled.CheckCircle,
+        ReputationFlag.LimitedLocalSupport => Icons.Material.Filled.Warning,
+        _ => Icons.Material.Filled.Info
+    };
+}

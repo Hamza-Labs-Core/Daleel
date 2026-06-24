@@ -110,6 +110,40 @@ public class AgentServiceTests
     }
 
     [Fact]
+    public async Task AskAsync_ProductQuery_AssessesBrandReputation()
+    {
+        const string repJson = """
+            { "brands": [ {
+              "brand": "Samsung", "score": 4.3, "pros": ["reliable"], "complaints": ["pricey"],
+              "hasLocalService": true, "warranty": "2-year local", "summary": "Well supported in-market."
+            } ] }
+            """;
+
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.PlannerSystem ? StrategyJson
+            : system == PromptTemplates.BrandReputationSystem ? repJson
+            : "summary");
+
+        var search = new FakeSearchProvider(
+            new SearchResult
+            {
+                Title = "Samsung Split AC AR24", Price = new Money(450, "JOD"), Seller = "OpenSooq",
+                Url = "https://jo.opensooq.com/en/listing/123", Kind = SearchKind.Shopping
+            });
+
+        var agent = new AgentService(llm, new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var answer = await agent.AskAsync("ACs in Jordan", "jordan");
+
+        var samsung = answer.Products!.Models.First(m => m.Brand == "Samsung");
+        samsung.BrandReputation.Should().NotBeNull();
+        samsung.BrandReputation!.Score.Should().Be(4.3);
+        samsung.BrandReputation.HasLocalService.Should().BeTrue();
+        samsung.BrandReputation.Flag.Should().Be(ReputationFlag.StrongLocalPresence);
+        llm.SystemPromptsSeen.Should().Contain(PromptTemplates.BrandReputationSystem);
+    }
+
+    [Fact]
     public async Task SearchProductsAsync_DropsNonLocalUnlessRequested()
     {
         // A non-local product listing (no country signal in the URL) plus a local one.
