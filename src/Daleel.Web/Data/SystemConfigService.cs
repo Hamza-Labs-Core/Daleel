@@ -64,6 +64,17 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "limit.saved_results_free", Value = "10", Type = "int" },
         new SystemConfig { Key = "model.default_free", Value = "openai/gpt-4o-mini", Type = "string" },
         new SystemConfig { Key = "model.default_pro", Value = "anthropic/claude-sonnet-4", Type = "string" },
+
+        // Cost controls + per-provider pricing (USD). max_per_job = 0 ⇒ no cap.
+        new SystemConfig { Key = "cost.max_per_job", Value = "0", Type = "decimal" },
+        new SystemConfig { Key = "cost.monthly_alert", Value = "50", Type = "decimal" },
+        new SystemConfig { Key = "pricing.search", Value = "0.005", Type = "decimal" },
+        new SystemConfig { Key = "pricing.scrape", Value = "0.001", Type = "decimal" },
+        new SystemConfig { Key = "pricing.extract", Value = "0.002", Type = "decimal" },
+        new SystemConfig { Key = "pricing.brand_lookup", Value = "0.01", Type = "decimal" },
+        new SystemConfig { Key = "pricing.places", Value = "0.017", Type = "decimal" },
+        new SystemConfig { Key = "pricing.social", Value = "0.01", Type = "decimal" },
+        new SystemConfig { Key = "pricing.render", Value = "0.01", Type = "decimal" },
     };
 
     public async Task<string?> GetAsync(string key, CancellationToken ct = default) =>

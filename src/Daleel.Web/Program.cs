@@ -82,6 +82,7 @@ builder.Services.AddScoped<ISavedResultRepository, SavedResultRepository>();
 builder.Services.AddScoped<IQuotaService, QuotaService>();
 builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
 builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
+builder.Services.AddScoped<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddHttpContextAccessor();
 
 // Async conversation backend: SignalR + a queue + a background worker run searches off the request.

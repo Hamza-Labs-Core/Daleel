@@ -2,6 +2,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @rendermode InteractiveServer
 @inject IAnalyticsService Analytics
+@inject IApiCallLogRepository ApiLog
 
 <PageTitle>دليل · Admin · Analytics</PageTitle>
 
@@ -49,6 +50,83 @@ else
             </MudPaper>
         </MudItem>
     </MudGrid>
+
+    <MudText Typo="Typo.h5" Class="mt-6 mb-2">Cost &amp; providers (30d)</MudText>
+    <MudGrid Spacing="3">
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Total API cost</MudText>
+                <MudText Typo="Typo.h5">~$@_totalCost.ToString("0.00")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" md="3">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Avg cost / search</MudText>
+                <MudText Typo="Typo.h5">~$@_avgPerJob.ToString("0.000")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Cost per day (last 14)</MudText>
+                @if (_costSeries.Count > 0 && _costPerDay.Any(d => d.Cost > 0))
+                {
+                    <MudChart ChartType="ChartType.Bar" ChartSeries="_costSeries" XAxisLabels="_costLabels" Height="200px" />
+                }
+                else { <MudText Typo="Typo.caption" Color="Color.Secondary">No cost recorded yet.</MudText> }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Provider usage &amp; health</MudText>
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead><tr><th>Provider</th><th>Calls</th><th>Cost</th><th>Avg time</th><th>Error rate</th></tr></thead>
+                    <tbody>
+                        @foreach (var p in _providers)
+                        {
+                            <tr>
+                                <td>@p.Provider</td>
+                                <td>@p.Calls</td>
+                                <td>~$@p.Cost.ToString("0.000")</td>
+                                <td>@p.AvgMs.ToString("0") ms</td>
+                                <td><MudText Color="@(p.ErrorRate > 0.1 ? Color.Error : Color.Success)">@((p.ErrorRate * 100).ToString("0.0"))%</MudText></td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+                @if (_providers.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No provider calls yet.</MudText> }
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="5">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">LLM token usage</MudText>
+                <MudSimpleTable Dense="true">
+                    <thead><tr><th>Model</th><th>In</th><th>Out</th><th>Cost</th></tr></thead>
+                    <tbody>
+                        @foreach (var t in _tokens)
+                        {
+                            <tr><td>@t.Model</td><td>@t.InputTokens.ToString("N0")</td><td>@t.OutputTokens.ToString("N0")</td><td>~$@t.Cost.ToString("0.000")</td></tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+                @if (_tokens.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No LLM calls yet.</MudText> }
+            </MudPaper>
+        </MudItem>
+
+        <MudItem xs="12">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">Most expensive searches</MudText>
+                @foreach (var q in _expensive)
+                {
+                    <div class="d-flex justify-space-between">
+                        <span dir="@Catalog.Dir(q.Query)" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;">@q.Query</span>
+                        <span><b>~$@q.Cost.ToString("0.000")</b> · @q.Calls calls</span>
+                    </div>
+                }
+                @if (_expensive.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No data.</MudText> }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
 }
 
 @code {
@@ -59,17 +137,36 @@ else
     private List<ChartSeries> _series = new();
     private string[] _labels = Array.Empty<string>();
 
+    private decimal _totalCost;
+    private double _avgPerJob;
+    private IReadOnlyList<ProviderUsage> _providers = new List<ProviderUsage>();
+    private IReadOnlyList<TokenUsage> _tokens = new List<TokenUsage>();
+    private IReadOnlyList<QueryCost> _expensive = new List<QueryCost>();
+    private IReadOnlyList<(DateTime Day, decimal Cost)> _costPerDay = new List<(DateTime, decimal)>();
+    private List<ChartSeries> _costSeries = new();
+    private string[] _costLabels = Array.Empty<string>();
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
 
         var since = DateTime.UtcNow.AddDays(-30);
+        var sinceOffset = DateTimeOffset.UtcNow.AddDays(-30);
         _perDay = await Analytics.SearchesPerDayAsync(14);
         _byType = await Analytics.SearchesByTypeAsync(since);
         _byGeo = await Analytics.GeoDistributionAsync(since);
 
         _labels = _perDay.Select(d => d.Day.ToString("MM/dd")).ToArray();
         _series = new() { new ChartSeries { Name = "Searches", Data = _perDay.Select(d => (double)d.Count).ToArray() } };
+
+        _totalCost = await ApiLog.TotalCostAsync(sinceOffset);
+        _avgPerJob = await ApiLog.AverageCostPerJobAsync(sinceOffset);
+        _providers = await ApiLog.ProviderUsageAsync(sinceOffset);
+        _tokens = await ApiLog.TokenUsageAsync(sinceOffset);
+        _expensive = await ApiLog.MostExpensiveQueriesAsync(sinceOffset, 10);
+        _costPerDay = await ApiLog.CostPerDayAsync(14);
+        _costLabels = _costPerDay.Select(d => d.Day.ToString("MM/dd")).ToArray();
+        _costSeries = new() { new ChartSeries { Name = "Cost $", Data = _costPerDay.Select(d => (double)d.Cost).ToArray() } };
 
         _loading = false;
         StateHasChanged();

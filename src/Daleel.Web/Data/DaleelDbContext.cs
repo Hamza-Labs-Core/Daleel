@@ -27,6 +27,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<SystemConfig> SystemConfig => Set<SystemConfig>();
     public DbSet<SearchJob> SearchJobs => Set<SearchJob>();
     public DbSet<UserConversation> UserConversations => Set<UserConversation>();
+    public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -77,6 +78,20 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.HasIndex(x => new { x.UserId, x.Status });
             e.Property(x => x.Status).HasMaxLength(20);
             e.Property(x => x.Query).HasMaxLength(2000);
+        });
+
+        builder.Entity<ApiCallLog>(e =>
+        {
+            // Indexed for the two hot query shapes: per-job (UI live log) and per-user-over-time (usage/cost).
+            e.HasIndex(x => x.JobId);
+            e.HasIndex(x => new { x.UserId, x.CreatedAt });
+            e.HasIndex(x => new { x.Provider, x.CreatedAt });
+            e.Property(x => x.Provider).HasMaxLength(64);
+            e.Property(x => x.Endpoint).HasMaxLength(64);
+            e.Property(x => x.RequestSummary).HasMaxLength(500);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.Model).HasMaxLength(128);
+            e.Property(x => x.EstimatedCost).HasColumnType("decimal(12,6)");
         });
 
         builder.Entity<SubscriptionPlan>(e =>

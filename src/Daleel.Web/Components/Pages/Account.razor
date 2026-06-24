@@ -5,6 +5,7 @@
 @using Microsoft.EntityFrameworkCore
 @inject ICurrentUser CurrentUser
 @inject IQuotaService Quota
+@inject IApiCallLogRepository ApiLog
 @inject UserManager<ApplicationUser> Users
 @inject DaleelDbContext Db
 @inject IDialogService Dialogs
@@ -50,6 +51,13 @@ else
 
         <MudItem xs="12" md="5">
             <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">This month's usage</MudText>
+                <div class="d-flex justify-space-between"><span>API calls</span><b>@_monthCalls</b></div>
+                <div class="d-flex justify-space-between"><span>Estimated API cost</span><b>~$@_monthCost.ToString("0.000")</b></div>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">Indicative provider cost, not your bill.</MudText>
+            </MudPaper>
+
+            <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
                 <MudText Typo="Typo.h6" Class="mb-2">Billing history</MudText>
                 <MudText Typo="Typo.caption" Color="Color.Secondary">No invoices yet. Billing arrives with Stripe.</MudText>
             </MudPaper>
@@ -60,12 +68,61 @@ else
                            OnClick="DeleteAccountAsync">Delete my account</MudButton>
             </MudPaper>
         </MudItem>
+
+        @if (_recent.Count > 0)
+        {
+            <MudItem xs="12">
+                <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                    <MudText Typo="Typo.h6" Class="mb-2">Recent searches — per-search cost</MudText>
+                    <MudExpansionPanels Elevation="0" MultiExpansion="true">
+                        @foreach (var s in _recent)
+                        {
+                            <MudExpansionPanel>
+                                <TitleContent>
+                                    <div class="d-flex justify-space-between align-center" style="width:100%;">
+                                        <MudText Typo="Typo.body2" dir="@Catalog.Dir(s.Query)" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:60%;">@s.Query</MudText>
+                                        <MudText Typo="Typo.body2" Color="Color.Secondary">@s.Calls calls · ~$@s.Cost.ToString("0.000")</MudText>
+                                    </div>
+                                </TitleContent>
+                                <ChildContent>
+                                    @if (_jobLogs.TryGetValue(s.JobId, out var log))
+                                    {
+                                        <MudSimpleTable Dense="true">
+                                            <thead><tr><th>Provider</th><th>Action</th><th>Time</th><th>Cost</th></tr></thead>
+                                            <tbody>
+                                                @foreach (var c in log)
+                                                {
+                                                    <tr>
+                                                        <td>@c.Provider</td>
+                                                        <td>@c.Endpoint</td>
+                                                        <td>@c.ResponseTimeMs ms</td>
+                                                        <td>~$@c.EstimatedCost.ToString("0.0000")</td>
+                                                    </tr>
+                                                }
+                                            </tbody>
+                                        </MudSimpleTable>
+                                    }
+                                    else
+                                    {
+                                        <MudButton Size="Size.Small" OnClick="@(() => LoadLogAsync(s.JobId))">Show API calls</MudButton>
+                                    }
+                                </ChildContent>
+                            </MudExpansionPanel>
+                        }
+                    </MudExpansionPanels>
+                </MudPaper>
+            </MudItem>
+        }
     </MudGrid>
 }
 
 @code {
     private QuotaStatus? _status;
     private string? _userId;
+    private int _monthCalls;
+    private decimal _monthCost;
+    private IReadOnlyList<QueryCost> _recent = new List<QueryCost>();
+    private readonly Dictionary<int, IReadOnlyList<ApiCallLog>> _jobLogs = new();
 
     private double Percent => _status is { Limit: > 0 } s ? Math.Min(100, 100.0 * s.Used / s.Limit.Value) : 0;
 
@@ -75,6 +132,16 @@ else
         _userId = await CurrentUser.GetUserIdAsync();
         if (_userId is null) return;
         _status = await Quota.GetStatusAsync(_userId, await CurrentUser.IsAdminAsync());
+
+        var monthStart = new DateTimeOffset(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, TimeSpan.Zero);
+        (_monthCalls, _monthCost) = await ApiLog.UserUsageSinceAsync(_userId, monthStart);
+        _recent = await ApiLog.RecentJobUsageAsync(_userId, 10);
+        StateHasChanged();
+    }
+
+    private async Task LoadLogAsync(int jobId)
+    {
+        _jobLogs[jobId] = await ApiLog.ListByJobAsync(jobId);
         StateHasChanged();
     }
 
@@ -90,6 +157,7 @@ else
         Db.SearchHistory.RemoveRange(Db.SearchHistory.Where(x => x.UserId == _userId));
         Db.UserSubscriptions.RemoveRange(Db.UserSubscriptions.Where(x => x.UserId == _userId));
         Db.UserQuotas.RemoveRange(Db.UserQuotas.Where(x => x.UserId == _userId));
+        Db.ApiCallLogs.RemoveRange(Db.ApiCallLogs.Where(x => x.UserId == _userId));
         await Db.SaveChangesAsync();
 
         var user = await Users.FindByIdAsync(_userId);

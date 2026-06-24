@@ -31,6 +31,12 @@ public sealed record AgentRequest
 
     /// <summary>Halal content-filter strictness for this request (default: Strict).</summary>
     public FilterStrictness Strictness { get; init; } = FilterStrictness.Strict;
+
+    /// <summary>Optional observer that records every external API call (timing + cost).</summary>
+    public Daleel.Core.Observability.IApiCallObserver? ApiObserver { get; init; }
+
+    /// <summary>Pricing used to estimate per-call cost (defaults to built-in rates).</summary>
+    public Daleel.Core.Observability.CostEstimator? CostEstimator { get; init; }
 }
 
 /// <summary>A snapshot of which capabilities are available given the current keys.</summary>
@@ -100,6 +106,18 @@ public sealed class AgentFactory : IAgentFactory
 
         IPostFetcher? social =
             Resolve("APIFY_TOKEN", keys) is { } apify ? new ApifyPostFetcher(new ApifyClient(apify)) : null;
+
+        // Wrap every provider in a logging decorator when an observer is supplied, so every
+        // external call is timed, cost-estimated, and streamed.
+        if (request.ApiObserver is { } observer)
+        {
+            var estimator = request.CostEstimator ?? new Daleel.Core.Observability.CostEstimator();
+            llm = new Daleel.Agent.Instrumentation.LoggingLlmClient(llm, observer, estimator);
+            if (search is not null) search = Daleel.Search.Instrumentation.LoggingProviders.Wrap(search, observer, estimator);
+            if (places is not null) places = Daleel.Search.Instrumentation.LoggingProviders.Wrap(places, observer, estimator);
+            if (scraper is not null) scraper = Daleel.Search.Instrumentation.LoggingProviders.WrapScrape(scraper, observer, estimator);
+            if (social is not null) social = Daleel.Search.Instrumentation.LoggingProviders.Wrap(social, observer, estimator, "Apify");
+        }
 
         var opinions = new OpinionExtractor(llm);
         var options = new AgentOptions { DefaultGeo = request.Geo, Log = request.Log };
