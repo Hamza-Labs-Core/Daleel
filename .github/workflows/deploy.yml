@@ -8,8 +8,8 @@ on:
         required: false
         default: "latest"
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
 
 env:
   IMAGE_NAME: ghcr.io/hamza-labs-core/daleel
@@ -135,13 +135,12 @@ jobs:
         id: tag
         env:
           INPUT_TAG: ${{ github.event.inputs.image_tag }}
-          REF_NAME: ${{ github.ref_name }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           if [ "$EVENT_NAME" = "push" ]; then
-            TAG="$REF_NAME"          # the pushed git tag, e.g. v1.2.3
+            TAG="latest"             # push to main publishes & deploys the `latest` image
           else
-            TAG="${INPUT_TAG:-latest}"
+            TAG="${INPUT_TAG:-latest}"   # manual run can override; defaults to latest
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Deploying tag: $TAG"
