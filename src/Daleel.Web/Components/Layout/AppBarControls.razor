@@ -1,11 +1,6 @@
-@* Interactive island for the app-bar controls: language, text direction, and theme.
-
-   MainLayout is static, so these buttons would never wire up their click handlers there (the live
-   symptom: the theme toggle and EN/عربي switch "did nothing"). Hosting them in an InteractiveServer
-   island makes the handlers fire; LanguageSwitcher is interactive simply by being rendered inside it.
-   They share the circuit's LayoutState with InteractiveProviders, so toggling theme here re-renders
-   the MudThemeProvider there. *@
-@rendermode InteractiveServer
+@* App-bar controls: language, text direction, and theme. MainLayout is InteractiveServer now, so these
+   click handlers fire as plain children. They share the circuit's LayoutState with InteractiveProviders,
+   so toggling theme here re-renders the MudThemeProvider there. *@
 @implements IDisposable
 @inject LayoutState State
 @inject BrowserStore Store

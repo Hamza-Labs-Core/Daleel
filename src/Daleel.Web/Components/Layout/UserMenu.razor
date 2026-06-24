@@ -1,6 +1,5 @@
 @* App-bar account control: a Sign-in button when anonymous, avatar + menu when signed in.
-   Rendered as an interactive island so the MudMenu dropdown actually opens — MainLayout is static. *@
-@rendermode InteractiveServer
+   MainLayout is InteractiveServer, so the MudMenu dropdown opens as a plain child. *@
 
 <AuthorizeView>
     <Authorized>

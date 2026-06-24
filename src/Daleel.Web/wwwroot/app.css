@@ -15,7 +15,8 @@ html, body {
     padding: clamp(1.5rem, 6vh, 5rem) 0 1.5rem;
 }
 
-.daleel-hero .daleel-logo {
+.daleel-hero .daleel-logo,
+.daleel-landing-logo {
     font-size: clamp(2.6rem, 7vw, 4rem);
     font-weight: 700;
     line-height: 1;
@@ -59,6 +60,105 @@ html, body {
 }
 .daleel-card:hover {
     transform: translateY(-2px);
+}
+
+/* ───────────────────────────── Landing page ───────────────────────────── */
+
+/* Hero: a soft radial wash of the brand hues behind centred content. */
+.daleel-landing-hero {
+    text-align: center;
+    padding: clamp(2rem, 8vh, 6rem) 1rem clamp(1.5rem, 4vh, 3rem);
+    border-radius: 24px;
+    background:
+        radial-gradient(60% 70% at 50% 0%, rgba(var(--mud-palette-primary-rgb), .14), transparent 70%),
+        radial-gradient(50% 60% at 85% 30%, rgba(var(--mud-palette-secondary-rgb), .12), transparent 70%);
+}
+
+.daleel-landing-logo {
+    font-size: clamp(3rem, 9vw, 5rem);
+}
+
+.daleel-landing-title {
+    font-weight: 700;
+    max-width: 18ch;
+    margin-inline: auto;
+    line-height: 1.15;
+}
+
+/* Constrain prose to a comfortable measure on wide screens. */
+.daleel-landing-lede {
+    max-width: 60ch;
+}
+
+.daleel-landing-section {
+    margin-top: clamp(3rem, 9vh, 6rem);
+}
+
+/* Feature cards: equal-height, lift handled by the shared .daleel-card rule. */
+.daleel-feature-card {
+    height: 100%;
+    border-radius: 18px;
+}
+
+.daleel-feature-icon {
+    width: 56px;
+    height: 56px;
+    border-radius: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Pricing cards */
+.daleel-price-card {
+    height: 100%;
+    border-radius: 20px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+}
+
+/* The list grows so every card's CTA sits flush at the bottom regardless of feature count. */
+.daleel-price-card .mud-list {
+    flex-grow: 1;
+}
+
+.daleel-price-popular {
+    border: 2px solid var(--mud-palette-primary);
+}
+
+/* Centred ribbon stays correct in both LTR and RTL. */
+.daleel-price-ribbon {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: var(--mud-palette-primary);
+    color: var(--mud-palette-primary-text);
+    font-size: .75rem;
+    font-weight: 700;
+    letter-spacing: .3px;
+    padding: 4px 14px;
+    border-radius: 999px;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(var(--mud-palette-primary-rgb), .4);
+}
+
+/* Closing call-to-action band */
+.daleel-cta-band {
+    border-radius: 24px;
+    background: linear-gradient(120deg,
+        rgba(var(--mud-palette-primary-rgb), .16),
+        rgba(var(--mud-palette-secondary-rgb), .16));
+    border: 1px solid rgba(var(--mud-palette-primary-rgb), .25);
+}
+
+.daleel-cta-title {
+    font-weight: 700;
+}
+
+.daleel-cta-sub {
+    max-width: 48ch;
 }
 
 /* Blazor framework error toast */

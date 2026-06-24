@@ -1,0 +1,29 @@
+@inherits LayoutComponentBase
+
+@* Static SSR layout for the auth pages (Login / Logout / Register). App.razor renders those paths
+   WITHOUT a render mode so their <AntiforgeryToken /> form posts keep working, so this layout must
+   avoid anything interactive — no MudLayout/drawer/menus. It just supplies MudBlazor styling (a static
+   MudThemeProvider emits the brand CSS variables) and RTL, then centres the page content. Dark mode is
+   stored in the browser and can't be read in static SSR, so auth pages always render the light theme. *@
+<MudThemeProvider Theme="_theme" />
+
+<MudRTLProvider RightToLeft="@RightToLeft">
+    <MudContainer MaxWidth="MaxWidth.Small" Class="py-8">
+        <div class="d-flex justify-center mb-6">
+            <MudLink Href="/" Underline="Underline.None" Class="d-flex align-center">
+                <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Color="Color.Primary" Class="mr-2" />
+                <MudText Typo="Typo.h6" Class="daleel-wordmark">دليل · Daleel</MudText>
+            </MudLink>
+        </div>
+        @Body
+    </MudContainer>
+</MudRTLProvider>
+
+@code {
+    private readonly MudTheme _theme = DaleelTheme.Build();
+
+    // Arabic resolves to RTL; the request culture comes from the localization middleware (cookie →
+    // Accept-Language), so this is correct on every static load of an auth page.
+    private static bool RightToLeft =>
+        System.Globalization.CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft;
+}

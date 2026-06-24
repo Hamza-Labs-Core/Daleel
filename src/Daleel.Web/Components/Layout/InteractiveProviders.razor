@@ -1,15 +1,8 @@
-@* MudBlazor's global providers, rendered as an interactive island.
-
-   MainLayout itself is static SSR: it wraps @Body, and @Body must stay static so that each page can
-   keep declaring its own @rendermode and so the static auth pages (Login/Logout with AntiforgeryToken)
-   keep working. A static MudThemeProvider can't react to the theme toggle, and static dialog/snackbar/
-   popover providers never fire for interactive pages — which is why theme switching looked dead.
-
-   These providers don't wrap page content (MudThemeProvider emits global CSS variables; the overlay
-   providers render their own roots), so they can live in their own InteractiveServer island. Every
-   interactive component in the circuit shares one scoped LayoutState, so the app-bar toggle and the
-   Settings page both drive this provider through State.Changed. *@
-@rendermode InteractiveServer
+@* MudBlazor's global providers. MainLayout is now InteractiveServer (App.razor sets the render mode
+   globally), so this renders interactively as a plain child: the MudThemeProvider reacts to the theme
+   toggle and the dialog/snackbar/popover overlays fire for interactive pages. Every interactive
+   component in the circuit shares one scoped LayoutState, so the app-bar toggle and the Settings page
+   both drive this provider through State.Changed. *@
 @implements IDisposable
 @inject LayoutState State
 @inject BrowserStore Store

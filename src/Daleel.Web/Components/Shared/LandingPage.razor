@@ -1,0 +1,152 @@
+@* Anonymous landing page. Shown to signed-out visitors in place of the search UI (see Home.razor).
+   All copy is localized via the shared catalogue so it follows the EN/AR culture, and the layout is
+   mobile-first (single column on xs, fanning out to 2–3 columns from sm/md up). MudRTLProvider in the
+   layout mirrors everything for Arabic automatically. *@
+@inject IStringLocalizer<SharedResource> L
+
+<!-- ╔═══════════════════════════ HERO ═══════════════════════════╗ -->
+<section class="daleel-landing-hero">
+    <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+             Icon="@Icons.Material.Filled.Verified" Class="mb-4">@L["Landing.Hero.Badge"]</MudChip>
+
+    <div class="daleel-logo daleel-landing-logo">دليل</div>
+
+    <MudText Typo="Typo.h3" Align="Align.Center" Class="daleel-landing-title mt-2">
+        @L["Landing.Hero.Title"]
+    </MudText>
+
+    <MudText Typo="Typo.subtitle1" Align="Align.Center" Color="Color.Secondary" Class="daleel-landing-lede mx-auto mt-3">
+        @L["Landing.Hero.Subtitle"]
+    </MudText>
+
+    <div class="d-flex flex-wrap justify-center gap-3 mt-6">
+        <MudButton Href="/register" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                   EndIcon="@Icons.Material.Filled.ArrowForward">@L["Landing.Hero.GetStarted"]</MudButton>
+        <MudButton Href="/login" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Large"
+                   StartIcon="@Icons.Material.Filled.Login">@L["Landing.Hero.SignIn"]</MudButton>
+    </div>
+
+    <MudText Typo="Typo.caption" Align="Align.Center" Color="Color.Secondary" Class="d-block mt-4">
+        @L["Landing.Hero.NoCard"]
+    </MudText>
+</section>
+
+<!-- ╔═════════════════════════ FEATURES ═════════════════════════╗ -->
+<section class="daleel-landing-section">
+    <div class="text-center mb-8">
+        <MudText Typo="Typo.h4">@L["Landing.Features.Title"]</MudText>
+        <MudText Typo="Typo.body1" Color="Color.Secondary" Class="daleel-landing-lede mx-auto mt-2">
+            @L["Landing.Features.Subtitle"]
+        </MudText>
+    </div>
+
+    <MudGrid Spacing="4">
+        @foreach (var f in _features)
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <MudPaper Outlined="true" Elevation="0" Class="daleel-card daleel-feature-card pa-6">
+                    <div class="daleel-feature-icon" style="@($"color:{f.Tint};background:rgba(var({f.TintRgb}),.12);")">
+                        <MudIcon Icon="@f.Icon" Size="Size.Large" />
+                    </div>
+                    <MudText Typo="Typo.h6" Class="mt-4">@f.Title</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1">@f.Desc</MudText>
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+</section>
+
+<!-- ╔══════════════════════════ PRICING ═════════════════════════╗ -->
+<section class="daleel-landing-section">
+    <div class="text-center mb-8">
+        <MudText Typo="Typo.h4">@L["Landing.Pricing.Title"]</MudText>
+        <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">@L["Landing.Pricing.Subtitle"]</MudText>
+    </div>
+
+    <MudGrid Spacing="4" Justify="Justify.Center">
+        @foreach (var t in _tiers)
+        {
+            <MudItem xs="12" sm="6" md="4">
+                <MudPaper Outlined="true" Elevation="@(t.Popular ? 8 : 0)"
+                          Class="@($"daleel-price-card pa-6 {(t.Popular ? "daleel-price-popular" : "")}")">
+                    @if (t.Popular)
+                    {
+                        <div class="daleel-price-ribbon">@L["Landing.Pricing.Popular"]</div>
+                    }
+                    <MudText Typo="Typo.h5">@t.Name</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@t.Tag</MudText>
+
+                    <div class="my-4 d-flex align-baseline">
+                        @if (t.Free)
+                        {
+                            <MudText Typo="Typo.h3" Style="display:inline;">@L["Landing.Pricing.Free"]</MudText>
+                        }
+                        else
+                        {
+                            <MudText Typo="Typo.h3" Style="display:inline;">@($"${t.Price}")</MudText>
+                            <MudText Typo="Typo.body1" Color="Color.Secondary" Class="ms-1" Style="display:inline;">
+                                @L["Landing.Pricing.PerMonth"]
+                            </MudText>
+                        }
+                    </div>
+
+                    <MudList T="string" Dense="true" Class="mb-2">
+                        @foreach (var feature in t.Features)
+                        {
+                            <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">
+                                <MudText Typo="Typo.body2">@feature</MudText>
+                            </MudListItem>
+                        }
+                    </MudList>
+
+                    <MudButton Href="/register" FullWidth="true" Size="Size.Large" Class="mt-2"
+                               Variant="@(t.Popular ? Variant.Filled : Variant.Outlined)" Color="Color.Primary">
+                        @L["Landing.Pricing.Cta"]
+                    </MudButton>
+                </MudPaper>
+            </MudItem>
+        }
+    </MudGrid>
+</section>
+
+<!-- ╔════════════════════════ CTA BAND ══════════════════════════╗ -->
+<section class="daleel-landing-section">
+    <MudPaper Elevation="0" Class="daleel-cta-band pa-8 text-center">
+        <MudText Typo="Typo.h4" Class="daleel-cta-title">@L["Landing.Cta.Title"]</MudText>
+        <MudText Typo="Typo.body1" Class="daleel-cta-sub mx-auto mt-2">@L["Landing.Cta.Subtitle"]</MudText>
+        <div class="d-flex flex-wrap justify-center gap-3 mt-6">
+            <MudButton Href="/register" Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
+                       EndIcon="@Icons.Material.Filled.ArrowForward">@L["Landing.Cta.Register"]</MudButton>
+            <MudButton Href="/login" Variant="Variant.Text" Color="Color.Inherit" Size="Size.Large">
+                @L["Landing.Cta.Login"]
+            </MudButton>
+        </div>
+    </MudPaper>
+</section>
+
+@code {
+    private sealed record Feature(string Icon, string Title, string Desc, string Tint, string TintRgb);
+    private sealed record Tier(string Name, string Tag, string Price, bool Free, bool Popular, string[] Features);
+
+    // CSS palette vars + their *-rgb companions (MudBlazor emits both) let the icon use a solid colour
+    // over a soft 12%-alpha wash of the same hue.
+    private Feature[] _features => new[]
+    {
+        new Feature(Icons.Material.Filled.TravelExplore, L["Landing.Feature.Search.Title"],     L["Landing.Feature.Search.Desc"],     "var(--mud-palette-primary)",   "--mud-palette-primary-rgb"),
+        new Feature(Icons.Material.Filled.Balance,       L["Landing.Feature.Compare.Title"],    L["Landing.Feature.Compare.Desc"],    "var(--mud-palette-secondary)", "--mud-palette-secondary-rgb"),
+        new Feature(Icons.Material.Filled.Reviews,       L["Landing.Feature.Reputation.Title"], L["Landing.Feature.Reputation.Desc"], "var(--mud-palette-info)",      "--mud-palette-info-rgb"),
+        new Feature(Icons.Material.Filled.LocalOffer,    L["Landing.Feature.Deals.Title"],      L["Landing.Feature.Deals.Desc"],      "var(--mud-palette-warning)",   "--mud-palette-warning-rgb"),
+        new Feature(Icons.Material.Filled.Shield,        L["Landing.Feature.Halal.Title"],      L["Landing.Feature.Halal.Desc"],      "var(--mud-palette-success)",   "--mud-palette-success-rgb"),
+        new Feature(Icons.Material.Filled.Translate,     L["Landing.Feature.Bilingual.Title"],  L["Landing.Feature.Bilingual.Desc"],  "var(--mud-palette-primary)",   "--mud-palette-primary-rgb"),
+    };
+
+    private Tier[] _tiers => new[]
+    {
+        new Tier(L["Plan.Basic"], L["Landing.Plan.Basic.Tag"], "0", Free: true, Popular: false,
+            new[] { L["Landing.Plan.Basic.F1"].Value, L["Landing.Plan.Basic.F2"].Value, L["Landing.Plan.Basic.F3"].Value }),
+        new Tier(L["Plan.Pro"], L["Landing.Plan.Pro.Tag"], "9.99", Free: false, Popular: true,
+            new[] { L["Landing.Plan.Pro.F1"].Value, L["Landing.Plan.Pro.F2"].Value, L["Landing.Plan.Pro.F3"].Value, L["Landing.Plan.Pro.F4"].Value }),
+        new Tier(L["Plan.Unlimited"], L["Landing.Plan.Unlimited.Tag"], "100", Free: false, Popular: false,
+            new[] { L["Landing.Plan.Unlimited.F1"].Value, L["Landing.Plan.Unlimited.F2"].Value, L["Landing.Plan.Unlimited.F3"].Value, L["Landing.Plan.Unlimited.F4"].Value }),
+    };
+}

@@ -1,5 +1,4 @@
 @page "/"
-@rendermode InteractiveServer
 @implements IDisposable
 @inject ICurrentUser CurrentUser
 @inject IConversationService Conversations
@@ -13,6 +12,12 @@
 
 <PageTitle>دليل · Daleel</PageTitle>
 
+@* Signed-out visitors get the marketing landing page; the search/chat workspace is for members only. *@
+<AuthorizeView>
+<NotAuthorized>
+    <LandingPage />
+</NotAuthorized>
+<Authorized>
 <MudGrid Spacing="3">
     <!-- Conversation history sidebar -->
     <MudItem xs="12" md="3">
@@ -107,6 +112,8 @@
         </MudPaper>
     </MudItem>
 </MudGrid>
+</Authorized>
+</AuthorizeView>
 
 @code {
     [SupplyParameterFromQuery] private string? Q { get; set; }

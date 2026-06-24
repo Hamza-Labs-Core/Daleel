@@ -123,4 +123,49 @@
   <data name="Lang.Language" xml:space="preserve"><value>اللغة</value></data>
   <data name="Lang.English" xml:space="preserve"><value>English</value></data>
   <data name="Lang.Arabic" xml:space="preserve"><value>العربية</value></data>
+
+  <data name="Landing.Hero.Badge" xml:space="preserve"><value>ذكاء سوقي مُنقّى وفق الشريعة</value></data>
+  <data name="Landing.Hero.Title" xml:space="preserve"><value>افهم السوق العربي في ثوانٍ</value></data>
+  <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>يبحث دليل في المتاجر العربية ووسائل التواصل والويب المفتوح ليجيب عن أسئلتك حول الأسعار والمنتجات والعلامات التجارية والعروض — بالعربية والإنجليزية.</value></data>
+  <data name="Landing.Hero.GetStarted" xml:space="preserve"><value>ابدأ مجانًا</value></data>
+  <data name="Landing.Hero.SignIn" xml:space="preserve"><value>تسجيل الدخول</value></data>
+  <data name="Landing.Hero.NoCard" xml:space="preserve"><value>بدون بطاقة ائتمان · ٥ عمليات بحث مجانية شهريًا</value></data>
+  <data name="Landing.Features.Title" xml:space="preserve"><value>كل ما تحتاجه لقراءة السوق</value></data>
+  <data name="Landing.Features.Subtitle" xml:space="preserve"><value>مساعد واحد للأسعار والمنتجات والسمعة والاتجاهات في أنحاء العالم العربي.</value></data>
+  <data name="Landing.Feature.Search.Title" xml:space="preserve"><value>بحث عربي ذكي</value></data>
+  <data name="Landing.Feature.Search.Desc" xml:space="preserve"><value>اسأل بالعربية أو الإنجليزية واحصل على إجابة واضحة وموثّقة في ثوانٍ.</value></data>
+  <data name="Landing.Feature.Compare.Title" xml:space="preserve"><value>قارن الأسعار والمتاجر</value></data>
+  <data name="Landing.Feature.Compare.Desc" xml:space="preserve"><value>اعرف أين تجد المنتج بأفضل سعر بين المتاجر المحلية والعالمية.</value></data>
+  <data name="Landing.Feature.Reputation.Title" xml:space="preserve"><value>سمعة العلامات التجارية</value></data>
+  <data name="Landing.Feature.Reputation.Desc" xml:space="preserve"><value>تقييمات حقيقية وتحليل لمشاعر الجمهور، مُلخّصة لأي علامة تجارية.</value></data>
+  <data name="Landing.Feature.Deals.Title" xml:space="preserve"><value>العروض والمتابعة</value></data>
+  <data name="Landing.Feature.Deals.Desc" xml:space="preserve"><value>تابع أفضل العروض وراقب تحرّك السوق مع مرور الوقت.</value></data>
+  <data name="Landing.Feature.Halal.Title" xml:space="preserve"><value>مُنقّى وفق الشريعة</value></data>
+  <data name="Landing.Feature.Halal.Desc" xml:space="preserve"><value>تُنقّى النتائج والصور لتبقى مناسبة للعائلة.</value></data>
+  <data name="Landing.Feature.Bilingual.Title" xml:space="preserve"><value>ثنائي اللغة ودعم RTL</value></data>
+  <data name="Landing.Feature.Bilingual.Desc" xml:space="preserve"><value>تجربة أصيلة بالعربية والإنجليزية مع دعم الكتابة من اليمين إلى اليسار.</value></data>
+  <data name="Landing.Pricing.Title" xml:space="preserve"><value>أسعار بسيطة وشفافة</value></data>
+  <data name="Landing.Pricing.Subtitle" xml:space="preserve"><value>ابدأ مجانًا، وارتقِ عندما تحتاج المزيد من عمليات البحث.</value></data>
+  <data name="Landing.Pricing.PerMonth" xml:space="preserve"><value>/شهريًا</value></data>
+  <data name="Landing.Pricing.Free" xml:space="preserve"><value>مجانًا</value></data>
+  <data name="Landing.Pricing.Popular" xml:space="preserve"><value>الأكثر شيوعًا</value></data>
+  <data name="Landing.Pricing.Cta" xml:space="preserve"><value>ابدأ الآن</value></data>
+  <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>للبداية</value></data>
+  <data name="Landing.Plan.Basic.F1" xml:space="preserve"><value>٥ عمليات بحث شهريًا</value></data>
+  <data name="Landing.Plan.Basic.F2" xml:space="preserve"><value>نتائج مُنقّاة وفق الشريعة</value></data>
+  <data name="Landing.Plan.Basic.F3" xml:space="preserve"><value>واجهة بالعربية والإنجليزية</value></data>
+  <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>للمتسوّقين بانتظام</value></data>
+  <data name="Landing.Plan.Pro.F1" xml:space="preserve"><value>١٠٠ عملية بحث شهريًا</value></data>
+  <data name="Landing.Plan.Pro.F2" xml:space="preserve"><value>مقارنة الأسعار والمتاجر</value></data>
+  <data name="Landing.Plan.Pro.F3" xml:space="preserve"><value>سمعة العلامات والتقييمات</value></data>
+  <data name="Landing.Plan.Pro.F4" xml:space="preserve"><value>سجل البحث والنتائج المحفوظة</value></data>
+  <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>للمحترفين والفرق</value></data>
+  <data name="Landing.Plan.Unlimited.F1" xml:space="preserve"><value>عمليات بحث غير محدودة</value></data>
+  <data name="Landing.Plan.Unlimited.F2" xml:space="preserve"><value>كل مزايا الباقة الاحترافية</value></data>
+  <data name="Landing.Plan.Unlimited.F3" xml:space="preserve"><value>متابعة العروض والتنبيهات</value></data>
+  <data name="Landing.Plan.Unlimited.F4" xml:space="preserve"><value>دعم ذو أولوية</value></data>
+  <data name="Landing.Cta.Title" xml:space="preserve"><value>هل أنت مستعد لاستكشاف السوق العربي؟</value></data>
+  <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>أنشئ حسابًا مجانيًا وابدأ أول عملية بحث خلال ثوانٍ.</value></data>
+  <data name="Landing.Cta.Register" xml:space="preserve"><value>أنشئ حسابًا مجانيًا</value></data>
+  <data name="Landing.Cta.Login" xml:space="preserve"><value>لدي حساب بالفعل</value></data>
 </root>

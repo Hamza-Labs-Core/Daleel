@@ -1,6 +1,8 @@
 @page "/logout"
+@layout Daleel.Web.Components.Layout.AuthLayout
 @* Static SSR sign-out confirmation. Logout is POST-only (see AuthEndpoints) so it can't be triggered
-   by a cross-site GET/<img>; the explicit button below submits an antiforgery-tokened form. *@
+   by a cross-site GET/<img>; the explicit button below submits an antiforgery-tokened form. The
+   AuthLayout it uses is static too, so the AntiforgeryToken below renders and validates correctly. *@
 
 <PageTitle>دليل · Sign out</PageTitle>
 

@@ -1,29 +1,29 @@
-@page "/login"
+@page "/register"
 @layout Daleel.Web.Components.Layout.AuthLayout
 @using Microsoft.AspNetCore.Authentication
 @inject IAuthenticationSchemeProvider SchemeProvider
 
-<PageTitle>دليل · Sign in</PageTitle>
+@* Static SSR. Daleel has no password sign-up: accounts are auto-provisioned on first OAuth callback
+   (see /auth/callback), so "register" and "sign in" share the same provider buttons — the only
+   difference is the framing. Kept static (its own AuthLayout) so it matches the auth flow. *@
 
-<div class="d-flex justify-center mt-8">
+<PageTitle>دليل · Create account</PageTitle>
+
+<div class="d-flex justify-center mt-4">
     <MudPaper Class="pa-8" Elevation="0" Outlined="true" Style="max-width:460px;width:100%;border-radius:18px;">
         <div class="text-center mb-4">
             <div class="daleel-logo" style="font-size:2.4rem;">دليل</div>
-            <MudText Typo="Typo.h5" Class="mt-2">تسجيل الدخول · Sign in</MudText>
+            <MudText Typo="Typo.h5" Class="mt-2">إنشاء حساب · Create account</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Sign in to keep your search history and saved results.
+                Sign up with one tap — we'll create your free account automatically.
+                You get 5 free searches every month.
             </MudText>
         </div>
-
-        @if (Error is not null)
-        {
-            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@ErrorText</MudAlert>
-        }
 
         <AuthorizeView>
             <Authorized>
                 <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-4">
-                    You are already signed in as @(context.User.Identity?.Name).
+                    You're already signed in as @(context.User.Identity?.Name).
                 </MudAlert>
                 <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
                     Go to Daleel
@@ -34,7 +34,7 @@
                 {
                     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
                         No login providers are configured. Add client ids/secrets under
-                        <code>Authentication</code> in configuration to enable sign-in.
+                        <code>Authentication</code> in configuration to enable sign-up.
                     </MudAlert>
                 }
                 else
@@ -42,15 +42,15 @@
                     <div class="d-flex flex-column gap-3">
                         @foreach (var p in _providers)
                         {
-                            <MudButton Href="@SignInHref(p.Scheme)" rel="nofollow"
+                            <MudButton Href="@SignUpHref(p.Scheme)" rel="nofollow"
                                        Variant="Variant.Outlined" Size="Size.Large" FullWidth="true"
                                        StartIcon="@Icon(p.Scheme)">
-                                Continue with @p.Display
+                                Sign up with @p.Display
                             </MudButton>
                         }
                     </div>
                     <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-4">
-                        New to Daleel? <MudLink Href="/register">Create a free account</MudLink>
+                        Already have an account? <MudLink Href="/login">Sign in</MudLink>
                     </MudText>
                 }
             </NotAuthorized>
@@ -60,7 +60,6 @@
 
 @code {
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
-    [SupplyParameterFromQuery] private string? Error { get; set; }
 
     private readonly List<(string Scheme, string Display)> _providers = new();
 
@@ -75,20 +74,11 @@
         }
     }
 
-    private string SignInHref(string scheme)
+    private string SignUpHref(string scheme)
     {
         var target = string.IsNullOrWhiteSpace(ReturnUrl) ? "/" : ReturnUrl;
         return $"/auth/signin/{Uri.EscapeDataString(scheme)}?returnUrl={Uri.EscapeDataString(target)}";
     }
-
-    private string ErrorText => Error switch
-    {
-        "external" => "The provider did not return a login. Please try again.",
-        "lockedout" => "This account is locked out.",
-        "disabled" => "This account has been disabled. Contact support if you think this is a mistake.",
-        "create" => "We couldn't create your account. Please try a different provider.",
-        _ => "Sign-in failed. Please try again."
-    };
 
     private static string Icon(string scheme) => scheme switch
     {

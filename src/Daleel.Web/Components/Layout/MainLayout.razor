@@ -1,9 +1,10 @@
 @inherits LayoutComponentBase
 
-@* This layout is static SSR — it wraps @Body, which must stay static so each page keeps its own
-   @rendermode and the static auth pages (Login/Logout) keep working. Everything interactive lives
-   in two islands: InteractiveProviders (theme + dialogs/snackbars/popovers) and AppBarControls
-   (language, direction, theme toggle). Initial text direction follows the request culture. *@
+@* This layout renders InteractiveServer (App.razor applies the render mode globally), so the drawer
+   toggle, theme switch and menus are all live here. The auth pages opt out of interactivity via their
+   own static AuthLayout — see App.razor's PageRenderMode — so their <AntiforgeryToken /> forms still
+   post. InteractiveProviders (theme + dialogs/snackbars/popovers) and AppBarControls (language,
+   direction, theme toggle) are plain children now; initial text direction follows the request culture. *@
 <InteractiveProviders />
 
 <MudRTLProvider RightToLeft="@RightToLeft">

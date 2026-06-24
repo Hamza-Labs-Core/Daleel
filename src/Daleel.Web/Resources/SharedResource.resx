@@ -123,4 +123,49 @@
   <data name="Lang.Language" xml:space="preserve"><value>Language</value></data>
   <data name="Lang.English" xml:space="preserve"><value>English</value></data>
   <data name="Lang.Arabic" xml:space="preserve"><value>العربية</value></data>
+
+  <data name="Landing.Hero.Badge" xml:space="preserve"><value>Halal-filtered market intelligence</value></data>
+  <data name="Landing.Hero.Title" xml:space="preserve"><value>Understand the Arab market in seconds</value></data>
+  <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>Daleel searches Arabic e-commerce, social media and the open web to answer your questions about prices, products, brands and deals — in both English and Arabic.</value></data>
+  <data name="Landing.Hero.GetStarted" xml:space="preserve"><value>Get started free</value></data>
+  <data name="Landing.Hero.SignIn" xml:space="preserve"><value>Sign in</value></data>
+  <data name="Landing.Hero.NoCard" xml:space="preserve"><value>No credit card needed · 5 free searches every month</value></data>
+  <data name="Landing.Features.Title" xml:space="preserve"><value>Everything you need to read the market</value></data>
+  <data name="Landing.Features.Subtitle" xml:space="preserve"><value>One assistant for prices, products, reputation and trends across the Arab world.</value></data>
+  <data name="Landing.Feature.Search.Title" xml:space="preserve"><value>Smart Arabic search</value></data>
+  <data name="Landing.Feature.Search.Desc" xml:space="preserve"><value>Ask in plain Arabic or English and get a clear, sourced answer in seconds.</value></data>
+  <data name="Landing.Feature.Compare.Title" xml:space="preserve"><value>Compare prices &amp; stores</value></data>
+  <data name="Landing.Feature.Compare.Desc" xml:space="preserve"><value>See where a product is cheapest across local and international sellers.</value></data>
+  <data name="Landing.Feature.Reputation.Title" xml:space="preserve"><value>Brand reputation</value></data>
+  <data name="Landing.Feature.Reputation.Desc" xml:space="preserve"><value>Real reviews and social sentiment, summarized for any brand.</value></data>
+  <data name="Landing.Feature.Deals.Title" xml:space="preserve"><value>Deals &amp; monitoring</value></data>
+  <data name="Landing.Feature.Deals.Desc" xml:space="preserve"><value>Track the best offers and watch the market move over time.</value></data>
+  <data name="Landing.Feature.Halal.Title" xml:space="preserve"><value>Halal-filtered</value></data>
+  <data name="Landing.Feature.Halal.Desc" xml:space="preserve"><value>Results and images are filtered to stay family-friendly.</value></data>
+  <data name="Landing.Feature.Bilingual.Title" xml:space="preserve"><value>Bilingual &amp; RTL</value></data>
+  <data name="Landing.Feature.Bilingual.Desc" xml:space="preserve"><value>A native experience in both English and Arabic, right-to-left.</value></data>
+  <data name="Landing.Pricing.Title" xml:space="preserve"><value>Simple, transparent pricing</value></data>
+  <data name="Landing.Pricing.Subtitle" xml:space="preserve"><value>Start free. Upgrade when you need more searches.</value></data>
+  <data name="Landing.Pricing.PerMonth" xml:space="preserve"><value>/mo</value></data>
+  <data name="Landing.Pricing.Free" xml:space="preserve"><value>Free</value></data>
+  <data name="Landing.Pricing.Popular" xml:space="preserve"><value>Most popular</value></data>
+  <data name="Landing.Pricing.Cta" xml:space="preserve"><value>Get started</value></data>
+  <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>For getting started</value></data>
+  <data name="Landing.Plan.Basic.F1" xml:space="preserve"><value>5 searches per month</value></data>
+  <data name="Landing.Plan.Basic.F2" xml:space="preserve"><value>Halal-filtered results</value></data>
+  <data name="Landing.Plan.Basic.F3" xml:space="preserve"><value>English &amp; Arabic interface</value></data>
+  <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>For regular shoppers</value></data>
+  <data name="Landing.Plan.Pro.F1" xml:space="preserve"><value>100 searches per month</value></data>
+  <data name="Landing.Plan.Pro.F2" xml:space="preserve"><value>Price &amp; store comparison</value></data>
+  <data name="Landing.Plan.Pro.F3" xml:space="preserve"><value>Brand reputation &amp; reviews</value></data>
+  <data name="Landing.Plan.Pro.F4" xml:space="preserve"><value>Search history &amp; saved results</value></data>
+  <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>For power users &amp; teams</value></data>
+  <data name="Landing.Plan.Unlimited.F1" xml:space="preserve"><value>Unlimited searches</value></data>
+  <data name="Landing.Plan.Unlimited.F2" xml:space="preserve"><value>Everything in Pro</value></data>
+  <data name="Landing.Plan.Unlimited.F3" xml:space="preserve"><value>Deal monitoring &amp; alerts</value></data>
+  <data name="Landing.Plan.Unlimited.F4" xml:space="preserve"><value>Priority support</value></data>
+  <data name="Landing.Cta.Title" xml:space="preserve"><value>Ready to explore the Arab market?</value></data>
+  <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>Create a free account and run your first search in seconds.</value></data>
+  <data name="Landing.Cta.Register" xml:space="preserve"><value>Create free account</value></data>
+  <data name="Landing.Cta.Login" xml:space="preserve"><value>I already have an account</value></data>
 </root>
