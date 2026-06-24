@@ -96,7 +96,8 @@ public sealed class SearchJobService : BackgroundService
             // count, result count and timing. This is server-side telemetry, never shown to the user.
             await analytics.RecordSearchAsync(new AnalyticsEvent
             {
-                UserId = job.UserId, Query = job.Query, QueryType = job.QueryType, Geo = job.Geo,
+                // Anonymous analytics: a one-way hash of the user id, never the id itself.
+                UserId = Anonymizer.HashUserId(job.UserId), Query = job.Query, QueryType = job.QueryType, Geo = job.Geo,
                 Model = job.Model, DurationMs = (int)sw.ElapsedMilliseconds,
                 ResultCount = result.ResultCount, ApiCallsMade = result.ApiCalls,
                 Provider = string.IsNullOrWhiteSpace(result.Providers) ? null : result.Providers,

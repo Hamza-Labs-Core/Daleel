@@ -1,7 +1,7 @@
 @* Product-search display. The product list is the primary unit — it always renders first and
-   prominently. Stores, brands, and review sources are kept (the store list is useful) but
-   demoted to secondary collapsible sections below the products. When a search returns no
-   products at all, the secondary content is shown directly so the page is never empty.
+   prominently. Stores, brands, real user reviews, and related articles are kept but demoted to
+   secondary collapsible sections below the products. When a search returns no products at all,
+   the secondary content is shown directly so the page is never empty.
    Brand cards drill into the product list pre-filtered to that brand. *@
 
 @if (Result.ProductCount > 0)
@@ -29,10 +29,17 @@
                     <BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />
                 </MudExpansionPanel>
             }
-            @if (Result.ReviewCount > 0)
+            @if (Result.HasUserReviews)
+            {
+                <MudExpansionPanel Icon="@Icons.Material.Filled.RateReview"
+                                   Text="@($"Reviews ({Result.UserReviewCount})")">
+                    <UserReviewList Result="Result" />
+                </MudExpansionPanel>
+            }
+            @if (Result.ArticleCount > 0)
             {
                 <MudExpansionPanel Icon="@Icons.Material.Filled.Article"
-                                   Text="@($"Reviews ({Result.ReviewCount})")">
+                                   Text="@($"Related articles ({Result.ArticleCount})")">
                     <ReviewList Reviews="Result.Reviews" />
                 </MudExpansionPanel>
             }
@@ -56,10 +63,17 @@ else if (HasSecondary)
         </MudText>
         <BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />
     }
-    @if (Result.ReviewCount > 0)
+    @if (Result.HasUserReviews)
     {
         <MudText Typo="Typo.h6" Class="mb-2 mt-4">
-            <MudIcon Icon="@Icons.Material.Filled.Article" Class="mr-1" />Reviews (@Result.ReviewCount)
+            <MudIcon Icon="@Icons.Material.Filled.RateReview" Class="mr-1" />Reviews (@Result.UserReviewCount)
+        </MudText>
+        <UserReviewList Result="Result" />
+    }
+    @if (Result.ArticleCount > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mb-2 mt-4">
+            <MudIcon Icon="@Icons.Material.Filled.Article" Class="mr-1" />Related articles (@Result.ArticleCount)
         </MudText>
         <ReviewList Reviews="Result.Reviews" />
     }
@@ -77,8 +91,9 @@ else
     /// <summary>Brand the product list is currently filtered to (set by drilling in from a brand card).</summary>
     private string? _brandFilter;
 
-    /// <summary>Whether there's any non-product content (stores / brands / reviews) to show.</summary>
-    private bool HasSecondary => Result.StoreCount > 0 || Result.BrandCount > 0 || Result.ReviewCount > 0;
+    /// <summary>Whether there's any non-product content (stores / brands / reviews / articles) to show.</summary>
+    private bool HasSecondary =>
+        Result.StoreCount > 0 || Result.BrandCount > 0 || Result.HasUserReviews || Result.ArticleCount > 0;
 
     private void DrillToBrand(string brand)
     {

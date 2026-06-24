@@ -72,7 +72,8 @@ public sealed class AnalyticsService : IAnalyticsService
     {
         _db.AnalyticsEvents.Add(new AnalyticsEvent
         {
-            EventType = "pageview", Path = path, UserId = userId, Timestamp = _clock()
+            // Anonymous analytics: hash the user id (login events keep the raw id as an auth record).
+            EventType = "pageview", Path = path, UserId = Anonymizer.HashUserId(userId), Timestamp = _clock()
         });
         await _db.SaveChangesAsync(ct);
     }

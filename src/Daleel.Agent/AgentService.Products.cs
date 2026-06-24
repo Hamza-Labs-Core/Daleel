@@ -116,18 +116,44 @@ public sealed partial class AgentService
         var representatives = models.Select(ToRepresentative).ToList();
         var comparisons = ComparisonGrouper.Group(representatives);
 
-        // Backfill brand counts from the aggregated models, and attach reputation.
-        var brandsWithCounts = brands.Values
-            .Select(b => b with
+        bool NameMatch(string a, string b) =>
+            a.Equals(b, StringComparison.OrdinalIgnoreCase) ||
+            a.Contains(b, StringComparison.OrdinalIgnoreCase) ||
+            b.Contains(a, StringComparison.OrdinalIgnoreCase);
+
+        // Brands are the actual product MANUFACTURERS (Samsung, LG, Gree…), drawn from the
+        // aggregated models — never the stores/marketplaces that sell them. Attach in-market
+        // reputation, and an official catalog URL when a classified brand page matches.
+        var brandsWithCounts = models
+            .Select(m => m.Brand)
+            .Where(b => !string.IsNullOrWhiteSpace(b))
+            .Select(b => b!.Trim())
+            .GroupBy(b => b, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new BrandInfo
             {
-                ListingCount = models.Count(m => MatchesBrand(m, b.Name)),
-                Reputation = FindReputation(reputations, b.Name)
+                Name = g.Key,
+                ListingCount = models.Count(m => MatchesBrand(m, g.Key)),
+                Reputation = FindReputation(reputations, g.Key),
+                Url = brands.Values.FirstOrDefault(bp => NameMatch(bp.Name, g.Key))?.Url
             })
             .OrderByDescending(b => b.ListingCount)
             .ThenBy(b => b.Name)
             .ToList();
 
-        // Google-Places stores are inherently local.
+        // Any "brand page" we classified that ISN'T one of our manufacturers is really a seller's
+        // site (Amazon, OpenSooq, Smart Buy). Surface it under Stores — never under Brands.
+        foreach (var bp in brands.Values)
+        {
+            if (brandsWithCounts.Any(b => NameMatch(b.Name, bp.Name)) || !KeepLocal(bp.Url, false))
+            {
+                continue;
+            }
+
+            stores.TryAdd(bp.Name, new StoreInfo { Name = bp.Name, Url = bp.Url, IsOnline = true });
+        }
+
+        // Google-Places stores are inherently local — keep their star ratings and individual
+        // reviews so the UI can show genuine user reviews (not editorial articles).
         foreach (var s in bundle.Stores)
         {
             var key = s.Website ?? s.Name;
@@ -137,9 +163,25 @@ public sealed partial class AgentService
                 Url = s.Website,
                 Address = s.Address,
                 Phone = s.Phone,
-                IsOnline = false
+                IsOnline = false,
+                Rating = s.Rating,
+                ReviewCount = s.ReviewCount,
+                Reviews = s.Reviews
             });
         }
+
+        // Aggregate the per-brand social/forum opinions into one product-level "what people say"
+        // feed, deduped by quote, so real user sentiment surfaces in the results (not just in the
+        // brand detail panel).
+        var socialReviews = models
+            .Select(m => m.BrandReputation?.Social)
+            .Where(sp => sp is { HasReviews: true })
+            .SelectMany(sp => sp!.Reviews)
+            .GroupBy(r => r.Quote, StringComparer.OrdinalIgnoreCase)
+            .Select(grp => grp.First())
+            .Take(12)
+            .ToList();
+        var social = socialReviews.Count > 0 ? new SocialProof { Reviews = socialReviews } : null;
 
         return new ProductSearchResult
         {
@@ -153,6 +195,7 @@ public sealed partial class AgentService
             Brands = brandsWithCounts,
             Stores = stores.Values.ToList(),
             Reviews = reviews,
+            Social = social,
             Marketplaces = marketplaces.Values.OrderByDescending(m => m.ListingCount).ToList(),
             Comparisons = comparisons,
             GeneratedAt = _options.Clock()

@@ -1,3 +1,4 @@
+using Daleel.Core.Moderation;
 using Daleel.Core.Observability;
 using Daleel.Web.Data;
 using Daleel.Web.Services;
@@ -29,14 +30,16 @@ public sealed class AgentSearchRunner : ISearchRunner
     private readonly IAgentFactory _agents;
     private readonly ISystemConfigService _config;
     private readonly IApiCallLogRepository _apiLog;
+    private readonly IFilteredContentLogRepository _filteredLog;
     private readonly ILogger<AgentSearchRunner> _logger;
 
     public AgentSearchRunner(IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
-        ILogger<AgentSearchRunner> logger)
+        IFilteredContentLogRepository filteredLog, ILogger<AgentSearchRunner> logger)
     {
         _agents = agents;
         _config = config;
         _apiLog = apiLog;
+        _filteredLog = filteredLog;
         _logger = logger;
     }
 
@@ -96,6 +99,43 @@ public sealed class AgentSearchRunner : ISearchRunner
             // Persist the call log regardless of outcome (success, cap-trip, or error) so usage
             // and cost are always recorded.
             await PersistAsync(job, collector, ct).ConfigureAwait(false);
+
+            // Record what the halal filter removed for admin review (anonymous — no userId).
+            await PersistFilteredAsync(job, agent.ContentFilter.AuditDetails, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Persists the filter's removals to the admin-only <see cref="FilteredContentLog"/>. Carries
+    /// the query and the matched rule, but never the user id — filter review is anonymous.
+    /// </summary>
+    private async Task PersistFilteredAsync(
+        SearchJob job, IReadOnlyList<ContentFilter.FilterAudit> details, CancellationToken ct)
+    {
+        if (details.Count == 0)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var rows = details.Select(d => new FilteredContentLog
+        {
+            Query = job.Query,
+            Geo = job.Geo,
+            Category = d.Category,
+            Rule = d.Term,
+            Kind = d.Kind,
+            Content = d.Content,
+            CreatedAt = now
+        });
+
+        try
+        {
+            await _filteredLog.AddBatchAsync(rows, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // best-effort: never let audit logging affect the search outcome
         }
     }
 
@@ -107,9 +147,12 @@ public sealed class AgentSearchRunner : ISearchRunner
             return;
         }
 
+        // Cost rows are anonymised: store a one-way hash of the user id so the log can't be traced
+        // to an account. The user's own usage view hashes the same way to find their rows.
+        var hashedUser = Anonymizer.HashUserId(job.UserId);
         var rows = calls.Select(c => new ApiCallLog
         {
-            UserId = job.UserId,
+            UserId = hashedUser,
             JobId = job.Id,
             Provider = c.Provider,
             Endpoint = c.Endpoint,

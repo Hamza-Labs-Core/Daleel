@@ -49,7 +49,9 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
 
     public async Task<(int Calls, decimal Cost)> UserUsageSinceAsync(string userId, DateTimeOffset since, CancellationToken ct = default)
     {
-        var rows = _db.ApiCallLogs.AsNoTracking().Where(c => c.UserId == userId && c.CreatedAt >= since);
+        // Rows store a hashed user id (privacy); hash the lookup the same way to find the user's own.
+        var key = Anonymizer.HashUserId(userId);
+        var rows = _db.ApiCallLogs.AsNoTracking().Where(c => c.UserId == key && c.CreatedAt >= since);
         var calls = await rows.CountAsync(ct);
         var cost = calls == 0 ? 0m : await rows.SumAsync(c => c.EstimatedCost, ct);
         return (calls, cost);
@@ -57,8 +59,9 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
 
     public async Task<IReadOnlyList<QueryCost>> RecentJobUsageAsync(string userId, int take, CancellationToken ct = default)
     {
+        var key = Anonymizer.HashUserId(userId);
         var perJob = await _db.ApiCallLogs.AsNoTracking()
-            .Where(c => c.UserId == userId && c.JobId != null)
+            .Where(c => c.UserId == key && c.JobId != null)
             .GroupBy(c => c.JobId!.Value)
             .Select(g => new { JobId = g.Key, Calls = g.Count(), Cost = g.Sum(x => x.EstimatedCost) })
             .OrderByDescending(x => x.JobId) // newest jobs have the highest id

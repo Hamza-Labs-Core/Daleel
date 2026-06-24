@@ -201,4 +201,7 @@
   <data name="Faq.A4" xml:space="preserve"><value>Yes — every account starts with 5 free searches each month, no credit card required. If you need more, paid plans add higher monthly limits, deal monitoring and saved results. See the Pricing page for details.</value></data>
   <data name="Faq.Q5" xml:space="preserve"><value>Do I need my own API keys?</value></data>
   <data name="Faq.A5" xml:space="preserve"><value>No. Daleel works out of the box. Power users can optionally add their own model and search provider keys under Settings — they stay in your browser and are never written to our server logs.</value></data>
+  <data name="Faq.Q6" xml:space="preserve"><value>How is my search data used?</value></data>
+  <data name="Faq.A6" xml:space="preserve"><value>Your personal search history is saved only for you, under your account. Separately, searches are analyzed anonymously to improve results — we record what was searched, the market, timing and cost, but never anything that identifies you. Analytics and cost logs carry only a one-way hash, so a search can't be traced back to your account.</value></data>
+  <data name="Footer.Privacy" xml:space="preserve"><value>Searches are analyzed anonymously to improve results.</value></data>
 </root>

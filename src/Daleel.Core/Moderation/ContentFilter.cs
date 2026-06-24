@@ -84,8 +84,15 @@ public sealed class ContentFilter
             new[] { "ربا", "فائدة ربوية", "قرض ربوي", "فوائد ربوية" }),
     };
 
+    /// <summary>
+    /// A structured record of one removal, for admin review: which category and exact term tripped,
+    /// the kind of item, and a truncated snippet of the offending content. Never shown to users.
+    /// </summary>
+    public sealed record FilterAudit(string Category, string Term, string Kind, string Content);
+
     private readonly FilterStrictness _strictness;
     private readonly List<string> _audit = new();
+    private readonly List<FilterAudit> _details = new();
 
     public ContentFilter(FilterStrictness strictness = FilterStrictness.Strict) => _strictness = strictness;
 
@@ -94,6 +101,12 @@ public sealed class ContentFilter
 
     /// <summary>Terms/categories that triggered removals, in order — for auditing, never display.</summary>
     public IReadOnlyList<string> AuditLog => _audit;
+
+    /// <summary>
+    /// Structured removal records (category + matched term + offending content) for the admin
+    /// "Filtered content" log. Server/admin-only — never surfaced to end users.
+    /// </summary>
+    public IReadOnlyList<FilterAudit> AuditDetails => _details;
 
     /// <summary>True when the text is free of any blocked term at the current strictness.</summary>
     public bool IsHalal(string? text)
@@ -114,9 +127,9 @@ public sealed class ContentFilter
             return text;
         }
 
-        if (MatchCategory(text) is { } category)
+        if (MatchDetail(text) is { } m)
         {
-            _audit.Add($"text:{category}");
+            Record(m.Category, m.Term, "text", text);
             return null;
         }
 
@@ -134,18 +147,31 @@ public sealed class ContentFilter
         var kept = new List<T>();
         foreach (var item in items)
         {
-            var match = MatchCategory(textSelector(item));
-            if (match is null)
+            var text = textSelector(item);
+            if (MatchDetail(text) is { } m)
             {
-                kept.Add(item);
+                Record(m.Category, m.Term, typeof(T).Name, text);
             }
             else
             {
-                _audit.Add($"{typeof(T).Name}:{match}");
+                kept.Add(item);
             }
         }
 
         return kept;
+    }
+
+    /// <summary>Records one removal in both the legacy string log and the structured detail log.</summary>
+    private void Record(string category, string term, string kind, string? content)
+    {
+        _audit.Add($"{kind}:{category}");
+        _details.Add(new FilterAudit(category, term, kind, Truncate(content)));
+    }
+
+    private static string Truncate(string? text)
+    {
+        var t = (text ?? string.Empty).Trim();
+        return t.Length <= 200 ? t : t[..200] + "…";
     }
 
     /// <summary>Removes deals for alcohol, pork, and other non-halal products.</summary>
@@ -169,7 +195,13 @@ public sealed class ContentFilter
         FilterResults(posts, p => $"{p.Text} {p.Author}");
 
     /// <summary>The name of the first category the text trips, or null if clean.</summary>
-    public string? MatchCategory(string? text)
+    public string? MatchCategory(string? text) => MatchDetail(text)?.Category;
+
+    /// <summary>
+    /// The first category the text trips and the exact term that matched, or null if clean.
+    /// The term lets the admin log show <em>which</em> blocklist word fired (e.g. "bar").
+    /// </summary>
+    public (string Category, string Term)? MatchDetail(string? text)
     {
         if (_strictness == FilterStrictness.Off || string.IsNullOrWhiteSpace(text))
         {
@@ -186,16 +218,17 @@ public sealed class ContentFilter
                 continue; // category not active at this strictness
             }
 
-            if (category.EnglishPattern.IsMatch(latin))
+            var match = category.EnglishPattern.Match(latin);
+            if (match.Success)
             {
-                return category.Name;
+                return (category.Name, match.Value);
             }
 
             foreach (var term in category.NormalizedArabic)
             {
                 if (arabic.Contains(term, StringComparison.Ordinal))
                 {
-                    return category.Name;
+                    return (category.Name, term);
                 }
             }
         }

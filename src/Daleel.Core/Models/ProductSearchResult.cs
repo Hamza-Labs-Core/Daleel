@@ -38,14 +38,24 @@ public record ProductSearchResult
     /// <summary>Raw (un-aggregated) listings retained for compatibility / debugging.</summary>
     public IReadOnlyList<ProductListing> Listings { get; init; } = Array.Empty<ProductListing>();
 
-    /// <summary>Brands present in the market (their catalog pages).</summary>
+    /// <summary>
+    /// Product <em>manufacturers</em> present in the market (Samsung, LG, Gree…) — never the
+    /// stores/marketplaces that sell them (those live in <see cref="Stores"/>/<see cref="Marketplaces"/>).
+    /// </summary>
     public IReadOnlyList<BrandInfo> Brands { get; init; } = Array.Empty<BrandInfo>();
 
     /// <summary>Stores/retailers selling the product.</summary>
     public IReadOnlyList<StoreInfo> Stores { get; init; } = Array.Empty<StoreInfo>();
 
-    /// <summary>Review / buying-guide articles worth reading.</summary>
+    /// <summary>
+    /// Editorial review / comparison / buying-guide <em>articles</em> — surfaced under
+    /// "Related articles", not as user reviews. Genuine user reviews come from <see cref="Stores"/>
+    /// (Google-Places ratings) and <see cref="Social"/> (forum/social opinions).
+    /// </summary>
     public IReadOnlyList<ReviewSource> Reviews { get; init; } = Array.Empty<ReviewSource>();
+
+    /// <summary>Aggregated real user opinions (social/forum sentiment) across the brands found.</summary>
+    public SocialProof? Social { get; init; }
 
     /// <summary>Marketplace category pages to browse the full selection.</summary>
     public IReadOnlyList<MarketplaceLink> Marketplaces { get; init; } = Array.Empty<MarketplaceLink>();
@@ -58,10 +68,23 @@ public record ProductSearchResult
     /// <summary>True when at least one aggregated product model was found.</summary>
     public bool HasListings => Models.Count > 0;
 
-    /// <summary>Counts per bucket, used to drive the adaptive (tabbed) display.</summary>
+    /// <summary>Counts per bucket, used to drive the adaptive display.</summary>
     public int ProductCount => Models.Count;
     public int StoreCount => Stores.Count;
     public int BrandCount => Brands.Count;
+
+    /// <summary>Editorial articles ("Related articles" section).</summary>
+    public int ArticleCount => Reviews.Count;
+
+    /// <summary>Star-rated reviews from Google Places stores.</summary>
+    public int PlaceReviewCount => Stores.Sum(s => s.Reviews.Count);
+
+    /// <summary>All genuine user reviews: Google-Places store reviews plus social/forum opinions.</summary>
+    public int UserReviewCount => PlaceReviewCount + (Social?.Reviews.Count ?? 0);
+
+    public bool HasUserReviews => UserReviewCount > 0;
+
+    /// <summary>Retained for compatibility; counts editorial articles. Prefer <see cref="ArticleCount"/>.</summary>
     public int ReviewCount => Reviews.Count;
 }
 
@@ -132,6 +155,15 @@ public record StoreInfo
     public string? Address { get; init; }
     public string? Phone { get; init; }
     public bool IsOnline { get; init; }
+
+    /// <summary>Average rating 1–5, when sourced from Google Places.</summary>
+    public double? Rating { get; init; }
+
+    /// <summary>Number of ratings behind <see cref="Rating"/>.</summary>
+    public int? ReviewCount { get; init; }
+
+    /// <summary>Individual star-rated user reviews for this store (Google Places).</summary>
+    public IReadOnlyList<StoreReview> Reviews { get; init; } = Array.Empty<StoreReview>();
 }
 
 /// <summary>A review / comparison / buying-guide article.</summary>

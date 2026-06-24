@@ -1,0 +1,100 @@
+@* Genuine user reviews — NOT editorial articles. Two real sources:
+   (1) Google-Places store reviews (star rating + text from real reviewers), and
+   (2) aggregated social/forum opinions (sentiment + quotes). Article links live separately
+   under "Related articles". *@
+
+@{
+    var ratedStores = Result.Stores.Where(s => s.Reviews.Count > 0).ToList();
+    var social = Result.Social;
+}
+
+@if (ratedStores.Count > 0)
+{
+    <MudText Typo="Typo.subtitle2" Class="mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.RateReview" Size="Size.Small" Class="mr-1" />Store reviews
+    </MudText>
+    @foreach (var store in ratedStores)
+    {
+        <MudPaper Class="pa-3 mb-3" Outlined="true" Elevation="0">
+            <div class="d-flex align-center gap-2 mb-2" style="flex-wrap:wrap;">
+                <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(store.Name)">@store.Name</MudText>
+                @if (store.Rating is { } rating)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled"
+                             Icon="@Icons.Material.Filled.Star">
+                        @rating.ToString("0.0")@(store.ReviewCount is { } rc ? $" ({rc})" : "")
+                    </MudChip>
+                }
+            </div>
+            @foreach (var rev in store.Reviews.Take(4))
+            {
+                <div class="mb-2">
+                    <div class="d-flex align-center gap-2" style="flex-wrap:wrap;">
+                        <MudRating ReadOnly="true" SelectedValue="@((int)Math.Round(rev.Rating))" Size="Size.Small" />
+                        @if (!string.IsNullOrWhiteSpace(rev.Author))
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">@rev.Author</MudText>
+                        }
+                        @if (rev.Date is { } d)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">· @d.ToString("yyyy-MM-dd")</MudText>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(rev.Text))
+                    {
+                        <MudText Typo="Typo.body2" dir="@Catalog.Dir(rev.Text)">@rev.Text</MudText>
+                    }
+                </div>
+            }
+        </MudPaper>
+    }
+}
+
+@if (social is { HasReviews: true })
+{
+    <MudText Typo="Typo.subtitle2" Class="mb-2 mt-2">
+        <MudIcon Icon="@Icons.Material.Filled.Forum" Size="Size.Small" Class="mr-1" />What people say
+    </MudText>
+    <div class="d-flex align-center gap-2 mb-2" style="flex-wrap:wrap;">
+        <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text"
+                 Icon="@Icons.Material.Filled.ThumbUp">@social.Positive positive</MudChip>
+        <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text"
+                 Icon="@Icons.Material.Filled.ThumbDown">@social.Negative negative</MudChip>
+        @if (social.Neutral > 0)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Default" Variant="Variant.Text">@social.Neutral neutral</MudChip>
+        }
+    </div>
+    @foreach (var r in social.Reviews)
+    {
+        <MudPaper Class="pa-2 mb-2" Outlined="true" Elevation="0"
+                  Style="@($"border-left:3px solid var(--mud-palette-{SentimentColor(r.Sentiment)});")">
+            <MudText Typo="Typo.body2" dir="@Catalog.Dir(r.Quote)" Style="font-style:italic;">"@r.Quote"</MudText>
+            <div class="d-flex align-center gap-2 mt-1" style="flex-wrap:wrap;">
+                @if (!string.IsNullOrWhiteSpace(r.Source))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@r.Source</MudText>
+                }
+                @if (r.Date is { } date)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">· @date.ToString("yyyy-MM-dd")</MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(r.Url))
+                {
+                    <MudLink Href="@r.Url" Target="_blank" Typo="Typo.caption">source</MudLink>
+                }
+            </div>
+        </MudPaper>
+    }
+}
+
+@code {
+    [Parameter, EditorRequired] public ProductSearchResult Result { get; set; } = default!;
+
+    private static string SentimentColor(Sentiment s) => s switch
+    {
+        Sentiment.Positive => "success",
+        Sentiment.Negative => "error",
+        _ => "warning"
+    };
+}

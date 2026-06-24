@@ -28,6 +28,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<SearchJob> SearchJobs => Set<SearchJob>();
     public DbSet<UserConversation> UserConversations => Set<UserConversation>();
     public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
+    public DbSet<FilteredContentLog> FilteredContentLogs => Set<FilteredContentLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -92,6 +93,19 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Status).HasMaxLength(16);
             e.Property(x => x.Model).HasMaxLength(128);
             e.Property(x => x.EstimatedCost).HasColumnType("decimal(12,6)");
+        });
+
+        builder.Entity<FilteredContentLog>(e =>
+        {
+            // Browsed newest-first and filtered by category in the admin "Filtered content" log.
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.Category, x.CreatedAt });
+            e.Property(x => x.Query).HasMaxLength(2000);
+            e.Property(x => x.Geo).HasMaxLength(64);
+            e.Property(x => x.Category).HasMaxLength(32);
+            e.Property(x => x.Rule).HasMaxLength(128);
+            e.Property(x => x.Kind).HasMaxLength(64);
+            e.Property(x => x.Content).HasMaxLength(300);
         });
 
         builder.Entity<SubscriptionPlan>(e =>

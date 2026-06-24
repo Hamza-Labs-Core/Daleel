@@ -244,7 +244,8 @@ public abstract class AgentPageBase : ComponentBase
 
         await Analytics.RecordSearchAsync(new AnalyticsEvent
         {
-            UserId = userId,
+            // Anonymous analytics: store a one-way hash of the user id, never the id itself.
+            UserId = Daleel.Web.Data.Anonymizer.HashUserId(userId),
             Query = Truncate(entry.Query, 2000),
             QueryType = entry.QueryType,
             Geo = Geo,
