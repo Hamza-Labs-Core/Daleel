@@ -46,6 +46,7 @@ public sealed class AgentSearchRunner : ISearchRunner
         {
             Geo = job.Geo,
             Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model,
+            Language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language,
             Log = progress,
             ApiObserver = collector,
             CostEstimator = estimator

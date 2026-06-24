@@ -12,7 +12,7 @@ public sealed record SubmitResult(bool Accepted, int? JobId, string? Error, int 
 /// </summary>
 public interface IConversationService
 {
-    Task<SubmitResult> SubmitAsync(string userId, bool isAdmin, string query, string? geo, string? model, CancellationToken ct = default);
+    Task<SubmitResult> SubmitAsync(string userId, bool isAdmin, string query, string? geo, string? model, string? language = null, CancellationToken ct = default);
     Task<bool> CancelAsync(string userId, int jobId, CancellationToken ct = default);
 }
 
@@ -35,7 +35,7 @@ public sealed class ConversationService : IConversationService
     }
 
     public async Task<SubmitResult> SubmitAsync(
-        string userId, bool isAdmin, string query, string? geo, string? model, CancellationToken ct = default)
+        string userId, bool isAdmin, string query, string? geo, string? model, string? language = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
@@ -67,6 +67,7 @@ public sealed class ConversationService : IConversationService
             QueryType = "ask",
             Geo = string.IsNullOrWhiteSpace(geo) ? "jordan" : geo,
             Model = resolvedModel ?? string.Empty,
+            Language = string.IsNullOrWhiteSpace(language) ? "en" : language,
             Status = JobStatus.Queued,
             CreatedAt = DateTimeOffset.UtcNow
         };

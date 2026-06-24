@@ -31,6 +31,9 @@ public sealed class SearchJob
     public string Geo { get; set; } = "jordan";
     public string Model { get; set; } = string.Empty;
 
+    /// <summary>BCP-47 UI language the result summary should be written in.</summary>
+    public string Language { get; set; } = "en";
+
     public string Status { get; set; } = JobStatus.Queued;
     public string? ProgressMessage { get; set; }
     public string? ResultJson { get; set; }

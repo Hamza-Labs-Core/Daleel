@@ -9,6 +9,7 @@
 @inject BrowserStore Store
 @inject IDialogService Dialogs
 @inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Daleel</PageTitle>
 
@@ -16,7 +17,7 @@
     <!-- Conversation history sidebar -->
     <MudItem xs="12" md="3">
         <MudPaper Class="pa-3" Outlined="true" Elevation="0" Style="position:sticky;top:80px;">
-            <MudText Typo="Typo.subtitle2" Class="mb-2">المحادثات · Recent</MudText>
+            <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Search.Recent"]</MudText>
             @if (_recent.Count == 0)
             {
                 <MudText Typo="Typo.caption" Color="Color.Secondary">No searches yet.</MudText>
@@ -32,7 +33,7 @@
                         </MudListItem>
                     }
                 </MudList>
-                <MudButton Href="/history" Size="Size.Small" Variant="Variant.Text" Class="mt-1">View all</MudButton>
+                <MudButton Href="/history" Size="Size.Small" Variant="Variant.Text" Class="mt-1">@L["Search.ViewAll"]</MudButton>
             }
         </MudPaper>
     </MudItem>
@@ -64,10 +65,10 @@
             <MudPaper Class="pa-4 mb-3" Outlined="true" Elevation="0">
                 <div class="d-flex align-center mb-2">
                     <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
-                    <MudText Typo="Typo.subtitle2">جارٍ البحث · Searching…</MudText>
+                    <MudText Typo="Typo.subtitle2">@L["Search.Searching"]</MudText>
                     <MudSpacer />
                     <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
-                               OnClick="CancelAsync">Cancel</MudButton>
+                               OnClick="CancelAsync">@L["Search.Cancel"]</MudButton>
                 </div>
                 <MudList T="string" Dense="true">
                     @foreach (var line in _progress)
@@ -87,7 +88,7 @@
 
         @if (_status == "completed" && _answer is not null)
         {
-            <ReportView Title="الملخص · Summary" Text="@_answer.Summary" />
+            <ReportView Title="@(L["Search.Summary"])" Text="@_answer.Summary" />
             @if (_answer.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
             {
                 <AdaptiveResults Result="products" />
@@ -98,7 +99,7 @@
         <!-- Chat input -->
         <MudPaper Class="pa-3 mt-4" Outlined="true" Elevation="0" Style="position:sticky;bottom:12px;border-radius:14px;">
             <div class="d-flex align-center gap-2">
-                <MudTextField @bind-Value="_input" Placeholder="اسأل دليل… / Ask Daleel…" Variant="Variant.Text"
+                <MudTextField @bind-Value="_input" Placeholder="@(L["Search.Placeholder"])" Variant="Variant.Text"
                               Immediate="true" OnKeyDown="OnKey" Class="mt-0" Disabled="_running" />
                 <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
                                OnClick="SubmitAsync" Disabled="@(_running || string.IsNullOrWhiteSpace(_input))" />
@@ -181,7 +182,8 @@
         var model = await Store.GetAsync("model");
         var isAdmin = await CurrentUser.IsAdminAsync();
 
-        var result = await Conversations.SubmitAsync(_userId, isAdmin, _input, geo, model);
+        var lang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        var result = await Conversations.SubmitAsync(_userId, isAdmin, _input, geo, model, lang);
         if (!result.Accepted)
         {
             _status = "error";

@@ -20,6 +20,9 @@ public sealed record AgentRequest
     /// <summary>OpenRouter model id to use, or null for the provider default.</summary>
     public string? Model { get; init; }
 
+    /// <summary>BCP-47 language for the analyst summary (e.g. "ar"). Defaults to English.</summary>
+    public string Language { get; init; } = "en";
+
     /// <summary>
     /// User-supplied API keys (from the browser Settings page). Take precedence over the
     /// server's environment variables, letting a visitor bring their own keys.
@@ -120,7 +123,7 @@ public sealed class AgentFactory : IAgentFactory
         }
 
         var opinions = new OpinionExtractor(llm);
-        var options = new AgentOptions { DefaultGeo = request.Geo, Log = request.Log };
+        var options = new AgentOptions { DefaultGeo = request.Geo, Log = request.Log, Language = request.Language };
         var filter = new ContentFilter(request.Strictness);
 
         return new AgentService(llm, options, search, places, scraper, social, matcher: null, opinions, filter);

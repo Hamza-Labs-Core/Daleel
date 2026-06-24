@@ -208,7 +208,7 @@ public sealed partial class AgentService
             return "No research data was gathered (no search providers configured or all returned empty).";
         }
 
-        var prompt = PromptTemplates.Analyze(task, geo, context);
+        var prompt = PromptTemplates.Analyze(task, geo, context, _options.Language);
         return await _llm.CompleteTextAsync(systemPrompt ?? PromptTemplates.AnalystSystem, prompt, cancellationToken)
             .ConfigureAwait(false);
     }

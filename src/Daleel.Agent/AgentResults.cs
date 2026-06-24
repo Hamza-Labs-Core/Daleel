@@ -18,6 +18,12 @@ public sealed class AgentOptions
     /// <summary>Max URLs to deep-read per run.</summary>
     public int MaxUrlsToRead { get; init; } = 3;
 
+    /// <summary>
+    /// BCP-47 language the analyst summary should be written in (e.g. "ar", "en"). Product and
+    /// brand names are left untranslated. Defaults to English.
+    /// </summary>
+    public string Language { get; init; } = "en";
+
     /// <summary>Clock, injectable for deterministic tests.</summary>
     public Func<DateTimeOffset> Clock { get; init; } = () => DateTimeOffset.UtcNow;
 

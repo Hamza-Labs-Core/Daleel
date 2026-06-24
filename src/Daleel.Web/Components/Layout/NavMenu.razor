@@ -1,4 +1,5 @@
-@* Primary navigation. Bilingual labels: Arabic lead, English secondary. *@
+@* Primary navigation. Labels are localized (English / Arabic) via the shared resource catalogue. *@
+@inject IStringLocalizer<SharedResource> L
 <div class="pa-4 d-flex align-center">
     <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Color="Color.Primary" Class="mr-2" />
     <div>
@@ -9,36 +10,16 @@
 <MudDivider />
 
 <MudNavMenu Bordered="true">
-    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Search">
-        اسأل دليل · Ask
-    </MudNavLink>
-    <MudNavLink Href="/brand" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Verified">
-        العلامات · Brand
-    </MudNavLink>
-    <MudNavLink Href="/stores" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Storefront">
-        المتاجر · Stores
-    </MudNavLink>
-    <MudNavLink Href="/deals" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.LocalOffer">
-        العروض · Deals
-    </MudNavLink>
-    <MudNavLink Href="/compare" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Compare">
-        قارن · Compare
-    </MudNavLink>
-    <MudNavLink Href="/monitor" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Radar">
-        المراقبة · Monitor
-    </MudNavLink>
+    <MudNavLink Href="/" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Search">@L["Nav.Home"]</MudNavLink>
+    <MudNavLink Href="/brand" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Verified">@L["Nav.Brand"]</MudNavLink>
+    <MudNavLink Href="/stores" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Storefront">@L["Nav.Stores"]</MudNavLink>
+    <MudNavLink Href="/deals" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.LocalOffer">@L["Nav.Deals"]</MudNavLink>
+    <MudNavLink Href="/compare" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Compare">@L["Nav.Compare"]</MudNavLink>
+    <MudNavLink Href="/monitor" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Radar">@L["Nav.Monitor"]</MudNavLink>
     <MudDivider Class="my-2" />
-    <MudNavLink Href="/history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.History">
-        السجل · History
-    </MudNavLink>
-    <MudNavLink Href="/saved" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Bookmarks">
-        المحفوظات · Saved
-    </MudNavLink>
+    <MudNavLink Href="/history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.History">@L["Nav.History"]</MudNavLink>
+    <MudNavLink Href="/saved" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Bookmarks">@L["Nav.Saved"]</MudNavLink>
     <MudDivider Class="my-2" />
-    <MudNavLink Href="/pricing" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.WorkspacePremium">
-        الأسعار · Pricing
-    </MudNavLink>
-    <MudNavLink Href="/settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">
-        الإعدادات · Settings
-    </MudNavLink>
+    <MudNavLink Href="/pricing" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.WorkspacePremium">@L["Nav.Pricing"]</MudNavLink>
+    <MudNavLink Href="/settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">@L["Nav.Settings"]</MudNavLink>
 </MudNavMenu>

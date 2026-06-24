@@ -1,6 +1,10 @@
 @* Host document. MudBlazor drives styling; Cairo gives crisp Arabic glyphs, Roboto the Latin UI. *@
+@{
+    var culture = System.Globalization.CultureInfo.CurrentUICulture;
+    var dir = culture.TextInfo.IsRightToLeft ? "rtl" : "ltr";
+}
 <!DOCTYPE html>
-<html lang="en">
+<html lang="@culture.TwoLetterISOLanguageName" dir="@dir">
 
 <head>
     <meta charset="utf-8" />

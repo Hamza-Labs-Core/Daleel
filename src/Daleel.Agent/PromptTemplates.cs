@@ -262,11 +262,22 @@ public static class PromptTemplates
         return sb.ToString();
     }
 
+    /// <summary>Maps a BCP-47 code to an English language name for the "respond in" directive.</summary>
+    public static string LanguageName(string? code) => (code ?? "en").ToLowerInvariant() switch
+    {
+        "ar" => "Arabic",
+        "en" => "English",
+        "fr" => "French",
+        _ => "English"
+    };
+
     /// <summary>Build the analyst prompt that turns gathered context into a final report.</summary>
-    public static string Analyze(string task, GeoProfile geo, string gatheredContext)
+    public static string Analyze(string task, GeoProfile geo, string gatheredContext, string? language = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine(MarketContext(geo));
+        sb.Append("Respond in ").Append(LanguageName(language))
+          .AppendLine(". Keep product names, brand names, and model numbers in their original form (do not translate them).");
         sb.Append("Task: ").AppendLine(task);
         sb.AppendLine();
         sb.AppendLine("Gathered research context (search results, listings, opinions, store data):");

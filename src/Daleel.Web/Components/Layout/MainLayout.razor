@@ -19,6 +19,7 @@
                 <MudText Typo="Typo.h6" Class="daleel-wordmark">دليل · Daleel</MudText>
             </MudLink>
             <MudSpacer />
+            <div class="mr-2"><LanguageSwitcher /></div>
             <MudTooltip Text="@(State.RightToLeft ? "Left-to-right" : "Right-to-left")">
                 <MudIconButton Icon="@Icons.Material.Filled.FormatTextdirectionRToL"
                                Color="@(State.RightToLeft ? Color.Primary : Color.Inherit)"
@@ -61,7 +62,15 @@
     private readonly MudTheme _theme = DaleelTheme.Build();
     private bool _drawerOpen = true;
 
-    protected override void OnInitialized() => State.Changed += OnStateChanged;
+    protected override void OnInitialized()
+    {
+        State.Changed += OnStateChanged;
+        // Arabic UI defaults to RTL; the manual toggle (restored below) can still override.
+        if (System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ar")
+        {
+            State.SetRightToLeft(true);
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

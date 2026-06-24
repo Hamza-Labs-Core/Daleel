@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace" />
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" />
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string" />
+              <xsd:attribute name="type" type="xsd:string" />
+              <xsd:attribute name="mimetype" type="xsd:string" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string" />
+              <xsd:attribute name="name" type="xsd:string" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1" />
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3" />
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4" />
+              <xsd:attribute ref="xml:space" />
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1" />
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" />
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype"><value>text/microsoft-resx</value></resheader>
+  <resheader name="version"><value>2.0</value></resheader>
+  <resheader name="reader"><value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+  <resheader name="writer"><value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value></resheader>
+
+  <data name="Nav.Home" xml:space="preserve"><value>الرئيسية</value></data>
+  <data name="Nav.Settings" xml:space="preserve"><value>الإعدادات</value></data>
+  <data name="Nav.History" xml:space="preserve"><value>السجل</value></data>
+  <data name="Nav.Saved" xml:space="preserve"><value>المحفوظات</value></data>
+  <data name="Nav.Admin" xml:space="preserve"><value>الإدارة</value></data>
+  <data name="Nav.Pricing" xml:space="preserve"><value>الأسعار</value></data>
+  <data name="Nav.Account" xml:space="preserve"><value>حسابي</value></data>
+  <data name="Nav.Login" xml:space="preserve"><value>تسجيل الدخول</value></data>
+  <data name="Nav.Logout" xml:space="preserve"><value>تسجيل الخروج</value></data>
+  <data name="Nav.Stores" xml:space="preserve"><value>المتاجر</value></data>
+  <data name="Nav.Deals" xml:space="preserve"><value>العروض</value></data>
+  <data name="Nav.Brand" xml:space="preserve"><value>العلامة التجارية</value></data>
+  <data name="Nav.Compare" xml:space="preserve"><value>المقارنة</value></data>
+  <data name="Nav.Monitor" xml:space="preserve"><value>المراقبة</value></data>
+
+  <data name="Search.Placeholder" xml:space="preserve"><value>اسأل دليل…</value></data>
+  <data name="Search.Search" xml:space="preserve"><value>بحث</value></data>
+  <data name="Search.Searching" xml:space="preserve"><value>جارٍ البحث…</value></data>
+  <data name="Search.Results" xml:space="preserve"><value>النتائج</value></data>
+  <data name="Search.NoResults" xml:space="preserve"><value>لا توجد نتائج.</value></data>
+  <data name="Search.Summary" xml:space="preserve"><value>الملخص</value></data>
+  <data name="Search.Cancel" xml:space="preserve"><value>إلغاء</value></data>
+  <data name="Search.Recent" xml:space="preserve"><value>المحادثات الأخيرة</value></data>
+  <data name="Search.ViewAll" xml:space="preserve"><value>عرض الكل</value></data>
+
+  <data name="Products.Products" xml:space="preserve"><value>المنتجات</value></data>
+  <data name="Products.Brands" xml:space="preserve"><value>العلامات التجارية</value></data>
+  <data name="Products.Stores" xml:space="preserve"><value>المتاجر</value></data>
+  <data name="Products.Reviews" xml:space="preserve"><value>المراجعات</value></data>
+  <data name="Products.Compare" xml:space="preserve"><value>قارن</value></data>
+  <data name="Products.Price" xml:space="preserve"><value>السعر</value></data>
+  <data name="Products.Specs" xml:space="preserve"><value>المواصفات</value></data>
+  <data name="Products.Buy" xml:space="preserve"><value>اشترِ</value></data>
+  <data name="Products.View" xml:space="preserve"><value>عرض</value></data>
+  <data name="Products.Details" xml:space="preserve"><value>التفاصيل والأسعار</value></data>
+  <data name="Products.Sellers" xml:space="preserve"><value>بائع</value></data>
+  <data name="Products.BrowseAllOn" xml:space="preserve"><value>تصفّح الكل على:</value></data>
+  <data name="Products.AllLocal" xml:space="preserve"><value>جميع النتائج محلية في {0}</value></data>
+  <data name="Products.WhatPeopleSay" xml:space="preserve"><value>ماذا يقول الناس</value></data>
+  <data name="Products.BrandReputation" xml:space="preserve"><value>سمعة العلامة التجارية</value></data>
+
+  <data name="Filter.SortBy" xml:space="preserve"><value>ترتيب حسب</value></data>
+  <data name="Filter.Brand" xml:space="preserve"><value>العلامة التجارية</value></data>
+  <data name="Filter.Source" xml:space="preserve"><value>المصدر</value></data>
+  <data name="Filter.Condition" xml:space="preserve"><value>الحالة</value></data>
+  <data name="Filter.MinPrice" xml:space="preserve"><value>أقل سعر</value></data>
+  <data name="Filter.MaxPrice" xml:space="preserve"><value>أعلى سعر</value></data>
+  <data name="Filter.Local" xml:space="preserve"><value>محلي</value></data>
+  <data name="Filter.International" xml:space="preserve"><value>دولي</value></data>
+  <data name="Filter.New" xml:space="preserve"><value>جديد</value></data>
+  <data name="Filter.Used" xml:space="preserve"><value>مستعمل</value></data>
+  <data name="Filter.Refurbished" xml:space="preserve"><value>مُجدّد</value></data>
+  <data name="Filter.Relevance" xml:space="preserve"><value>الصلة</value></data>
+  <data name="Filter.PriceLowHigh" xml:space="preserve"><value>السعر: من الأقل إلى الأعلى</value></data>
+  <data name="Filter.PriceHighLow" xml:space="preserve"><value>السعر: من الأعلى إلى الأقل</value></data>
+
+  <data name="Plan.Basic" xml:space="preserve"><value>الأساسية</value></data>
+  <data name="Plan.Pro" xml:space="preserve"><value>الاحترافية</value></data>
+  <data name="Plan.Unlimited" xml:space="preserve"><value>غير المحدودة</value></data>
+  <data name="Plan.Upgrade" xml:space="preserve"><value>ترقية</value></data>
+  <data name="Plan.SearchesRemaining" xml:space="preserve"><value>{0} عملية بحث متبقية</value></data>
+
+  <data name="Error.Generic" xml:space="preserve"><value>حدث خطأ ما.</value></data>
+  <data name="Error.RateLimit" xml:space="preserve"><value>تم تجاوز حد الطلبات.</value></data>
+  <data name="Error.LoginRequired" xml:space="preserve"><value>يلزم تسجيل الدخول.</value></data>
+
+  <data name="Content.Filtered" xml:space="preserve"><value>تمت تصفية المحتوى</value></data>
+  <data name="Content.ShowImage" xml:space="preserve"><value>إظهار الصورة</value></data>
+
+  <data name="Lang.Language" xml:space="preserve"><value>اللغة</value></data>
+  <data name="Lang.English" xml:space="preserve"><value>English</value></data>
+  <data name="Lang.Arabic" xml:space="preserve"><value>العربية</value></data>
+</root>

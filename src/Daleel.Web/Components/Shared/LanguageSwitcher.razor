@@ -1,0 +1,21 @@
+@* EN / عربي language toggle. Posts to /set-language, which sets the culture cookie and
+   redirects back to the current page (a full reload so the new culture takes effect). *@
+@inject NavigationManager Nav
+
+<MudButtonGroup Size="Size.Small" Variant="Variant.Text" OverrideStyles="false">
+    <MudButton Color="@(IsArabic ? Color.Inherit : Color.Primary)" OnClick="@(() => Switch("en"))">EN</MudButton>
+    <MudButton Color="@(IsArabic ? Color.Primary : Color.Inherit)" OnClick="@(() => Switch("ar"))">عربي</MudButton>
+</MudButtonGroup>
+
+@code {
+    private bool IsArabic =>
+        System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ar";
+
+    private void Switch(string culture)
+    {
+        var current = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+        var url = $"/set-language?culture={culture}&redirectUri={Uri.EscapeDataString(current)}";
+        // Full reload so request localization re-resolves the culture for the whole circuit.
+        Nav.NavigateTo(url, forceLoad: true);
+    }
+}

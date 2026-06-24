@@ -21,6 +21,18 @@ builder.Services.AddRazorComponents()
 // MudBlazor UI services (theme, dialogs, snackbars, popovers).
 builder.Services.AddMudServices();
 
+// ── Localization (English + Arabic, cookie-based) ───────────────────────────
+builder.Services.AddLocalization(o => o.ResourcesPath = "Resources");
+var supportedCultures = new[] { "en", "ar" };
+builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>(o =>
+{
+    o.SetDefaultCulture("en")
+     .AddSupportedCultures(supportedCultures)
+     .AddSupportedUICultures(supportedCultures);
+    // Cookie first (explicit user choice), then the browser's Accept-Language header.
+    o.RequestCultureProviders.Insert(0, new Microsoft.AspNetCore.Localization.CookieRequestCultureProvider());
+});
+
 // ── Persistence ────────────────────────────────────────────────────────────
 // SQLite locally (data/daleel.db); swap UseSqlite → UseNpgsql for Postgres without model changes.
 var connection = builder.Configuration.GetConnectionString("DefaultConnection")
@@ -143,10 +155,27 @@ app.UseHttpsRedirection();
 
 app.UseStaticFiles();
 
+// Resolve the request culture (cookie → Accept-Language) before components render.
+app.UseRequestLocalization(app.Services.GetRequiredService<
+    Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Builder.RequestLocalizationOptions>>().Value);
+
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.UseAntiforgery();
+
+// Sets the culture cookie and redirects back — the language switcher posts here.
+app.MapGet("/set-language", (string culture, string? redirectUri, HttpContext ctx) =>
+{
+    var safe = culture is "ar" or "en" ? culture : "en";
+    ctx.Response.Cookies.Append(
+        Microsoft.AspNetCore.Localization.CookieRequestCultureProvider.DefaultCookieName,
+        Microsoft.AspNetCore.Localization.CookieRequestCultureProvider.MakeCookieValue(
+            new Microsoft.AspNetCore.Localization.RequestCulture(safe)),
+        new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, Path = "/" });
+    var target = string.IsNullOrWhiteSpace(redirectUri) || !redirectUri.StartsWith('/') ? "/" : redirectUri;
+    return Results.LocalRedirect(target);
+});
 
 app.MapAuthEndpoints();
 app.MapConversationEndpoints();
