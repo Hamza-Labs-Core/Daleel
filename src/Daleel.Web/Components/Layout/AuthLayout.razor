@@ -1,10 +1,9 @@
 @inherits LayoutComponentBase
 
-@* Static SSR layout for the auth pages (Login / Logout / Register). App.razor renders those paths
-   WITHOUT a render mode so their <AntiforgeryToken /> form posts keep working, so this layout must
-   avoid anything interactive — no MudLayout/drawer/menus. It just supplies MudBlazor styling (a static
-   MudThemeProvider emits the brand CSS variables) and RTL, then centres the page content. Dark mode is
-   stored in the browser and can't be read in static SSR, so auth pages always render the light theme. *@
+@* Static SSR layout for /logout only. Logout renders WITHOUT a render mode so its <AntiforgeryToken />
+   form post keeps working, so this layout must avoid anything interactive — no MudLayout/drawer/menus.
+   It just supplies MudBlazor styling (a static MudThemeProvider emits the brand CSS variables) and RTL,
+   then centres the page content. (Login and register now use the standard themed MainLayout.) *@
 <MudThemeProvider Theme="_theme" />
 
 <MudRTLProvider RightToLeft="@RightToLeft">
@@ -16,10 +15,6 @@
             </MudLink>
         </div>
         @Body
-
-        <div class="d-flex justify-center mt-6">
-            <MudLink Href="/" Color="Color.Secondary" Underline="Underline.Hover">← Back to home · العودة للرئيسية</MudLink>
-        </div>
     </MudContainer>
 </MudRTLProvider>
 

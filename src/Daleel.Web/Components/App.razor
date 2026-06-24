@@ -36,11 +36,12 @@
 @code {
     // App.razor is the only component guaranteed to render statically (it's the host document), so it
     // can read the request here and pick a render mode per page. Everything is InteractiveServer — that
-    // is what makes the layout's drawer toggle, theme switch and menus live — except the auth pages,
-    // which must stay static SSR so their <AntiforgeryToken /> form posts keep working.
+    // is what makes the layout's drawer toggle, theme switch and menus live — except /logout, which must
+    // stay static SSR so its <AntiforgeryToken /> form post keeps working. Login and register only emit
+    // OAuth redirect links (no form post), so they render interactively under the themed MainLayout.
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
 
-    private static readonly string[] StaticAuthPaths = { "/login", "/logout", "/register" };
+    private static readonly string[] StaticAuthPaths = { "/logout" };
 
     private IComponentRenderMode? PageRenderMode =>
         StaticAuthPaths.Any(p => HttpContext.Request.Path.StartsWithSegments(p))

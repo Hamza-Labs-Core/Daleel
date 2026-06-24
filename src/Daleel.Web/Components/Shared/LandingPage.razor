@@ -5,11 +5,11 @@
 @inject IStringLocalizer<SharedResource> L
 
 <!-- ╔═══════════════════════════ HERO ═══════════════════════════╗ -->
+@* The brand wordmark lives in the top app bar, so the hero leads straight with the value
+   proposition rather than repeating a standalone logo. *@
 <section class="daleel-landing-hero">
     <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
-             Icon="@Icons.Material.Filled.Verified" Class="mb-4">@L["Landing.Hero.Badge"]</MudChip>
-
-    <div class="daleel-logo daleel-landing-logo">دليل</div>
+             Icon="@Icons.Material.Filled.ShoppingBag" Class="mb-4">@L["Landing.Hero.Badge"]</MudChip>
 
     <MudText Typo="Typo.h3" Align="Align.Center" Class="daleel-landing-title mt-2">
         @L["Landing.Hero.Title"]
@@ -40,7 +40,7 @@
         </MudText>
     </div>
 
-    <MudGrid Spacing="4">
+    <MudGrid Spacing="4" Justify="Justify.Center">
         @foreach (var f in _features)
         {
             <MudItem xs="12" sm="6" md="4">
@@ -54,16 +54,6 @@
             </MudItem>
         }
     </MudGrid>
-</section>
-
-<!-- ╔══════════════════════════ PRICING ═════════════════════════╗ -->
-<section class="daleel-landing-section">
-    <div class="text-center mb-8">
-        <MudText Typo="Typo.h4">@L["Landing.Pricing.Title"]</MudText>
-        <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">@L["Landing.Pricing.Subtitle"]</MudText>
-    </div>
-
-    <PricingTiers />
 </section>
 
 <!-- ╔════════════════════════ CTA BAND ══════════════════════════╗ -->
@@ -92,7 +82,6 @@
         new Feature(Icons.Material.Filled.Balance,       L["Landing.Feature.Compare.Title"],    L["Landing.Feature.Compare.Desc"],    "var(--mud-palette-secondary)", "--mud-palette-secondary-rgb"),
         new Feature(Icons.Material.Filled.Reviews,       L["Landing.Feature.Reputation.Title"], L["Landing.Feature.Reputation.Desc"], "var(--mud-palette-info)",      "--mud-palette-info-rgb"),
         new Feature(Icons.Material.Filled.LocalOffer,    L["Landing.Feature.Deals.Title"],      L["Landing.Feature.Deals.Desc"],      "var(--mud-palette-warning)",   "--mud-palette-warning-rgb"),
-        new Feature(Icons.Material.Filled.Shield,        L["Landing.Feature.Halal.Title"],      L["Landing.Feature.Halal.Desc"],      "var(--mud-palette-success)",   "--mud-palette-success-rgb"),
         new Feature(Icons.Material.Filled.Translate,     L["Landing.Feature.Bilingual.Title"],  L["Landing.Feature.Bilingual.Desc"],  "var(--mud-palette-primary)",   "--mud-palette-primary-rgb"),
     };
 }

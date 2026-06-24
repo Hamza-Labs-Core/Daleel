@@ -3,6 +3,11 @@ html, body {
     margin: 0;
 }
 
+/* This MudBlazor build ships flex/spacing utilities (d-flex, justify-center, mx-auto, pa-*) but no
+   text-align helper, so the `text-center` wrappers used for section headings were silently
+   left-aligned. Define it here so those headings actually centre. */
+.text-center { text-align: center; }
+
 /* Brand wordmark */
 .daleel-wordmark {
     font-weight: 700;

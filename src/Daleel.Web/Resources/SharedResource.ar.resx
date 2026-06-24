@@ -65,6 +65,7 @@
   <data name="Nav.Brand" xml:space="preserve"><value>العلامة التجارية</value></data>
   <data name="Nav.Compare" xml:space="preserve"><value>المقارنة</value></data>
   <data name="Nav.Monitor" xml:space="preserve"><value>المراقبة</value></data>
+  <data name="Nav.Faq" xml:space="preserve"><value>الأسئلة الشائعة</value></data>
 
   <data name="Search.Placeholder" xml:space="preserve"><value>اسأل دليل…</value></data>
   <data name="Search.Search" xml:space="preserve"><value>بحث</value></data>
@@ -124,14 +125,14 @@
   <data name="Lang.English" xml:space="preserve"><value>English</value></data>
   <data name="Lang.Arabic" xml:space="preserve"><value>العربية</value></data>
 
-  <data name="Landing.Hero.Badge" xml:space="preserve"><value>ذكاء سوقي مُنقّى وفق الشريعة</value></data>
-  <data name="Landing.Hero.Title" xml:space="preserve"><value>افهم السوق العربي في ثوانٍ</value></data>
-  <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>يبحث دليل في المتاجر العربية ووسائل التواصل والويب المفتوح ليجيب عن أسئلتك حول الأسعار والمنتجات والعلامات التجارية والعروض — بالعربية والإنجليزية.</value></data>
+  <data name="Landing.Hero.Badge" xml:space="preserve"><value>مساعدك الذكي للتسوّق</value></data>
+  <data name="Landing.Hero.Title" xml:space="preserve"><value>اعثر على أفضل المنتجات والأسعار والعروض في ثوانٍ</value></data>
+  <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>دليل مساعدك الشخصي للتسوّق. اسأل بالعربية أو الإنجليزية لمقارنة الأسعار بين المتاجر، والتحقّق من سمعة العلامات التجارية، واكتشاف أفضل العروض — دون عناء فتح عشرات الصفحات.</value></data>
   <data name="Landing.Hero.GetStarted" xml:space="preserve"><value>ابدأ مجانًا</value></data>
   <data name="Landing.Hero.SignIn" xml:space="preserve"><value>تسجيل الدخول</value></data>
   <data name="Landing.Hero.NoCard" xml:space="preserve"><value>بدون بطاقة ائتمان · ٥ عمليات بحث مجانية شهريًا</value></data>
-  <data name="Landing.Features.Title" xml:space="preserve"><value>كل ما تحتاجه لقراءة السوق</value></data>
-  <data name="Landing.Features.Subtitle" xml:space="preserve"><value>مساعد واحد للأسعار والمنتجات والسمعة والاتجاهات في أنحاء العالم العربي.</value></data>
+  <data name="Landing.Features.Title" xml:space="preserve"><value>كل ما تحتاجه لتتسوّق بذكاء</value></data>
+  <data name="Landing.Features.Subtitle" xml:space="preserve"><value>مساعد واحد للعثور على المنتجات ومقارنة الأسعار ومتابعة أفضل العروض.</value></data>
   <data name="Landing.Feature.Search.Title" xml:space="preserve"><value>بحث عربي ذكي</value></data>
   <data name="Landing.Feature.Search.Desc" xml:space="preserve"><value>اسأل بالعربية أو الإنجليزية واحصل على إجابة واضحة وموثّقة في ثوانٍ.</value></data>
   <data name="Landing.Feature.Compare.Title" xml:space="preserve"><value>قارن الأسعار والمتاجر</value></data>
@@ -139,9 +140,7 @@
   <data name="Landing.Feature.Reputation.Title" xml:space="preserve"><value>سمعة العلامات التجارية</value></data>
   <data name="Landing.Feature.Reputation.Desc" xml:space="preserve"><value>تقييمات حقيقية وتحليل لمشاعر الجمهور، مُلخّصة لأي علامة تجارية.</value></data>
   <data name="Landing.Feature.Deals.Title" xml:space="preserve"><value>العروض والمتابعة</value></data>
-  <data name="Landing.Feature.Deals.Desc" xml:space="preserve"><value>تابع أفضل العروض وراقب تحرّك السوق مع مرور الوقت.</value></data>
-  <data name="Landing.Feature.Halal.Title" xml:space="preserve"><value>مُنقّى وفق الشريعة</value></data>
-  <data name="Landing.Feature.Halal.Desc" xml:space="preserve"><value>تُنقّى النتائج والصور لتبقى مناسبة للعائلة.</value></data>
+  <data name="Landing.Feature.Deals.Desc" xml:space="preserve"><value>تابع أفضل العروض واكتشف انخفاض الأسعار مع مرور الوقت.</value></data>
   <data name="Landing.Feature.Bilingual.Title" xml:space="preserve"><value>ثنائي اللغة ودعم RTL</value></data>
   <data name="Landing.Feature.Bilingual.Desc" xml:space="preserve"><value>تجربة أصيلة بالعربية والإنجليزية مع دعم الكتابة من اليمين إلى اليسار.</value></data>
   <data name="Landing.Pricing.Title" xml:space="preserve"><value>أسعار بسيطة وشفافة</value></data>
@@ -152,7 +151,7 @@
   <data name="Landing.Pricing.Cta" xml:space="preserve"><value>ابدأ الآن</value></data>
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>للبداية</value></data>
   <data name="Landing.Plan.Basic.F1" xml:space="preserve"><value>٥ عمليات بحث شهريًا</value></data>
-  <data name="Landing.Plan.Basic.F2" xml:space="preserve"><value>نتائج مُنقّاة وفق الشريعة</value></data>
+  <data name="Landing.Plan.Basic.F2" xml:space="preserve"><value>بحث ذكي عن المنتجات والأسعار</value></data>
   <data name="Landing.Plan.Basic.F3" xml:space="preserve"><value>واجهة بالعربية والإنجليزية</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>للمتسوّقين بانتظام</value></data>
   <data name="Landing.Plan.Pro.F1" xml:space="preserve"><value>١٠٠ عملية بحث شهريًا</value></data>
@@ -164,8 +163,21 @@
   <data name="Landing.Plan.Unlimited.F2" xml:space="preserve"><value>كل مزايا الباقة الاحترافية</value></data>
   <data name="Landing.Plan.Unlimited.F3" xml:space="preserve"><value>متابعة العروض والتنبيهات</value></data>
   <data name="Landing.Plan.Unlimited.F4" xml:space="preserve"><value>دعم ذو أولوية</value></data>
-  <data name="Landing.Cta.Title" xml:space="preserve"><value>هل أنت مستعد لاستكشاف السوق العربي؟</value></data>
+  <data name="Landing.Cta.Title" xml:space="preserve"><value>هل أنت مستعد لتتسوّق بذكاء؟</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>أنشئ حسابًا مجانيًا وابدأ أول عملية بحث خلال ثوانٍ.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>أنشئ حسابًا مجانيًا</value></data>
   <data name="Landing.Cta.Login" xml:space="preserve"><value>لدي حساب بالفعل</value></data>
+
+  <data name="Faq.Title" xml:space="preserve"><value>الأسئلة الشائعة</value></data>
+  <data name="Faq.Subtitle" xml:space="preserve"><value>كل ما قد ترغب بمعرفته عن دليل.</value></data>
+  <data name="Faq.Q1" xml:space="preserve"><value>ما هو دليل؟</value></data>
+  <data name="Faq.A1" xml:space="preserve"><value>دليل مساعد شخصي للتسوّق. اطرح سؤالك بالعربية أو الإنجليزية، فيبحث في المتاجر والأسواق والويب المفتوح ليجد المنتجات ويقارن الأسعار ويلخّص سمعة العلامات التجارية ويبرز أفضل العروض — ثم يقدّم لك إجابة واضحة وموثّقة.</value></data>
+  <data name="Faq.Q2" xml:space="preserve"><value>ما اللغات التي يدعمها دليل؟</value></data>
+  <data name="Faq.A2" xml:space="preserve"><value>العربية والإنجليزية معًا. يمكنك السؤال بأي من اللغتين وتبديل الواجهة في أي وقت، وتتكيّف التجربة بالكامل — بما في ذلك الكتابة من اليمين إلى اليسار — تلقائيًا.</value></data>
+  <data name="Faq.Q3" xml:space="preserve"><value>كيف يُصفّي دليل النتائج؟</value></data>
+  <data name="Faq.A3" xml:space="preserve"><value>يطبّق دليل فلترًا للمحتوى وفق الشريعة افتراضيًا: تُزال النتائج والصور التي تتضمّن الكحول أو لحم الخنزير أو القمار أو محتوى البالغين أو غيره من المحتوى غير الحلال لتبقى المخرجات مناسبة للعائلة. ويمكنك ضبط مستوى الصرامة — أو إيقافه لحسابات المشرفين — من قسم «فلتر المحتوى» في الإعدادات.</value></data>
+  <data name="Faq.Q4" xml:space="preserve"><value>هل دليل مجاني؟</value></data>
+  <data name="Faq.A4" xml:space="preserve"><value>نعم — يبدأ كل حساب بخمس عمليات بحث مجانية شهريًا دون الحاجة إلى بطاقة ائتمان. وإذا احتجت المزيد، تتيح الباقات المدفوعة حدودًا شهرية أعلى ومتابعة للعروض وحفظًا للنتائج. راجع صفحة الأسعار للتفاصيل.</value></data>
+  <data name="Faq.Q5" xml:space="preserve"><value>هل أحتاج إلى مفاتيح API خاصة بي؟</value></data>
+  <data name="Faq.A5" xml:space="preserve"><value>لا. يعمل دليل مباشرةً دون إعداد. ويمكن للمستخدمين المتقدّمين إضافة مفاتيح النماذج ومزوّدي البحث الخاصة بهم من الإعدادات — وتبقى هذه المفاتيح في متصفحك ولا تُسجَّل أبدًا في سجلّات خوادمنا.</value></data>
 </root>

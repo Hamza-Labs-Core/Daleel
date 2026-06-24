@@ -1,0 +1,34 @@
+@page "/faq"
+@inject IStringLocalizer<SharedResource> L
+
+@* Public FAQ. Content filtering (the halal filter) is documented here as one question rather than
+   advertised on the landing page — users discover it in Settings and here. All copy is localized. *@
+
+<PageTitle>دليل · @L["Faq.Title"]</PageTitle>
+
+<div class="text-center mb-8">
+    <MudText Typo="Typo.h3">@L["Faq.Title"]</MudText>
+    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">@L["Faq.Subtitle"]</MudText>
+</div>
+
+<MudExpansionPanels MultiExpansion="true" Class="mx-auto" Style="max-width:760px;">
+    @foreach (var item in _items)
+    {
+        <MudExpansionPanel Text="@item.Question">
+            <MudText Typo="Typo.body1" Color="Color.Secondary">@item.Answer</MudText>
+        </MudExpansionPanel>
+    }
+</MudExpansionPanels>
+
+@code {
+    private sealed record FaqItem(string Question, string Answer);
+
+    private FaqItem[] _items => new[]
+    {
+        new FaqItem(L["Faq.Q1"], L["Faq.A1"]),
+        new FaqItem(L["Faq.Q2"], L["Faq.A2"]),
+        new FaqItem(L["Faq.Q3"], L["Faq.A3"]),
+        new FaqItem(L["Faq.Q4"], L["Faq.A4"]),
+        new FaqItem(L["Faq.Q5"], L["Faq.A5"]),
+    };
+}

@@ -65,6 +65,7 @@
   <data name="Nav.Brand" xml:space="preserve"><value>Brand</value></data>
   <data name="Nav.Compare" xml:space="preserve"><value>Compare</value></data>
   <data name="Nav.Monitor" xml:space="preserve"><value>Monitor</value></data>
+  <data name="Nav.Faq" xml:space="preserve"><value>FAQ</value></data>
 
   <data name="Search.Placeholder" xml:space="preserve"><value>Ask Daleel…</value></data>
   <data name="Search.Search" xml:space="preserve"><value>Search</value></data>
@@ -124,14 +125,14 @@
   <data name="Lang.English" xml:space="preserve"><value>English</value></data>
   <data name="Lang.Arabic" xml:space="preserve"><value>العربية</value></data>
 
-  <data name="Landing.Hero.Badge" xml:space="preserve"><value>Halal-filtered market intelligence</value></data>
-  <data name="Landing.Hero.Title" xml:space="preserve"><value>Understand the Arab market in seconds</value></data>
-  <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>Daleel searches Arabic e-commerce, social media and the open web to answer your questions about prices, products, brands and deals — in both English and Arabic.</value></data>
+  <data name="Landing.Hero.Badge" xml:space="preserve"><value>Your smart shopping assistant</value></data>
+  <data name="Landing.Hero.Title" xml:space="preserve"><value>Find the best products, prices and deals in seconds</value></data>
+  <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>Daleel is your personal shopping assistant. Ask in plain English or Arabic to compare prices across stores, check brand reputation and catch the best deals — without the endless browser tabs.</value></data>
   <data name="Landing.Hero.GetStarted" xml:space="preserve"><value>Get started free</value></data>
   <data name="Landing.Hero.SignIn" xml:space="preserve"><value>Sign in</value></data>
   <data name="Landing.Hero.NoCard" xml:space="preserve"><value>No credit card needed · 5 free searches every month</value></data>
-  <data name="Landing.Features.Title" xml:space="preserve"><value>Everything you need to read the market</value></data>
-  <data name="Landing.Features.Subtitle" xml:space="preserve"><value>One assistant for prices, products, reputation and trends across the Arab world.</value></data>
+  <data name="Landing.Features.Title" xml:space="preserve"><value>Everything you need to shop smarter</value></data>
+  <data name="Landing.Features.Subtitle" xml:space="preserve"><value>One assistant for finding products, comparing prices and tracking the best deals.</value></data>
   <data name="Landing.Feature.Search.Title" xml:space="preserve"><value>Smart Arabic search</value></data>
   <data name="Landing.Feature.Search.Desc" xml:space="preserve"><value>Ask in plain Arabic or English and get a clear, sourced answer in seconds.</value></data>
   <data name="Landing.Feature.Compare.Title" xml:space="preserve"><value>Compare prices &amp; stores</value></data>
@@ -139,9 +140,7 @@
   <data name="Landing.Feature.Reputation.Title" xml:space="preserve"><value>Brand reputation</value></data>
   <data name="Landing.Feature.Reputation.Desc" xml:space="preserve"><value>Real reviews and social sentiment, summarized for any brand.</value></data>
   <data name="Landing.Feature.Deals.Title" xml:space="preserve"><value>Deals &amp; monitoring</value></data>
-  <data name="Landing.Feature.Deals.Desc" xml:space="preserve"><value>Track the best offers and watch the market move over time.</value></data>
-  <data name="Landing.Feature.Halal.Title" xml:space="preserve"><value>Halal-filtered</value></data>
-  <data name="Landing.Feature.Halal.Desc" xml:space="preserve"><value>Results and images are filtered to stay family-friendly.</value></data>
+  <data name="Landing.Feature.Deals.Desc" xml:space="preserve"><value>Track the best offers and spot when prices drop over time.</value></data>
   <data name="Landing.Feature.Bilingual.Title" xml:space="preserve"><value>Bilingual &amp; RTL</value></data>
   <data name="Landing.Feature.Bilingual.Desc" xml:space="preserve"><value>A native experience in both English and Arabic, right-to-left.</value></data>
   <data name="Landing.Pricing.Title" xml:space="preserve"><value>Simple, transparent pricing</value></data>
@@ -152,7 +151,7 @@
   <data name="Landing.Pricing.Cta" xml:space="preserve"><value>Get started</value></data>
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>For getting started</value></data>
   <data name="Landing.Plan.Basic.F1" xml:space="preserve"><value>5 searches per month</value></data>
-  <data name="Landing.Plan.Basic.F2" xml:space="preserve"><value>Halal-filtered results</value></data>
+  <data name="Landing.Plan.Basic.F2" xml:space="preserve"><value>Smart product &amp; price search</value></data>
   <data name="Landing.Plan.Basic.F3" xml:space="preserve"><value>English &amp; Arabic interface</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>For regular shoppers</value></data>
   <data name="Landing.Plan.Pro.F1" xml:space="preserve"><value>100 searches per month</value></data>
@@ -164,8 +163,21 @@
   <data name="Landing.Plan.Unlimited.F2" xml:space="preserve"><value>Everything in Pro</value></data>
   <data name="Landing.Plan.Unlimited.F3" xml:space="preserve"><value>Deal monitoring &amp; alerts</value></data>
   <data name="Landing.Plan.Unlimited.F4" xml:space="preserve"><value>Priority support</value></data>
-  <data name="Landing.Cta.Title" xml:space="preserve"><value>Ready to explore the Arab market?</value></data>
+  <data name="Landing.Cta.Title" xml:space="preserve"><value>Ready to shop smarter?</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>Create a free account and run your first search in seconds.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>Create free account</value></data>
   <data name="Landing.Cta.Login" xml:space="preserve"><value>I already have an account</value></data>
+
+  <data name="Faq.Title" xml:space="preserve"><value>Frequently asked questions</value></data>
+  <data name="Faq.Subtitle" xml:space="preserve"><value>Everything you might want to know about Daleel.</value></data>
+  <data name="Faq.Q1" xml:space="preserve"><value>What is Daleel?</value></data>
+  <data name="Faq.A1" xml:space="preserve"><value>Daleel is a personal shopping assistant. Ask a question in plain English or Arabic and it searches stores, marketplaces and the open web to find products, compare prices, summarize brand reputation and surface the best deals — then gives you a clear, sourced answer.</value></data>
+  <data name="Faq.Q2" xml:space="preserve"><value>Which languages does Daleel support?</value></data>
+  <data name="Faq.A2" xml:space="preserve"><value>Both English and Arabic. You can ask in either language, switch the interface anytime, and the whole experience — including right-to-left layout — adapts automatically.</value></data>
+  <data name="Faq.Q3" xml:space="preserve"><value>How does Daleel filter results?</value></data>
+  <data name="Faq.A3" xml:space="preserve"><value>Daleel applies a halal content filter by default: results and images that include alcohol, pork, gambling, adult or other non-halal content are removed so what you see stays family-friendly. You can adjust the strictness — or, for admin accounts, turn it off — under Content Filter in Settings.</value></data>
+  <data name="Faq.Q4" xml:space="preserve"><value>Is Daleel free?</value></data>
+  <data name="Faq.A4" xml:space="preserve"><value>Yes — every account starts with 5 free searches each month, no credit card required. If you need more, paid plans add higher monthly limits, deal monitoring and saved results. See the Pricing page for details.</value></data>
+  <data name="Faq.Q5" xml:space="preserve"><value>Do I need my own API keys?</value></data>
+  <data name="Faq.A5" xml:space="preserve"><value>No. Daleel works out of the box. Power users can optionally add their own model and search provider keys under Settings — they stay in your browser and are never written to our server logs.</value></data>
 </root>
