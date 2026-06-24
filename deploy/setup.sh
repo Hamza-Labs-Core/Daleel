@@ -79,10 +79,14 @@ for f in docker-compose.yml Caddyfile deploy.sh; do
 done
 chmod +x "$APP_DIR/deploy.sh" 2>/dev/null || true
 
-# Seed .env from the example if not present (operator fills in real secrets).
+# Seed a placeholder .env if not present. NOTE: you do NOT edit this by hand —
+# the GitHub Actions deploy workflow (.github/workflows/deploy.yml) rewrites
+# $APP_DIR/.env from the repo's GitHub secrets on EVERY deploy. This seed only
+# exists so the systemd unit / `docker compose up` has a file to read if the box
+# reboots before the first deploy runs.
 if [ ! -f "$APP_DIR/.env" ] && [ -f "$SCRIPT_DIR/.env.example" ]; then
   install -m 0600 "$SCRIPT_DIR/.env.example" "$APP_DIR/.env"
-  log "Seeded $APP_DIR/.env from .env.example — EDIT IT and fill in secrets."
+  log "Seeded placeholder $APP_DIR/.env — the deploy workflow overwrites it from GitHub secrets."
 fi
 
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
@@ -161,11 +165,14 @@ log "Done."
 cat <<NEXT
 
 Next steps:
-  1. Edit ${APP_DIR}/.env and fill in all secrets (see .env.example).
+  1. Do NOT hand-edit ${APP_DIR}/.env — the GitHub Actions deploy workflow writes
+     it from the repo's GitHub secrets on every deploy. Just make sure those
+     secrets are set (see deploy/create-secrets.sh and deploy/.env.example).
   2. Point DNS: daleel.hamzalabs.dev (A/AAAA) -> this server's IP.
   3. Log in to GHCR if the image is private:
        sudo -u ${APP_USER} docker login ghcr.io
-  4. Start the stack:
+  4. Trigger a deploy from GitHub (Actions -> Deploy, or push a v* tag). It will
+     write ${APP_DIR}/.env and bring the stack up. To start locally instead:
        sudo systemctl start daleel.service
      or run the deploy script directly:
        sudo -u ${APP_USER} ${APP_DIR}/deploy.sh latest

@@ -102,6 +102,34 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Deploying tag: $TAG"
 
+      - name: Write /opt/daleel/.env from GitHub secrets
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            umask 077
+            # Render the runtime env from the CURRENT GitHub secret values.
+            # GitHub substitutes the ${{ secrets.* }} placeholders into this
+            # script before it is sent to the box. The heredoc terminator is
+            # quoted ('EOF') so the remote shell writes values VERBATIM — it
+            # does not expand $, backticks, etc. in secret contents.
+            cat > "/tmp/daleel.env.$$" << 'EOF'
+            OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
+            SERPAPI_KEY=${{ secrets.SERPAPI_KEY }}
+            CONTEXT_DEV_API_KEY=${{ secrets.CONTEXT_DEV_API_KEY }}
+            GOOGLE_PLACES_API_KEY=${{ secrets.GOOGLE_PLACES_API_KEY }}
+            APIFY_TOKEN=${{ secrets.APIFY_TOKEN }}
+            CADDY_DOMAIN=daleel.hamzalabs.dev
+            CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
+            EOF
+            # deploy.sh runs as the 'daleel' service user, so the file must be
+            # owned by it (not the SSH login user) and kept private (0600).
+            sudo install -o daleel -g daleel -m 0600 "/tmp/daleel.env.$$" /opt/daleel/.env
+            rm -f "/tmp/daleel.env.$$"
+
       - name: Deploy over SSH (pull, restart, health-check, rollback)
         uses: appleboy/ssh-action@v1
         env:

@@ -85,6 +85,14 @@ jobs:
 
       # Build and push in one step — the "push" gate (main only) is the same condition
       # as this whole job, so a successful docker build publishes to GHCR.
+      #
+      # NOTE: no secrets/build-args are passed here ON PURPOSE. The image is built
+      # config-free (the Dockerfile only runs `dotnet publish`); every API key and
+      # provider credential is injected at RUNTIME via /opt/daleel/.env, which the
+      # deploy workflow writes on the VPS from GitHub secrets. If a build-time
+      # secret ever becomes necessary, add it with build-push-action's `secrets:`
+      # input (BuildKit `--mount=type=secret`) rather than `build-args` so it is
+      # never baked into an image layer.
       - name: Build and push
         id: build
         uses: docker/build-push-action@v6
