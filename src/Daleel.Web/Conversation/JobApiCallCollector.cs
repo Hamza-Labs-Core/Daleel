@@ -3,14 +3,18 @@ using Daleel.Core.Observability;
 namespace Daleel.Web.Conversation;
 
 /// <summary>
-/// Per-job <see cref="IApiCallObserver"/>: streams each external API call to the UI as a
-/// progress line with timing + cost, keeps a running cost total, accumulates the calls for
-/// persistence, and trips the cost cap (cancelling the job) when the total exceeds the limit.
+/// Per-job <see cref="IApiCallObserver"/>: records each external API call (timing + cost) to an
+/// internal audit sink, keeps a running cost total, accumulates the calls for persistence, and
+/// trips the cost cap (cancelling the job) when the total exceeds the limit.
 /// </summary>
-/// <remarks>Thread-safe: providers run in parallel during the gather phase.</remarks>
+/// <remarks>
+/// The per-call detail (provider, endpoint, cost, timing) is deliberately <em>not</em> shown to
+/// the user — it goes to the internal audit sink (server logs) and is persisted for analytics.
+/// Thread-safe: providers run in parallel during the gather phase.
+/// </remarks>
 public sealed class JobApiCallCollector : IApiCallObserver
 {
-    private readonly Action<string> _progress;
+    private readonly Action<string> _audit;
     private readonly decimal _maxCost;
     private readonly CancellationTokenSource? _capTrip;
     private readonly object _gate = new();
@@ -18,12 +22,12 @@ public sealed class JobApiCallCollector : IApiCallObserver
     private decimal _total;
     private bool _capped;
 
-    /// <param name="progress">Live progress sink (streamed to the user's devices).</param>
+    /// <param name="audit">Internal audit sink (server-side log) — never surfaced to the user.</param>
     /// <param name="maxCost">Max cost per job; 0 = no cap.</param>
     /// <param name="capTrip">Cancelled when the cap is exceeded, to stop the job.</param>
-    public JobApiCallCollector(Action<string> progress, decimal maxCost, CancellationTokenSource? capTrip)
+    public JobApiCallCollector(Action<string> audit, decimal maxCost, CancellationTokenSource? capTrip)
     {
-        _progress = progress;
+        _audit = audit;
         _maxCost = maxCost;
         _capTrip = capTrip;
     }
@@ -54,11 +58,11 @@ public sealed class JobApiCallCollector : IApiCallObserver
             }
         }
 
-        _progress(Format(call, total));
+        _audit(Format(call, total));
 
         if (tripNow)
         {
-            _progress($"⛔ Cost cap of ${_maxCost:0.###} exceeded (running ${total:0.###}) — stopping search.");
+            _audit($"Cost cap of ${_maxCost:0.###} exceeded (running ${total:0.###}) — stopping search.");
             _capTrip?.Cancel();
         }
     }

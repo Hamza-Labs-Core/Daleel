@@ -65,44 +65,51 @@
             </MudPaper>
         }
 
+        @* While the search runs we show only a neutral spinner. The detailed step/cost/provider
+           log is internal — it's logged and recorded for analytics, never surfaced here. *@
         @if (_status == "running")
         {
             <MudPaper Class="pa-4 mb-3" Outlined="true" Elevation="0">
-                <div class="d-flex align-center mb-2">
-                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                <div class="d-flex align-center">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-3" />
                     <MudText Typo="Typo.subtitle2">@L["Search.Searching"]</MudText>
                     <MudSpacer />
                     <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
                                OnClick="CancelAsync">@L["Search.Cancel"]</MudButton>
                 </div>
-                <MudList T="string" Dense="true">
-                    @foreach (var line in _progress)
-                    {
-                        <MudListItem T="string" Icon="@Icons.Material.Filled.ChevronRight">
-                            <MudText Typo="Typo.body2">@line</MudText>
-                        </MudListItem>
-                    }
-                </MudList>
             </MudPaper>
         }
 
+        @* No raw status/error metadata: a search that yields nothing shows a neutral empty state.
+           The underlying reason is logged server-side for operators, not shown to the user. *@
         @if (_status == "error")
         {
-            <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
-                <div>@(_error ?? "Search failed.")</div>
-                <div class="mt-1 d-flex align-center gap-1">
-                    <MudText Typo="Typo.caption">@L["Search.Trouble"]</MudText>
-                    <MudLink Href="/status" Typo="Typo.caption">@L["Search.CheckStatus"]</MudLink>
-                </div>
-            </MudAlert>
+            <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
+                <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                <MudText Typo="Typo.subtitle1" Align="Align.Center">لم نجد نتائج · No results just yet</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-1">
+                    Try rephrasing your search or searching again. · جرّب صياغة أخرى أو أعد البحث.
+                </MudText>
+            </MudPaper>
         }
 
+        @* Results render as a structured product list (with stores/brands/reviews secondary).
+           No text-summary paragraph — the data speaks for itself. *@
         @if (_status == "completed" && _answer is not null)
         {
-            <ReportView Title="@(L["Search.Summary"])" Text="@_answer.Summary" />
             @if (_answer.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
             {
                 <AdaptiveResults Result="products" />
+            }
+            else
+            {
+                <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
+                    <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                    <MudText Typo="Typo.subtitle1" Align="Align.Center">لم نجد نتائج · No results just yet</MudText>
+                    <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-1">
+                        Try rephrasing your search or searching again. · جرّب صياغة أخرى أو أعد البحث.
+                    </MudText>
+                </MudPaper>
             }
             <SourceChips Sources="_answer.Research.Sources" />
         }

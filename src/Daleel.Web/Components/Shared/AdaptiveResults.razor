@@ -1,99 +1,90 @@
-@* Adaptive product-search display. Shows only the buckets that have results, as tabs, and
-   opens on whichever bucket is largest. A single populated bucket renders directly (no tabs).
-   Brand cards drill down into the Products tab pre-filtered to that brand. *@
+@* Product-search display. The product list is the primary unit — it always renders first and
+   prominently. Stores, brands, and review sources are kept (the store list is useful) but
+   demoted to secondary collapsible sections below the products. When a search returns no
+   products at all, the secondary content is shown directly so the page is never empty.
+   Brand cards drill into the product list pre-filtered to that brand. *@
 
-@if (TabCount == 0)
+@if (Result.ProductCount > 0)
+{
+    @* PRIMARY — the product grid (cards → detail dialog with price comparison + reviews). *@
+    <ProductListings Result="Result" InitialBrand="@_brandFilter" />
+
+    @if (HasSecondary)
+    {
+        <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mt-5 mb-1">
+            Also found · أيضاً
+        </MudText>
+        <MudExpansionPanels MultiExpansion="true" Elevation="0">
+            @if (Result.StoreCount > 0)
+            {
+                <MudExpansionPanel Icon="@Icons.Material.Filled.Store"
+                                   Text="@($"Stores ({Result.StoreCount})")">
+                    <StoreCards Stores="Result.Stores" />
+                </MudExpansionPanel>
+            }
+            @if (Result.BrandCount > 0)
+            {
+                <MudExpansionPanel Icon="@Icons.Material.Filled.Verified"
+                                   Text="@($"Brands ({Result.BrandCount})")">
+                    <BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />
+                </MudExpansionPanel>
+            }
+            @if (Result.ReviewCount > 0)
+            {
+                <MudExpansionPanel Icon="@Icons.Material.Filled.Article"
+                                   Text="@($"Reviews ({Result.ReviewCount})")">
+                    <ReviewList Reviews="Result.Reviews" />
+                </MudExpansionPanel>
+            }
+        </MudExpansionPanels>
+    }
+}
+else if (HasSecondary)
+{
+    @* No distinct product models — surface whatever we did find so the search isn't a dead end. *@
+    @if (Result.StoreCount > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.Store" Class="mr-1" />Stores (@Result.StoreCount)
+        </MudText>
+        <StoreCards Stores="Result.Stores" />
+    }
+    @if (Result.BrandCount > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mb-2 mt-4">
+            <MudIcon Icon="@Icons.Material.Filled.Verified" Class="mr-1" />Brands (@Result.BrandCount)
+        </MudText>
+        <BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />
+    }
+    @if (Result.ReviewCount > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mb-2 mt-4">
+            <MudIcon Icon="@Icons.Material.Filled.Article" Class="mr-1" />Reviews (@Result.ReviewCount)
+        </MudText>
+        <ReviewList Reviews="Result.Reviews" />
+    }
+}
+else
 {
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">
         No local products, stores, or brands were found for this search in @Result.Country.
     </MudAlert>
 }
-else if (TabCount == 1)
-{
-    @* One bucket only — render its dedicated layout without tab chrome. *@
-    @RenderBucket(LargestBucket)
-}
-else
-{
-    <MudTabs Elevation="0" Rounded="true" ApplyEffectsToContainer="true" @bind-ActivePanelIndex="_active" Class="mb-3">
-        @if (Result.ProductCount > 0)
-        {
-            <MudTabPanel Text="@($"Products ({Result.ProductCount})")" Icon="@Icons.Material.Filled.ShoppingBag">
-                <div class="pt-3">@RenderProducts()</div>
-            </MudTabPanel>
-        }
-        @if (Result.StoreCount > 0)
-        {
-            <MudTabPanel Text="@($"Stores ({Result.StoreCount})")" Icon="@Icons.Material.Filled.Store">
-                <div class="pt-3"><StoreCards Stores="Result.Stores" /></div>
-            </MudTabPanel>
-        }
-        @if (Result.BrandCount > 0)
-        {
-            <MudTabPanel Text="@($"Brands ({Result.BrandCount})")" Icon="@Icons.Material.Filled.Verified">
-                <div class="pt-3"><BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" /></div>
-            </MudTabPanel>
-        }
-        @if (Result.ReviewCount > 0)
-        {
-            <MudTabPanel Text="@($"Reviews ({Result.ReviewCount})")" Icon="@Icons.Material.Filled.Article">
-                <div class="pt-3"><ReviewList Reviews="Result.Reviews" /></div>
-            </MudTabPanel>
-        }
-    </MudTabs>
-}
 
 @code {
     [Parameter, EditorRequired] public ProductSearchResult Result { get; set; } = default!;
 
-    private int _active;
+    /// <summary>Brand the product list is currently filtered to (set by drilling in from a brand card).</summary>
     private string? _brandFilter;
 
-    // Tab order matches the panel order above: Products, Stores, Brands, Reviews.
-    private bool[] Present => new[]
-    {
-        Result.ProductCount > 0, Result.StoreCount > 0, Result.BrandCount > 0, Result.ReviewCount > 0
-    };
-
-    private int[] Counts => new[] { Result.ProductCount, Result.StoreCount, Result.BrandCount, Result.ReviewCount };
-
-    private int TabCount => Present.Count(p => p);
-
-    private int LargestBucket
-    {
-        get
-        {
-            var counts = Counts;
-            var best = 0;
-            for (var i = 1; i < counts.Length; i++)
-            {
-                if (counts[i] > counts[best]) best = i;
-            }
-            return best;
-        }
-    }
-
-    protected override void OnParametersSet()
-    {
-        // Open on the largest bucket — translate its bucket index into the visible-tab index.
-        var target = LargestBucket;
-        _active = Present.Take(target).Count(p => p);
-    }
+    /// <summary>Whether there's any non-product content (stores / brands / reviews) to show.</summary>
+    private bool HasSecondary => Result.StoreCount > 0 || Result.BrandCount > 0 || Result.ReviewCount > 0;
 
     private void DrillToBrand(string brand)
     {
+        // Filter the (already-primary) product list to this brand; ProductListings re-reads
+        // InitialBrand on parameter change.
         _brandFilter = brand;
-        // Switch to the Products tab (index 0 when products are present).
-        _active = 0;
+        StateHasChanged();
     }
-
-    private RenderFragment RenderProducts() => @<ProductListings Result="Result" InitialBrand="@_brandFilter" />;
-
-    private RenderFragment RenderBucket(int bucket) => bucket switch
-    {
-        1 => @<StoreCards Stores="Result.Stores" />,
-        2 => @<BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />,
-        3 => @<ReviewList Reviews="Result.Reviews" />,
-        _ => RenderProducts()
-    };
 }

@@ -92,10 +92,14 @@ public sealed class SearchJobService : BackgroundService
                 UserId = job.UserId, Query = job.Query, QueryType = job.QueryType,
                 Geo = job.Geo, Model = job.Model, ResultSummary = null, CreatedAt = job.CompletedAt.Value
             }, stoppingToken);
+            // Record the search for analytics / cost optimisation — providers called, api-call
+            // count, result count and timing. This is server-side telemetry, never shown to the user.
             await analytics.RecordSearchAsync(new AnalyticsEvent
             {
                 UserId = job.UserId, Query = job.Query, QueryType = job.QueryType, Geo = job.Geo,
                 Model = job.Model, DurationMs = (int)sw.ElapsedMilliseconds,
+                ResultCount = result.ResultCount, ApiCallsMade = result.ApiCalls,
+                Provider = string.IsNullOrWhiteSpace(result.Providers) ? null : result.Providers,
                 FilteredCount = result.FilteredCount, FilteredCategories = result.FilteredCategories
             }, stoppingToken);
 
