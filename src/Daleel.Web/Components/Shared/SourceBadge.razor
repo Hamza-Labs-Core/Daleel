@@ -1,0 +1,36 @@
+@* Color-coded badge for a listing's source type: green=marketplace, blue=brand, orange=store. *@
+<MudChip T="string" Size="Size.Small" Variant="Variant.Filled" Color="@BadgeColor" Icon="@BadgeIcon">
+    @Label
+</MudChip>
+
+@code {
+    [Parameter] public ResultType SourceType { get; set; }
+    [Parameter] public string? Source { get; set; }
+
+    private Color BadgeColor => SourceType switch
+    {
+        ResultType.Marketplace => Color.Success,
+        ResultType.ProductListing => Color.Success,
+        ResultType.BrandPage => Color.Info,
+        ResultType.StorePage => Color.Warning,
+        _ => Color.Default
+    };
+
+    private string BadgeIcon => SourceType switch
+    {
+        ResultType.Marketplace or ResultType.ProductListing => Icons.Material.Filled.Storefront,
+        ResultType.BrandPage => Icons.Material.Filled.Verified,
+        ResultType.StorePage => Icons.Material.Filled.Store,
+        _ => Icons.Material.Filled.Link
+    };
+
+    private string Label => string.IsNullOrWhiteSpace(Source)
+        ? SourceType switch
+        {
+            ResultType.Marketplace or ResultType.ProductListing => "Marketplace",
+            ResultType.BrandPage => "Brand",
+            ResultType.StorePage => "Store",
+            _ => "Link"
+        }
+        : Source!;
+}

@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Daleel.Core\Daleel.Core.csproj" />
+    <ProjectReference Include="..\Daleel.Search\Daleel.Search.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

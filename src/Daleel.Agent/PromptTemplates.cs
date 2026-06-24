@@ -122,11 +122,47 @@ public static class PromptTemplates
     {
         var sb = new StringBuilder();
         sb.AppendLine(MarketContext(geo));
-        sb.Append("Research the best \"").Append(category).AppendLine("\" options in this market.");
-        sb.AppendLine("Cover: top models/brands, customer opinions on forums + social, prices, and where to buy.");
+        sb.Append("The user wants to BUY \"").Append(category).AppendLine("\" in this market — they need actual, " +
+            "purchasable product listings with prices and links, not just advice.");
+        sb.AppendLine("Design the search to surface CONCRETE LISTINGS:");
+        sb.AppendLine("- shoppingQueries: target marketplaces and price comparison directly (include the category " +
+            "in both Arabic and English, e.g. 'مكيفات للبيع', 'air conditioner price').");
+        sb.AppendLine("- webQueries: a mix of local-marketplace listing pages, brand catalog pages, store sections, " +
+            "and one or two buying-guide/review queries.");
+        sb.AppendLine("- placesQueries: physical stores selling it near the main city, both languages.");
+        sb.AppendLine(KnownSourcesHint(geo));
+        sb.AppendLine("Include BOTH local sellers AND international sites that ship to this market.");
+        sb.AppendLine("Set queryType to ProductResearch.");
         sb.AppendLine(StrategySchema);
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Names the high-signal local + ships-here sources the planner should prioritise for a
+    /// given market, so listing queries land on sites we can actually extract from.
+    /// </summary>
+    private static string KnownSourcesHint(GeoProfile geo)
+    {
+        var local = geo.Marketplaces.Count > 0
+            ? string.Join(", ", geo.Marketplaces)
+            : "the market's main classifieds and electronics retailers";
+
+        var shipsHere = geo.CountryCode.Equals("jo", StringComparison.OrdinalIgnoreCase)
+            ? " Also prioritise: OpenSooq, Carrefour Jordan, Samsung Jordan, LG Levant, Xcite, Safeway Electronics, " +
+              "and international sites that ship to Jordan (Amazon.ae, Noon.com)."
+            : string.Empty;
+
+        return $"Prioritise these local sources: {local}.{shipsHere}";
+    }
+
+    /// <summary>System prompt for summarising a structured product search (grid-backed).</summary>
+    public const string ProductAnalystSystem =
+        "You are Daleel, a shopping assistant. You are given the actual product listings, stores, brands, and " +
+        "review sources gathered for a buy-intent query. Write a short, decision-ready summary that: names the " +
+        "concrete products worth considering and their prices; groups options into budget / mid-range / premium; " +
+        "and tells the user where to buy (local marketplaces, stores, and international sites that ship in). " +
+        "Reference real prices and sources from the context — never invent listings." +
+        HalalGuard;
 
     /// <summary>Build the analyst prompt that turns gathered context into a final report.</summary>
     public static string Analyze(string task, GeoProfile geo, string gatheredContext)

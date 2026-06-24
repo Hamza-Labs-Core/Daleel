@@ -1,0 +1,116 @@
+@* Side-by-side comparison of 2–4 listings: price, where to buy, condition, specs.
+   The cheapest priced column is highlighted as best value. *@
+
+<MudDialog>
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            <MudIcon Icon="@Icons.Material.Filled.Compare" Class="mr-2" />Compare products
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        <div style="overflow-x:auto;">
+            <MudSimpleTable Dense="true" Bordered="true" Striped="false" Style="min-width:480px;">
+                <thead>
+                    <tr>
+                        <th></th>
+                        @foreach (var l in Items)
+                        {
+                            <th style="@HeaderStyle(l)">
+                                <MudText Typo="Typo.subtitle2" dir="@Catalog.Dir(l.Name)">@l.Name</MudText>
+                                @if (IsCheapest(l))
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled"
+                                             Icon="@Icons.Material.Filled.Savings">Best value</MudChip>
+                                }
+                            </th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Price</strong></td>
+                        @foreach (var l in Items)
+                        {
+                            <td style="@HeaderStyle(l)">
+                                @if (l.AsMoney is { } m)
+                                {
+                                    <MudText Color="Color.Primary" Typo="Typo.body1" Style="font-weight:600;">@m.ToDisplay()</MudText>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </td>
+                        }
+                    </tr>
+                    <tr>
+                        <td><strong>Source</strong></td>
+                        @foreach (var l in Items)
+                        {
+                            <td><SourceBadge SourceType="l.SourceType" Source="@l.Source" /></td>
+                        }
+                    </tr>
+                    <tr>
+                        <td><strong>Condition</strong></td>
+                        @foreach (var l in Items)
+                        {
+                            <td>@(string.IsNullOrWhiteSpace(l.Condition) ? "—" : l.Condition)</td>
+                        }
+                    </tr>
+                    @foreach (var key in SpecKeys)
+                    {
+                        <tr>
+                            <td><strong>@Humanize(key)</strong></td>
+                            @foreach (var l in Items)
+                            {
+                                <td>@(l.Specs.TryGetValue(key, out var v) ? v : "—")</td>
+                            }
+                        </tr>
+                    }
+                    <tr>
+                        <td><strong>Buy</strong></td>
+                        @foreach (var l in Items)
+                        {
+                            <td>
+                                @if (!string.IsNullOrWhiteSpace(l.Url))
+                                {
+                                    <MudButton Href="@l.Url" Target="_blank" Size="Size.Small" Variant="Variant.Filled"
+                                               Color="Color.Primary" StartIcon="@Icons.Material.Filled.ShoppingCart">Buy</MudButton>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </td>
+                        }
+                    </tr>
+                </tbody>
+            </MudSimpleTable>
+        </div>
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="Close">Close</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    [CascadingParameter] private IMudDialogInstance MudDialog { get; set; } = default!;
+    [Parameter] public IReadOnlyList<ProductListing> Items { get; set; } = Array.Empty<ProductListing>();
+
+    // Union of spec keys across the compared items, preserving first-seen order.
+    private IReadOnlyList<string> SpecKeys =>
+        Items.SelectMany(i => i.Specs.Keys).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+    private decimal? MinPrice => Items.Where(i => i.Price is > 0).Select(i => i.Price).DefaultIfEmpty(null).Min();
+
+    private bool IsCheapest(ProductListing l) => MinPrice is { } min && l.Price == min;
+
+    private string HeaderStyle(ProductListing l) =>
+        IsCheapest(l) ? "background:var(--mud-palette-success-hover);" : string.Empty;
+
+    private static string Humanize(string key) =>
+        string.Join(' ', key.Replace('_', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
+
+    private void Close() => MudDialog.Close();
+}

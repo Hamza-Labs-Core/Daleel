@@ -65,9 +65,45 @@ public class AgentServiceTests
         answer.Research.WebResults.Should().NotBeEmpty();
         answer.GeneratedAt.Should().Be(FixedNow);
 
-        // Both planner and analyst roles were exercised.
+        // Both planner and analyst roles were exercised. Product queries use the product-focused
+        // analyst system prompt rather than the generic one.
         llm.SystemPromptsSeen.Should().Contain(PromptTemplates.PlannerSystem);
-        llm.SystemPromptsSeen.Should().Contain(PromptTemplates.AnalystSystem);
+        llm.SystemPromptsSeen.Should().Contain(PromptTemplates.ProductAnalystSystem);
+    }
+
+    [Fact]
+    public async Task AskAsync_ProductQuery_ProjectsStructuredListings()
+    {
+        // FakeSearchProvider returns the same set for every kind; we lean on classification to bucket them.
+        var search = new FakeSearchProvider(
+            new SearchResult
+            {
+                Title = "Samsung Split AC AR24", Price = new Money(450, "JOD"), Seller = "OpenSooq",
+                Url = "https://jo.opensooq.com/en/listing/12345678", Kind = SearchKind.Shopping
+            },
+            new SearchResult
+            {
+                Title = "Air Conditioners | Samsung Jordan",
+                Url = "https://www.samsung.com/jo/air-conditioners/", Kind = SearchKind.Web
+            },
+            new SearchResult
+            {
+                Title = "Best ACs in Jordan 2024 - Buying Guide",
+                Url = "https://blog.example.com/best-acs", Kind = SearchKind.Web
+            });
+
+        var agent = new AgentService(PlannerAndAnalyst("Top picks summarized."),
+            new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var answer = await agent.AskAsync("ACs in Jordan", "jordan");
+
+        answer.Products.Should().NotBeNull();
+        var products = answer.Products!;
+        products.Geo.Should().Be("jordan");
+        products.Listings.Should().Contain(l => l.Price == 450 && l.Currency == "JOD");
+        products.Brands.Should().Contain(b => b.Name == "Samsung");
+        products.Reviews.Should().Contain(r => r.Title.Contains("Best ACs"));
+        products.GeneratedAt.Should().Be(FixedNow);
     }
 
     [Fact]

@@ -29,7 +29,7 @@ public record BrandProfile
 /// <see cref="GetBrandAsync"/>, <see cref="CrawlAsync"/>) the agent uses directly.
 /// Auth is a bearer token from <c>CONTEXT_DEV_API_KEY</c>.
 /// </remarks>
-public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider
+public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExtractProvider
 {
     public const string DefaultBaseUrl = "https://api.context.dev";
 

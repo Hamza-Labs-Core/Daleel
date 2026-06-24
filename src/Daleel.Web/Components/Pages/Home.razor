@@ -88,6 +88,10 @@
         @if (_status == "completed" && _answer is not null)
         {
             <ReportView Title="الملخص · Summary" Text="@_answer.Summary" />
+            @if (_answer.Products is { HasListings: true } products)
+            {
+                <ProductListings Result="products" />
+            }
             <SourceChips Sources="_answer.Research.Sources" />
         }
 

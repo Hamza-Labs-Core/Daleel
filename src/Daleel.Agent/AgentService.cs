@@ -86,7 +86,18 @@ public sealed partial class AgentService
         var strategy = await PlanAsync(PromptTemplates.PlanFreeform(question, geo), cancellationToken).ConfigureAwait(false);
         var bundle = await GatherAsync(strategy, geo, cancellationToken).ConfigureAwait(false);
 
-        var summary = await AnalyzeAsync(question, geo, bundle, cancellationToken).ConfigureAwait(false);
+        var isProduct = strategy.QueryType == QueryType.ProductResearch;
+        var summary = await AnalyzeAsync(question, geo, bundle, cancellationToken,
+            isProduct ? PromptTemplates.ProductAnalystSystem : null).ConfigureAwait(false);
+
+        // For product searches, also project the bundle into structured, link-rich listings
+        // (reusing the bundle we already gathered — no extra planning/search round-trip).
+        ProductSearchResult? products = null;
+        if (isProduct)
+        {
+            products = await BuildProductSearchResultAsync(strategy.Subject is { Length: > 0 } s ? s : question,
+                geo, bundle, summary, cancellationToken).ConfigureAwait(false);
+        }
 
         return new AgentAnswer
         {
@@ -95,6 +106,7 @@ public sealed partial class AgentService
             QueryType = strategy.QueryType,
             Summary = summary,
             Research = bundle,
+            Products = products,
             GeneratedAt = _options.Clock()
         };
     }
@@ -187,7 +199,8 @@ public sealed partial class AgentService
     // ── Analyze ─────────────────────────────────────────────────────────────────
 
     private async Task<string> AnalyzeAsync(
-        string task, GeoProfile geo, ResearchBundle bundle, CancellationToken cancellationToken)
+        string task, GeoProfile geo, ResearchBundle bundle, CancellationToken cancellationToken,
+        string? systemPrompt = null)
     {
         var context = BuildContext(bundle);
         if (context.Length == 0)
@@ -196,7 +209,8 @@ public sealed partial class AgentService
         }
 
         var prompt = PromptTemplates.Analyze(task, geo, context);
-        return await _llm.CompleteTextAsync(PromptTemplates.AnalystSystem, prompt, cancellationToken).ConfigureAwait(false);
+        return await _llm.CompleteTextAsync(systemPrompt ?? PromptTemplates.AnalystSystem, prompt, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     private async Task<IReadOnlyList<CustomerOpinion>> ExtractOpinionsAsync(

@@ -1,0 +1,85 @@
+@* A single product listing: image, name, price (+ deal strike-through), source badge,
+   specs preview, a direct "View" link, and an optional compare checkbox. *@
+
+<MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;display:flex;flex-direction:column;">
+    @if (!string.IsNullOrWhiteSpace(Listing.ImageUrl))
+    {
+        <div style="height:150px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);">
+            <SafeImage Src="@Listing.ImageUrl" Alt="@Listing.Name" Style="max-height:150px;max-width:100%;object-fit:contain;" />
+        </div>
+    }
+
+    <MudCardContent Class="flex-grow-1">
+        <div class="d-flex align-center justify-space-between mb-1" style="gap:8px;">
+            <SourceBadge SourceType="Listing.SourceType" Source="@Listing.Source" />
+            @if (ShowCompare)
+            {
+                <MudCheckBox T="bool" Value="Selected" ValueChanged="OnToggleCompare" Dense="true"
+                             Size="Size.Small" Disabled="@(!Selected && !CanSelectMore)" Label="Compare" />
+            }
+        </div>
+
+        <MudText Typo="Typo.body1" dir="@Catalog.Dir(Listing.Name)" Style="font-weight:500;line-height:1.3;">
+            @Listing.Name
+        </MudText>
+
+        @if (!string.IsNullOrWhiteSpace(Listing.Brand) || !string.IsNullOrWhiteSpace(Listing.Model))
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                @string.Join(" · ", new[] { Listing.Brand, Listing.Model }.Where(s => !string.IsNullOrWhiteSpace(s)))
+            </MudText>
+        }
+
+        <div class="d-flex align-center gap-2 mt-2" style="flex-wrap:wrap;">
+            @if (Listing.AsMoney is { } money)
+            {
+                <MudText Typo="Typo.h6" Color="Color.Primary">@money.ToDisplay()</MudText>
+            }
+            else
+            {
+                <MudText Typo="Typo.body2" Color="Color.Secondary">Price on site</MudText>
+            }
+
+            @if (Listing.IsDeal && Listing.OriginalPrice is { } orig && !string.IsNullOrWhiteSpace(Listing.Currency))
+            {
+                <MudText Typo="Typo.body2" Style="text-decoration:line-through;" Color="Color.Secondary">
+                    @(new Money(orig, Listing.Currency!).ToDisplay())
+                </MudText>
+            }
+        </div>
+
+        <div class="d-flex align-center gap-1 mt-1" style="flex-wrap:wrap;">
+            @if (!string.IsNullOrWhiteSpace(Listing.Condition))
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         Color="@(Listing.Condition == "new" ? Color.Success : Color.Default)">@Listing.Condition</MudChip>
+            }
+            @if (!string.IsNullOrWhiteSpace(Listing.Availability))
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">@Listing.Availability</MudChip>
+            }
+        </div>
+    </MudCardContent>
+
+    <MudCardActions>
+        @if (!string.IsNullOrWhiteSpace(Listing.Url))
+        {
+            <MudButton Href="@Listing.Url" Target="_blank" Size="Size.Small" Variant="Variant.Filled"
+                       Color="Color.Primary" StartIcon="@Icons.Material.Filled.OpenInNew">View</MudButton>
+        }
+        @if (!string.IsNullOrWhiteSpace(Listing.Seller) && Listing.Seller != Listing.Source)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-1">@Listing.Seller</MudText>
+        }
+    </MudCardActions>
+</MudCard>
+
+@code {
+    [Parameter, EditorRequired] public ProductListing Listing { get; set; } = default!;
+    [Parameter] public bool ShowCompare { get; set; } = true;
+    [Parameter] public bool Selected { get; set; }
+    [Parameter] public bool CanSelectMore { get; set; } = true;
+    [Parameter] public EventCallback<bool> SelectedChanged { get; set; }
+
+    private Task OnToggleCompare(bool value) => SelectedChanged.InvokeAsync(value);
+}

@@ -51,5 +51,12 @@ public sealed record AgentAnswer
     public QueryType QueryType { get; init; }
     public string Summary { get; init; } = string.Empty;
     public ResearchBundle Research { get; init; } = new();
+
+    /// <summary>
+    /// Structured product listings, present only when the query was classified as a product
+    /// search (e.g. "ACs in Jordan"). Drives the product-grid UI.
+    /// </summary>
+    public ProductSearchResult? Products { get; init; }
+
     public DateTimeOffset GeneratedAt { get; init; }
 }
