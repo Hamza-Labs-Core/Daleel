@@ -32,9 +32,12 @@
             <NotAuthorized>
                 @if (_providers.Count == 0)
                 {
-                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-                        No login providers are configured. Add client ids/secrets under
-                        <code>Authentication</code> in configuration to enable sign-up.
+                    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="text-center">
+                        <MudText Typo="Typo.subtitle2">Sign-up is coming soon</MudText>
+                        <MudText Typo="Typo.body2" Class="mt-1">
+                            إنشاء الحساب قريباً — We're putting the finishing touches on secure sign-in.
+                            Check back shortly to create your free account.
+                        </MudText>
                     </MudAlert>
                 }
                 else

@@ -1,5 +1,7 @@
-@* OpenRouter model picker with a short note per model. *@
+@* OpenRouter model picker with a short note per model. ToStringFunc maps the model id (e.g.
+   "anthropic/claude-sonnet-4") to its friendly label so the closed select shows "Claude Sonnet 4". *@
 <MudSelect T="string" Value="Value" ValueChanged="OnChanged" Label="@Label"
+           ToStringFunc="@(id => Catalog.Models.FirstOrDefault(m => m.Id == id)?.Label ?? id)"
            Dense="true" Variant="Variant.Outlined" Adornment="Adornment.Start"
            AdornmentIcon="@Icons.Material.Filled.Memory" AnchorOrigin="Origin.BottomCenter">
     @foreach (var model in Catalog.Models)

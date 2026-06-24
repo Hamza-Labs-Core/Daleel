@@ -56,9 +56,9 @@
                 <MudText Typo="Typo.h6">التفضيلات · Preferences</MudText>
             </div>
 
-            <GeoSelect Value="_geo" ValueChanged="OnGeoChanged" Label="Default market · السوق الافتراضي" />
+            <GeoSelect Value="@_geo" ValueChanged="OnGeoChanged" Label="Default market · السوق الافتراضي" />
             <div class="mt-3">
-                <ModelSelect Value="_model" ValueChanged="OnModelChanged" Label="Default model · النموذج الافتراضي" />
+                <ModelSelect Value="@_model" ValueChanged="OnModelChanged" Label="Default model · النموذج الافتراضي" />
             </div>
 
             <MudDivider Class="my-4" />

@@ -1,79 +1,18 @@
 @page "/pricing"
-@using System.Text.Json
-@using Microsoft.EntityFrameworkCore
-@inject DaleelDbContext Db
+@inject IStringLocalizer<SharedResource> L
+
+@* Standalone pricing page. The tier cards are rendered by the shared <PricingTiers /> component —
+   the same one the anonymous landing page uses — so the two pages always show identical plans. *@
 
 <PageTitle>دليل · Pricing</PageTitle>
 
-<div class="text-center mb-6">
-    <MudText Typo="Typo.h3">الأسعار · Pricing</MudText>
-    <MudText Typo="Typo.body1" Color="Color.Secondary">Simple plans. Halal-filtered results on every tier.</MudText>
+<div class="text-center mb-8">
+    <MudText Typo="Typo.h3">@L["Landing.Pricing.Title"]</MudText>
+    <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">@L["Landing.Pricing.Subtitle"]</MudText>
 </div>
 
-@if (_plans is null)
-{
-    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-}
-else
-{
-    <MudGrid Spacing="4" Justify="Justify.Center">
-        @foreach (var p in _plans)
-        {
-            <MudItem xs="12" sm="6" md="4">
-                <MudPaper Class="pa-6" Outlined="true" Elevation="0" Style="height:100%;border-radius:18px;">
-                    <MudText Typo="Typo.h5">@p.Name</MudText>
-                    <div class="my-3">
-                        <MudText Typo="Typo.h3" Style="display:inline;">@(p.PriceMonthly == 0 ? "Free" : $"${p.PriceMonthly:0.##}")</MudText>
-                        @if (p.PriceMonthly > 0)
-                        {
-                            <MudText Typo="Typo.body2" Color="Color.Secondary" Style="display:inline;">/mo</MudText>
-                        }
-                    </div>
-                    <MudText Typo="Typo.subtitle2" Color="Color.Primary" Class="mb-2">
-                        @(p.IsUnlimited ? "Unlimited searches" : $"{p.SearchesPerMonth} searches / month")
-                    </MudText>
-                    <MudList T="string" Dense="true">
-                        @foreach (var feature in Features(p))
-                        {
-                            <MudListItem T="string" Icon="@Icons.Material.Filled.Check" IconColor="Color.Success">@feature</MudListItem>
-                        }
-                    </MudList>
-                    @if (p.PriceMonthly == 0)
-                    {
-                        <MudButton Href="/login" Variant="Variant.Outlined" Color="Color.Primary" FullWidth="true" Class="mt-3">Get started</MudButton>
-                    }
-                    else
-                    {
-                        <MudButton Href="@UpgradeMailto(p)"
-                                   Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-3">
-                            Upgrade — coming soon
-                        </MudButton>
-                    }
-                </MudPaper>
-            </MudItem>
-        }
-    </MudGrid>
-    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block text-center mt-4">
-        Paid plans are not yet billable — contact us to upgrade. Stripe integration is coming.
-    </MudText>
-}
+<PricingTiers />
 
-@code {
-    private List<SubscriptionPlan>? _plans;
-
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (!firstRender) return;
-        _plans = await Db.SubscriptionPlans.Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
-        StateHasChanged();
-    }
-
-    private static string UpgradeMailto(SubscriptionPlan p) =>
-        $"mailto:hello@daleel.app?subject=Upgrade to {Uri.EscapeDataString(p.Name)}";
-
-    private static IEnumerable<string> Features(SubscriptionPlan p)
-    {
-        try { return JsonSerializer.Deserialize<List<string>>(p.FeaturesJson) ?? new(); }
-        catch { return Array.Empty<string>(); }
-    }
-}
+<MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block text-center mt-6">
+    Paid plans are not yet billable — contact us to upgrade. Stripe integration is coming.
+</MudText>

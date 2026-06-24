@@ -34,7 +34,7 @@
         }
 
         var promptEnabled = (await Store.GetAsync("img.haramblur_prompt") ?? "1") != "0";
-        var dismissed = await Store.GetAsync("haramblur.dismissed") == "1";
+        var dismissed = await IsDismissedAsync();
         if (!promptEnabled || dismissed)
         {
             return;
@@ -61,6 +61,26 @@
     private async Task Dismiss()
     {
         _show = false;
+        // Persist the dismissal in a long-lived cookie so the banner stays hidden across reloads and
+        // browser restarts. (localStorage is also written for backward compatibility with old visits.)
+        await JS.InvokeVoidAsync("daleel.setCookie", "haramblur.dismissed", "1", 365);
         await Store.SetAsync("haramblur.dismissed", "1");
+    }
+
+    private async Task<bool> IsDismissedAsync()
+    {
+        try
+        {
+            if (await JS.InvokeAsync<string>("daleel.getCookie", "haramblur.dismissed") == "1")
+            {
+                return true;
+            }
+        }
+        catch
+        {
+            // ignore — fall back to localStorage
+        }
+
+        return await Store.GetAsync("haramblur.dismissed") == "1";
     }
 }

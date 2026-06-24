@@ -40,6 +40,28 @@ window.daleel = {
         }
     },
 
+    // Writes a cookie that survives reloads and browser restarts (default ~1 year). Used to
+    // persist UI dismissals (e.g. the HaramBlur banner) so they don't reappear on every visit.
+    setCookie: function (name, value, days) {
+        try {
+            const maxAge = (days || 365) * 24 * 60 * 60;
+            document.cookie = name + '=' + encodeURIComponent(value) +
+                ';path=/;max-age=' + maxAge + ';samesite=lax';
+        } catch (e) {
+            /* ignore */
+        }
+    },
+
+    // Reads a cookie value by name, or returns an empty string if it is absent.
+    getCookie: function (name) {
+        try {
+            const match = document.cookie.match('(?:^|; )' + name + '=([^;]*)');
+            return match ? decodeURIComponent(match[1]) : '';
+        } catch (e) {
+            return '';
+        }
+    },
+
     // Triggers a client-side file download of the given text (used to export saved results).
     download: function (filename, text, mime) {
         const blob = new Blob([text], { type: mime || 'application/json' });

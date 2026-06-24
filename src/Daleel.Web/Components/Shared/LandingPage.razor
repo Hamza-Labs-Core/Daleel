@@ -63,50 +63,7 @@
         <MudText Typo="Typo.body1" Color="Color.Secondary" Class="mt-2">@L["Landing.Pricing.Subtitle"]</MudText>
     </div>
 
-    <MudGrid Spacing="4" Justify="Justify.Center">
-        @foreach (var t in _tiers)
-        {
-            <MudItem xs="12" sm="6" md="4">
-                <MudPaper Outlined="true" Elevation="@(t.Popular ? 8 : 0)"
-                          Class="@($"daleel-price-card pa-6 {(t.Popular ? "daleel-price-popular" : "")}")">
-                    @if (t.Popular)
-                    {
-                        <div class="daleel-price-ribbon">@L["Landing.Pricing.Popular"]</div>
-                    }
-                    <MudText Typo="Typo.h5">@t.Name</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">@t.Tag</MudText>
-
-                    <div class="my-4 d-flex align-baseline">
-                        @if (t.Free)
-                        {
-                            <MudText Typo="Typo.h3" Style="display:inline;">@L["Landing.Pricing.Free"]</MudText>
-                        }
-                        else
-                        {
-                            <MudText Typo="Typo.h3" Style="display:inline;">@($"${t.Price}")</MudText>
-                            <MudText Typo="Typo.body1" Color="Color.Secondary" Class="ms-1" Style="display:inline;">
-                                @L["Landing.Pricing.PerMonth"]
-                            </MudText>
-                        }
-                    </div>
-
-                    <MudList T="string" Dense="true" Class="mb-2">
-                        @foreach (var feature in t.Features)
-                        {
-                            <MudListItem T="string" Icon="@Icons.Material.Filled.CheckCircle" IconColor="Color.Success">
-                                <MudText Typo="Typo.body2">@feature</MudText>
-                            </MudListItem>
-                        }
-                    </MudList>
-
-                    <MudButton Href="/register" FullWidth="true" Size="Size.Large" Class="mt-2"
-                               Variant="@(t.Popular ? Variant.Filled : Variant.Outlined)" Color="Color.Primary">
-                        @L["Landing.Pricing.Cta"]
-                    </MudButton>
-                </MudPaper>
-            </MudItem>
-        }
-    </MudGrid>
+    <PricingTiers />
 </section>
 
 <!-- ╔════════════════════════ CTA BAND ══════════════════════════╗ -->
@@ -126,7 +83,6 @@
 
 @code {
     private sealed record Feature(string Icon, string Title, string Desc, string Tint, string TintRgb);
-    private sealed record Tier(string Name, string Tag, string Price, bool Free, bool Popular, string[] Features);
 
     // CSS palette vars + their *-rgb companions (MudBlazor emits both) let the icon use a solid colour
     // over a soft 12%-alpha wash of the same hue.
@@ -138,15 +94,5 @@
         new Feature(Icons.Material.Filled.LocalOffer,    L["Landing.Feature.Deals.Title"],      L["Landing.Feature.Deals.Desc"],      "var(--mud-palette-warning)",   "--mud-palette-warning-rgb"),
         new Feature(Icons.Material.Filled.Shield,        L["Landing.Feature.Halal.Title"],      L["Landing.Feature.Halal.Desc"],      "var(--mud-palette-success)",   "--mud-palette-success-rgb"),
         new Feature(Icons.Material.Filled.Translate,     L["Landing.Feature.Bilingual.Title"],  L["Landing.Feature.Bilingual.Desc"],  "var(--mud-palette-primary)",   "--mud-palette-primary-rgb"),
-    };
-
-    private Tier[] _tiers => new[]
-    {
-        new Tier(L["Plan.Basic"], L["Landing.Plan.Basic.Tag"], "0", Free: true, Popular: false,
-            new[] { L["Landing.Plan.Basic.F1"].Value, L["Landing.Plan.Basic.F2"].Value, L["Landing.Plan.Basic.F3"].Value }),
-        new Tier(L["Plan.Pro"], L["Landing.Plan.Pro.Tag"], "9.99", Free: false, Popular: true,
-            new[] { L["Landing.Plan.Pro.F1"].Value, L["Landing.Plan.Pro.F2"].Value, L["Landing.Plan.Pro.F3"].Value, L["Landing.Plan.Pro.F4"].Value }),
-        new Tier(L["Plan.Unlimited"], L["Landing.Plan.Unlimited.Tag"], "100", Free: false, Popular: false,
-            new[] { L["Landing.Plan.Unlimited.F1"].Value, L["Landing.Plan.Unlimited.F2"].Value, L["Landing.Plan.Unlimited.F3"].Value, L["Landing.Plan.Unlimited.F4"].Value }),
     };
 }

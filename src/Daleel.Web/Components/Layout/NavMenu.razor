@@ -1,13 +1,7 @@
-@* Primary navigation. Labels are localized (English / Arabic) via the shared resource catalogue. *@
+@* Primary navigation. Labels are localized (English / Arabic) via the shared resource catalogue.
+   The brand wordmark lives in the top app bar (MainLayout); repeating it here was redundant, so the
+   drawer starts straight at the navigation links. *@
 @inject IStringLocalizer<SharedResource> L
-<div class="pa-4 d-flex align-center">
-    <MudIcon Icon="@Icons.Material.Filled.TravelExplore" Color="Color.Primary" Class="mr-2" />
-    <div>
-        <MudText Typo="Typo.subtitle1" Class="daleel-wordmark" Style="line-height:1.1;">دليل</MudText>
-        <MudText Typo="Typo.caption" Color="Color.Secondary">market intelligence</MudText>
-    </div>
-</div>
-<MudDivider />
 
 @* Search-related destinations are gated behind sign-in: anonymous visitors only have the landing
    home, pricing and settings, so the drawer stays uncluttered for them. *@
@@ -23,7 +17,9 @@
             <MudNavLink Href="/monitor" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Radar">@L["Nav.Monitor"]</MudNavLink>
             <MudDivider Class="my-2" />
             <MudNavLink Href="/history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.History">@L["Nav.History"]</MudNavLink>
-            <MudNavLink Href="/saved" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Bookmarks">@L["Nav.Saved"]</MudNavLink>
+            <MudTooltip Text="Your bookmarked reports — saved searches you can revisit anytime" Placement="Placement.End">
+                <MudNavLink Href="/saved" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Bookmarks">@L["Nav.Saved"]</MudNavLink>
+            </MudTooltip>
         </Authorized>
     </AuthorizeView>
 
