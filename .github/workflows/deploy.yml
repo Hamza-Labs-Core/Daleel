@@ -87,6 +87,26 @@ jobs:
     # environment in repo Settings -> Environments.
     environment: production
     steps:
+      # Fail fast if any required secret is missing/empty. Without this, a blank
+      # secret silently produces a broken /opt/daleel/.env (e.g. no LLM key) and
+      # the failure only surfaces deep in the health-check — or worse, at runtime.
+      - name: Validate required secrets
+        run: |
+          missing=""
+          [ -z "${{ secrets.OPENROUTER_API_KEY }}" ]   && missing="$missing OPENROUTER_API_KEY"
+          [ -z "${{ secrets.SERPAPI_KEY }}" ]          && missing="$missing SERPAPI_KEY"
+          [ -z "${{ secrets.CONTEXT_DEV_API_KEY }}" ]  && missing="$missing CONTEXT_DEV_API_KEY"
+          [ -z "${{ secrets.GOOGLE_PLACES_API_KEY }}" ] && missing="$missing GOOGLE_PLACES_API_KEY"
+          [ -z "${{ secrets.APIFY_TOKEN }}" ]          && missing="$missing APIFY_TOKEN"
+          [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ]        && missing="$missing DEPLOY_SSH_KEY"
+          [ -z "${{ secrets.DEPLOY_SSH_HOST }}" ]       && missing="$missing DEPLOY_SSH_HOST"
+          [ -z "${{ secrets.DEPLOY_SSH_USER }}" ]       && missing="$missing DEPLOY_SSH_USER"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secrets:$missing"
+            exit 1
+          fi
+          echo "All required secrets are present."
+
       - uses: actions/checkout@v4   # need deploy/ config files to sync to the box
 
       - name: Resolve image tag
