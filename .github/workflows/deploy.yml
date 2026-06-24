@@ -87,25 +87,42 @@ jobs:
     # environment in repo Settings -> Environments.
     environment: production
     steps:
-      # Fail fast if any required secret is missing/empty. Without this, a blank
-      # secret silently produces a broken /opt/daleel/.env (e.g. no LLM key) and
-      # the failure only surfaces deep in the health-check — or worse, at runtime.
+      # Fail fast (before any box mutation) if a required secret is missing,
+      # empty, or still the create-secrets.sh "CHANGE_ME" placeholder. Without
+      # this, a blank secret silently produces a broken /opt/daleel/.env (e.g. no
+      # LLM key) and the failure only surfaces deep in the health-check — or worse,
+      # at runtime. Secrets are mapped to env vars rather than interpolated into
+      # the script body, so multi-line values (the SSH private key!) and any shell
+      # metacharacters are handled safely and can't break the test or leak.
       - name: Validate required secrets
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}   # critical — LLM backend
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          # Host secret is named DEPLOY_SSH_HOST in the repo (the "VPS IP").
+          DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
+          set -euo pipefail
+          required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
           missing=""
-          [ -z "${{ secrets.OPENROUTER_API_KEY }}" ]   && missing="$missing OPENROUTER_API_KEY"
-          [ -z "${{ secrets.SERPAPI_KEY }}" ]          && missing="$missing SERPAPI_KEY"
-          [ -z "${{ secrets.CONTEXT_DEV_API_KEY }}" ]  && missing="$missing CONTEXT_DEV_API_KEY"
-          [ -z "${{ secrets.GOOGLE_PLACES_API_KEY }}" ] && missing="$missing GOOGLE_PLACES_API_KEY"
-          [ -z "${{ secrets.APIFY_TOKEN }}" ]          && missing="$missing APIFY_TOKEN"
-          [ -z "${{ secrets.DEPLOY_SSH_KEY }}" ]        && missing="$missing DEPLOY_SSH_KEY"
-          [ -z "${{ secrets.DEPLOY_SSH_HOST }}" ]       && missing="$missing DEPLOY_SSH_HOST"
-          [ -z "${{ secrets.DEPLOY_SSH_USER }}" ]       && missing="$missing DEPLOY_SSH_USER"
+          for var in $required; do
+            val="${!var:-}"
+            if [ -z "$val" ] || [ "$val" = "CHANGE_ME" ]; then
+              missing="$missing $var"
+            fi
+          done
           if [ -n "$missing" ]; then
-            echo "::error::Missing required secrets:$missing"
+            echo "::error::Deploy aborted — required secrets unset/empty/placeholder:$missing"
+            echo "ERROR: the following required secrets are missing, empty, or still the CHANGE_ME placeholder:" >&2
+            for m in $missing; do echo "  - $m" >&2; done
+            echo "Set each with: gh secret set <NAME> --body '<real-value>' --repo Hamza-Labs-Core/Daleel" >&2
             exit 1
           fi
-          echo "All required secrets are present."
+          echo "All required secrets are present and non-placeholder."
 
       - uses: actions/checkout@v4   # need deploy/ config files to sync to the box
 
