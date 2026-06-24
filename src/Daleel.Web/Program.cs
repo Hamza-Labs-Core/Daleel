@@ -51,8 +51,9 @@ var connection = builder.Configuration.GetConnectionString("DefaultConnection")
 builder.Services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(connection));
 
 // ── Identity (cookie auth, email + password) ──────────────────────────────────
-// Standard Identity cookie schemes. Sign-in/registration happen on the static-SSR /login and
-// /register pages, which run in a real HTTP request and can therefore set the auth cookie.
+// Standard Identity cookie schemes. The cookie is written by the raw /auth/login and /auth/register
+// POST endpoints (see AuthEndpoints) — a real HTTP request, never a streaming Blazor circuit, so the
+// Set-Cookie header write always succeeds.
 builder.Services.AddAuthentication(IdentityConstants.ApplicationScheme)
     .AddIdentityCookies();
 

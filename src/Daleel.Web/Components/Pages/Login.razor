@@ -1,21 +1,10 @@
 @page "/login"
-@* Belt-and-suspenders: pin this page to non-streaming static SSR. If anything ever flips the render
-   mode to streaming/interactive, the response would flush its headers before the form handler runs and
-   SignInManager.PasswordSignInAsync would throw "Headers are read-only, response has already started"
-   when it tries to write the auth cookie. (false) is the static-SSR default, made explicit here. *@
-@attribute [StreamRendering(false)]
-@using System.ComponentModel.DataAnnotations
-@using Daleel.Web.Data
-@using Microsoft.AspNetCore.Identity
-@inject SignInManager<ApplicationUser> SignInManager
-@inject UserManager<ApplicationUser> UserManager
-@inject IAnalyticsService Analytics
-@inject NavigationManager Nav
-
-@* Static SSR (App.razor renders /login without a render mode) so the EditForm below posts back to
-   this page in a real HTTP request — that's the only context where SignInManager can write the auth
-   cookie. Uses the themed MainLayout like the rest of the site; the text inputs are framework
-   <InputText> (MudBlazor fields don't round-trip in static form posts) styled to the dark theme. *@
+@attribute [StaticSsrPage]
+@layout Daleel.Web.Components.Layout.AuthLayout
+@* Static SSR (flagged [StaticSsrPage]; App.razor renders it without a render mode) so the plain HTML
+   form below makes a real HTTP POST to /auth/login. That endpoint — not this page, not the circuit —
+   calls SignInManager and writes the auth cookie, which is the only context where the Set-Cookie header
+   write is safe. Rendering static also guarantees <AntiforgeryToken /> emits a valid token. *@
 
 <PageTitle>دليل · Sign in</PageTitle>
 
@@ -39,23 +28,22 @@
                 </MudButton>
             </Authorized>
             <NotAuthorized>
-                @if (_error is not null)
+                @if (ErrorMessage is not null)
                 {
-                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@_error</MudAlert>
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@ErrorMessage</MudAlert>
                 }
 
-                <EditForm Model="Input" method="post" OnValidSubmit="LoginUser" FormName="login" Context="editContext">
-                    <DataAnnotationsValidator />
+                <form method="post" action="/auth/login">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="returnUrl" value="@ReturnUrl" />
 
                     <label class="daleel-field-label" for="login-email">Email</label>
-                    <InputText id="login-email" class="daleel-field" type="email" autocomplete="username"
-                               @bind-Value="Input.Email" placeholder="you@example.com" />
-                    <ValidationMessage For="() => Input.Email" />
+                    <input id="login-email" name="email" class="daleel-field" type="email" required
+                           autocomplete="username" placeholder="you@example.com" />
 
                     <label class="daleel-field-label" for="login-password">Password</label>
-                    <InputText id="login-password" class="daleel-field" type="password" autocomplete="current-password"
-                               @bind-Value="Input.Password" placeholder="Your password" />
-                    <ValidationMessage For="() => Input.Password" />
+                    <input id="login-password" name="password" class="daleel-field" type="password" required
+                           autocomplete="current-password" placeholder="Your password" />
 
                     <div class="d-flex justify-end mt-2">
                         <MudLink Href="/forgot-password" Typo="Typo.body2">Forgot password?</MudLink>
@@ -65,7 +53,7 @@
                                Size="Size.Large" FullWidth="true" Class="mt-4">
                         Sign in
                     </MudButton>
-                </EditForm>
+                </form>
 
                 <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-4">
                     New to Daleel? <MudLink Href="/register">Create a free account</MudLink>
@@ -76,66 +64,16 @@
 </div>
 
 @code {
-    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
-
-    [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] private string? Error { get; set; }
 
-    private string? _error;
-
-    private async Task LoginUser()
+    // /auth/login redirects back here with ?error=<code> on failure; map the code to a message. Unknown
+    // email and wrong password both surface as the same "invalid" — never reveal which accounts exist.
+    private string? ErrorMessage => Error switch
     {
-        var user = await UserManager.FindByEmailAsync(Input.Email);
-
-        // Identical message whether the email is unknown or the password is wrong — never reveal which
-        // accounts exist.
-        if (user is null)
-        {
-            _error = "Invalid email or password.";
-            return;
-        }
-
-        if (user.IsDisabled)
-        {
-            _error = "This account has been disabled. Contact support if you think this is a mistake.";
-            return;
-        }
-
-        var result = await SignInManager.PasswordSignInAsync(
-            user.UserName!, Input.Password, isPersistent: true, lockoutOnFailure: false);
-
-        if (result.Succeeded)
-        {
-            user.LastActiveAt = DateTime.UtcNow;
-            await UserManager.UpdateAsync(user);
-            await Analytics.RecordLoginAsync(user.Id, "Password", HttpContext.Connection.RemoteIpAddress?.ToString());
-            // NavigateTo on a static page issues a 302 carrying the freshly-set auth cookie.
-            Nav.NavigateTo(Local(ReturnUrl), forceLoad: true);
-            return;
-        }
-
-        _error = result.IsLockedOut
-            ? "This account is locked out. Please try again later."
-            : "Invalid email or password.";
-    }
-
-    /// <summary>Coerces a return URL to a safe local path; rejects open-redirect forms.</summary>
-    private static string Local(string? returnUrl) =>
-        !string.IsNullOrWhiteSpace(returnUrl)
-        && returnUrl.StartsWith('/')
-        && !returnUrl.StartsWith("//", StringComparison.Ordinal)
-        && !returnUrl.StartsWith("/\\", StringComparison.Ordinal)
-            ? returnUrl
-            : "/";
-
-    private sealed class InputModel
-    {
-        [Required(ErrorMessage = "Email is required.")]
-        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
-        public string Email { get; set; } = string.Empty;
-
-        [Required(ErrorMessage = "Password is required.")]
-        [DataType(DataType.Password)]
-        public string Password { get; set; } = string.Empty;
-    }
+        "invalid" => "Invalid email or password.",
+        "disabled" => "This account has been disabled. Contact support if you think this is a mistake.",
+        "lockedout" => "This account is locked out. Please try again later.",
+        _ => null,
+    };
 }

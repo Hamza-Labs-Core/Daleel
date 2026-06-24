@@ -60,20 +60,31 @@
 
 @code {
     // App.razor is the only component guaranteed to render statically (it's the host document), so it
-    // can read the request here and pick a render mode per page. Everything is InteractiveServer — that
-    // is what makes the layout's drawer toggle, theme switch and menus live — except the auth pages
-    // (/login, /register, /logout), which must stay static SSR so their antiforgery form posts work and
-    // so SignInManager can write the auth cookie during the POST. They still use the themed MainLayout.
+    // picks a render mode per page here. Everything is InteractiveServer — that is what makes the
+    // layout's drawer toggle, theme switch and menus live — EXCEPT pages flagged [StaticSsrPage] (the
+    // auth pages /login, /register, /logout). Those render static so their <AntiforgeryToken /> form
+    // posts work; the posts target raw /auth/* endpoints (see AuthEndpoints) where the cookie write
+    // happens in a real HTTP request, never a streaming circuit.
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
 
     // The host document is static SSR, so the reconnection card (which lives outside the Blazor circuit)
     // can't be localized via IStringLocalizer at runtime — read the request culture directly instead.
     private static bool _rtl => System.Globalization.CultureInfo.CurrentUICulture.TextInfo.IsRightToLeft;
 
-    private static readonly string[] StaticAuthPaths = { "/login", "/register", "/logout" };
-
-    private IComponentRenderMode? PageRenderMode =>
-        StaticAuthPaths.Any(p => HttpContext.Request.Path.StartsWithSegments(p))
-            ? null
-            : InteractiveServer;
+    // Decide static-vs-interactive from the MATCHED PAGE COMPONENT TYPE, not the request path. Blazor's
+    // router resolves that type and stamps it onto the endpoint as ComponentTypeMetadata, so the signal
+    // survives a reverse proxy rewriting Request.Path — the failure mode that made the old path check
+    // wrongly render /login as InteractiveServer behind Caddy, streaming the response and crashing the
+    // cookie write with "Headers are read-only, response has already started".
+    private IComponentRenderMode? PageRenderMode
+    {
+        get
+        {
+            var pageType = HttpContext.GetEndpoint()?
+                .Metadata.GetMetadata<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>()?
+                .Type;
+            var isStatic = pageType?.IsDefined(typeof(StaticSsrPageAttribute), inherit: false) == true;
+            return isStatic ? null : InteractiveServer;
+        }
+    }
 }

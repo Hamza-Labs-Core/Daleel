@@ -1,19 +1,9 @@
 @page "/register"
-@* Belt-and-suspenders: pin this page to non-streaming static SSR so the form post stays in a real
-   HTTP request where SignInManager can write the auth cookie. See Login.razor for the failure mode
-   this guards against ("Headers are read-only, response has already started"). *@
-@attribute [StreamRendering(false)]
-@using System.ComponentModel.DataAnnotations
-@using Daleel.Web.Data
-@using Microsoft.AspNetCore.Identity
-@using Microsoft.EntityFrameworkCore
-@inject UserManager<ApplicationUser> UserManager
-@inject SignInManager<ApplicationUser> SignInManager
-@inject IAnalyticsService Analytics
-@inject NavigationManager Nav
-
-@* Static SSR (see App.razor) so this EditForm posts back in a real HTTP request, letting us create
-   the account and sign it in (cookie write) in one go. Themed with the standard MainLayout. *@
+@attribute [StaticSsrPage]
+@layout Daleel.Web.Components.Layout.AuthLayout
+@* Static SSR (flagged [StaticSsrPage]) so this plain HTML form makes a real HTTP POST to /auth/register,
+   where the account is created and signed in (cookie write) in one raw request. See Login.razor for the
+   failure mode this avoids ("Headers are read-only, response has already started"). *@
 
 <PageTitle>دليل · Create account</PageTitle>
 
@@ -37,28 +27,26 @@
                 </MudButton>
             </Authorized>
             <NotAuthorized>
-                @if (_error is not null)
+                @if (ErrorMessage is not null)
                 {
-                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@_error</MudAlert>
+                    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@ErrorMessage</MudAlert>
                 }
 
-                <EditForm Model="Input" method="post" OnValidSubmit="RegisterUser" FormName="register" Context="editContext">
-                    <DataAnnotationsValidator />
+                <form method="post" action="/auth/register">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="returnUrl" value="@ReturnUrl" />
 
                     <label class="daleel-field-label" for="reg-email">Email</label>
-                    <InputText id="reg-email" class="daleel-field" type="email" autocomplete="username"
-                               @bind-Value="Input.Email" placeholder="you@example.com" />
-                    <ValidationMessage For="() => Input.Email" />
+                    <input id="reg-email" name="email" class="daleel-field" type="email" required
+                           autocomplete="username" placeholder="you@example.com" />
 
                     <label class="daleel-field-label" for="reg-password">Password</label>
-                    <InputText id="reg-password" class="daleel-field" type="password" autocomplete="new-password"
-                               @bind-Value="Input.Password" placeholder="At least 8 characters" />
-                    <ValidationMessage For="() => Input.Password" />
+                    <input id="reg-password" name="password" class="daleel-field" type="password" required
+                           autocomplete="new-password" placeholder="At least 8 characters" />
 
                     <label class="daleel-field-label" for="reg-confirm">Confirm password</label>
-                    <InputText id="reg-confirm" class="daleel-field" type="password" autocomplete="new-password"
-                               @bind-Value="Input.ConfirmPassword" placeholder="Re-enter your password" />
-                    <ValidationMessage For="() => Input.ConfirmPassword" />
+                    <input id="reg-confirm" name="confirmPassword" class="daleel-field" type="password" required
+                           autocomplete="new-password" placeholder="Re-enter your password" />
 
                     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-2">
                         Use at least 8 characters with upper- and lower-case letters and a number.
@@ -68,7 +56,7 @@
                                Size="Size.Large" FullWidth="true" Class="mt-4">
                         Create account
                     </MudButton>
-                </EditForm>
+                </form>
 
                 <MudText Typo="Typo.caption" Color="Color.Secondary" Align="Align.Center" Class="d-block mt-3">
                     Your search history is private to your account. Searches are also analyzed
@@ -85,66 +73,17 @@
 </div>
 
 @code {
-    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
-
-    [SupplyParameterFromForm] private InputModel Input { get; set; } = new();
     [SupplyParameterFromQuery] private string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] private string? Error { get; set; }
 
-    private string? _error;
-
-    private async Task RegisterUser()
+    // /auth/register redirects back here with ?error=<code> on failure; map the code to a message.
+    private string? ErrorMessage => Error switch
     {
-        // The very first account to register owns the instance — promote it to admin. Checked before
-        // creation so a race can't mint two admins; AnyAsync short-circuits on the first row.
-        var isFirstUser = !await UserManager.Users.AsNoTracking().AnyAsync();
-
-        var user = new ApplicationUser
-        {
-            UserName = Input.Email,
-            Email = Input.Email,
-            EmailConfirmed = true,
-            DisplayName = Input.Email.Split('@')[0],
-            CreatedAt = DateTime.UtcNow,
-            LastActiveAt = DateTime.UtcNow,
-            IsAdmin = isFirstUser,
-        };
-
-        var result = await UserManager.CreateAsync(user, Input.Password);
-        if (!result.Succeeded)
-        {
-            // Surface Identity's own messages (duplicate email, weak password, …).
-            _error = string.Join(" ", result.Errors.Select(e => e.Description));
-            return;
-        }
-
-        await SignInManager.SignInAsync(user, isPersistent: true);
-        await Analytics.RecordLoginAsync(user.Id, "Password", HttpContext.Connection.RemoteIpAddress?.ToString());
-        Nav.NavigateTo(Local(ReturnUrl), forceLoad: true);
-    }
-
-    /// <summary>Coerces a return URL to a safe local path; rejects open-redirect forms.</summary>
-    private static string Local(string? returnUrl) =>
-        !string.IsNullOrWhiteSpace(returnUrl)
-        && returnUrl.StartsWith('/')
-        && !returnUrl.StartsWith("//", StringComparison.Ordinal)
-        && !returnUrl.StartsWith("/\\", StringComparison.Ordinal)
-            ? returnUrl
-            : "/";
-
-    private sealed class InputModel
-    {
-        [Required(ErrorMessage = "Email is required.")]
-        [EmailAddress(ErrorMessage = "Enter a valid email address.")]
-        public string Email { get; set; } = string.Empty;
-
-        [Required(ErrorMessage = "Password is required.")]
-        [StringLength(100, MinimumLength = 8, ErrorMessage = "Password must be at least 8 characters.")]
-        [DataType(DataType.Password)]
-        public string Password { get; set; } = string.Empty;
-
-        [Required(ErrorMessage = "Please confirm your password.")]
-        [DataType(DataType.Password)]
-        [Compare(nameof(Password), ErrorMessage = "The passwords do not match.")]
-        public string ConfirmPassword { get; set; } = string.Empty;
-    }
+        "missing" => "Please enter both an email and a password.",
+        "mismatch" => "The passwords do not match.",
+        "duplicate" => "An account with that email already exists. Try signing in instead.",
+        "weakpassword" => "Password must be at least 8 characters with upper- and lower-case letters and a number.",
+        "failed" => "We couldn't create your account. Please check your details and try again.",
+        _ => null,
+    };
 }
