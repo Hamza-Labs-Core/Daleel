@@ -4,7 +4,10 @@ using Daleel.Web.Conversation;
 using Daleel.Web.Data;
 using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -50,6 +53,21 @@ var connection = builder.Configuration.GetConnectionString("DefaultConnection")
                  ?? "Data Source=data/daleel.db";
 builder.Services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(connection));
 
+// ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
+// ASP.NET encrypts the Identity auth cookie with Data Protection keys. By default those keys live in
+// $HOME/.aspnet/DataProtection-Keys, but the container runs as a --no-create-home user (see Dockerfile),
+// so there is no $HOME and the key ring falls back to IN-MEMORY storage. New keys are then minted on every
+// container start, which makes every previously-issued cookie undecryptable — i.e. every user is silently
+// signed out on each redeploy/restart. Persisting the keys to the data/ directory fixes this: that path
+// maps to the `daleel_data` named volume (owned by the app user) and survives redeploys, just like the
+// SQLite DB next to it. Path is configurable; defaults alongside the DB so container + local both work.
+//   SetApplicationName pins the key-ring purpose string so the keys stay valid across app revisions.
+var keysDirectory = builder.Configuration.GetValue<string>("DataProtection:KeysDirectory") ?? "data/keys";
+Directory.CreateDirectory(keysDirectory);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(keysDirectory))
+    .SetApplicationName("Daleel");
+
 // ── Identity (cookie auth, email + password) ──────────────────────────────────
 // Standard Identity cookie schemes. The cookie is written by the raw /auth/login and /auth/register
 // POST endpoints (see AuthEndpoints) — a real HTTP request, never a streaming Blazor circuit, so the
@@ -63,6 +81,17 @@ builder.Services.ConfigureApplicationCookie(o =>
 {
     o.LoginPath = "/login";
     o.AccessDeniedPath = "/login";
+
+    // Explicit cookie settings for life behind the Caddy reverse proxy.
+    o.Cookie.Name = "Daleel.Auth";
+    o.Cookie.HttpOnly = true;                            // never exposed to JS
+    o.Cookie.SameSite = SameSiteMode.Lax;               // sent on top-level nav (the login 302) — same-site app, so Lax is enough; None is unnecessary and would force Secure everywhere
+    // SameAsRequest, NOT Always: behind Caddy the forwarded scheme is https so the cookie is marked Secure
+    // in production, but plain-http local dev still works (Always would make the browser drop it over http).
+    o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    o.ExpireTimeSpan = TimeSpan.FromDays(30);            // long-lived; paired with isPersistent:true at sign-in
+    o.SlidingExpiration = true;                          // active users don't get logged out at the 30-day mark
+
     o.Events.OnRedirectToLogin = ctx => ApiAwareRedirect(ctx, StatusCodes.Status401Unauthorized);
     o.Events.OnRedirectToAccessDenied = ctx => ApiAwareRedirect(ctx, StatusCodes.Status403Forbidden);
 });

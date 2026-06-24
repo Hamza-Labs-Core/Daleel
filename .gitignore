@@ -40,3 +40,6 @@ Thumbs.db
 daleel.db
 *.db-shm
 *.db-wal
+
+# Data Protection key ring (auth-cookie encryption keys) — never commit
+data/keys/
