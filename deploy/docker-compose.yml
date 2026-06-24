@@ -14,6 +14,8 @@ services:
       ASPNETCORE_ENVIRONMENT: Production
     expose:
       - "8080"
+    volumes:
+      - daleel_data:/app/data   # persisted SQLite database — survives redeploys
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 30s
@@ -58,5 +60,6 @@ networks:
     driver: bridge
 
 volumes:
+  daleel_data:
   caddy_data:
   caddy_config:

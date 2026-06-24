@@ -50,6 +50,13 @@ RUN groupadd --system --gid 1001 daleel \
 
 COPY --from=build --chown=daleel:daleel /app/publish ./
 
+# Pre-create the SQLite data directory owned by the app user. WORKDIR creates
+# /app as root, and COPY --chown only affects copied files — not the dir itself —
+# so the non-root user can't create subdirs under /app at runtime. Creating
+# /app/data here also seeds the named volume mounted at this path with the right
+# ownership on first init, so the DB survives redeploys.
+RUN mkdir -p /app/data && chown daleel:daleel /app/data
+
 ENV ASPNETCORE_URLS=http://+:8080 \
     ASPNETCORE_ENVIRONMENT=Production \
     DOTNET_RUNNING_IN_CONTAINER=true
