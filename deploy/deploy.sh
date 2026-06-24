@@ -62,6 +62,15 @@ docker pull "$NEW_IMAGE"
 
 if compose up -d --wait --remove-orphans && health_check; then
   log "Deploy succeeded: $NEW_IMAGE is live and healthy."
+  # A bind-mounted Caddyfile change isn't picked up by `compose up` (compose only
+  # recreates containers when their definition changes, not when a mounted file's
+  # contents do). Trigger a graceful, zero-downtime reload so any synced Caddyfile
+  # edit takes effect. No-op/harmless if the config is unchanged.
+  if compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null 2>&1; then
+    log "Caddy reloaded with the current Caddyfile."
+  else
+    warn "Caddy reload skipped (caddy not running yet, or config unchanged)."
+  fi
   # Reclaim disk from old image layers (keep it tidy on a small CX23).
   docker image prune -f >/dev/null 2>&1 || true
   exit 0

@@ -87,6 +87,8 @@ jobs:
     # environment in repo Settings -> Environments.
     environment: production
     steps:
+      - uses: actions/checkout@v4   # need deploy/ config files to sync to the box
+
       - name: Resolve image tag
         id: tag
         env:
@@ -134,7 +136,22 @@ jobs:
             sudo install -o daleel -g daleel -m 0600 "/tmp/daleel.env.$$" /opt/daleel/.env
             rm -f "/tmp/daleel.env.$$"
 
-      - name: Deploy over SSH (pull, restart, health-check, rollback)
+      # Ship the latest infra config (Caddyfile / compose / deploy.sh) to the box.
+      # The deploy pipeline pulls a new IMAGE, but these are bind-mounted files
+      # placed by setup.sh — without this sync, repo changes to them (e.g. the
+      # Caddyfile) would never reach production without a manual setup.sh re-run.
+      # scp lands them in /tmp; the next step installs them with daleel ownership.
+      - name: Stage deploy config on the VPS
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "deploy/Caddyfile,deploy/docker-compose.yml,deploy/deploy.sh"
+          target: "/tmp/daleel-config"
+          strip_components: 1   # drop the leading deploy/ so files land flat
+
+      - name: Deploy over SSH (install config, pull, restart, health-check, rollback)
         uses: appleboy/ssh-action@v1
         env:
           DALEEL_TAG: ${{ steps.tag.outputs.tag }}
@@ -145,5 +162,11 @@ jobs:
           envs: DALEEL_TAG
           script: |
             set -euo pipefail
+            # Install the freshly-staged config with the daleel service user's
+            # ownership (deploy.sh and the compose stack run as that user).
+            sudo install -o daleel -g daleel -m 0644 /tmp/daleel-config/Caddyfile          /opt/daleel/Caddyfile
+            sudo install -o daleel -g daleel -m 0644 /tmp/daleel-config/docker-compose.yml  /opt/daleel/docker-compose.yml
+            sudo install -o daleel -g daleel -m 0755 /tmp/daleel-config/deploy.sh           /opt/daleel/deploy.sh
+            rm -rf /tmp/daleel-config
             cd /opt/daleel
             sudo -u daleel DALEEL_TAG="$DALEEL_TAG" ./deploy.sh "$DALEEL_TAG"
