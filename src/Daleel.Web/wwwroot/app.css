@@ -175,8 +175,28 @@ html, body {
     max-width: 48ch;
 }
 
+/* Sticky footer: make the layout a full-height flex column so the footer is
+   pushed to the bottom of the viewport even when the page content is short.
+   The footer lives inside .mud-main-content (see MainLayout.razor), so that
+   element — not .mud-layout — must be the flex column, and the content
+   container (.daleel-content) grows to fill the leftover space. */
+.mud-layout {
+    min-height: 100vh;
+}
+
+.mud-main-content {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+.daleel-content {
+    flex: 1 0 auto;
+}
+
 /* App footer */
 .daleel-footer {
+    flex-shrink: 0;
     border-top: 1px solid var(--mud-palette-divider, rgba(0, 0, 0, 0.12));
     margin-top: 24px;
 }
