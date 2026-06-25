@@ -59,6 +59,25 @@
             <MudIcon Icon="@Icons.Material.Filled.Storefront" Size="Size.Small" />
             @Model.SellerCount @(Model.SellerCount == 1 ? L["ModelCard.Seller"] : L["Products.Sellers"])
         </MudText>
+
+        @if (!string.IsNullOrWhiteSpace(Model.ReviewSummary))
+        {
+            <MudText Typo="Typo.caption" Class="mt-2 d-block" Style="font-style:italic;"
+                     dir="@Catalog.Dir(Model.ReviewSummary!)">“@Model.ReviewSummary”</MudText>
+        }
+
+        @if (Model.Pros.Count > 0)
+        {
+            <MudList T="string" Dense="true" Class="mt-1 pa-0">
+                @foreach (var pro in Model.Pros.Take(2))
+                {
+                    <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbUp" IconColor="Color.Success"
+                                 Class="pa-0">
+                        <MudText Typo="Typo.caption" dir="@Catalog.Dir(pro)">@pro</MudText>
+                    </MudListItem>
+                }
+            </MudList>
+        }
     </MudCardContent>
 
     <MudCardActions>

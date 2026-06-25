@@ -17,11 +17,29 @@
                         }
                         <MudText Typo="Typo.h6">@b.Name</MudText>
                     </div>
-                    @if (b.ListingCount > 0)
+                    <div class="d-flex align-center gap-2 mt-1" style="flex-wrap:wrap;">
+                        @if (b.ListingCount > 0)
+                        {
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @b.ListingCount @(b.ListingCount == 1 ? "model" : "models") in this market
+                            </MudText>
+                        }
+                        @if (b.PriceRange is { } range)
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary"
+                                     Icon="@Icons.Material.Filled.Sell">@range</MudChip>
+                        }
+                    </div>
+
+                    @if (b.Models.Count > 0)
                     {
-                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
-                            @b.ListingCount @(b.ListingCount == 1 ? "model" : "models") in this market
-                        </MudText>
+                        <div class="d-flex align-center gap-1 mt-1" style="flex-wrap:wrap;">
+                            @foreach (var model in b.Models)
+                            {
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
+                                         Class="ma-0" dir="@Catalog.Dir(model)">@model</MudChip>
+                            }
+                        </div>
                     }
 
                     @if (b.Reputation is { HasSignal: true })

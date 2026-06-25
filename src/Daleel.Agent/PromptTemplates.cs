@@ -129,11 +129,21 @@ public static class PromptTemplates
         sb.AppendLine(MarketContext(geo));
         sb.Append("The user wants to BUY \"").Append(category).Append("\" in ").Append(geo.Country)
           .AppendLine(" — they need actual, purchasable listings with prices and links, not just advice.");
+        // Short, abbreviated or ambiguous queries (e.g. "AC", "TV", "مكيف") return junk if searched
+        // literally — expand them to the full product category, in both languages, before querying.
+        sb.AppendLine("FIRST, if the query is an abbreviation, very short, or ambiguous, expand it to the full " +
+            "product category in BOTH the market language and English before building queries " +
+            "(e.g. \"AC\" → \"air conditioner\" / \"مكيف هواء\" / \"مكيف سبليت\"; \"TV\" → \"television\" / \"تلفزيون\"). " +
+            "Use the expanded terms — never search the bare abbreviation alone.");
+        sb.AppendLine("Aim for BREADTH: cover as MANY brands as compete in this market and MULTIPLE models per brand " +
+            "— generate enough queries (include brand-named and 'best <category> brands' queries) that the results " +
+            "span the budget, mid-range and premium ends, not just the top one or two names.");
         sb.AppendLine("Design the search to surface CONCRETE LISTINGS from whatever local sites rank in this market:");
         sb.AppendLine("- shoppingQueries: price/marketplace-style queries in both the market language and English " +
-            "(e.g. the category + 'للبيع' / 'price').");
+            "(e.g. the category + 'للبيع' / 'price' / 'سعر'), including a few brand-specific ones.");
         sb.AppendLine("- webQueries: a mix of local classifieds/marketplace pages, brand catalog pages, store " +
-            "sections, and one or two buying-guide/review queries.");
+            "sections, and SEVERAL buying-guide / 'best <category>' / review / comparison queries (these become the " +
+            "'related articles' the user reads).");
         sb.AppendLine("- placesQueries: physical stores selling it near the main city, in both languages.");
         sb.AppendLine("- socialQueries / webQueries: also surface REAL user experiences — include social- and " +
             "forum-scoped queries and opinion phrasing (e.g. 'site:facebook.com', 'تجربتي مع', 'رأي', 'مشاكل').");
@@ -295,6 +305,9 @@ public static class PromptTemplates
         sb.Append("Buy-intent query: ").AppendLine(query);
         sb.Append("Extract the concrete products a shopper in ").Append(geo.Country)
           .AppendLine(" could buy, drawn ONLY from the context below. Prefer local sellers; quote real prices and links.");
+        sb.AppendLine("Be COMPREHENSIVE: extract EVERY distinct model the context evidences — span MULTIPLE brands and " +
+            "MULTIPLE models per brand (budget through premium), not just the few most prominent. A model mentioned " +
+            "with a name but no price still counts: include it with an empty offers array so the shopper sees it exists.");
         sb.AppendLine("Gathered research context (search results, shopping hits, store data, social posts):");
         sb.AppendLine("----------------------------------------");
         sb.AppendLine(gatheredContext);
@@ -319,13 +332,17 @@ public static class PromptTemplates
                       "url": "direct link to this offer if present, else null",
                       "condition": "new|used|refurbished, else null"
                     }
-                  ]
+                  ],
+                  "pros": ["short strength drawn from reviews/specs in the context", "..."],
+                  "cons": ["short weakness drawn from reviews/specs in the context", "..."],
+                  "summary": "one-line verdict grounded in the context, else null"
                 }
               ]
             }
-            One entry per distinct model; gather all its sellers into offers. Only include products evidenced in
-            the context — never invent products, prices, models or links. Use an empty products array if the context
-            has no concrete products. Respond ONLY with valid JSON.
+            One entry per distinct model; gather ALL its sellers into offers, and always include the offer's direct
+            url when the context provides one. Fill pros/cons/summary ONLY from opinions or specs actually in the
+            context (empty arrays / null when there's nothing to say) — never invent products, prices, models, links,
+            or opinions. Use an empty products array if the context has no concrete products. Respond ONLY with valid JSON.
             """);
         return sb.ToString();
     }

@@ -168,6 +168,53 @@ public class AgentServiceTests
     }
 
     [Fact]
+    public async Task AskAsync_ProductQuery_PopulatesBrandModelsPriceRangeAndModelInsights()
+    {
+        // Two Samsung models at different prices plus an LG one, each with a distilled verdict —
+        // the brand card should list the model names with a price range, and the verdict should
+        // ride along on the aggregated model (so the grid card can show it without a deep scrape).
+        var search = new FakeSearchProvider(
+            new SearchResult { Title = "AC guide", Snippet = "options", Url = "https://blog.x/acs", Kind = SearchKind.Web });
+
+        const string productsJson = """
+            { "products": [
+              { "name": "Samsung WindFree 1.5 ton", "brand": "Samsung", "model": "AR18TXHQ",
+                "offers": [ { "source": "Smart Buy", "price": 320, "currency": "JOD", "url": "https://shop.jo/ar18" } ],
+                "pros": ["very quiet", "energy efficient"], "cons": ["pricey filters"],
+                "summary": "A quiet, efficient pick for mid-size rooms." },
+              { "name": "Samsung WindFree 2 ton", "brand": "Samsung", "model": "AR24TXHQ",
+                "offers": [ { "source": "Leaders", "price": 480, "currency": "JOD", "url": "https://shop.jo/ar24" } ] },
+              { "name": "LG DualCool", "brand": "LG", "model": "S4-Q24",
+                "offers": [ { "source": "Leaders", "price": 410, "currency": "JOD", "url": "https://shop.jo/s4q24" } ] }
+            ] }
+            """;
+
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.PlannerSystem ? StrategyJson
+            : system == PromptTemplates.ProductExtractionSystem ? productsJson
+            : "summary");
+
+        var agent = new AgentService(llm,
+            new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var answer = await agent.AskAsync("ACs in Jordan", "jordan");
+        var products = answer.Products!;
+
+        // Brand card now lists the actual models and a price range spanning the brand's offers.
+        var samsung = products.Brands.First(b => b.Name == "Samsung");
+        samsung.Models.Should().Contain(new[] { "AR18TXHQ", "AR24TXHQ" });
+        samsung.PriceFrom.Should().Be(new Money(320, "JOD"));
+        samsung.PriceTo.Should().Be(new Money(480, "JOD"));
+        samsung.PriceRange.Should().NotBeNullOrEmpty();
+
+        // The extracted verdict rides along on the aggregated model.
+        var windFree = products.Models.First(m => m.Model == "AR18TXHQ");
+        windFree.Pros.Should().Contain("very quiet");
+        windFree.Cons.Should().Contain("pricey filters");
+        windFree.ReviewSummary.Should().Contain("efficient pick");
+    }
+
+    [Fact]
     public async Task AskAsync_ProductQuery_LlmExtraction_DropsNonLocalOffers()
     {
         var search = new FakeSearchProvider(
