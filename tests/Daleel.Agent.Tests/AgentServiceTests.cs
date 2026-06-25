@@ -196,6 +196,72 @@ public class AgentServiceTests
     }
 
     [Fact]
+    public async Task AskAsync_ProductQuery_LlmExtraction_RetriesOnceThenRecovers()
+    {
+        // Models sometimes answer the first extraction call with prose instead of JSON. The pass
+        // must retry exactly once and parse the recovered response, rather than giving up after
+        // a single unparseable reply and leaving the grid empty.
+        var search = new FakeSearchProvider(
+            new SearchResult { Title = "AC buying guide", Snippet = "options", Url = "https://blog.x/acs", Kind = SearchKind.Web });
+
+        const string productsJson = """
+            { "products": [
+              { "name": "Samsung WindFree", "brand": "Samsung", "model": "AR18TXHQ",
+                "offers": [ { "source": "Smart Buy", "price": 320, "currency": "JOD", "url": "https://shop.jo/ar18" } ] }
+            ] }
+            """;
+
+        var extractionCalls = 0;
+        var llm = new FakeLlmClient(system =>
+        {
+            if (system == PromptTemplates.PlannerSystem) return StrategyJson;
+            if (system == PromptTemplates.ProductExtractionSystem)
+            {
+                // First reply is unparseable prose; the retry returns valid JSON.
+                return ++extractionCalls == 1 ? "Sure! Here are the products you asked for:" : productsJson;
+            }
+            return "summary";
+        });
+
+        var agent = new AgentService(llm,
+            new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var answer = await agent.AskAsync("ACs in Jordan", "jordan");
+
+        extractionCalls.Should().Be(2); // failed once, retried once
+        answer.Products!.Models.Should().Contain(m => m.Brand == "Samsung" && m.Offers.Any(o => o.Price == 320));
+    }
+
+    [Fact]
+    public async Task AskAsync_ProductQuery_LlmExtraction_FallsBackGracefullyWhenJsonAlwaysBad()
+    {
+        // When every extraction reply is unparseable, the pass retries once (two attempts total)
+        // and then falls back to the deterministic listings instead of throwing. Here the only
+        // deterministic source is a shopping hit, which must still surface.
+        var search = new FakeSearchProvider(
+            new SearchResult
+            {
+                Title = "Samsung Split AC AR24", Price = new Money(450, "JOD"), Seller = "OpenSooq",
+                Url = "https://jo.opensooq.com/en/listing/1", Kind = SearchKind.Shopping
+            });
+
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.PlannerSystem ? StrategyJson
+            : system == PromptTemplates.ProductExtractionSystem ? "not json — just talking"
+            : "summary");
+
+        var agent = new AgentService(llm,
+            new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var answer = await agent.AskAsync("ACs in Jordan", "jordan");
+
+        // Retried exactly once (2 attempts) before falling back.
+        llm.SystemPromptsSeen.Count(s => s == PromptTemplates.ProductExtractionSystem).Should().Be(2);
+        // The deterministic shopping listing is unaffected by the failed LLM pass.
+        answer.Products!.Models.Should().Contain(m => m.Offers.Any(o => o.Price == 450 && o.Currency == "JOD"));
+    }
+
+    [Fact]
     public async Task AskAsync_ProductQuery_AssessesBrandReputation()
     {
         const string repJson = """
