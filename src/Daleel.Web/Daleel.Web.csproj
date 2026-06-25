@@ -16,11 +16,16 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
     <PackageReference Include="MudBlazor" Version="8.15.0" />
     <!-- Structured logging: Serilog replaces the default provider. AspNetCore 9.x pins Serilog 4.x
-         (matching the AmazonS3 sink) and transitively provides the Console + File sinks and the
-         compact-JSON formatter. AmazonS3 1.6.0 ships the R2-compatible serviceUrl / payload-signing
-         knobs used in Logging/SerilogConfiguration.cs. -->
+         (matching the AmazonS3 sink) and the compact-JSON formatter. AmazonS3 1.6.0 ships the
+         R2-compatible serviceUrl / payload-signing knobs used in Logging/SerilogConfiguration.cs.
+         The Console + File sinks arrive transitively via Serilog.AspNetCore, but we use both
+         directly (file logging is the R2 fallback), so they are pinned explicitly here at the
+         versions AspNetCore 9.0.0 already resolves to — making the dependency intentional and
+         immune to a future AspNetCore bump silently changing the sink version. -->
     <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.AmazonS3" Version="1.6.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
+    <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
   </ItemGroup>
 
   <ItemGroup>
