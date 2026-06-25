@@ -17,31 +17,50 @@
     Changes apply to new billing cycles. Leave "searches/month" empty for unlimited.
 </MudText>
 
-@if (_plans is null)
+@if (_editors is null)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
 else
 {
     <MudGrid Spacing="3">
-        @foreach (var p in _plans.OrderBy(x => x.SortOrder))
+        @foreach (var e in _editors.OrderBy(x => x.Plan.SortOrder))
         {
-            <MudItem xs="12" md="6" lg="4">
+            <MudItem xs="12" md="6" lg="4" @key="e">
                 <MudPaper Class="pa-4" Outlined="true" Elevation="0">
-                    <MudTextField @bind-Value="p.Name" Label="Name" Variant="Variant.Outlined" Class="mb-2" />
-                    <MudNumericField T="int?" @bind-Value="p.SearchesPerMonth" Label="Searches / month (empty = unlimited)"
+                    <MudTextField @bind-Value="e.Plan.Name" Label="Name" Variant="Variant.Outlined" Class="mb-2" />
+                    <MudNumericField T="int?" @bind-Value="e.Plan.SearchesPerMonth" Label="Searches / month (empty = unlimited)"
                                      Variant="Variant.Outlined" Class="mb-2" Clearable="true" />
-                    <MudNumericField T="decimal" @bind-Value="p.PriceMonthly" Label="Price / month ($)" Format="F2"
+                    <MudNumericField T="decimal" @bind-Value="e.Plan.PriceMonthly" Label="Price / month ($)" Format="F2"
                                      Variant="Variant.Outlined" Class="mb-2" />
-                    <MudNumericField T="int" @bind-Value="p.SortOrder" Label="Sort order" Variant="Variant.Outlined" Class="mb-2" />
-                    <MudSwitch T="bool" @bind-Value="p.IsActive" Color="Color.Primary" Label="Active" />
-                    <MudTextField @bind-Value="p.FeaturesJson" Label="Features (JSON array)" Variant="Variant.Outlined"
-                                  Lines="3" Class="mb-2" />
+                    <MudNumericField T="int" @bind-Value="e.Plan.SortOrder" Label="Sort order" Variant="Variant.Outlined" Class="mb-2" />
+                    <MudSwitch T="bool" @bind-Value="e.Plan.IsActive" Color="Color.Primary" Label="Active" />
+
+                    <MudText Typo="Typo.subtitle2" Class="mt-3 mb-1">Features</MudText>
+                    @if (e.Features.Count == 0)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-1">No features yet — add one below.</MudText>
+                    }
+                    @foreach (var f in e.Features)
+                    {
+                        <div class="d-flex align-center gap-1 mb-1" @key="f">
+                            <MudTextField @bind-Value="f.Text" Placeholder="e.g. Priority support"
+                                          Variant="Variant.Outlined" Margin="Margin.Dense" Class="flex-grow-1" />
+                            <MudTooltip Text="Remove feature">
+                                <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small" Color="Color.Error"
+                                               aria-label="Remove feature"
+                                               OnClick="@(() => RemoveFeature(e, f))" />
+                            </MudTooltip>
+                        </div>
+                    }
+                    <MudButton StartIcon="@Icons.Material.Filled.Add" Size="Size.Small" Variant="Variant.Text"
+                               Color="Color.Primary" Class="mb-3" OnClick="@(() => AddFeature(e))">Add feature</MudButton>
+
                     <div class="d-flex gap-2">
                         <MudButton StartIcon="@Icons.Material.Filled.Save" Variant="Variant.Filled" Color="Color.Primary"
-                                   OnClick="@(() => SaveAsync(p))">Save</MudButton>
+                                   OnClick="@(() => SaveAsync(e))">Save</MudButton>
                         <MudButton StartIcon="@Icons.Material.Filled.Delete" Color="Color.Error"
-                                   OnClick="@(() => DeleteAsync(p))">Delete</MudButton>
+                                   OnClick="@(() => DeleteAsync(e))">Delete</MudButton>
                     </div>
                 </MudPaper>
             </MudItem>
@@ -50,7 +69,21 @@ else
 }
 
 @code {
-    private List<SubscriptionPlan>? _plans;
+    // Stable holder so each feature row keeps its identity across add/remove (clean Blazor re-render).
+    private sealed class FeatureItem
+    {
+        public string Text { get; set; } = string.Empty;
+    }
+
+    // Pairs the EF entity with its decoded, editable feature list. The raw FeaturesJson is only
+    // (de)serialized at the model boundary — the admin never sees or edits JSON.
+    private sealed class PlanEditor
+    {
+        public required SubscriptionPlan Plan { get; init; }
+        public List<FeatureItem> Features { get; set; } = new();
+    }
+
+    private List<PlanEditor>? _editors;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -59,30 +92,50 @@ else
         StateHasChanged();
     }
 
-    private async Task LoadAsync() => _plans = await Db.SubscriptionPlans.ToListAsync();
-
-    private void AddPlan() => _plans?.Add(new SubscriptionPlan
+    private async Task LoadAsync()
     {
-        Name = "New plan", SearchesPerMonth = 50, PriceMonthly = 0m, IsActive = false,
-        SortOrder = (_plans.Count > 0 ? _plans.Max(p => p.SortOrder) : 0) + 1, FeaturesJson = "[]"
-    });
-
-    private async Task SaveAsync(SubscriptionPlan plan)
-    {
-        if (plan.Id == 0) { Db.SubscriptionPlans.Add(plan); }
-        else { Db.SubscriptionPlans.Update(plan); }
-        await Db.SaveChangesAsync();
-        Snackbar.Add($"Saved {plan.Name}.", Severity.Success);
+        var plans = await Db.SubscriptionPlans.ToListAsync();
+        _editors = plans.Select(ToEditor).ToList();
     }
 
-    private async Task DeleteAsync(SubscriptionPlan plan)
+    private static PlanEditor ToEditor(SubscriptionPlan p) => new()
     {
-        if (plan.Id != 0)
+        Plan = p,
+        Features = p.GetFeatures().Select(f => new FeatureItem { Text = f }).ToList()
+    };
+
+    private void AddPlan() => _editors?.Add(ToEditor(new SubscriptionPlan
+    {
+        Name = "New plan", SearchesPerMonth = 50, PriceMonthly = 0m, IsActive = false,
+        SortOrder = (_editors.Count > 0 ? _editors.Max(e => e.Plan.SortOrder) : 0) + 1, FeaturesJson = "[]"
+    }));
+
+    private void AddFeature(PlanEditor editor) => editor.Features.Add(new FeatureItem());
+
+    private void RemoveFeature(PlanEditor editor, FeatureItem item) => editor.Features.Remove(item);
+
+    private async Task SaveAsync(PlanEditor editor)
+    {
+        // Fold the edited feature rows back into the JSON column (trims + drops blanks).
+        editor.Plan.SetFeatures(editor.Features.Select(f => f.Text));
+
+        if (editor.Plan.Id == 0) { Db.SubscriptionPlans.Add(editor.Plan); }
+        else { Db.SubscriptionPlans.Update(editor.Plan); }
+        await Db.SaveChangesAsync();
+
+        // Re-sync the editor rows so blanks the user left are reflected after the save.
+        editor.Features = editor.Plan.GetFeatures().Select(f => new FeatureItem { Text = f }).ToList();
+        Snackbar.Add($"Saved {editor.Plan.Name}.", Severity.Success);
+    }
+
+    private async Task DeleteAsync(PlanEditor editor)
+    {
+        if (editor.Plan.Id != 0)
         {
-            Db.SubscriptionPlans.Remove(plan);
+            Db.SubscriptionPlans.Remove(editor.Plan);
             await Db.SaveChangesAsync();
         }
-        _plans?.Remove(plan);
+        _editors?.Remove(editor);
         Snackbar.Add("Plan removed.", Severity.Info);
     }
 }

@@ -46,6 +46,30 @@ public class PlansAndConfigTests
     }
 
     [Fact]
+    public void PlanFeatures_RoundTrip_BetweenListAndJson()
+    {
+        var plan = new SubscriptionPlan();
+
+        // Editing as a list, then serializing, trims entries and drops blanks.
+        plan.SetFeatures(new[] { "  Priority support  ", "", "Unlimited exports", "   " });
+        plan.FeaturesJson.Should().Be("[\"Priority support\",\"Unlimited exports\"]");
+
+        // Decoding back yields exactly the clean list the admin sees.
+        plan.GetFeatures().Should().Equal("Priority support", "Unlimited exports");
+    }
+
+    [Fact]
+    public void PlanFeatures_DecodesSeededJson_AndToleratesBadJson()
+    {
+        new SubscriptionPlan { FeaturesJson = "[\"a\",\"b\",\"c\"]" }.GetFeatures()
+            .Should().Equal("a", "b", "c");
+
+        // Null/blank and malformed JSON degrade to an empty list rather than throwing in the UI.
+        new SubscriptionPlan { FeaturesJson = "" }.GetFeatures().Should().BeEmpty();
+        new SubscriptionPlan { FeaturesJson = "not json" }.GetFeatures().Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task SystemConfig_SeedsDefaults_AndRoundTripsTypedValues()
     {
         using var ctx = new SqliteTestContext();
