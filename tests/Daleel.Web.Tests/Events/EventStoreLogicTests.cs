@@ -1,5 +1,6 @@
 using Daleel.Core.Observability;
 using Daleel.Web.Events;
+using Daleel.Web.Pipeline;
 using FluentAssertions;
 using Xunit;
 
@@ -103,6 +104,23 @@ public class EventStoreLogicTests
 
         conn.Should().Contain("Port=5432");
         conn.Should().Contain("SSL Mode=Require");
+    }
+
+    [Fact]
+    public void State_RecordEvent_BuffersWithSearchIdAndMetadata()
+    {
+        var state = new SearchPipelineState { SearchId = "99" };
+
+        state.RecordEvent(EventCategory.Profile, "profile.store", "profile",
+            success: true,
+            metadata: new Dictionary<string, object?> { ["name"] = "Smart Buy", ["verified"] = true });
+
+        state.Events.Should().ContainSingle();
+        var ev = state.Events[0];
+        ev.Category.Should().Be(EventCategory.Profile);
+        ev.EventType.Should().Be("profile.store");
+        ev.SearchId.Should().Be("99");
+        ev.MetadataJson.Should().Contain("Smart Buy").And.Contain("verified");
     }
 
     private static PipelineEvent Ev(string category, string provider, decimal cost, long ms, bool ok) => new()

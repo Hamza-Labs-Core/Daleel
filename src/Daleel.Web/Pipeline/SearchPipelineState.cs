@@ -2,6 +2,7 @@ using Daleel.Agent;
 using Daleel.Core.Caching;
 using Daleel.Core.Geo;
 using Daleel.Core.Models;
+using Daleel.Web.Events;
 
 namespace Daleel.Web.Pipeline;
 
@@ -24,6 +25,16 @@ public sealed class SearchPipelineState
     public TimeSpan CacheTtl { get; set; } = TimeSpan.FromDays(30);
     public Action<string>? Progress { get; set; }
 
+    /// <summary>Correlation id (the SearchJob id) stamped onto every recorded pipeline event.</summary>
+    public string? SearchId { get; set; }
+
+    /// <summary>
+    /// Buffer of non-provider pipeline events (cache hits/misses, profile lookups) recorded by the
+    /// activities. Provider calls are captured separately via the API-call collector. The runner
+    /// flushes both to the event store at the end of the run.
+    /// </summary>
+    public List<PipelineEvent> Events { get; } = new();
+
     // ── Intermediate results (filled by activities) ──────────────────────────────
     public GeoProfile? GeoProfile { get; set; }
     public SearchStrategy? Strategy { get; set; }
@@ -45,6 +56,14 @@ public sealed class SearchPipelineState
     public bool IsProductQuery => Strategy?.QueryType == QueryType.ProductResearch;
 
     public void Log(string message) => Progress?.Invoke(message);
+
+    /// <summary>Buffers a categorized pipeline event (cache/profile/…) for the event store.</summary>
+    public void RecordEvent(
+        string category, string eventType, string provider,
+        bool success = true, decimal cost = 0m, long durationMs = 0,
+        IReadOnlyDictionary<string, object?>? metadata = null) =>
+        Events.Add(PipelineEventFactory.Custom(
+            category, eventType, provider, SearchId, success, cost, durationMs, metadata));
 }
 
 /// <summary>

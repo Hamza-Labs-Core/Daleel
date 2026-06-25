@@ -2,6 +2,7 @@ using Daleel.Core.Caching;
 using Daleel.Core.Moderation;
 using Daleel.Core.Observability;
 using Daleel.Web.Data;
+using Daleel.Web.Events;
 using Daleel.Web.Pipeline;
 using Daleel.Web.Services;
 using Elsa.Workflows;
@@ -25,12 +26,13 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private readonly IApiCallLogRepository _apiLog;
     private readonly IFilteredContentLogRepository _filteredLog;
     private readonly ICacheStore _cache;
+    private readonly IEventStore _eventStore;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WorkflowSearchRunner> _logger;
 
     public WorkflowSearchRunner(
         IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
-        IFilteredContentLogRepository filteredLog, ICacheStore cache,
+        IFilteredContentLogRepository filteredLog, ICacheStore cache, IEventStore eventStore,
         IServiceScopeFactory scopeFactory, ILogger<WorkflowSearchRunner> logger)
     {
         _agents = agents;
@@ -38,6 +40,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         _apiLog = apiLog;
         _filteredLog = filteredLog;
         _cache = cache;
+        _eventStore = eventStore;
         _scopeFactory = scopeFactory;
         _logger = logger;
     }
@@ -69,6 +72,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             CacheTtl = CacheTtl
         });
 
+        // Captured from the run's state so the finally block can flush buffered cache/profile events
+        // even when the workflow faults partway through.
+        IReadOnlyList<PipelineEvent> bufferedEvents = Array.Empty<PipelineEvent>();
+
         try
         {
             // One scope per run so the per-run SearchPipelineState (scoped) is isolated; the Elsa
@@ -83,6 +90,8 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             state.Cache = _cache;
             state.CacheTtl = CacheTtl;
             state.Progress = progress;
+            state.SearchId = job.Id.ToString();
+            bufferedEvents = state.Events;
 
             var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
             var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: capTrip.Token).ConfigureAwait(false);
@@ -118,6 +127,31 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         {
             await PersistAsync(job, collector, ct).ConfigureAwait(false);
             await PersistFilteredAsync(job, agent.ContentFilter.AuditDetails, ct).ConfigureAwait(false);
+            await PersistEventsAsync(job, collector, bufferedEvents, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Flushes the run's pipeline events to the (optional) Postgres event store: every provider call
+    /// (projected from the API-call collector) plus the buffered cache/profile events. No-op + cheap
+    /// when the event store is the null/unconfigured one.
+    /// </summary>
+    private async Task PersistEventsAsync(
+        SearchJob job, JobApiCallCollector collector, IReadOnlyList<PipelineEvent> buffered, CancellationToken ct)
+    {
+        if (!_eventStore.IsEnabled)
+        {
+            return;
+        }
+
+        var searchId = job.Id.ToString();
+        var events = new List<PipelineEvent>(collector.Calls.Count + buffered.Count);
+        events.AddRange(collector.Calls.Select(c => PipelineEventFactory.FromApiCall(c, searchId)));
+        events.AddRange(buffered);
+
+        if (events.Count > 0)
+        {
+            await _eventStore.RecordBatchAsync(events, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

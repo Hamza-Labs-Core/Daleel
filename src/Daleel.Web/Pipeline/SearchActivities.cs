@@ -2,6 +2,7 @@ using System.Text.Json;
 using Daleel.Agent;
 using Daleel.Core.Geo;
 using Daleel.Core.Models;
+using Daleel.Web.Events;
 using Daleel.Web.Profiles;
 using Daleel.Web.Services;
 using Elsa.Extensions;
@@ -63,6 +64,7 @@ public sealed class CheckCacheActivity : CodeActivity
             var payload = await state.Cache.GetAsync(state.ResultKey, context.CancellationToken);
             if (payload is null)
             {
+                state.RecordEvent(EventCategory.Cache, "cache.miss", "cache");
                 return;
             }
 
@@ -74,6 +76,7 @@ public sealed class CheckCacheActivity : CodeActivity
                 state.ResultType = cached.ResultType;
                 state.FilteredCount = cached.FilteredCount;
                 state.FilteredCategories = cached.FilteredCategories ?? string.Empty;
+                state.RecordEvent(EventCategory.Cache, "cache.hit", "cache");
                 state.Log("⚡ Loaded from cache — identical search run recently.");
             }
         }
@@ -179,6 +182,9 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
             {
                 state.Log($"Building profile for {b.Name}…");
                 saved = await SafeGetBrand(brandSvc, b.Name, state.Geo, ct);
+                state.RecordEvent(EventCategory.Profile, "profile.brand", "profile",
+                    success: saved is not null,
+                    metadata: new Dictionary<string, object?> { ["name"] = b.Name, ["found"] = saved is not null });
             }
 
             brands.Add(saved is null
@@ -196,6 +202,14 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
             {
                 state.Log($"Verifying {s.Name} on Google Maps…");
                 saved = await SafeGetStore(storeSvc, s.Name, state.Geo, ct);
+                state.RecordEvent(EventCategory.Profile, "profile.store", "profile",
+                    success: saved is not null,
+                    metadata: new Dictionary<string, object?>
+                    {
+                        ["name"] = s.Name,
+                        ["found"] = saved is not null,
+                        ["verified"] = saved?.IsVerified ?? false
+                    });
             }
 
             if (saved is null)
@@ -327,6 +341,7 @@ public sealed class CacheResultsActivity : CodeActivity
         state.Log("Saving results…");
         state.ResultJson = ResultSerialization.Serialize(state.Answer);
         state.ResultType = "ask";
+        state.RecordEvent(EventCategory.Cache, "cache.write", "cache");
 
         if (state.Cache is not null)
         {
