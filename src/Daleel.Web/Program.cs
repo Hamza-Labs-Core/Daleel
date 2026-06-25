@@ -163,6 +163,16 @@ builder.Services.AddScoped<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddScoped<IFilteredContentLogRepository, FilteredContentLogRepository>();
 builder.Services.AddHttpContextAccessor();
 
+// Persistent brand/store profiles: researched once via Context.dev + the LLM, saved to SQLite, and
+// refreshed only when stale (>30 days). Search results JOIN against these instead of re-fetching.
+builder.Services.AddScoped<IBrandRepository, BrandRepository>();
+builder.Services.AddScoped<IStoreRepository, StoreRepository>();
+builder.Services.AddSingleton(new Daleel.Web.Profiles.ProfileOptions());
+builder.Services.AddSingleton<Daleel.Web.Profiles.IProfileResearcher, Daleel.Web.Profiles.ContextDevProfileResearcher>();
+builder.Services.AddScoped<Daleel.Web.Profiles.IBrandProfileService, Daleel.Web.Profiles.BrandProfileService>();
+builder.Services.AddScoped<Daleel.Web.Profiles.IStoreProfileService, Daleel.Web.Profiles.StoreProfileService>();
+builder.Services.AddHostedService<Daleel.Web.Profiles.ProfileRefreshService>();
+
 // Async conversation backend: SignalR + a queue + a background worker run searches off the request.
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<Daleel.Web.Conversation.ISearchJobQueue, Daleel.Web.Conversation.SearchJobQueue>();
