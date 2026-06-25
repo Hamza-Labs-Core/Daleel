@@ -270,6 +270,108 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
     };
 }
 
+/// <summary>
+/// Step 5b — the per-item deep-dive sub-workflow. For each found product model (bounded), it compares
+/// prices across the stores that carry it and, for items whose specs are thin, scrapes the cheapest
+/// offer page (via Context.dev, instrumented + cost-capped) to pull richer detail back onto the model.
+/// </summary>
+[Activity("Daleel", "Search", "Item deep-dive: compare store prices + scrape specs per product")]
+public sealed class ItemDeepDiveActivity : CodeActivity
+{
+    /// <summary>How many items get a price-comparison pass (cheap, in-memory).</summary>
+    private const int MaxItems = 20;
+
+    /// <summary>How many thin items get an actual network scrape (bounds latency + cost).</summary>
+    private const int MaxScrapes = 8;
+
+    /// <summary>An item is "thin" (worth scraping) when it has fewer than this many specs.</summary>
+    private const int ThinSpecThreshold = 3;
+
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    {
+        var state = context.GetRequiredService<SearchPipelineState>();
+        if (state.FromCache || state.Products is null || state.Products.Models.Count == 0)
+        {
+            return;
+        }
+
+        var products = state.Products;
+        var models = products.Models.Take(MaxItems).ToList();
+
+        // 1) Price comparison across stores — per item, in-memory (the offers are already aggregated).
+        foreach (var m in models)
+        {
+            var stores = m.Offers.Select(o => o.Source)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct(StringComparer.OrdinalIgnoreCase).Count();
+            state.Log($"Getting details on {m.Name} — comparing {stores} store price(s)…");
+            state.RecordEvent(EventCategory.Extract, "item.compare", "pipeline",
+                metadata: new Dictionary<string, object?>
+                {
+                    ["item"] = m.Name, ["stores"] = stores, ["offers"] = m.Offers.Count
+                });
+        }
+
+        // 2) Deep scrape for thin items only, bounded + run concurrently to keep latency to one round.
+        var targets = models
+            .Select((m, idx) => (m, idx, url: FirstOfferUrl(m)))
+            .Where(t => t.m.Specs.Count < ThinSpecThreshold && t.url is not null)
+            .Take(MaxScrapes)
+            .ToList();
+
+        if (targets.Count == 0)
+        {
+            return;
+        }
+
+        var enriched = new Dictionary<int, string>();
+        var gate = new object();
+        await Task.WhenAll(targets.Select(async t =>
+        {
+            var page = await state.Agent.ReadPageAsync(t.url!, context.CancellationToken);
+            if (page is null)
+            {
+                return;
+            }
+
+            var snippet = page.Content.Length <= 1500 ? page.Content : page.Content[..1500];
+            lock (gate)
+            {
+                enriched[t.idx] = snippet;
+            }
+            state.RecordEvent(EventCategory.Extract, "item.deepdive", "context.dev",
+                metadata: new Dictionary<string, object?> { ["item"] = t.m.Name, ["url"] = t.url });
+        }));
+
+        if (enriched.Count == 0)
+        {
+            return;
+        }
+
+        // Merge the scraped detail back onto the affected models, preserving the un-deep-dived tail.
+        var rebuilt = models
+            .Select((m, idx) =>
+            {
+                if (!enriched.TryGetValue(idx, out var detail))
+                {
+                    return m;
+                }
+                var specs = new Dictionary<string, string>(m.Specs) { ["details"] = detail };
+                return m with { Specs = specs };
+            })
+            .Concat(products.Models.Skip(MaxItems))
+            .ToList();
+
+        state.Products = products with { Models = rebuilt };
+        state.Log($"Deep-dived {enriched.Count} item(s) for extra detail.");
+    }
+
+    /// <summary>The first offer URL for a model (prefer the cheapest/lowest), or null.</summary>
+    private static string? FirstOfferUrl(ProductModel m) =>
+        m.Offers.FirstOrDefault(o => o.IsLowest && !string.IsNullOrWhiteSpace(o.Url))?.Url
+        ?? m.Offers.FirstOrDefault(o => !string.IsNullOrWhiteSpace(o.Url))?.Url;
+}
+
 /// <summary>Step 6 — assemble the final answer object from the summary, bundle and (enriched) products.</summary>
 [Activity("Daleel", "Search", "Aggregate: assemble the final ranked answer + result count")]
 public sealed class AggregateResultsActivity : CodeActivity

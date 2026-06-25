@@ -441,4 +441,48 @@ public class AgentServiceTests
         var stores = await agent.FindStoresAsync("مكيفات", "jordan");
         stores.Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task ReadPageAsync_NoScraper_ReturnsNull()
+    {
+        var agent = new AgentService(PlannerAndAnalyst());
+        (await agent.ReadPageAsync("https://x.com")).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadPageAsync_ScrapesThroughConfiguredProvider()
+    {
+        var agent = new AgentService(PlannerAndAnalyst(), scraper: new FakeScraper("# Specs\nCooling: 24000 BTU"));
+
+        var page = await agent.ReadPageAsync("https://store.jo/ac");
+
+        page.Should().NotBeNull();
+        page!.Content.Should().Contain("24000 BTU");
+    }
+
+    [Fact]
+    public async Task ReadPageAsync_FailedOrEmptyScrape_ReturnsNull()
+    {
+        var agent = new AgentService(PlannerAndAnalyst(), scraper: new FakeScraper("", success: false));
+        (await agent.ReadPageAsync("https://store.jo/ac")).Should().BeNull();
+    }
+}
+
+/// <summary>Minimal scraper that returns a fixed page, for exercising AgentService.ReadPageAsync.</summary>
+file sealed class FakeScraper : IScrapeProvider
+{
+    private readonly string _content;
+    private readonly bool _success;
+
+    public FakeScraper(string content, bool success = true)
+    {
+        _content = content;
+        _success = success;
+    }
+
+    public string Name => "fake-scraper";
+
+    public Task<ScrapedPage> ScrapeAsync(
+        string url, ScrapeFormat format = ScrapeFormat.Markdown, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new ScrapedPage { Url = url, Content = _content, Success = _success });
 }

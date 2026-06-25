@@ -180,6 +180,31 @@ public sealed partial class AgentService
         }
     }
 
+    /// <summary>
+    /// Reads (scrapes) a single page through the configured scraper — instrumented and cost-capped
+    /// like every other provider call (Context.dev is the primary scraper). Returns null when no
+    /// scraper is configured or the scrape fails/empties. Used by the per-item deep-dive to pull
+    /// richer specs from a product's offer page.
+    /// </summary>
+    public async Task<ScrapedPage?> ReadPageAsync(string url, CancellationToken cancellationToken = default)
+    {
+        if (_scraper is null || string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        try
+        {
+            var page = await _scraper.ScrapeAsync(url, ScrapeFormat.Markdown, cancellationToken).ConfigureAwait(false);
+            return page.Success && page.Content.Length > 0 ? page : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log($"item scrape failed for '{url}': {ex.Message}");
+            return null;
+        }
+    }
+
     private async Task<IReadOnlyList<ScrapedPage>> RunReadAsync(
         IReadOnlyList<string> urls, CancellationToken cancellationToken)
     {
