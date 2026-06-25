@@ -122,6 +122,15 @@ public sealed partial class AgentService
 
         var models = ListingAggregator.Aggregate(listings);
 
+        // A product the LLM surfaced with no actionable offer becomes a single placeholder offer
+        // (no price, no link) during aggregation — which would misleadingly read as "1 seller". Strip
+        // those placeholders so such a model honestly reports 0 sellers while still being listed.
+        models = models
+            .Select(m => m.Offers.Any(IsPlaceholderOffer)
+                ? m with { Offers = m.Offers.Where(o => !IsPlaceholderOffer(o)).ToList() }
+                : m)
+            .ToList();
+
         // Attach the LLM-distilled pros/cons + verdict to each model up-front (keyed the same way
         // the aggregator groups listings), so the grid card and detail panel can show an honest
         // summary without waiting for the per-model on-demand deep scrape.
@@ -174,14 +183,23 @@ public sealed partial class AgentService
             .Select(g =>
             {
                 var brandModels = models.Where(m => MatchesBrand(m, g.Key)).ToList();
-                var prices = brandModels
-                    .Select(m => m.LowestPrice)
-                    .Where(p => p is not null)
-                    .Select(p => p!.Value)
+
+                // Build the price range from EVERY priced offer across the brand's models (not just
+                // each model's lowest, which understates the true high end). A min/max is only
+                // meaningful when those offers share a single currency — so surface a range only when
+                // exactly one distinct currency is present; otherwise leave it unset.
+                var pricedOffers = brandModels
+                    .SelectMany(m => m.Offers)
+                    .Where(o => o.Price is not null && !string.IsNullOrWhiteSpace(o.Currency))
                     .ToList();
-                var currency = brandModels
-                    .Select(m => m.LowestOffer?.Currency)
-                    .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)) ?? geo.Currency;
+                var currencies = pricedOffers
+                    .Select(o => o.Currency!.Trim())
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                var prices = currencies.Count == 1
+                    ? pricedOffers.Select(o => o.Price!.Value).ToList()
+                    : new List<decimal>();
+                var currency = currencies.Count == 1 ? currencies[0] : null;
 
                 return new BrandInfo
                 {
@@ -196,8 +214,8 @@ public sealed partial class AgentService
                         .Distinct(StringComparer.OrdinalIgnoreCase)
                         .Take(6)
                         .ToList(),
-                    PriceFrom = prices.Count > 0 ? new Money(prices.Min(), currency) : null,
-                    PriceTo = prices.Count > 0 ? new Money(prices.Max(), currency) : null,
+                    PriceFrom = prices.Count > 0 ? new Money(prices.Min(), currency!) : null,
+                    PriceTo = prices.Count > 0 ? new Money(prices.Max(), currency!) : null,
                     Reputation = FindReputation(reputations, g.Key),
                     Url = brands.Values.FirstOrDefault(bp => NameMatch(bp.Name, g.Key))?.Url
                 };
@@ -669,6 +687,13 @@ public sealed partial class AgentService
 
         return null;
     }
+
+    /// <summary>
+    /// An offer with neither a price nor a link isn't actionable — there's no seller to send the
+    /// shopper to. These come from products the LLM surfaced without any concrete offer.
+    /// </summary>
+    private static bool IsPlaceholderOffer(PriceOffer o) =>
+        o.Price is null && string.IsNullOrWhiteSpace(o.Url);
 
     private static ProductListing ToRepresentative(ProductModel m)
     {

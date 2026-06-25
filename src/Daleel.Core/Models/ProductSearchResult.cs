@@ -140,7 +140,7 @@ public record BrandInfo
     public string? Url { get; init; }
     public string? LogoUrl { get; init; }
 
-    /// <summary>How many of the gathered listings carry this brand.</summary>
+    /// <summary>How many distinct product models under this brand were found in the market.</summary>
     public int ListingCount { get; init; }
 
     /// <summary>
