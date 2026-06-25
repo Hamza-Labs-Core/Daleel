@@ -298,7 +298,12 @@ public static class ListingExtractor
         return null;
     }
 
-    private static string? NormalizeCondition(string? raw)
+    /// <summary>
+    /// Canonicalizes a free-text condition into one of "new"/"used"/"refurbished" (Arabic and
+    /// English aware), else the trimmed original. Shared so LLM-extracted offers normalize the
+    /// same way as the deterministic parsers. Returns null for blank input.
+    /// </summary>
+    public static string? NormalizeCondition(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
         {

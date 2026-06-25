@@ -96,15 +96,26 @@ public sealed partial class AgentService
 
         // Always-on LLM extraction: have the LLM read the gathered context and pull out concrete
         // products + per-store offers the structured parsers miss (markets where the shopping/scrape
-        // APIs return thin or no data — the common case for e.g. "best ACs in Jordan"). These are
-        // concatenated with (not deduped against) the deterministic listings, so the aggregator turns
-        // every source — structured and LLM-extracted alike — into a price offer on the same model.
+        // APIs return thin or no data — the common case for e.g. "best ACs in Jordan"). The aggregator
+        // turns every source — structured and LLM-extracted alike — into a price offer on the same model.
         var llmListings = useLlmExtraction
             ? await ExtractProductListingsAsync(query, geo, bundle, includeIntl, cancellationToken).ConfigureAwait(false)
             : Array.Empty<ProductListing>();
 
+        // De-duplicate the LLM offers against the deterministic ones (and each other) before
+        // concatenating, so an offer the structured parsers already found isn't surfaced twice.
+        // Identity is the URL when present (the strongest signal), else model-key + source +
+        // price + currency — mirroring the aggregator's notion of "the same offer".
+        static string OfferIdentity(ProductListing l) =>
+            string.IsNullOrWhiteSpace(l.Url)
+                ? $"{ListingExtractor.DedupKey(l)}|{l.Source?.Trim().ToLowerInvariant()}|{l.Price}|{l.Currency?.Trim().ToLowerInvariant()}"
+                : $"u:{l.Url!.Trim().ToLowerInvariant()}";
+
+        var seen = new HashSet<string>(deterministic.Select(OfferIdentity), StringComparer.Ordinal);
+        var dedupedLlm = llmListings.Where(l => seen.Add(OfferIdentity(l)));
+
         var listings = deterministic
-            .Concat(llmListings)
+            .Concat(dedupedLlm)
             .OrderBy(l => l.Price ?? decimal.MaxValue)
             .ToList();
 
@@ -517,7 +528,7 @@ public sealed partial class AgentService
                     Source = string.IsNullOrWhiteSpace(o.Source) ? (brand ?? "Search") : o.Source!.Trim(),
                     SourceType = ResultType.Marketplace,
                     Specs = specs,
-                    Condition = o.Condition,
+                    Condition = ListingExtractor.NormalizeCondition(o.Condition),
                 });
                 added++;
             }
