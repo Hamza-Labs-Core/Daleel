@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
@@ -40,7 +41,7 @@ public sealed partial class AgentService
     /// </summary>
     internal async Task<ProductSearchResult> BuildProductSearchResultAsync(
         string query, GeoProfile geo, ResearchBundle bundle, string summary, CancellationToken cancellationToken,
-        bool assessReputation = true)
+        bool assessReputation = true, bool useLlmExtraction = true)
     {
         var cc = geo.CountryCode;
         var countryName = geo.Country;
@@ -90,8 +91,31 @@ public sealed partial class AgentService
         // Deep-extract individual listings from the top LOCAL marketplace/store pages.
         var extracted = await ExtractListingsAsync(classified, geo, includeIntl, cancellationToken).ConfigureAwait(false);
 
-        // Merge (most-detailed first) then aggregate into one entry per model.
-        var listings = ListingExtractor.Merge(extracted, shoppingListings, webListings)
+        // Merge the deterministic sources (most-detailed first) so duplicate listings collapse.
+        var deterministic = ListingExtractor.Merge(extracted, shoppingListings, webListings);
+
+        // Always-on LLM extraction: have the LLM read the gathered context and pull out concrete
+        // products + per-store offers the structured parsers miss (markets where the shopping/scrape
+        // APIs return thin or no data — the common case for e.g. "best ACs in Jordan"). The aggregator
+        // turns every source — structured and LLM-extracted alike — into a price offer on the same model.
+        var llmListings = useLlmExtraction
+            ? await ExtractProductListingsAsync(query, geo, bundle, includeIntl, cancellationToken).ConfigureAwait(false)
+            : Array.Empty<ProductListing>();
+
+        // De-duplicate the LLM offers against the deterministic ones (and each other) before
+        // concatenating, so an offer the structured parsers already found isn't surfaced twice.
+        // Identity is the URL when present (the strongest signal), else model-key + source +
+        // price + currency — mirroring the aggregator's notion of "the same offer".
+        static string OfferIdentity(ProductListing l) =>
+            string.IsNullOrWhiteSpace(l.Url)
+                ? $"{ListingExtractor.DedupKey(l)}|{l.Source?.Trim().ToLowerInvariant()}|{l.Price}|{l.Currency?.Trim().ToLowerInvariant()}"
+                : $"u:{l.Url!.Trim().ToLowerInvariant()}";
+
+        var seen = new HashSet<string>(deterministic.Select(OfferIdentity), StringComparer.Ordinal);
+        var dedupedLlm = llmListings.Where(l => seen.Add(OfferIdentity(l)));
+
+        var listings = deterministic
+            .Concat(dedupedLlm)
             .OrderBy(l => l.Price ?? decimal.MaxValue)
             .ToList();
 
@@ -215,10 +239,10 @@ public sealed partial class AgentService
 
         var strategy = await PlanAsync(PromptTemplates.PlanModel(model, geo), cancellationToken).ConfigureAwait(false);
         var bundle = await GatherAsync(strategy, geo, cancellationToken).ConfigureAwait(false);
-        // Skip the per-brand reputation pass here — the detail panel is about one model, and we
-        // keep the on-demand deep scrape lean.
+        // Skip the per-brand reputation pass AND the LLM extraction pass here — the detail panel is
+        // about one model, and we keep the on-demand deep scrape lean (no extra LLM round-trips).
         var result = await BuildProductSearchResultAsync(model, geo, bundle, string.Empty, cancellationToken,
-            assessReputation: false).ConfigureAwait(false);
+            assessReputation: false, useLlmExtraction: false).ConfigureAwait(false);
 
         var best = PickBestModel(result.Models, model);
         if (best is null)
@@ -429,6 +453,140 @@ public sealed partial class AgentService
         return batches.SelectMany(b => b).ToList();
     }
 
+    /// <summary>
+    /// LLM structured-extraction pass: reads the gathered context and pulls out concrete products
+    /// with their per-store offers, flattened into one <see cref="ProductListing"/> per offer (all
+    /// offers of a model share its brand+model, so the aggregator regroups them into one model with
+    /// many price sources). Non-local offers are dropped unless the user asked for international.
+    /// Returns empty on thin context or any failure, so the rest of the report is unaffected.
+    /// </summary>
+    private async Task<IReadOnlyList<ProductListing>> ExtractProductListingsAsync(
+        string query, GeoProfile geo, ResearchBundle bundle, bool includeIntl, CancellationToken cancellationToken)
+    {
+        var context = BuildContext(bundle);
+        if (context.Length == 0)
+        {
+            return Array.Empty<ProductListing>();
+        }
+
+        // Ask the LLM for structured products; if its JSON can't be parsed, retry once before
+        // falling back gracefully to no LLM listings (the deterministic sources still stand).
+        var dto = await ExtractProductsDtoAsync(query, geo, context, cancellationToken).ConfigureAwait(false);
+        if (dto?.Products is null)
+        {
+            return Array.Empty<ProductListing>();
+        }
+
+        var listings = new List<ProductListing>();
+        foreach (var p in dto.Products)
+        {
+            var name = string.IsNullOrWhiteSpace(p.Name) ? p.Model : p.Name;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue; // nothing to identify the product by
+            }
+
+            var brand = string.IsNullOrWhiteSpace(p.Brand) ? null : p.Brand!.Trim();
+            var model = string.IsNullOrWhiteSpace(p.Model) ? null : p.Model!.Trim();
+            var image = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl!.Trim();
+            var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (p.Specs is { Count: > 0 })
+            {
+                foreach (var (key, value) in p.Specs)
+                {
+                    if (!string.IsNullOrWhiteSpace(key) && SpecValue(value) is { Length: > 0 } sv)
+                    {
+                        specs[key] = sv;
+                    }
+                }
+            }
+
+            var added = 0;
+            foreach (var o in p.Offers ?? new List<ExtractedOfferDto>())
+            {
+                var url = string.IsNullOrWhiteSpace(o.Url) ? null : o.Url!.Trim();
+                // Honour the same locality rule as the deterministic path: drop a linked offer
+                // we can confirm is non-local (keep link-less offers — the prompt asks local-only).
+                if (url is not null && !includeIntl &&
+                    !LocalityClassifier.IsLocal(url, geo.CountryCode, geo.Country))
+                {
+                    continue;
+                }
+
+                var price = ParsePrice(o.Price);
+                listings.Add(new ProductListing
+                {
+                    Name = name!.Trim(),
+                    Brand = brand,
+                    Model = model,
+                    Price = price,
+                    Currency = string.IsNullOrWhiteSpace(o.Currency)
+                        ? (price is not null ? geo.Currency : null)
+                        : o.Currency!.Trim(),
+                    Url = url,
+                    ImageUrl = image,
+                    Source = string.IsNullOrWhiteSpace(o.Source) ? (brand ?? "Search") : o.Source!.Trim(),
+                    SourceType = ResultType.Marketplace,
+                    Specs = specs,
+                    Condition = ListingExtractor.NormalizeCondition(o.Condition),
+                });
+                added++;
+            }
+
+            // A product whose only offers were non-local is dropped; one with no offers at all is
+            // still surfaced (brand/name/specs visible) so the shopper knows the option exists.
+            if (added == 0 && (p.Offers is null || p.Offers.Count == 0))
+            {
+                listings.Add(new ProductListing
+                {
+                    Name = name!.Trim(),
+                    Brand = brand,
+                    Model = model,
+                    ImageUrl = image,
+                    Source = brand ?? "Search",
+                    SourceType = ResultType.Marketplace,
+                    Specs = specs,
+                });
+            }
+        }
+
+        return listings;
+    }
+
+    /// <summary>
+    /// Calls the LLM extraction prompt and parses its JSON response, retrying once when the
+    /// model returns something we can't parse into the expected shape. Returns null when both
+    /// attempts fail, so the caller can fall back gracefully to no LLM-extracted listings.
+    /// </summary>
+    private async Task<ExtractedProductsDto?> ExtractProductsDtoAsync(
+        string query, GeoProfile geo, string context, CancellationToken cancellationToken)
+    {
+        var prompt = PromptTemplates.ExtractProducts(query, geo, context);
+
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                var text = await _llm.CompleteTextAsync(
+                    PromptTemplates.ProductExtractionSystem, prompt, cancellationToken).ConfigureAwait(false);
+
+                var dto = LlmJson.Deserialize<ExtractedProductsDto>(text);
+                if (dto?.Products is not null)
+                {
+                    return dto;
+                }
+
+                Log($"product extraction returned unparseable JSON (attempt {attempt}/2)");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log($"product extraction failed (attempt {attempt}/2): {ex.Message}");
+            }
+        }
+
+        return null;
+    }
+
     private static ProductListing ToRepresentative(ProductModel m)
     {
         var offer = m.LowestOffer;
@@ -526,6 +684,65 @@ public sealed partial class AgentService
 
         return char.ToUpperInvariant(label[0]) + label[1..];
     }
+
+    /// <summary>Wire shape for the structured product-extraction LLM output.</summary>
+    private sealed class ExtractedProductsDto
+    {
+        [JsonPropertyName("products")] public List<ExtractedProductDto>? Products { get; set; }
+    }
+
+    private sealed class ExtractedProductDto
+    {
+        [JsonPropertyName("name")] public string? Name { get; set; }
+        [JsonPropertyName("brand")] public string? Brand { get; set; }
+        [JsonPropertyName("model")] public string? Model { get; set; }
+        [JsonPropertyName("imageUrl")] public string? ImageUrl { get; set; }
+
+        // Tolerant of mixed value types: LLMs emit spec values as strings, numbers or bools.
+        [JsonPropertyName("specs")] public Dictionary<string, JsonElement>? Specs { get; set; }
+        [JsonPropertyName("offers")] public List<ExtractedOfferDto>? Offers { get; set; }
+    }
+
+    private sealed class ExtractedOfferDto
+    {
+        [JsonPropertyName("source")] public string? Source { get; set; }
+
+        // Tolerant of a number (320) or a string ("320 JOD") — parsed via <see cref="ParsePrice"/>.
+        [JsonPropertyName("price")] public JsonElement Price { get; set; }
+        [JsonPropertyName("currency")] public string? Currency { get; set; }
+        [JsonPropertyName("url")] public string? Url { get; set; }
+        [JsonPropertyName("condition")] public string? Condition { get; set; }
+    }
+
+    /// <summary>Parses an LLM price element that may be a JSON number or a string like "320 JOD".</summary>
+    private static decimal? ParsePrice(JsonElement el) => el.ValueKind switch
+    {
+        JsonValueKind.Number when el.TryGetDecimal(out var d) => d,
+        JsonValueKind.String => ParsePriceString(el.GetString()),
+        _ => null
+    };
+
+    private static decimal? ParsePriceString(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var digits = new string(raw.Where(c => char.IsDigit(c) || c is '.' or ',').ToArray()).Replace(",", string.Empty);
+        return decimal.TryParse(digits, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
+    }
+
+    /// <summary>Renders a spec <see cref="JsonElement"/> (string/number/bool) as a display string.</summary>
+    private static string? SpecValue(JsonElement el) => el.ValueKind switch
+    {
+        JsonValueKind.String => el.GetString()?.Trim(),
+        JsonValueKind.Number => el.GetRawText(),
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        _ => null
+    };
 
     /// <summary>Wire shape for the model pros/cons LLM output.</summary>
     private sealed class ProsConsDto
