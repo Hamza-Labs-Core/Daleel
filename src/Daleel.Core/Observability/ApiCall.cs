@@ -46,3 +46,20 @@ public interface IApiCallObserver
 {
     void Record(ApiCall call);
 }
+
+/// <summary>
+/// Helpers for the <see cref="ApiCall.RequestSummary"/> field. Its persisted form
+/// (the <c>ApiCallLog.RequestSummary</c> column) is capped at <see cref="RequestSummaries.MaxLength"/>
+/// chars in the database, so any summary built from unbounded input (e.g. a user's raw query) must
+/// be truncated before persisting — otherwise a long value fails the insert and silently drops the
+/// telemetry batch. Shared so every call site truncates identically.
+/// </summary>
+public static class RequestSummaries
+{
+    /// <summary>Max persisted length of a request summary; mirrors the ApiCallLog DB column constraint.</summary>
+    public const int MaxLength = 500;
+
+    /// <summary>Truncates a summary to <see cref="MaxLength"/> chars. Null or shorter input is returned unchanged.</summary>
+    public static string? Truncate(string? summary) =>
+        summary is { Length: > MaxLength } ? summary[..MaxLength] : summary;
+}

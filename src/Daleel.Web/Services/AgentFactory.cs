@@ -40,6 +40,13 @@ public sealed record AgentRequest
 
     /// <summary>Pricing used to estimate per-call cost (defaults to built-in rates).</summary>
     public Daleel.Core.Observability.CostEstimator? CostEstimator { get; init; }
+
+    /// <summary>Optional cache for provider responses. When set, each search provider is wrapped so an
+    /// exact provider+query+geo repeat is served from cache instead of a paid external call.</summary>
+    public Daleel.Core.Caching.ICacheStore? Cache { get; init; }
+
+    /// <summary>How long cached provider responses stay valid (defaults to 30 days).</summary>
+    public TimeSpan CacheTtl { get; init; } = TimeSpan.FromDays(30);
 }
 
 /// <summary>A snapshot of which capabilities are available given the current keys.</summary>
@@ -120,6 +127,13 @@ public sealed class AgentFactory : IAgentFactory
             if (places is not null) places = Daleel.Search.Instrumentation.LoggingProviders.Wrap(places, observer, estimator);
             if (scraper is not null) scraper = Daleel.Search.Instrumentation.LoggingProviders.WrapScrape(scraper, observer, estimator);
             if (social is not null) social = Daleel.Search.Instrumentation.LoggingProviders.Wrap(social, observer, estimator, "Apify");
+        }
+
+        // Provider-level cache, wrapped OUTSIDE logging so a cache hit skips the real call entirely
+        // (and is recorded as a "cache" hit rather than a paid provider call).
+        if (request.Cache is { } cache && search is not null)
+        {
+            search = Daleel.Search.Instrumentation.CachingProviders.Wrap(search, cache, request.CacheTtl, request.ApiObserver);
         }
 
         var opinions = new OpinionExtractor(llm);

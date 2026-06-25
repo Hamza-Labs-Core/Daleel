@@ -160,6 +160,11 @@ builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.We
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
 builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 
+// Search cache: SQLite-backed store (singleton — opens its own DbContext scope per call, since the
+// agent runs providers in parallel) plus a weekly background sweep of expired entries.
+builder.Services.AddSingleton<Daleel.Core.Caching.ICacheStore, Daleel.Web.Data.SqliteCacheStore>();
+builder.Services.AddHostedService<Daleel.Web.Services.CacheCleanupService>();
+
 // IP rate limiting (in-memory fixed-window — no Redis at this scale).
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IIpRateLimiter, IpRateLimiter>();
