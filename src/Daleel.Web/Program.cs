@@ -60,6 +60,22 @@ var connection = builder.Configuration.GetConnectionString("DefaultConnection")
                  ?? "Data Source=data/daleel.db";
 builder.Services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(connection));
 
+// ── Pipeline event store (PostgreSQL, optional) ───────────────────────────────
+// A separate append-only store on Postgres records every pipeline action (provider call, scrape,
+// LLM, cache, profile, places, extract) for the admin usage/cost dashboard. It is OPTIONAL: with no
+// POSTGRES_CONNECTION_STRING / DATABASE_URL set, the app runs SQLite-only and the store is a no-op.
+var eventStoreConn = Daleel.Web.Events.PostgresConnection.Resolve(builder.Configuration);
+if (eventStoreConn is not null)
+{
+    builder.Services.AddDbContextFactory<Daleel.Web.Events.EventStoreDbContext>(
+        o => o.UseNpgsql(eventStoreConn));
+    builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.PostgresEventStore>();
+}
+else
+{
+    builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.NullEventStore>();
+}
+
 // ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
 // ASP.NET encrypts the Identity auth cookie with Data Protection keys. By default those keys live in
 // $HOME/.aspnet/DataProtection-Keys, but the container runs as a --no-create-home user (see Dockerfile),
@@ -296,4 +312,22 @@ static void EnsureDatabase(WebApplication app)
 
     // Seed admin-editable system settings (idempotent).
     scope.ServiceProvider.GetRequiredService<ISystemConfigService>().SeedDefaultsAsync().GetAwaiter().GetResult();
+
+    // Bring the Postgres event store up to schema when it's configured. Best-effort: a Postgres that
+    // is unreachable at boot must not stop the app — the event store just degrades to dropping writes.
+    var events = scope.ServiceProvider.GetService<Daleel.Web.Events.IEventStore>();
+    if (events?.IsEnabled == true)
+    {
+        try
+        {
+            var factory = scope.ServiceProvider
+                .GetRequiredService<IDbContextFactory<Daleel.Web.Events.EventStoreDbContext>>();
+            using var eventDb = factory.CreateDbContext();
+            eventDb.Database.Migrate();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Event store migration skipped — Postgres unavailable at startup");
+        }
+    }
 }
