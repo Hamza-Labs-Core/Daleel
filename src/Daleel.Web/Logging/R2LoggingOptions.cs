@@ -27,12 +27,15 @@ public sealed record R2LoggingOptions(
         var accessKey = config["R2_ACCESS_KEY"];
         var secretKey = config["R2_SECRET_KEY"];
         var bucket = config["R2_BUCKET_NAME"];
-        var accountId = config["R2_ACCOUNT_ID"];
+        // R2 lives under the same Cloudflare account as the rest of the app, so we reuse the
+        // existing CLOUDFLARE_ACCOUNT_ID rather than asking operators to set a redundant
+        // R2-specific account id. One fewer secret to manage and keep in sync.
+        var accountId = config["CLOUDFLARE_ACCOUNT_ID"];
         var endpoint = config["R2_ENDPOINT"];
 
         // Prefer an explicit endpoint; otherwise derive the canonical R2 S3 URL from the account id.
-        // This lets operators set just R2_ACCOUNT_ID and get the right host for free, while still
-        // allowing a full override (e.g. a jurisdiction-specific endpoint) via R2_ENDPOINT.
+        // This lets operators set just CLOUDFLARE_ACCOUNT_ID and get the right host for free, while
+        // still allowing a full override (e.g. a jurisdiction-specific endpoint) via R2_ENDPOINT.
         var serviceUrl = !string.IsNullOrWhiteSpace(endpoint)
             ? endpoint.Trim()
             : !string.IsNullOrWhiteSpace(accountId)

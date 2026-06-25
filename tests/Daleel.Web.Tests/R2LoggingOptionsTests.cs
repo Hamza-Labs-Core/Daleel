@@ -29,26 +29,26 @@ public class R2LoggingOptionsTests
     }
 
     [Fact]
-    public void FromConfiguration_NoEndpoint_DerivesServiceUrlFromAccountId()
+    public void FromConfiguration_NoEndpoint_DerivesServiceUrlFromCloudflareAccountId()
     {
         var options = R2LoggingOptions.FromConfiguration(Config(
             ("R2_ACCESS_KEY", "ak"),
             ("R2_SECRET_KEY", "sk"),
             ("R2_BUCKET_NAME", "daleel-logs"),
-            ("R2_ACCOUNT_ID", "abc123")));
+            ("CLOUDFLARE_ACCOUNT_ID", "abc123")));
 
         options.Should().NotBeNull();
         options!.ServiceUrl.Should().Be("https://abc123.r2.cloudflarestorage.com");
     }
 
     [Fact]
-    public void FromConfiguration_ExplicitEndpoint_WinsOverAccountId()
+    public void FromConfiguration_ExplicitEndpoint_WinsOverCloudflareAccountId()
     {
         var options = R2LoggingOptions.FromConfiguration(Config(
             ("R2_ACCESS_KEY", "ak"),
             ("R2_SECRET_KEY", "sk"),
             ("R2_BUCKET_NAME", "daleel-logs"),
-            ("R2_ACCOUNT_ID", "abc123"),
+            ("CLOUDFLARE_ACCOUNT_ID", "abc123"),
             ("R2_ENDPOINT", "https://custom.example.com")));
 
         options!.ServiceUrl.Should().Be("https://custom.example.com");
@@ -73,7 +73,7 @@ public class R2LoggingOptionsTests
     }
 
     [Fact]
-    public void FromConfiguration_NoEndpointAndNoAccountId_ReturnsNull()
+    public void FromConfiguration_NoEndpointAndNoCloudflareAccountId_ReturnsNull()
     {
         R2LoggingOptions.FromConfiguration(Config(
             ("R2_ACCESS_KEY", "ak"),
