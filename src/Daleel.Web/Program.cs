@@ -184,6 +184,7 @@ builder.Services.AddHttpContextAccessor();
 // refreshed only when stale (>30 days). Search results JOIN against these instead of re-fetching.
 builder.Services.AddScoped<IBrandRepository, BrandRepository>();
 builder.Services.AddScoped<IStoreRepository, StoreRepository>();
+builder.Services.AddScoped<IProductProfileRepository, ProductProfileRepository>();
 builder.Services.AddSingleton(new Daleel.Web.Profiles.ProfileOptions());
 builder.Services.AddSingleton<Daleel.Web.Profiles.IProfileResearcher, Daleel.Web.Profiles.ContextDevProfileResearcher>();
 builder.Services.AddScoped<Daleel.Web.Profiles.IBrandProfileService, Daleel.Web.Profiles.BrandProfileService>();

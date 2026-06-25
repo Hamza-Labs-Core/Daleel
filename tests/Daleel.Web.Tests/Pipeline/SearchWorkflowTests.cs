@@ -81,9 +81,11 @@ public class SearchWorkflowTests
         services.AddElsa(elsa => elsa.AddActivitiesFrom<SearchWorkflow>());
         services.AddScoped<SearchPipelineState>();
         services.AddSingleton(cache);
-        // Enrichment only resolves these for product queries; register no-ops for completeness.
+        // Enrichment + deep-dive only resolve these for product queries; register no-ops for completeness.
         services.AddSingleton<IBrandProfileService, NoopBrandProfiles>();
         services.AddSingleton<IStoreProfileService, NoopStoreProfiles>();
+        services.AddSingleton(new ProfileOptions());
+        services.AddSingleton<IProductProfileRepository, NoopProductProfiles>();
         return services.BuildServiceProvider();
     }
 
@@ -122,5 +124,12 @@ public class SearchWorkflowTests
         public Task<Store?> GetOrCreateAsync(string n, string? g = null, CancellationToken ct = default) => Task.FromResult<Store?>(null);
         public Task<Store?> RefreshAsync(string n, string? g = null, CancellationToken ct = default) => Task.FromResult<Store?>(null);
         public Task<int> RefreshStaleAsync(int max, CancellationToken ct = default) => Task.FromResult(0);
+    }
+
+    private sealed class NoopProductProfiles : IProductProfileRepository
+    {
+        public Task<ProductProfile?> GetByKeyAsync(string key, CancellationToken ct = default) => Task.FromResult<ProductProfile?>(null);
+        public Task<ProductProfile> UpsertAsync(ProductProfile p, CancellationToken ct = default) => Task.FromResult(p);
+        public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 }

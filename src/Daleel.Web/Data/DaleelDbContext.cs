@@ -35,6 +35,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<SearchCache> SearchCache => Set<SearchCache>();
     public DbSet<Brand> Brands => Set<Brand>();
     public DbSet<Store> Stores => Set<Store>();
+    public DbSet<ProductProfile> ProductProfiles => Set<ProductProfile>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -96,6 +97,20 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.GooglePlaceId).HasMaxLength(256);
             e.Property(x => x.GoogleMapsUrl).HasMaxLength(500);
             e.Property(x => x.OpeningHours).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+        });
+
+        builder.Entity<ProductProfile>(e =>
+        {
+            // Upsert/lookup keyed on the normalized brand+model; LastRefreshed index backs staleness.
+            e.HasIndex(x => x.NameKey).IsUnique();
+            e.HasIndex(x => x.LastRefreshed);
+            e.Property(x => x.Name).HasMaxLength(300);
+            e.Property(x => x.NameKey).HasMaxLength(300);
+            e.Property(x => x.Brand).HasMaxLength(200);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Details).HasMaxLength(8000);
+            e.Property(x => x.SourceUrl).HasMaxLength(1000);
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
         });
 

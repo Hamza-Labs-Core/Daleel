@@ -271,21 +271,26 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
 }
 
 /// <summary>
-/// Step 5b — the per-item deep-dive sub-workflow. For each found product model (bounded), it compares
-/// prices across the stores that carry it and, for items whose specs are thin, scrapes the cheapest
-/// offer page (via Context.dev, instrumented + cost-capped) to pull richer detail back onto the model.
+/// Step 5b — the per-item deep-dive sub-workflow, DB-first. For each found product model (bounded) it
+/// compares prices across the stores that carry it, then pulls richer detail onto the model: a saved
+/// <see cref="Data.ProductProfile"/> is reused when fresh, and only a cache miss / stale profile for a
+/// spec-thin item triggers an actual scrape (via Context.dev, instrumented + cost-capped) — which is
+/// then persisted so every future search that surfaces the same model reuses it instead of re-scraping.
 /// </summary>
-[Activity("Daleel", "Search", "Item deep-dive: compare store prices + scrape specs per product")]
+[Activity("Daleel", "Search", "Item deep-dive: compare store prices + scrape/save specs per product")]
 public sealed class ItemDeepDiveActivity : CodeActivity
 {
-    /// <summary>How many items get a price-comparison pass (cheap, in-memory).</summary>
+    /// <summary>How many items get a price-comparison + reuse pass (cheap; DB reads only).</summary>
     private const int MaxItems = 20;
 
-    /// <summary>How many thin items get an actual network scrape (bounds latency + cost).</summary>
-    private const int MaxScrapes = 8;
+    /// <summary>How many NEW (uncached) thin items get an actual network scrape per run.</summary>
+    private const int MaxNewScrapes = 8;
 
     /// <summary>An item is "thin" (worth scraping) when it has fewer than this many specs.</summary>
     private const int ThinSpecThreshold = 3;
+
+    /// <summary>Cap on a saved detail blob (entity column is 8000).</summary>
+    private const int MaxDetailChars = 4000;
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
@@ -295,12 +300,23 @@ public sealed class ItemDeepDiveActivity : CodeActivity
             return;
         }
 
+        var repo = context.GetRequiredService<Data.IProductProfileRepository>();
+        var opts = context.GetRequiredService<ProfileOptions>();
+        var now = opts.Now();
+        var ttl = opts.Ttl;
+        var ct = context.CancellationToken;
+
         var products = state.Products;
         var models = products.Models.Take(MaxItems).ToList();
+        var enriched = new Dictionary<int, string>();
 
-        // 1) Price comparison across stores — per item, in-memory (the offers are already aggregated).
-        foreach (var m in models)
+        // Phase 1 — price comparison + DB-first reuse. Sequential: the scoped DbContext isn't
+        // concurrency-safe, so all reads happen before any scrape. Items needing a fresh scrape are
+        // queued for phase 2.
+        var toScrape = new List<(ProductModel m, int idx, string url, string key)>();
+        for (var idx = 0; idx < models.Count; idx++)
         {
+            var m = models[idx];
             var stores = m.Offers.Select(o => o.Source)
                 .Where(s => !string.IsNullOrWhiteSpace(s))
                 .Distinct(StringComparer.OrdinalIgnoreCase).Count();
@@ -310,45 +326,67 @@ public sealed class ItemDeepDiveActivity : CodeActivity
                 {
                     ["item"] = m.Name, ["stores"] = stores, ["offers"] = m.Offers.Count
                 });
-        }
 
-        // 2) Deep scrape for thin items only, bounded + run concurrently to keep latency to one round.
-        var targets = models
-            .Select((m, idx) => (m, idx, url: FirstOfferUrl(m)))
-            .Where(t => t.m.Specs.Count < ThinSpecThreshold && t.url is not null)
-            .Take(MaxScrapes)
-            .ToList();
-
-        if (targets.Count == 0)
-        {
-            return;
-        }
-
-        var enriched = new Dictionary<int, string>();
-        var gate = new object();
-        await Task.WhenAll(targets.Select(async t =>
-        {
-            var page = await state.Agent.ReadPageAsync(t.url!, context.CancellationToken);
-            if (page is null)
+            var key = Data.ProductProfile.KeyFor(m.Brand, m.Model, m.Name);
+            if (key.Length == 0)
             {
-                return;
+                continue;
             }
 
-            var snippet = page.Content.Length <= 1500 ? page.Content : page.Content[..1500];
-            lock (gate)
+            var saved = await SafeGetProfile(repo, key, ct);
+            if (saved is { } s && !s.IsStale(now, ttl) && !string.IsNullOrWhiteSpace(s.Details))
             {
-                enriched[t.idx] = snippet;
+                enriched[idx] = s.Details!;
+                state.RecordEvent(EventCategory.Profile, "item.reuse", "profile",
+                    metadata: new Dictionary<string, object?> { ["item"] = m.Name, ["cached"] = true });
+                continue;
             }
+
+            var url = FirstOfferUrl(m);
+            if (url is not null && m.Specs.Count < ThinSpecThreshold && toScrape.Count < MaxNewScrapes)
+            {
+                toScrape.Add((m, idx, url, key));
+            }
+        }
+
+        // Phase 2 — scrape the misses concurrently (network only, no DB access here).
+        var scraped = toScrape.Count == 0
+            ? Array.Empty<(int idx, string url, string key, ProductModel m, string? content)>()
+            : await Task.WhenAll(toScrape.Select(async t =>
+            {
+                var page = await state.Agent.ReadPageAsync(t.url, ct);
+                var content = page is null
+                    ? null
+                    : page.Content.Length <= MaxDetailChars ? page.Content : page.Content[..MaxDetailChars];
+                return (t.idx, t.url, t.key, t.m, content);
+            }));
+
+        // Phase 3 — persist each fresh deep-dive (sequential DB writes) so it's reused next time.
+        var fresh = 0;
+        foreach (var r in scraped)
+        {
+            if (string.IsNullOrWhiteSpace(r.content))
+            {
+                continue;
+            }
+
+            enriched[r.idx] = r.content!;
+            fresh++;
             state.RecordEvent(EventCategory.Extract, "item.deepdive", "context.dev",
-                metadata: new Dictionary<string, object?> { ["item"] = t.m.Name, ["url"] = t.url });
-        }));
+                metadata: new Dictionary<string, object?> { ["item"] = r.m.Name, ["url"] = r.url });
+            await SafeUpsertProfile(repo, new Data.ProductProfile
+            {
+                Name = r.m.Name, Brand = r.m.Brand, Model = r.m.Model, NameKey = r.key,
+                Details = r.content, SourceUrl = r.url, LastRefreshed = now
+            }, ct);
+        }
 
         if (enriched.Count == 0)
         {
             return;
         }
 
-        // Merge the scraped detail back onto the affected models, preserving the un-deep-dived tail.
+        // Merge the detail (saved or fresh) onto the affected models, preserving the un-dived tail.
         var rebuilt = models
             .Select((m, idx) =>
             {
@@ -363,7 +401,23 @@ public sealed class ItemDeepDiveActivity : CodeActivity
             .ToList();
 
         state.Products = products with { Models = rebuilt };
-        state.Log($"Deep-dived {enriched.Count} item(s) for extra detail.");
+        state.Log($"Deep-dived {enriched.Count} item(s) — {fresh} new, {enriched.Count - fresh} reused from earlier searches.");
+    }
+
+    private static async Task<Data.ProductProfile?> SafeGetProfile(
+        Data.IProductProfileRepository repo, string key, CancellationToken ct)
+    {
+        try { return await repo.GetByKeyAsync(key, ct); }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    private static async Task SafeUpsertProfile(
+        Data.IProductProfileRepository repo, Data.ProductProfile profile, CancellationToken ct)
+    {
+        try { await repo.UpsertAsync(profile, ct); }
+        catch (OperationCanceledException) { throw; }
+        catch { /* best-effort: saving a deep-dive must never fail the search */ }
     }
 
     /// <summary>The first offer URL for a model (prefer the cheapest/lowest), or null.</summary>
