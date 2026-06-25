@@ -110,6 +110,92 @@ public class AgentServiceTests
     }
 
     [Fact]
+    public async Task AskAsync_ProductQuery_ExtractsModelsFromProseWhenDeterministicParsersFindNothing()
+    {
+        // The real-world failure: web search returns only a buying-guide article and a brand
+        // homepage — nothing the deterministic parsers turn into a priced listing (no shopping
+        // rows, no ProductListing classification). The LLM extraction pass reads the prose and
+        // produces the structured products, so the grid is populated instead of empty.
+        var search = new FakeSearchProvider(
+            new SearchResult
+            {
+                Title = "Best ACs in Jordan 2026 - Buying Guide",
+                Snippet = "Samsung WindFree ~320 JOD at Smart Buy; LG DualCool ~410 JOD.",
+                Url = "https://blog.example.com/best-acs", Kind = SearchKind.Web
+            },
+            new SearchResult
+            {
+                Title = "Air Conditioners | Samsung Jordan",
+                Url = "https://www.samsung.com/jo/air-conditioners/", Kind = SearchKind.Web
+            });
+
+        const string productsJson = """
+            { "products": [
+              { "name": "Samsung WindFree 1.5 ton Split AC", "brand": "Samsung", "model": "AR18TXHQ",
+                "specs": { "capacity": 1.5, "energy": "A++" },
+                "offers": [ { "source": "Smart Buy", "price": "320 JOD", "currency": "JOD",
+                              "url": "https://smartbuy.com.jo/p/ar18", "condition": "new" } ] },
+              { "name": "LG DualCool 2 ton", "brand": "LG", "model": "S4-Q24",
+                "offers": [ { "source": "Leaders", "price": 410, "currency": "JOD",
+                              "url": "https://leaders.jo/p/s4q24" } ] }
+            ] }
+            """;
+
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.PlannerSystem ? StrategyJson
+            : system == PromptTemplates.ProductExtractionSystem ? productsJson
+            : "Top picks summarized.");
+
+        var agent = new AgentService(llm,
+            new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var answer = await agent.AskAsync("best ACs in Jordan", "jordan");
+
+        var products = answer.Products!;
+        products.ProductCount.Should().Be(2);
+        // Tolerant parsing: the "320 JOD" string price and the numeric spec both survive.
+        products.Models.Should().Contain(m => m.Brand == "Samsung"
+            && m.Specs.ContainsKey("capacity")
+            && m.Offers.Any(o => o.Price == 320 && o.Currency == "JOD" && (o.Url ?? "").Contains("smartbuy")));
+        products.Models.Should().Contain(m => m.Brand == "LG" && m.Offers.Any(o => o.Price == 410));
+        // Brands are derived from the extracted models, so they populate too.
+        products.Brands.Should().Contain(b => b.Name == "Samsung");
+        products.Brands.Should().Contain(b => b.Name == "LG");
+        llm.SystemPromptsSeen.Should().Contain(PromptTemplates.ProductExtractionSystem);
+    }
+
+    [Fact]
+    public async Task AskAsync_ProductQuery_LlmExtraction_DropsNonLocalOffers()
+    {
+        var search = new FakeSearchProvider(
+            new SearchResult { Title = "guide", Snippet = "options", Url = "https://blog.x/acs", Kind = SearchKind.Web });
+
+        const string productsJson = """
+            { "products": [
+              { "name": "Gree AC", "brand": "Gree",
+                "offers": [
+                  { "source": "LocalShop", "price": 300, "currency": "JOD", "url": "https://shop.jo/gree" },
+                  { "source": "GlobalShop", "price": 250, "currency": "USD", "url": "https://global-store.com/gree" }
+                ] }
+            ] }
+            """;
+
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.PlannerSystem ? StrategyJson
+            : system == PromptTemplates.ProductExtractionSystem ? productsJson
+            : "summary");
+
+        var agent = new AgentService(llm,
+            new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var answer = await agent.AskAsync("ACs in Jordan", "jordan");
+        var offers = answer.Products!.Models.SelectMany(m => m.Offers).ToList();
+
+        offers.Should().Contain(o => (o.Url ?? "").Contains("shop.jo"));
+        offers.Should().NotContain(o => (o.Url ?? "").Contains("global-store.com"));
+    }
+
+    [Fact]
     public async Task AskAsync_ProductQuery_AssessesBrandReputation()
     {
         const string repJson = """

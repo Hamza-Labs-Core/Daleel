@@ -175,6 +175,27 @@ public static class PromptTemplates
         "brand with no local service centre, since a cheap product from such a brand is a poor deal." +
         HalalGuard;
 
+    /// <summary>
+    /// System prompt for the structured product-extraction pass. The LLM acts here as a
+    /// <em>parser</em> (not a writer): it reads the gathered search snippets, shopping hits, store
+    /// data and social posts and pulls out the concrete products on offer, with their per-store
+    /// prices and links — the structured data the deterministic parsers miss when a market's
+    /// shopping/scrape APIs return thin results.
+    /// </summary>
+    public const string ProductExtractionSystem =
+        "You are Daleel, a precise product-extraction engine for a shopping assistant. Given the raw " +
+        "research context for a buy-intent query (search results, shopping hits, store listings, social " +
+        "posts), you EXTRACT the concrete products being sold and their prices. You never write prose, " +
+        "advice, or summaries — only structured data. CRITICAL RULES: (1) Extract ONLY products that are " +
+        "actually evidenced in the context (a name, a price, a seller, or a link); never invent products, " +
+        "prices, models, or links. (2) Output ONE entry per distinct MODEL, with every place it is sold " +
+        "gathered into that entry's offers array — never repeat the same model once per store. (3) Prices " +
+        "are numbers only (strip currency symbols/thousands separators); omit a price you cannot find rather " +
+        "than guessing. (4) Keep brand names, model numbers and product names in their ORIGINAL form (do not " +
+        "translate them). (5) Prefer sellers in the target country; include an offer's link verbatim when the " +
+        "context provides one. You ALWAYS reply with a single JSON object only." +
+        HalalGuard;
+
     /// <summary>System prompt for distilling per-model pros/cons from reviews.</summary>
     public const string ModelDetailSystem =
         "You are Daleel, a product analyst. Given reviews, specs and listings for a single product model, you " +
@@ -258,6 +279,53 @@ public static class PromptTemplates
               "summary": "one or two sentence verdict"
             }
             Base everything on the context; if it's thin, return fewer points rather than inventing. No prose outside the JSON.
+            """);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds the prompt that asks the LLM to extract structured products + per-store offers from
+    /// the gathered context. The JSON shape feeds straight into the listing aggregator, so a model's
+    /// <c>offers</c> become its <see cref="Daleel.Core.Models.PriceOffer"/>s in the product grid.
+    /// </summary>
+    public static string ExtractProducts(string query, GeoProfile geo, string gatheredContext)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(MarketContext(geo));
+        sb.Append("Buy-intent query: ").AppendLine(query);
+        sb.Append("Extract the concrete products a shopper in ").Append(geo.Country)
+          .AppendLine(" could buy, drawn ONLY from the context below. Prefer local sellers; quote real prices and links.");
+        sb.AppendLine("Gathered research context (search results, shopping hits, store data, social posts):");
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine(gatheredContext);
+        sb.AppendLine("----------------------------------------");
+        sb.Append("Prices are in ").Append(geo.Currency)
+          .AppendLine(" unless the context states otherwise.");
+        sb.AppendLine("""
+            Reply with exactly this JSON object:
+            {
+              "products": [
+                {
+                  "name": "full product name as written",
+                  "brand": "manufacturer, e.g. Samsung / LG / Gree",
+                  "model": "model number/name if known, else null",
+                  "imageUrl": "image link if present in context, else null",
+                  "specs": { "key": "value" },
+                  "offers": [
+                    {
+                      "source": "store/marketplace name, e.g. Smart Buy",
+                      "price": 320,
+                      "currency": "JOD",
+                      "url": "direct link to this offer if present, else null",
+                      "condition": "new|used|refurbished, else null"
+                    }
+                  ]
+                }
+              ]
+            }
+            One entry per distinct model; gather all its sellers into offers. Only include products evidenced in
+            the context — never invent products, prices, models or links. Use an empty products array if the context
+            has no concrete products. No prose outside the JSON.
             """);
         return sb.ToString();
     }
