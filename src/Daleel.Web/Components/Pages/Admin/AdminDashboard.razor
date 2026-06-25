@@ -8,7 +8,14 @@
 
 <MudText Typo="Typo.h4" Class="mb-4">Dashboard</MudText>
 
-@if (_d is null)
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load the dashboard: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="RetryAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_d is null)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
@@ -46,11 +53,27 @@ else
 
 @code {
     private AdminDashboardStats? _d;
+    private string? _error;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        _d = await Analytics.GetDashboardAsync();
+        await RetryAsync();
+    }
+
+    private async Task RetryAsync()
+    {
+        _error = null;
+        _d = null;
+        StateHasChanged();
+        try
+        {
+            _d = await Analytics.GetDashboardAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
         StateHasChanged();
     }
 }

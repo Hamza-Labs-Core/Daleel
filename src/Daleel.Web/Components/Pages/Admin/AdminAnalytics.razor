@@ -8,7 +8,14 @@
 <AdminNav />
 <MudText Typo="Typo.h4" Class="mb-4">Analytics</MudText>
 
-@if (_loading)
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load analytics: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="RetryAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
@@ -130,6 +137,7 @@ else
 
 @code {
     private bool _loading = true;
+    private string? _error;
     private IReadOnlyList<(DateTime Day, int Count)> _perDay = new List<(DateTime, int)>();
     private IReadOnlyList<(string Type, int Count)> _byType = new List<(string, int)>();
     private IReadOnlyList<(string Geo, int Count)> _byGeo = new List<(string, int)>();
@@ -148,26 +156,42 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
+        await RetryAsync();
+    }
 
-        var since = DateTime.UtcNow.AddDays(-30);
-        var sinceOffset = DateTimeOffset.UtcNow.AddDays(-30);
-        _perDay = await Analytics.SearchesPerDayAsync(14);
-        _byType = await Analytics.SearchesByTypeAsync(since);
-        _byGeo = await Analytics.GeoDistributionAsync(since);
+    private async Task RetryAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
 
-        _labels = _perDay.Select(d => d.Day.ToString("MM/dd")).ToArray();
-        _series = new() { new ChartSeries { Name = "Searches", Data = _perDay.Select(d => (double)d.Count).ToArray() } };
+        try
+        {
+            var since = DateTime.UtcNow.AddDays(-30);
+            var sinceOffset = DateTimeOffset.UtcNow.AddDays(-30);
+            _perDay = await Analytics.SearchesPerDayAsync(14);
+            _byType = await Analytics.SearchesByTypeAsync(since);
+            _byGeo = await Analytics.GeoDistributionAsync(since);
 
-        _totalCost = await ApiLog.TotalCostAsync(sinceOffset);
-        _avgPerJob = await ApiLog.AverageCostPerJobAsync(sinceOffset);
-        _providers = await ApiLog.ProviderUsageAsync(sinceOffset);
-        _tokens = await ApiLog.TokenUsageAsync(sinceOffset);
-        _expensive = await ApiLog.MostExpensiveQueriesAsync(sinceOffset, 10);
-        _costPerDay = await ApiLog.CostPerDayAsync(14);
-        _costLabels = _costPerDay.Select(d => d.Day.ToString("MM/dd")).ToArray();
-        _costSeries = new() { new ChartSeries { Name = "Cost $", Data = _costPerDay.Select(d => (double)d.Cost).ToArray() } };
+            _labels = _perDay.Select(d => d.Day.ToString("MM/dd")).ToArray();
+            _series = new() { new ChartSeries { Name = "Searches", Data = _perDay.Select(d => (double)d.Count).ToArray() } };
 
-        _loading = false;
+            _totalCost = await ApiLog.TotalCostAsync(sinceOffset);
+            _avgPerJob = await ApiLog.AverageCostPerJobAsync(sinceOffset);
+            _providers = await ApiLog.ProviderUsageAsync(sinceOffset);
+            _tokens = await ApiLog.TokenUsageAsync(sinceOffset);
+            _expensive = await ApiLog.MostExpensiveQueriesAsync(sinceOffset, 10);
+            _costPerDay = await ApiLog.CostPerDayAsync(14);
+            _costLabels = _costPerDay.Select(d => d.Day.ToString("MM/dd")).ToArray();
+            _costSeries = new() { new ChartSeries { Name = "Cost $", Data = _costPerDay.Select(d => (double)d.Cost).ToArray() } };
+
+            _loading = false;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _loading = false;
+        }
         StateHasChanged();
     }
 }

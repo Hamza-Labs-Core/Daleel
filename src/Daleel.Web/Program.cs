@@ -27,9 +27,8 @@ builder.AddDaleelLogging();
 //
 // DetailedErrors surfaces the full server-side stack trace of any unhandled circuit exception to the
 // browser (instead of the opaque "Unhandled exception on the current circuit"). It's config-driven so
-// it can be toggled per environment: it defaults OFF (don't leak stack traces to clients), and is
-// currently enabled in appsettings.json to diagnose a production circuit error. Set "DetailedErrors"
-// back to false once the root cause is found.
+// it can be toggled per environment: it defaults OFF in base appsettings.json (don't leak stack traces
+// to clients) and is enabled only in appsettings.Development.json for local debugging. See SEC-2.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents(options =>
         options.DetailedErrors = builder.Configuration.GetValue("DetailedErrors", false))
@@ -101,6 +100,14 @@ builder.Services.ConfigureApplicationCookie(o =>
 
     o.Events.OnRedirectToLogin = ctx => ApiAwareRedirect(ctx, StatusCodes.Status401Unauthorized);
     o.Events.OnRedirectToAccessDenied = ctx => ApiAwareRedirect(ctx, StatusCodes.Status403Forbidden);
+
+    // Revalidate the security stamp on every authenticated request (HTTP API included, not just the
+    // Blazor circuit). Without this, a disabled user's cookie — or a revoked admin's baked-in role
+    // claim — keeps authenticating against /api/* until the 30-day cookie expires. The validator
+    // re-checks the cookie's stamp against the database at most once per SecurityStampValidatorOptions
+    // .ValidationInterval (5 min, configured below), so disabling/role changes (which rotate the stamp
+    // via UpdateSecurityStampAsync) take effect within minutes everywhere. See SEC-1.
+    o.Events.OnValidatePrincipal = SecurityStampValidator.ValidatePrincipalAsync;
 });
 
 static Task ApiAwareRedirect(Microsoft.AspNetCore.Authentication.RedirectContext<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions> ctx, int statusCode)
@@ -130,6 +137,13 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
     .AddSignInManager()
     .AddClaimsPrincipalFactory<AdditionalUserClaimsPrincipalFactory>()
     .AddDefaultTokenProviders();
+
+// Cookie security-stamp validation (SEC-1). AddIdentityCore — unlike AddIdentity — does not register
+// the stamp validators, so the OnValidatePrincipal hook above has nothing to call unless we add them.
+// A 5-minute interval bounds how long a revoked/disabled user's cookie can survive on the HTTP API.
+builder.Services.Configure<SecurityStampValidatorOptions>(o => o.ValidationInterval = TimeSpan.FromMinutes(5));
+builder.Services.AddScoped<ISecurityStampValidator, SecurityStampValidator<ApplicationUser>>();
+builder.Services.AddScoped<ITwoFactorSecurityStampValidator, TwoFactorSecurityStampValidator<ApplicationUser>>();
 
 // Surfaces auth state to interactive Server components and revalidates against the security stamp.
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();

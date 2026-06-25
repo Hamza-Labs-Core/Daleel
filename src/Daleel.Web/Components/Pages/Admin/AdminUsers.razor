@@ -5,13 +5,21 @@
 @inject UserManager<ApplicationUser> Users
 @inject DaleelDbContext Db
 @inject ISnackbar Snackbar
+@inject IDialogService Dialogs
 
 <PageTitle>دليل · Admin · Users</PageTitle>
 
 <AdminNav />
 <MudText Typo="Typo.h4" Class="mb-4">User Management</MudText>
 
-@if (_rows is null)
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load users: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="RetryAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_rows is null)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
@@ -81,11 +89,29 @@ else
     private List<Row>? _rows;
     private List<SubscriptionPlan> _plans = new();
     private string _search = string.Empty;
+    private string? _error;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        await LoadAsync();
+        await RetryAsync();
+    }
+
+    private async Task RetryAsync()
+    {
+        // Reset to the loading state, then attempt the load; on failure surface a retryable error
+        // instead of leaving the page on a permanent spinner. H4.
+        _error = null;
+        _rows = null;
+        StateHasChanged();
+        try
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
         StateHasChanged();
     }
 
@@ -120,42 +146,114 @@ else
 
     private async Task ChangePlanAsync(Row row, int planId)
     {
-        // Cancel any current active subscriptions, then add the new one (Basic = no subscription row).
-        var current = await Db.UserSubscriptions
-            .Where(s => s.UserId == row.User.Id && s.Status == "active").ToListAsync();
-        foreach (var s in current) { s.Status = "cancelled"; }
-
-        if (planId != SubscriptionPlan.BasicId)
+        if (planId == row.PlanId)
         {
-            Db.UserSubscriptions.Add(new UserSubscription
-            {
-                UserId = row.User.Id, PlanId = planId, Status = "active", StartedAt = DateTimeOffset.UtcNow
-            });
+            return;
         }
 
-        await Db.SaveChangesAsync();
-        row.PlanId = planId;
-        Snackbar.Add("Plan updated.", Severity.Success);
+        var who = row.User.DisplayName ?? row.User.Email ?? "this user";
+        var newPlan = _plans.FirstOrDefault(p => p.Id == planId)?.Name ?? "the selected plan";
+        var confirmed = await Dialogs.ShowMessageBox(
+            "Change subscription plan?",
+            $"This cancels {who}'s current subscription and moves them to {newPlan}. Continue?",
+            yesText: "Change plan", cancelText: "Cancel");
+
+        if (confirmed != true)
+        {
+            // Revert the MudSelect to the persisted plan (its Value is bound to row.PlanId).
+            StateHasChanged();
+            return;
+        }
+
+        try
+        {
+            // Cancel any current active subscriptions, then add the new one (Basic = no subscription row).
+            var current = await Db.UserSubscriptions
+                .Where(s => s.UserId == row.User.Id && s.Status == "active").ToListAsync();
+            foreach (var s in current) { s.Status = "cancelled"; }
+
+            if (planId != SubscriptionPlan.BasicId)
+            {
+                Db.UserSubscriptions.Add(new UserSubscription
+                {
+                    UserId = row.User.Id, PlanId = planId, Status = "active", StartedAt = DateTimeOffset.UtcNow
+                });
+            }
+
+            await Db.SaveChangesAsync();
+            // Only mutate UI state after the save succeeds, so the row never diverges from the DB.
+            row.PlanId = planId;
+            Snackbar.Add("Plan updated.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't update plan: {ex.Message}", Severity.Error);
+            StateHasChanged();
+        }
     }
 
     private async Task ToggleAdminAsync(Row row)
     {
-        row.User.IsAdmin = !row.User.IsAdmin;
-        await Users.UpdateAsync(row.User);
-        // Rotate the security stamp so live sessions/circuits are revalidated and the role change
-        // (especially a *revocation*) takes effect without waiting for the cookie to expire.
-        await Users.UpdateSecurityStampAsync(row.User);
-        Snackbar.Add(row.User.IsAdmin ? "Granted admin (effective on next sign-in)." : "Revoked admin (signed out everywhere).", Severity.Success);
+        var who = row.User.DisplayName ?? row.User.Email ?? "this user";
+        var granting = !row.User.IsAdmin;
+        var confirmed = await Dialogs.ShowMessageBox(
+            granting ? "Grant admin?" : "Revoke admin?",
+            granting
+                ? $"Grant full admin access to {who}?"
+                : $"Revoke admin from {who}? They will be signed out everywhere.",
+            yesText: granting ? "Grant admin" : "Revoke admin", cancelText: "Cancel");
+
+        if (confirmed != true)
+        {
+            return;
+        }
+
+        try
+        {
+            row.User.IsAdmin = granting;
+            await Users.UpdateAsync(row.User);
+            // Rotate the security stamp so live sessions/circuits are revalidated and the role change
+            // (especially a *revocation*) takes effect without waiting for the cookie to expire.
+            await Users.UpdateSecurityStampAsync(row.User);
+            Snackbar.Add(row.User.IsAdmin ? "Granted admin (effective on next sign-in)." : "Revoked admin (signed out everywhere).", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            row.User.IsAdmin = !granting; // roll back the optimistic flip
+            Snackbar.Add($"Couldn't change admin role: {ex.Message}", Severity.Error);
+        }
     }
 
     private async Task ToggleDisableAsync(Row row)
     {
-        row.User.IsDisabled = !row.User.IsDisabled;
-        await Users.UpdateAsync(row.User);
-        // Rotate the security stamp: disabling must terminate the user's existing sessions, not just
-        // block the next sign-in. The revalidating auth-state provider picks this up and tears down
-        // their live circuits; the cookie's stamp validation rejects subsequent requests.
-        await Users.UpdateSecurityStampAsync(row.User);
-        Snackbar.Add(row.User.IsDisabled ? "Account disabled (signed out everywhere)." : "Account enabled.", Severity.Success);
+        var who = row.User.DisplayName ?? row.User.Email ?? "this user";
+        var disabling = !row.User.IsDisabled;
+        var confirmed = await Dialogs.ShowMessageBox(
+            disabling ? "Disable account?" : "Enable account?",
+            disabling
+                ? $"Disable {who}? This signs them out everywhere and blocks sign-in until re-enabled."
+                : $"Re-enable {who}? They will be able to sign in again.",
+            yesText: disabling ? "Disable" : "Enable", cancelText: "Cancel");
+
+        if (confirmed != true)
+        {
+            return;
+        }
+
+        try
+        {
+            row.User.IsDisabled = disabling;
+            await Users.UpdateAsync(row.User);
+            // Rotate the security stamp: disabling must terminate the user's existing sessions, not just
+            // block the next sign-in. The revalidating auth-state provider picks this up and tears down
+            // their live circuits; the cookie's stamp validation rejects subsequent requests.
+            await Users.UpdateSecurityStampAsync(row.User);
+            Snackbar.Add(row.User.IsDisabled ? "Account disabled (signed out everywhere)." : "Account enabled.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            row.User.IsDisabled = !disabling; // roll back the optimistic flip
+            Snackbar.Add($"Couldn't change account status: {ex.Message}", Severity.Error);
+        }
     }
 }

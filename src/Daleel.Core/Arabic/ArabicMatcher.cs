@@ -139,8 +139,18 @@ public class ArabicMatcher : IPostMatcher
                 continue;
             }
 
-            var distance = Levenshtein(token, keyword);
             var denom = Math.Max(token.Length, keyword.Length);
+
+            // Edit distance is always >= the length difference, so if the lengths
+            // alone push us past the allowed max distance there is no point computing
+            // the full matrix — prune before the O(n*m) work.
+            var maxDist = threshold * denom;
+            if (Math.Abs(token.Length - keyword.Length) > maxDist)
+            {
+                continue;
+            }
+
+            var distance = Levenshtein(token, keyword);
             var similarity = denom == 0 ? 0.0 : 1.0 - (double)distance / denom;
 
             // Convert the caller's "max distance fraction" threshold into a minimum
@@ -192,8 +202,18 @@ public class ArabicMatcher : IPostMatcher
     }
 
     /// <summary>
+    /// Largest <c>b.Length</c> for which the rolling rows are stack-allocated. Beyond
+    /// this we fall back to heap arrays so a pathologically long token cannot overflow
+    /// the stack. Two rows of (cap + 1) ints ≈ 2 KB at the cap.
+    /// </summary>
+    private const int StackallocThreshold = 256;
+
+    /// <summary>
     /// Classic Wagner–Fischer Levenshtein edit distance using two rolling rows
-    /// (O(n) memory). Operates on already-normalized strings.
+    /// (O(n) memory). Operates on already-normalized strings. The rolling rows are
+    /// stack-allocated for typical token lengths to avoid two array allocations per
+    /// call (this runs once per keyword × text-token pair), with a heap fallback for
+    /// very long inputs.
     /// </summary>
     internal static int Levenshtein(string a, string b)
     {
@@ -212,10 +232,18 @@ public class ArabicMatcher : IPostMatcher
             return a.Length;
         }
 
-        var previous = new int[b.Length + 1];
-        var current = new int[b.Length + 1];
+        var width = b.Length + 1;
+        int[]? previousRented = null;
+        int[]? currentRented = null;
 
-        for (var j = 0; j <= b.Length; j++)
+        Span<int> previous = width <= StackallocThreshold
+            ? stackalloc int[width]
+            : (previousRented = new int[width]);
+        Span<int> current = width <= StackallocThreshold
+            ? stackalloc int[width]
+            : (currentRented = new int[width]);
+
+        for (var j = 0; j < width; j++)
         {
             previous[j] = j;
         }
@@ -231,9 +259,13 @@ public class ArabicMatcher : IPostMatcher
                     previous[j - 1] + cost);
             }
 
-            (previous, current) = (current, previous);
+            var tmp = previous;
+            previous = current;
+            current = tmp;
         }
 
+        // previousRented / currentRented are held only to keep the heap fallback
+        // buffers rooted for the lifetime of the spans above.
         return previous[b.Length];
     }
 }

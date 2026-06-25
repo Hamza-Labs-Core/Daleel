@@ -11,7 +11,14 @@
     Rate limits, feature flags, default models per plan, and other tunables.
 </MudText>
 
-@if (_items is null)
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load settings: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="RetryAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_items is null)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
@@ -37,27 +44,75 @@ else
             </div>
         }
         <MudButton StartIcon="@Icons.Material.Filled.Save" Variant="Variant.Filled" Color="Color.Primary"
-                   Class="mt-3" OnClick="SaveAllAsync">Save all</MudButton>
+                   Class="mt-3" OnClick="SaveAllAsync" Disabled="_saving">
+            @(_saving ? "Saving…" : "Save all")
+        </MudButton>
     </MudPaper>
 }
 
 @code {
     private List<SystemConfig>? _items;
+    private string? _error;
+    private bool _saving;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        _items = (await Config.AllAsync()).ToList();
+        await RetryAsync();
+    }
+
+    private async Task RetryAsync()
+    {
+        _error = null;
+        _items = null;
+        StateHasChanged();
+        try
+        {
+            _items = (await Config.AllAsync()).ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
         StateHasChanged();
     }
 
     private async Task SaveAllAsync()
     {
-        if (_items is null) return;
+        if (_items is null || _saving) return;
+
+        // Validate every value before writing anything, so a single bad entry can't leave the system
+        // half-saved with a misleading "Settings saved." H5.
         foreach (var item in _items)
         {
-            await Config.SetAsync(item.Key, item.Value, item.Type);
+            if (item.Type == "int" && !int.TryParse(item.Value, out _))
+            {
+                Snackbar.Add($"\"{item.Key}\" must be a whole number.", Severity.Warning);
+                return;
+            }
+            if (item.Type == "bool" && item.Value is not ("true" or "false"))
+            {
+                Snackbar.Add($"\"{item.Key}\" must be true or false.", Severity.Warning);
+                return;
+            }
         }
-        Snackbar.Add("Settings saved.", Severity.Success);
+
+        _saving = true;
+        try
+        {
+            foreach (var item in _items)
+            {
+                await Config.SetAsync(item.Key, item.Value, item.Type);
+            }
+            Snackbar.Add("Settings saved.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't save all settings: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _saving = false;
+        }
     }
 }

@@ -44,7 +44,7 @@ public static class ArabicNormalizer
         var sb = new StringBuilder(text.Length);
         foreach (var ch in text)
         {
-            sb.Append(FoldChar(ch));
+            FoldChar(ch, sb);
         }
 
         // 8. Whitespace normalization.
@@ -52,45 +52,80 @@ public static class ArabicNormalizer
     }
 
     /// <summary>
-    /// Maps a single character to its folded canonical form. Characters with no
-    /// mapping are returned unchanged. The standalone hamza (ء) folds to the empty
-    /// string, so callers must treat the return value as a (possibly empty) span.
+    /// Appends the folded canonical form of a single character to <paramref name="sb"/>.
+    /// Characters with no mapping are appended unchanged; the standalone hamza (ء) and
+    /// tatweel (ـ) fold to nothing (no append). Writing directly into the builder avoids
+    /// allocating a one-character <see cref="string"/> per input character — this is the
+    /// hottest path in the system, so the per-char allocation matters.
     /// </summary>
-    private static string FoldChar(char ch) => ch switch
+    private static void FoldChar(char ch, StringBuilder sb)
     {
-        // Alef variants → bare alef.
-        'أ' or 'إ' or 'آ' or 'ٱ' or 'ٲ' or 'ٳ' => "ا",
+        switch (ch)
+        {
+            // Alef variants → bare alef.
+            case 'أ' or 'إ' or 'آ' or 'ٱ' or 'ٲ' or 'ٳ':
+                sb.Append('ا');
+                break;
 
-        // Alef maksura → yaa.
-        'ى' => "ي",
+            // Alef maksura → yaa.
+            case 'ى':
+                sb.Append('ي');
+                break;
 
-        // Taa marbuta → haa.
-        'ة' => "ه",
+            // Taa marbuta → haa.
+            case 'ة':
+                sb.Append('ه');
+                break;
 
-        // Hamza on waw / yaa → bare carrier.
-        'ؤ' => "و",
-        'ئ' => "ي",
+            // Hamza on waw / yaa → bare carrier.
+            case 'ؤ':
+                sb.Append('و');
+                break;
+            case 'ئ':
+                sb.Append('ي');
+                break;
 
-        // Standalone hamza is dropped entirely.
-        'ء' => string.Empty,
+            // Standalone hamza and tatweel (kashida) are dropped entirely.
+            case 'ء' or 'ـ':
+                break;
 
-        // Tatweel (kashida) is decorative stretching → drop.
-        'ـ' => string.Empty,
+            // Arabic-Indic digits → ASCII digits for consistent matching.
+            case '٠':
+                sb.Append('0');
+                break;
+            case '١':
+                sb.Append('1');
+                break;
+            case '٢':
+                sb.Append('2');
+                break;
+            case '٣':
+                sb.Append('3');
+                break;
+            case '٤':
+                sb.Append('4');
+                break;
+            case '٥':
+                sb.Append('5');
+                break;
+            case '٦':
+                sb.Append('6');
+                break;
+            case '٧':
+                sb.Append('7');
+                break;
+            case '٨':
+                sb.Append('8');
+                break;
+            case '٩':
+                sb.Append('9');
+                break;
 
-        // Arabic-Indic digits → ASCII digits for consistent matching.
-        '٠' => "0",
-        '١' => "1",
-        '٢' => "2",
-        '٣' => "3",
-        '٤' => "4",
-        '٥' => "5",
-        '٦' => "6",
-        '٧' => "7",
-        '٨' => "8",
-        '٩' => "9",
-
-        _ => ch.ToString()
-    };
+            default:
+                sb.Append(ch);
+                break;
+        }
+    }
 
     /// <summary>
     /// Collapses any run of whitespace into a single ASCII space and trims the ends.

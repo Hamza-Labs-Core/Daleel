@@ -3,6 +3,7 @@
 @using Microsoft.EntityFrameworkCore
 @inject DaleelDbContext Db
 @inject ISnackbar Snackbar
+@inject IDialogService Dialogs
 
 <PageTitle>دليل · Admin · Plans</PageTitle>
 
@@ -17,7 +18,14 @@
     Changes apply to new billing cycles. Leave "searches/month" empty for unlimited.
 </MudText>
 
-@if (_editors is null)
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load plans: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="RetryAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_editors is null)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
@@ -84,11 +92,27 @@ else
     }
 
     private List<PlanEditor>? _editors;
+    private string? _error;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        await LoadAsync();
+        await RetryAsync();
+    }
+
+    private async Task RetryAsync()
+    {
+        _error = null;
+        _editors = null;
+        StateHasChanged();
+        try
+        {
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
         StateHasChanged();
     }
 
@@ -116,26 +140,60 @@ else
 
     private async Task SaveAsync(PlanEditor editor)
     {
-        // Fold the edited feature rows back into the JSON column (trims + drops blanks).
-        editor.Plan.SetFeatures(editor.Features.Select(f => f.Text));
+        if (string.IsNullOrWhiteSpace(editor.Plan.Name))
+        {
+            Snackbar.Add("Plan name is required.", Severity.Warning);
+            return;
+        }
 
-        if (editor.Plan.Id == 0) { Db.SubscriptionPlans.Add(editor.Plan); }
-        else { Db.SubscriptionPlans.Update(editor.Plan); }
-        await Db.SaveChangesAsync();
+        try
+        {
+            // Fold the edited feature rows back into the JSON column (trims + drops blanks).
+            editor.Plan.SetFeatures(editor.Features.Select(f => f.Text));
 
-        // Re-sync the editor rows so blanks the user left are reflected after the save.
-        editor.Features = editor.Plan.GetFeatures().Select(f => new FeatureItem { Text = f }).ToList();
-        Snackbar.Add($"Saved {editor.Plan.Name}.", Severity.Success);
+            if (editor.Plan.Id == 0) { Db.SubscriptionPlans.Add(editor.Plan); }
+            else { Db.SubscriptionPlans.Update(editor.Plan); }
+            await Db.SaveChangesAsync();
+
+            // Re-sync the editor rows so blanks the user left are reflected after the save.
+            editor.Features = editor.Plan.GetFeatures().Select(f => new FeatureItem { Text = f }).ToList();
+            Snackbar.Add($"Saved {editor.Plan.Name}.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't save plan: {ex.Message}", Severity.Error);
+        }
     }
 
     private async Task DeleteAsync(PlanEditor editor)
     {
-        if (editor.Plan.Id != 0)
+        // Unsaved (new) editors can be dropped without a round-trip or a scary prompt.
+        if (editor.Plan.Id == 0)
+        {
+            _editors?.Remove(editor);
+            return;
+        }
+
+        var confirmed = await Dialogs.ShowMessageBox(
+            "Delete plan?",
+            $"Permanently delete the \"{editor.Plan.Name}\" plan? This cannot be undone.",
+            yesText: "Delete", cancelText: "Cancel");
+
+        if (confirmed != true)
+        {
+            return;
+        }
+
+        try
         {
             Db.SubscriptionPlans.Remove(editor.Plan);
             await Db.SaveChangesAsync();
+            _editors?.Remove(editor);
+            Snackbar.Add("Plan removed.", Severity.Info);
         }
-        _editors?.Remove(editor);
-        Snackbar.Add("Plan removed.", Severity.Info);
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't delete plan: {ex.Message}", Severity.Error);
+        }
     }
 }
