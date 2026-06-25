@@ -20,6 +20,12 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
 {
     public const string DefaultBaseUrl = "https://serpapi.com";
 
+    /// <summary>Google's reliable page size; <c>num</c> above this is often ignored, so we page instead.</summary>
+    private const int PageSize = 10;
+
+    /// <summary>Hard cap on pages per query so a deep scan can never fan out unbounded.</summary>
+    private const int MaxPages = 10;
+
     private readonly string _apiKey;
     public string Name => "serpapi";
     protected override string ProviderName => Name;
@@ -55,18 +61,11 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
             _ => "google"
         };
 
-        var url = BuildUrl(engine, query);
-
-        using var doc = await SendJsonAsync(
-            () => new HttpRequestMessage(HttpMethod.Get, url),
-            cancellationToken).ConfigureAwait(false);
-
-        var results = query.Kind switch
-        {
-            SearchKind.Shopping => ParseShopping(doc.RootElement, query.MaxResults),
-            SearchKind.Maps => ParseLocal(doc.RootElement, query.MaxResults),
-            _ => ParseOrganic(doc.RootElement, query.MaxResults)
-        };
+        // Web and shopping go deep — page through results (up to MaxPages) until we reach the
+        // requested count. Maps/News stay single-page (their result shapes don't paginate usefully here).
+        var results = query.Kind is SearchKind.Web or SearchKind.Shopping
+            ? await SearchPagedAsync(engine, query, cancellationToken).ConfigureAwait(false)
+            : await SearchSinglePageAsync(engine, query, cancellationToken).ConfigureAwait(false);
 
         return new SearchResults
         {
@@ -77,12 +76,86 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
         };
     }
 
-    private string BuildUrl(string engine, SearchQuery query)
+    /// <summary>
+    /// Deep search: walk pages via the <c>start</c> offset, aggregating + de-duplicating until we
+    /// have <see cref="SearchQuery.MaxResults"/> hits, a page comes back empty, or we hit
+    /// <see cref="MaxPages"/>. Each page asks for <see cref="PageSize"/> rather than trusting a large
+    /// <c>num</c>, which Google often clamps back to ~10.
+    /// </summary>
+    private async Task<List<SearchResult>> SearchPagedAsync(
+        string engine, SearchQuery query, CancellationToken cancellationToken)
+    {
+        var collected = new List<SearchResult>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pages = Math.Clamp((int)Math.Ceiling(query.MaxResults / (double)PageSize), 1, MaxPages);
+
+        for (var page = 0; page < pages; page++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var url = BuildUrl(engine, query, start: page * PageSize, num: PageSize);
+            using var doc = await SendJsonAsync(
+                () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken).ConfigureAwait(false);
+
+            var pageResults = query.Kind == SearchKind.Shopping
+                ? ParseShopping(doc.RootElement, int.MaxValue)
+                : ParseOrganic(doc.RootElement, int.MaxValue);
+
+            if (pageResults.Count == 0)
+            {
+                break; // No more results — Google has nothing past this offset.
+            }
+
+            var added = 0;
+            foreach (var r in pageResults)
+            {
+                // Dedup across pages: prefer URL, fall back to title+position for url-less shopping hits.
+                var key = r.Url ?? $"{r.Title}|{r.Position}";
+                if (seen.Add(key))
+                {
+                    collected.Add(r);
+                    added++;
+                    if (collected.Count >= query.MaxResults)
+                    {
+                        return collected;
+                    }
+                }
+            }
+
+            // A page that adds nothing new means Google is repeating the tail — stop paging.
+            if (added == 0)
+            {
+                break;
+            }
+        }
+
+        return collected;
+    }
+
+    private async Task<List<SearchResult>> SearchSinglePageAsync(
+        string engine, SearchQuery query, CancellationToken cancellationToken)
+    {
+        var url = BuildUrl(engine, query, start: 0, num: query.MaxResults);
+        using var doc = await SendJsonAsync(
+            () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken).ConfigureAwait(false);
+
+        return query.Kind switch
+        {
+            SearchKind.Maps => ParseLocal(doc.RootElement, query.MaxResults),
+            _ => ParseOrganic(doc.RootElement, query.MaxResults)
+        };
+    }
+
+    private string BuildUrl(string engine, SearchQuery query, int start, int num)
     {
         var sb = new System.Text.StringBuilder("/search.json?");
         sb.Append("engine=").Append(Uri.EscapeDataString(engine));
         sb.Append("&q=").Append(Uri.EscapeDataString(query.Query));
-        sb.Append("&num=").Append(query.MaxResults);
+        sb.Append("&num=").Append(num);
+        if (start > 0)
+        {
+            // SerpAPI pagination offset (0-based result index): 10, 20, … for subsequent pages.
+            sb.Append("&start=").Append(start);
+        }
         // Halal/safety: always request Google SafeSearch so adult/unsafe hits never reach us.
         sb.Append("&safe=active");
         if (!string.IsNullOrWhiteSpace(query.CountryCode))

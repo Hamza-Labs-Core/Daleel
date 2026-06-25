@@ -9,8 +9,15 @@ public sealed class AgentOptions
     /// <summary>Default market when a query doesn't specify one.</summary>
     public string DefaultGeo { get; init; } = "usa";
 
-    /// <summary>Max results to request per search query.</summary>
+    /// <summary>Max results to request per search query (places/social depth).</summary>
     public int ResultsPerQuery { get; init; } = 10;
+
+    /// <summary>
+    /// Depth for web/shopping queries: the provider pages through Google until it reaches this many
+    /// results (SerpAPI caps at 10 pages). Defaults to a deep 100-result scan; total cost is still
+    /// bounded by <see cref="MaxQueriesPerKind"/> and the per-job API-call cap.
+    /// </summary>
+    public int DeepResultsPerQuery { get; init; } = 100;
 
     /// <summary>Max web/shopping queries to actually execute from a plan (cost guard).</summary>
     public int MaxQueriesPerKind { get; init; } = 4;

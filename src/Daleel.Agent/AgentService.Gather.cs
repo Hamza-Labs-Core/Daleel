@@ -81,6 +81,10 @@ public sealed partial class AgentService
         }
 
         var selected = queries.Take(_options.MaxQueriesPerKind).ToList();
+        // Web and shopping go deep (paginated up to 10 pages); other kinds keep the shallow depth.
+        var maxResults = kind is SearchKind.Web or SearchKind.Shopping
+            ? _options.DeepResultsPerQuery
+            : _options.ResultsPerQuery;
         var tasks = selected.Select(q => SafeSearchAsync(new SearchQuery
         {
             Query = q,
@@ -88,7 +92,7 @@ public sealed partial class AgentService
             CountryCode = geo.CountryCode,
             LanguageCode = geo.PrimaryLanguage,
             Location = geo.CenterCity,
-            MaxResults = _options.ResultsPerQuery
+            MaxResults = maxResults
         }, cancellationToken));
 
         var batches = await Task.WhenAll(tasks).ConfigureAwait(false);
