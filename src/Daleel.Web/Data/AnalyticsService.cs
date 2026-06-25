@@ -4,13 +4,12 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Daleel.Web.Data;
 
-/// <summary>Headline counts for the admin dashboard.</summary>
+/// <summary>Headline counts for the admin dashboard. Aggregate-only — never ranks or identifies individual users.</summary>
 public sealed record AdminDashboardStats(
     int UsersTotal, int UsersToday, int UsersThisWeek, int UsersThisMonth,
     int SearchesToday, int SearchesThisWeek, int SearchesThisMonth,
     IReadOnlyList<(string Plan, int Count)> PlanBreakdown,
-    IReadOnlyList<(string Query, int Count)> TopQueries,
-    IReadOnlyList<(string UserId, int Count)> TopUsers);
+    IReadOnlyList<(string Query, int Count)> TopQueries);
 
 /// <summary>Records and aggregates analytics. Append-only; never exposes user-owned rows.</summary>
 public interface IAnalyticsService
@@ -121,17 +120,10 @@ public sealed class AnalyticsService : IAnalyticsService
             .ToListAsync(ct);
         var topQueries = topQueriesRaw.Select(x => (x.Key, x.Count)).ToList();
 
-        var topUsersRaw = await searches
-            .Where(e => e.Timestamp >= monthStart && e.UserId != null)
-            .GroupBy(e => e.UserId!)
-            .Select(g => new { Key = g.Key, Count = g.Count() })
-            .OrderByDescending(x => x.Count)
-            .Take(10)
-            .ToListAsync(ct);
-        var topUsers = topUsersRaw.Select(x => (x.Key, x.Count)).ToList();
-
+        // Deliberately no per-user ranking: admin analytics are aggregate-only to honour the
+        // anonymity promise. Do not reintroduce a "top users" leaderboard here.
         return new AdminDashboardStats(usersTotal, usersToday, usersWeek, usersMonth,
-            sToday, sWeek, sMonth, planBreakdown, topQueries, topUsers);
+            sToday, sWeek, sMonth, planBreakdown, topQueries);
     }
 
     public async Task<IReadOnlyList<(string Type, int Count)>> SearchesByTypeAsync(DateTime since, CancellationToken ct = default)

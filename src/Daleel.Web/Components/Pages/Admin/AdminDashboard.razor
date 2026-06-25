@@ -22,7 +22,7 @@ else
     </MudGrid>
 
     <MudGrid Spacing="3" Class="mt-2">
-        <MudItem xs="12" md="4">
+        <MudItem xs="12" md="6">
             <MudPaper Class="pa-4" Outlined="true" Elevation="0">
                 <MudText Typo="Typo.h6" Class="mb-2">Active subscriptions</MudText>
                 @foreach (var (plan, count) in _d.PlanBreakdown)
@@ -31,23 +31,13 @@ else
                 }
             </MudPaper>
         </MudItem>
-        <MudItem xs="12" md="4">
+        <MudItem xs="12" md="6">
             <MudPaper Class="pa-4" Outlined="true" Elevation="0">
                 <MudText Typo="Typo.h6" Class="mb-2">Top queries (month)</MudText>
                 @if (_d.TopQueries.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No searches yet.</MudText> }
                 @foreach (var (q, c) in _d.TopQueries)
                 {
                     <div class="d-flex justify-space-between gap-2"><span dir="@Catalog.Dir(q)" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@q</span><b>@c</b></div>
-                }
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="12" md="4">
-            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
-                <MudText Typo="Typo.h6" Class="mb-2">Top users (month)</MudText>
-                @if (_d.TopUsers.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No activity yet.</MudText> }
-                @foreach (var (u, c) in _d.TopUsers)
-                {
-                    <div class="d-flex justify-space-between gap-2"><span style="font-family:monospace;font-size:.8rem;">@u[..Math.Min(10, u.Length)]…</span><b>@c</b></div>
                 }
             </MudPaper>
         </MudItem>

@@ -25,9 +25,7 @@ else
         <HeaderContent>
             <MudTh>User</MudTh>
             <MudTh>Plan</MudTh>
-            <MudTh>Used</MudTh>
             <MudTh>Joined</MudTh>
-            <MudTh>Last active</MudTh>
             <MudTh>Roles/State</MudTh>
             <MudTh Style="text-align:right;">Actions</MudTh>
         </HeaderContent>
@@ -45,9 +43,7 @@ else
                     }
                 </MudSelect>
             </MudTd>
-            <MudTd>@context.Used</MudTd>
             <MudTd><MudText Typo="Typo.caption">@context.User.CreatedAt.ToLocalTime().ToString("d")</MudText></MudTd>
-            <MudTd><MudText Typo="Typo.caption">@(context.User.LastActiveAt?.ToLocalTime().ToString("g") ?? "—")</MudText></MudTd>
             <MudTd>
                 @if (context.User.IsAdmin) { <MudChip T="string" Size="Size.Small" Color="Color.Tertiary">admin</MudChip> }
                 @if (context.User.IsDisabled) { <MudChip T="string" Size="Size.Small" Color="Color.Error">disabled</MudChip> }
@@ -75,7 +71,6 @@ else
     {
         public ApplicationUser User { get; set; } = default!;
         public int PlanId { get; set; }
-        public int Used { get; set; }
     }
 
     private List<Row>? _rows;
@@ -98,14 +93,11 @@ else
         var planByUser = activeSubs
             .GroupBy(s => s.UserId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.StartedAt).First().PlanId);
-        var quotas = await Db.UserQuotas.ToListAsync();
-        var usedByUser = quotas.ToDictionary(q => q.UserId, q => q.SearchesUsed);
 
         _rows = users.Select(u => new Row
         {
             User = u,
-            PlanId = planByUser.GetValueOrDefault(u.Id, SubscriptionPlan.BasicId),
-            Used = usedByUser.GetValueOrDefault(u.Id, 0)
+            PlanId = planByUser.GetValueOrDefault(u.Id, SubscriptionPlan.BasicId)
         }).ToList();
     }
 
