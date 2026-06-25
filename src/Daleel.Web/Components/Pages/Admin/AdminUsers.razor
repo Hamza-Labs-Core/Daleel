@@ -98,8 +98,12 @@ else
         var planByUser = activeSubs
             .GroupBy(s => s.UserId)
             .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.StartedAt).First().PlanId);
-        var quotas = await Db.UserQuotas.ToListAsync();
-        var usedByUser = quotas.ToDictionary(q => q.UserId, q => q.SearchesUsed);
+        // Read-only display column: project just the two needed columns (no change tracking) and
+        // build the dictionary straight from the DB rather than materializing full tracked entities.
+        var usedByUser = await Db.UserQuotas
+            .AsNoTracking()
+            .Select(q => new { q.UserId, q.SearchesUsed })
+            .ToDictionaryAsync(q => q.UserId, q => q.SearchesUsed);
 
         _rows = users.Select(u => new Row
         {

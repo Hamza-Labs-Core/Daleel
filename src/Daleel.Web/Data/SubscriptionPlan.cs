@@ -50,7 +50,7 @@ public sealed class SubscriptionPlan
     /// dropping blanks so the stored array stays clean.</summary>
     public void SetFeatures(IEnumerable<string> features) =>
         FeaturesJson = JsonSerializer.Serialize(
-            features.Select(f => f.Trim()).Where(f => f.Length > 0).ToList());
+            features.Where(f => !string.IsNullOrWhiteSpace(f)).Select(f => f.Trim()).ToList());
 
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; }
