@@ -67,6 +67,17 @@ public sealed class StoreRepository : IStoreRepository
         existing.Website = store.Website;
         existing.BrandsCarried = store.BrandsCarried;
         existing.Rating = store.Rating;
+        // Contact + Google-Maps verification fields (added with store enrichment).
+        existing.Phone = store.Phone;
+        existing.Email = store.Email;
+        existing.Address = store.Address;
+        existing.Latitude = store.Latitude;
+        existing.Longitude = store.Longitude;
+        existing.OpeningHours = store.OpeningHours;
+        existing.GoogleRating = store.GoogleRating;
+        existing.GoogleReviewCount = store.GoogleReviewCount;
+        existing.GooglePlaceId = store.GooglePlaceId;
+        existing.GoogleMapsUrl = store.GoogleMapsUrl;
         existing.LastRefreshed = store.LastRefreshed;
     }
 

@@ -22,11 +22,27 @@ public sealed class ParseQueryActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        state.Log("Analyzing your request…");
         state.GeoProfile = GeoProfiles.ResolveOrDefault(state.Geo);
-        state.Log($"Planning research for: {state.Query} [{state.GeoProfile.Country}]");
+        state.Log($"Focusing on the {state.GeoProfile.Country} market…");
         state.Strategy = await state.Agent.PlanAsync(
             PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken);
+
+        var subject = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
+        state.Log($"Looking for {Humanize(state.Strategy.QueryType)}: {subject}");
     }
+
+    /// <summary>Turns the QueryType enum into a friendly noun for the status line.</summary>
+    private static string Humanize(QueryType type) => type switch
+    {
+        QueryType.ProductResearch => "products",
+        QueryType.BrandLookup => "brand info",
+        QueryType.StoreFinder => "stores",
+        QueryType.DealHunter => "deals",
+        QueryType.OpinionAggregation => "opinions",
+        QueryType.Comparison => "a comparison",
+        _ => "answers"
+    };
 }
 
 /// <summary>Step 2 — replay a stored report for an identical recent search, short-circuiting the rest.</summary>
@@ -41,6 +57,7 @@ public sealed class CheckCacheActivity : CodeActivity
             return;
         }
 
+        state.Log("Checking our answers vault…");
         try
         {
             var payload = await state.Cache.GetAsync(state.ResultKey, context.CancellationToken);
@@ -79,8 +96,12 @@ public sealed class GatherSourcesActivity : CodeActivity
             return;
         }
 
+        state.Log("Expanding the search across providers…");
         state.Bundle = await state.Agent.GatherAsync(state.Strategy, state.GeoProfile, context.CancellationToken);
-        state.Log("Gathered web, shopping, store, social and page sources.");
+
+        var b = state.Bundle;
+        state.Log(
+            $"Gathered {b.WebResults.Count} web, {b.ShoppingResults.Count} shopping and {b.Stores.Count} store sources.");
     }
 }
 
@@ -96,25 +117,38 @@ public sealed class ExtractProductsActivity : CodeActivity
             return;
         }
 
+        state.Log($"Found {state.Bundle.Sources.Count} sources — reading and extracting…");
         var system = state.IsProductQuery ? PromptTemplates.ProductAnalystSystem : null;
         state.Summary = await state.Agent.AnalyzeAsync(
             state.Query, state.GeoProfile, state.Bundle, context.CancellationToken, system);
 
         if (state.IsProductQuery)
         {
+            state.Log("Identifying brands and models…");
             var subject = state.Strategy!.Subject is { Length: > 0 } s ? s : state.Query;
             state.Products = await state.Agent.BuildProductSearchResultAsync(
                 subject, state.GeoProfile, state.Bundle, state.Summary, context.CancellationToken);
+
+            if (state.Products is { } p)
+            {
+                state.Log($"Extracted {p.ProductCount} product(s) from {p.BrandCount} brand(s).");
+            }
         }
     }
 }
 
-/// <summary>Step 5 — join the extracted brands/stores against saved profiles (DB-first, research on miss).</summary>
+/// <summary>
+/// Step 5 — the brand/store enrichment loops. For each extracted brand and store (up to a per-kind
+/// cap) we join against saved Context.dev/Places profiles, researching on a miss. Each loop streams
+/// per-item progress so the user sees the work happening, and the verified store fields (Google
+/// rating, address, phone, Maps link) flow into the rendered results.
+/// </summary>
 [Activity("Daleel", "Search", "Enrich with saved Brand/Store profiles from the database")]
 public sealed class EnrichWithProfilesActivity : CodeActivity
 {
-    /// <summary>Cap on inline profile lookups per search so a brand-heavy query can't fan out unbounded.</summary>
-    private const int MaxEnrich = 12;
+    // Per-kind caps so a brand/store-heavy query can't fan out into unbounded research cost.
+    private const int MaxBrands = 15;
+    private const int MaxStores = 10;
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
@@ -129,29 +163,69 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
         var ct = context.CancellationToken;
         var products = state.Products;
 
+        var brandsToBuild = Math.Min(products.Brands.Count, MaxBrands);
+        var storesToBuild = Math.Min(products.Stores.Count, MaxStores);
+        if (brandsToBuild + storesToBuild > 0)
+        {
+            state.Log($"Building profiles for {brandsToBuild} brand(s) and {storesToBuild} store(s)…");
+        }
+
+        // ── Brand loop ──────────────────────────────────────────────────────────
         var brands = new List<BrandInfo>(products.Brands.Count);
         foreach (var (b, i) in products.Brands.Select((b, i) => (b, i)))
         {
-            var saved = i < MaxEnrich ? await SafeGetBrand(brandSvc, b.Name, state.Geo, ct) : null;
+            Data.Brand? saved = null;
+            if (i < MaxBrands)
+            {
+                state.Log($"Building profile for {b.Name}…");
+                saved = await SafeGetBrand(brandSvc, b.Name, state.Geo, ct);
+            }
+
             brands.Add(saved is null
                 ? b
                 : b with { Reputation = b.Reputation ?? ToReputation(saved), Url = b.Url ?? saved.Website });
         }
 
+        // ── Store loop ──────────────────────────────────────────────────────────
         var stores = new List<StoreInfo>(products.Stores.Count);
+        var verified = 0;
         foreach (var (s, i) in products.Stores.Select((s, i) => (s, i)))
         {
-            var saved = i < MaxEnrich ? await SafeGetStore(storeSvc, s.Name, state.Geo, ct) : null;
-            stores.Add(saved is null
-                ? s
-                : s with { Rating = s.Rating ?? saved.Rating, Address = s.Address ?? saved.Location });
+            Data.Store? saved = null;
+            if (i < MaxStores)
+            {
+                state.Log($"Verifying {s.Name} on Google Maps…");
+                saved = await SafeGetStore(storeSvc, s.Name, state.Geo, ct);
+            }
+
+            if (saved is null)
+            {
+                stores.Add(s);
+                continue;
+            }
+
+            if (saved.IsVerified)
+            {
+                verified++;
+            }
+
+            // Prefer the live result's own fields; backfill from the verified profile (Google data first).
+            stores.Add(s with
+            {
+                Rating = s.Rating ?? saved.GoogleRating ?? saved.Rating,
+                ReviewCount = s.ReviewCount ?? saved.GoogleReviewCount,
+                Address = s.Address ?? saved.Address ?? saved.Location,
+                Phone = s.Phone ?? saved.Phone,
+                Url = s.Url ?? saved.Website ?? saved.GoogleMapsUrl
+            });
         }
 
         state.Products = products with { Brands = brands, Stores = stores };
+
         var enriched = brands.Count(b => b.Reputation is not null);
-        if (enriched > 0)
+        if (enriched > 0 || verified > 0)
         {
-            state.Log($"Enriched {enriched} brand(s) from saved Context.dev profiles.");
+            state.Log($"Enriched {enriched} brand(s); verified {verified} store(s) on Google Maps.");
         }
     }
 
@@ -207,6 +281,11 @@ public sealed class AggregateResultsActivity : CodeActivity
         };
         state.ResultCount = state.Products?.ProductCount
             ?? bundle.WebResults.Count + bundle.ShoppingResults.Count;
+
+        if (state.Products is { } p)
+        {
+            state.Log($"Ranking {p.ProductCount} product(s) from {p.BrandCount} brand(s)…");
+        }
         return ValueTask.CompletedTask;
     }
 }
@@ -223,6 +302,7 @@ public sealed class ModerateContentActivity : CodeActivity
             return ValueTask.CompletedTask;
         }
 
+        state.Log("Reviewing content quality…");
         var audit = state.Agent.ContentFilter.AuditLog;
         state.FilteredCount = audit.Count;
         state.FilteredCategories = string.Join(",", audit
@@ -244,6 +324,7 @@ public sealed class CacheResultsActivity : CodeActivity
             return;
         }
 
+        state.Log("Saving results…");
         state.ResultJson = ResultSerialization.Serialize(state.Answer);
         state.ResultType = "ask";
 
@@ -271,7 +352,18 @@ public sealed class ReturnResultsActivity : CodeActivity
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
-        state.Log(state.FromCache ? "Returned cached result." : "Search complete.");
+        if (state.FromCache)
+        {
+            state.Log("Loaded a saved answer.");
+        }
+        else if (state.Products is { } p && p.ProductCount > 0)
+        {
+            state.Log($"Done! Found {p.ProductCount} product(s) from {p.BrandCount} brand(s).");
+        }
+        else
+        {
+            state.Log("Done!");
+        }
         return ValueTask.CompletedTask;
     }
 }

@@ -98,6 +98,55 @@ public class BrandStoreRepositoryTests
     }
 
     [Fact]
+    public async Task Store_Upsert_RoundTripsContactAndPlacesFields_OnInsertAndUpdate()
+    {
+        using var ctx = new SqliteTestContext();
+        var repo = new StoreRepository(ctx.Db);
+
+        // Insert with full Google-Places verification + contact details.
+        await repo.UpsertAsync(new Store
+        {
+            Name = "Smart Buy",
+            Phone = "+962 6 123 4567",
+            Email = "info@smartbuy.jo",
+            Address = "King St, Amman",
+            Latitude = 31.95,
+            Longitude = 35.91,
+            OpeningHours = new List<string> { "Monday: 9 AM–10 PM", "Tuesday: 9 AM–10 PM" },
+            GoogleRating = 4.6,
+            GoogleReviewCount = 1280,
+            GooglePlaceId = "ChIJ_place_123",
+            GoogleMapsUrl = "https://maps.google.com/?cid=123",
+            LastRefreshed = DateTimeOffset.UtcNow
+        });
+
+        var inserted = await repo.GetByNameAsync("smart buy");
+        inserted!.GooglePlaceId.Should().Be("ChIJ_place_123");
+        inserted.IsVerified.Should().BeTrue();
+        inserted.OpeningHours.Should().HaveCount(2);
+        inserted.Latitude.Should().Be(31.95);
+
+        // A second refresh must update the verification fields in place (the ApplyUpdates path),
+        // not silently drop them.
+        await repo.UpsertAsync(new Store
+        {
+            Name = "smart buy",
+            Phone = "+962 6 999 0000",
+            GoogleRating = 4.8,
+            GooglePlaceId = "ChIJ_place_456",
+            OpeningHours = new List<string> { "Open 24 hours" },
+            LastRefreshed = DateTimeOffset.UtcNow
+        });
+
+        (await repo.CountAsync()).Should().Be(1);
+        var updated = await repo.GetByNameAsync("smart buy");
+        updated!.Phone.Should().Be("+962 6 999 0000");
+        updated.GoogleRating.Should().Be(4.8);
+        updated.GooglePlaceId.Should().Be("ChIJ_place_456");
+        updated.OpeningHours.Should().BeEquivalentTo("Open 24 hours");
+    }
+
+    [Fact]
     public async Task Brand_IsStale_UsesRefreshAgeAgainstTtl()
     {
         var now = DateTimeOffset.UtcNow;

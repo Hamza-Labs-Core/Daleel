@@ -65,19 +65,18 @@
             </MudPaper>
         }
 
-        @* While the search runs we show only a neutral spinner. The detailed step/cost/provider
-           log is internal — it's logged and recorded for analytics, never surfaced here. *@
+        @* While the search runs we stream a live, human-friendly log of what each step is doing
+           (analyzing → gathering → extracting → verifying stores → ranking) so the user sees real
+           progress, not just a spinner. The cancel control sits above the log. *@
         @if (_status == "running")
         {
-            <MudPaper Class="pa-4 mb-3" Outlined="true" Elevation="0">
-                <div class="d-flex align-center">
-                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-3" />
-                    <MudText Typo="Typo.subtitle2">@L["Search.Searching"]</MudText>
-                    <MudSpacer />
-                    <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
-                               OnClick="CancelAsync">@L["Search.Cancel"]</MudButton>
-                </div>
-            </MudPaper>
+            <div class="d-flex align-center mb-2">
+                <MudText Typo="Typo.subtitle2">@L["Search.Searching"]</MudText>
+                <MudSpacer />
+                <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
+                           OnClick="CancelAsync">@L["Search.Cancel"]</MudButton>
+            </div>
+            <ProgressLog Busy="true" Lines="_progress" />
         }
 
         @* No raw status/error metadata: a search that yields nothing shows a neutral empty state.
