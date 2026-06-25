@@ -96,4 +96,27 @@ public class R2LoggingOptionsTests
             ("R2_BUCKET_NAME", "daleel-logs"),
             ("R2_ENDPOINT", "https://acc.r2.cloudflarestorage.com"))).Should().BeNull();
     }
+
+    [Theory]
+    [InlineData("R2_ACCESS_KEY")]
+    [InlineData("R2_SECRET_KEY")]
+    [InlineData("R2_BUCKET_NAME")]
+    [InlineData("CLOUDFLARE_ACCOUNT_ID")]
+    public void FromConfiguration_ChangeMePlaceholder_TreatedAsUnset(string placeholderKey)
+    {
+        // create-secrets.sh seeds secrets with "CHANGE_ME"; a half-provisioned R2 setup must read
+        // as "not configured" so the app falls back to file logging instead of dialling R2 with
+        // bogus credentials.
+        var pairs = new List<(string, string?)>
+        {
+            ("R2_ACCESS_KEY", "ak"),
+            ("R2_SECRET_KEY", "sk"),
+            ("R2_BUCKET_NAME", "daleel-logs"),
+            ("CLOUDFLARE_ACCOUNT_ID", "abc123"),
+        };
+        var idx = pairs.FindIndex(p => p.Item1 == placeholderKey);
+        pairs[idx] = (placeholderKey, "CHANGE_ME");
+
+        R2LoggingOptions.FromConfiguration(Config(pairs.ToArray())).Should().BeNull();
+    }
 }

@@ -18,7 +18,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 // ── Logging (Serilog) ─────────────────────────────────────────────────────────
 // Replace the default console logger with Serilog: Information+ to the console for debugging, and
-// Warning+ errors as JSON Lines to Cloudflare R2 (when R2_* env vars are set) or to local files
+// Warning and above as JSON Lines to Cloudflare R2 (when R2_* env vars are set) or to local files
 // under /app/data/logs otherwise. See Daleel.Web.Logging.SerilogConfiguration.
 builder.AddDaleelLogging();
 

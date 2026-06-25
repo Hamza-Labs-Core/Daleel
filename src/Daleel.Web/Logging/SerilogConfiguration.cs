@@ -10,7 +10,7 @@ namespace Daleel.Web.Logging;
 ///
 /// Sinks:
 ///  • Console — always on, full Information+ output for local debugging / container stdout.
-///  • Warning+ errors as newline-delimited JSON, sent to Cloudflare R2 when configured
+///  • Warning-level and above as newline-delimited JSON, sent to Cloudflare R2 when configured
 ///    (<c>R2_*</c> env vars), otherwise to local files under <c>/app/data/logs</c>.
 /// </summary>
 public static class SerilogConfiguration
@@ -62,7 +62,7 @@ public static class SerilogConfiguration
     }
 
     /// <summary>
-    /// (3) Warning+ events to R2 as JSON Lines, partitioned into a date folder so a day's errors
+    /// (3) Warning-level and above to R2 as JSON Lines, partitioned into a date folder so a day's errors
     /// live together: <c>errors/2026/06/24/errors.jsonl</c>.
     /// </summary>
     private static void ConfigureR2Sink(LoggerConfiguration loggerConfiguration, R2LoggingOptions r2)
@@ -93,7 +93,7 @@ public static class SerilogConfiguration
     }
 
     /// <summary>
-    /// (8) Graceful fallback when R2 is not configured: Warning+ events to daily-rolling JSON Lines
+    /// (8) Graceful fallback when R2 is not configured: Warning-level and above to daily-rolling JSON Lines
     /// files on the persisted data volume.
     /// </summary>
     private static void ConfigureFileFallback(LoggerConfiguration loggerConfiguration, IConfiguration configuration)

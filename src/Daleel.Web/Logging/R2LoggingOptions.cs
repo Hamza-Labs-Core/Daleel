@@ -24,35 +24,44 @@ public sealed record R2LoggingOptions(
     /// </summary>
     public static R2LoggingOptions? FromConfiguration(IConfiguration config)
     {
-        var accessKey = config["R2_ACCESS_KEY"];
-        var secretKey = config["R2_SECRET_KEY"];
-        var bucket = config["R2_BUCKET_NAME"];
+        var accessKey = RealValue(config["R2_ACCESS_KEY"]);
+        var secretKey = RealValue(config["R2_SECRET_KEY"]);
+        var bucket = RealValue(config["R2_BUCKET_NAME"]);
         // R2 lives under the same Cloudflare account as the rest of the app, so we reuse the
         // existing CLOUDFLARE_ACCOUNT_ID rather than asking operators to set a redundant
         // R2-specific account id. One fewer secret to manage and keep in sync.
-        var accountId = config["CLOUDFLARE_ACCOUNT_ID"];
-        var endpoint = config["R2_ENDPOINT"];
+        var accountId = RealValue(config["CLOUDFLARE_ACCOUNT_ID"]);
+        var endpoint = RealValue(config["R2_ENDPOINT"]);
 
         // Prefer an explicit endpoint; otherwise derive the canonical R2 S3 URL from the account id.
         // This lets operators set just CLOUDFLARE_ACCOUNT_ID and get the right host for free, while
         // still allowing a full override (e.g. a jurisdiction-specific endpoint) via R2_ENDPOINT.
-        var serviceUrl = !string.IsNullOrWhiteSpace(endpoint)
-            ? endpoint.Trim()
-            : !string.IsNullOrWhiteSpace(accountId)
-                ? $"https://{accountId.Trim()}.r2.cloudflarestorage.com"
-                : null;
+        var serviceUrl = endpoint
+            ?? (accountId is not null ? $"https://{accountId}.r2.cloudflarestorage.com" : null);
 
         // Credentials + bucket + a resolvable endpoint are all mandatory; anything short of the full
         // set means "not configured" — half-set R2 config is treated the same as none, so we never
         // hand the S3 sink a connection it cannot complete.
-        if (string.IsNullOrWhiteSpace(accessKey) ||
-            string.IsNullOrWhiteSpace(secretKey) ||
-            string.IsNullOrWhiteSpace(bucket) ||
-            string.IsNullOrWhiteSpace(serviceUrl))
+        if (accessKey is null || secretKey is null || bucket is null || serviceUrl is null)
         {
             return null;
         }
 
-        return new R2LoggingOptions(accessKey.Trim(), secretKey.Trim(), bucket.Trim(), serviceUrl);
+        return new R2LoggingOptions(accessKey, secretKey, bucket, serviceUrl);
+    }
+
+    /// <summary>
+    /// Normalizes a raw config value to "real, or absent". Returns the trimmed value when it is
+    /// genuinely set, or <c>null</c> for blank/whitespace OR the <c>CHANGE_ME</c> placeholder that
+    /// <c>deploy/create-secrets.sh</c> seeds. Without the placeholder guard a seeded-but-unfilled R2
+    /// secret would look configured, and the app would try to reach R2 with bogus credentials instead
+    /// of falling back to file logging.
+    /// </summary>
+    private static string? RealValue(string? raw)
+    {
+        var trimmed = raw?.Trim();
+        return string.IsNullOrEmpty(trimmed) || string.Equals(trimmed, "CHANGE_ME", StringComparison.Ordinal)
+            ? null
+            : trimmed;
     }
 }

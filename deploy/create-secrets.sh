@@ -22,13 +22,6 @@ SECRETS=(
   CONTEXT_DEV_API_KEY
   GOOGLE_PLACES_API_KEY
   APIFY_TOKEN
-  # Cloudflare R2 — structured error logging (optional; blank values fall back to
-  # file logging at /app/data/logs/, so the deploy still succeeds without them).
-  # The endpoint is derived from CLOUDFLARE_ACCOUNT_ID (org-level secret), so no
-  # R2_ACCOUNT_ID / R2_ENDPOINT secret is needed here.
-  R2_ACCESS_KEY
-  R2_SECRET_KEY
-  R2_BUCKET_NAME
   # Deploy (consumed by .github/workflows/deploy.yml)
   DEPLOY_SSH_HOST
   DEPLOY_SSH_USER
@@ -38,6 +31,13 @@ SECRETS=(
 # NOTE: CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are intentionally NOT created
 # here — they are provided at the GitHub org level, so they don't need a per-repo secret.
 # The app still reads them at runtime via /opt/daleel/.env (see deploy/.env.example).
+#
+# NOTE: the R2 error-logging secrets (R2_ACCESS_KEY, R2_SECRET_KEY, R2_BUCKET_NAME) are
+# also intentionally NOT seeded. They are OPTIONAL — when unset the app falls back to file
+# logging — and seeding them with the CHANGE_ME placeholder would make the app think R2 is
+# configured and try to connect with bogus credentials. Set them by hand only if you want R2
+# logging: gh secret set R2_ACCESS_KEY --body '<real>' --repo "$REPO" (and likewise for the
+# secret key + bucket). The R2 endpoint is derived from CLOUDFLARE_ACCOUNT_ID.
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "ERROR: GitHub CLI (gh) is not installed. See https://cli.github.com/" >&2
