@@ -27,7 +27,6 @@ public sealed class SearchWorkflow : WorkflowBase
                 new GatherSourcesActivity(),       // 3. fan out to providers
                 new ExtractProductsActivity(),     // 4. LLM analyst + product extraction
                 new EnrichWithProfilesActivity(),  // 5. join saved Brand/Store profiles
-                new ItemDeepDiveActivity(),        // 5b. per-item: compare store prices + scrape specs
                 new AggregateResultsActivity(),    // 6. assemble the ranked answer
                 new ModerateContentActivity(),     // 7. record halal-filter audit
                 new CacheResultsActivity(),        // 8. serialize + persist

@@ -175,6 +175,7 @@ public class ConversationBackendTests : IDisposable
     {
         public ConcurrentBag<(string UserId, int JobId, string Message)> Progress { get; } = new();
         public ConcurrentBag<(string UserId, int JobId, string Status)> Completed { get; } = new();
+        public ConcurrentBag<(string UserId, int JobId, string ResultJson)> Enriched { get; } = new();
 
         public Task ProgressAsync(string userId, int jobId, string message)
         {
@@ -185,6 +186,12 @@ public class ConversationBackendTests : IDisposable
         public Task CompletedAsync(string userId, int jobId, string status, string? resultJson, string? resultType, string? error)
         {
             Completed.Add((userId, jobId, status));
+            return Task.CompletedTask;
+        }
+
+        public Task EnrichedAsync(string userId, int jobId, string resultJson, string resultType)
+        {
+            Enriched.Add((userId, jobId, resultJson));
             return Task.CompletedTask;
         }
     }

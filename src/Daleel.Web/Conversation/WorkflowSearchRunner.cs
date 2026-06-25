@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Daleel.Agent;
 using Daleel.Core.Caching;
 using Daleel.Core.Moderation;
 using Daleel.Core.Observability;
@@ -153,6 +155,70 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         {
             await _eventStore.RecordBatchAsync(events, CancellationToken.None).ConfigureAwait(false);
         }
+    }
+
+    public async Task<SearchRunResult?> EnrichAsync(
+        SearchJob job, SearchRunResult baseResult, Action<string> progress, CancellationToken ct)
+    {
+        // Only product results have items to deep-dive.
+        if (ResultSerialization.Deserialize<AgentAnswer>(baseResult.ResultJson) is not { Products: { Models.Count: > 0 } products } answer)
+        {
+            return null;
+        }
+
+        var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
+        var resultKey = CacheKey.ForResult(job.Query, job.Geo, language);
+
+        var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
+        var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
+        using var capTrip = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var collector = new JobApiCallCollector(
+            line => _logger.LogInformation("Enrich job {JobId} API call · {Detail}", job.Id, line),
+            caps.MaxPerJob, capTrip);
+
+        var agent = _agents.Build(new AgentRequest
+        {
+            Geo = job.Geo, Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model, Language = language,
+            Log = progress, ApiObserver = collector, CostEstimator = estimator, Cache = _cache, CacheTtl = CacheTtl
+        });
+
+        var enrichment = new ItemEnrichmentResult(null, Array.Empty<PipelineEvent>());
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var service = scope.ServiceProvider.GetRequiredService<IItemEnrichmentService>();
+            enrichment = await service.EnrichAsync(agent, products, progress, job.Id.ToString(), capTrip.Token)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            // Record enrichment cost + events the same way a base run does (provider scrape calls +
+            // the custom item events), so they show in the usage dashboard too.
+            await PersistAsync(job, collector, ct).ConfigureAwait(false);
+            await PersistEventsAsync(job, collector, enrichment.Events, ct).ConfigureAwait(false);
+        }
+
+        if (enrichment.Products is not { } enrichedProducts)
+        {
+            return null; // nothing changed — no UI update needed
+        }
+
+        var enrichedJson = ResultSerialization.Serialize(answer with { Products = enrichedProducts });
+
+        // Overwrite the cached report with the enriched one (preserving the base moderation stats) so a
+        // repeat search replays the full, deep-dived result instead of re-enriching.
+        try
+        {
+            var cached = new CachedSearchResult(
+                enrichedJson, baseResult.ResultType, baseResult.FilteredCount, baseResult.FilteredCategories);
+            await _cache.SetAsync(resultKey, JsonSerializer.Serialize(cached), CacheTtl, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // best-effort: a cache write must never fail enrichment
+        }
+
+        return baseResult with { ResultJson = enrichedJson, ResultCount = enrichedProducts.ProductCount };
     }
 
     private async Task PersistFilteredAsync(

@@ -105,6 +105,32 @@ public sealed class SearchJobService : BackgroundService
             }, stoppingToken);
 
             await _broadcaster.CompletedAsync(job.UserId, job.Id, "completed", result.ResultJson, result.ResultType, null);
+
+            // Progressive enrichment: base results are already on screen — now deep-dive each item
+            // (official-brand-site specs via Context.dev, price comparison) and stream the refreshed
+            // result so the UI fills specs in place. Self-contained: its failure must never flip the
+            // already-delivered result to an error.
+            try
+            {
+                var enriched = await runner.EnrichAsync(job, result, Progress, cts.Token);
+                if (enriched is not null)
+                {
+                    job.ResultJson = enriched.ResultJson;
+                    await db.SaveChangesAsync(stoppingToken);
+                    await convos.CompleteAsync(
+                        job.UserId, "completed", enriched.ResultJson, enriched.ResultType,
+                        DateTimeOffset.UtcNow, stoppingToken);
+                    await _broadcaster.EnrichedAsync(job.UserId, job.Id, enriched.ResultJson, enriched.ResultType);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Cancelled mid-enrichment — the base result was already delivered; nothing to undo.
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Enrichment failed for job {JobId} (base result already delivered)", job.Id);
+            }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
         {

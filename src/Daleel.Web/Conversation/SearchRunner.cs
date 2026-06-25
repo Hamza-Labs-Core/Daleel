@@ -24,6 +24,15 @@ public sealed record SearchRunResult(
 public interface ISearchRunner
 {
     Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct);
+
+    /// <summary>
+    /// Optional post-result enrichment: deep-dives the items in an already-returned base result
+    /// (official-brand-site specs, price comparison) and returns an updated result to stream to the
+    /// UI, or null when there's nothing to enrich. Default is a no-op so legacy/test runners opt out.
+    /// </summary>
+    Task<SearchRunResult?> EnrichAsync(
+        SearchJob job, SearchRunResult baseResult, Action<string> progress, CancellationToken ct) =>
+        Task.FromResult<SearchRunResult?>(null);
 }
 
 /// <summary>Production runner: builds an agent from server-side keys and runs the unified ask flow.</summary>

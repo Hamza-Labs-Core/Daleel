@@ -96,6 +96,13 @@
            No text-summary paragraph — the data speaks for itself. *@
         @if (_status == "completed" && _answer is not null)
         {
+            @if (_enriching)
+            {
+                <div class="d-flex align-center mb-2">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Search.FetchingSpecs"]</MudText>
+                </div>
+            }
             @if (_answer.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
             {
                 <AdaptiveResults Result="products" />
@@ -137,6 +144,7 @@
     private string? _error;
     private int? _jobId;
     private bool _running => _status == "running";
+    private bool _enriching;
     private readonly List<string> _progress = new();
     private AgentAnswer? _answer;
     private List<SearchHistoryEntry> _recent = new();
@@ -145,6 +153,7 @@
     {
         Notifier.Progress += OnProgress;
         Notifier.Completed += OnCompleted;
+        Notifier.Enriched += OnEnriched;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -251,10 +260,38 @@
             _answer = status == "completed" && resultJson is not null
                 ? ResultSerialization.Deserialize<AgentAnswer>(resultJson)
                 : null;
+            // Base results are now on screen; the server is deep-diving item specs in the background.
+            // Show a "more coming" hint until the Enriched update arrives (auto-clears as a safety net).
+            _enriching = _answer?.Products is { HasListings: true };
+            if (_enriching) ScheduleEnrichTimeout(jobId);
             _recent = (await History.ListAsync(_userId!, page: 1, pageSize: 15)).Items.ToList();
             StateHasChanged();
         });
     }
+
+    // A streamed result refresh after completion (item deep-dive specs arrived). Re-render in place
+    // without resetting the "completed" state.
+    private void OnEnriched(string userId, int jobId, string resultJson, string resultType)
+    {
+        if (userId != _userId || jobId != _jobId) return;
+        InvokeAsync(() =>
+        {
+            _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson) ?? _answer;
+            _enriching = false;
+            StateHasChanged();
+        });
+    }
+
+    // Safety net so the "fetching specs" hint never sticks if no enrichment update arrives.
+    private void ScheduleEnrichTimeout(int jobId) => _ = Task.Delay(TimeSpan.FromSeconds(60)).ContinueWith(_ =>
+        InvokeAsync(() =>
+        {
+            if (_enriching && _jobId == jobId)
+            {
+                _enriching = false;
+                StateHasChanged();
+            }
+        }));
 
     private void Prefill(string query) => _input = query;
 
@@ -273,5 +310,6 @@
     {
         Notifier.Progress -= OnProgress;
         Notifier.Completed -= OnCompleted;
+        Notifier.Enriched -= OnEnriched;
     }
 }

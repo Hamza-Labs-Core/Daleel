@@ -185,6 +185,7 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IBrandRepository, BrandRepository>();
 builder.Services.AddScoped<IStoreRepository, StoreRepository>();
 builder.Services.AddScoped<IProductProfileRepository, ProductProfileRepository>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.IItemEnrichmentService, Daleel.Web.Pipeline.ItemEnrichmentService>();
 builder.Services.AddSingleton(new Daleel.Web.Profiles.ProfileOptions());
 builder.Services.AddSingleton<Daleel.Web.Profiles.IProfileResearcher, Daleel.Web.Profiles.ContextDevProfileResearcher>();
 builder.Services.AddScoped<Daleel.Web.Profiles.IBrandProfileService, Daleel.Web.Profiles.BrandProfileService>();

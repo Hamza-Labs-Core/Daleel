@@ -73,6 +73,7 @@
   <data name="Search.CheckStatus" xml:space="preserve"><value>Check our status page</value></data>
   <data name="Search.Search" xml:space="preserve"><value>Search</value></data>
   <data name="Search.Searching" xml:space="preserve"><value>Searching…</value></data>
+  <data name="Search.FetchingSpecs" xml:space="preserve"><value>Fetching official specs — more details loading…</value></data>
   <data name="Search.Results" xml:space="preserve"><value>Results</value></data>
   <data name="Search.NoResults" xml:space="preserve"><value>No results found.</value></data>
   <data name="Search.Summary" xml:space="preserve"><value>Summary</value></data>

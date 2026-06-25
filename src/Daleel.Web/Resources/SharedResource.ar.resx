@@ -73,6 +73,7 @@
   <data name="Search.CheckStatus" xml:space="preserve"><value>تحقّق من صفحة حالة النظام</value></data>
   <data name="Search.Search" xml:space="preserve"><value>بحث</value></data>
   <data name="Search.Searching" xml:space="preserve"><value>جارٍ البحث…</value></data>
+  <data name="Search.FetchingSpecs" xml:space="preserve"><value>جارٍ جلب المواصفات الرسمية — يتم تحميل المزيد من التفاصيل…</value></data>
   <data name="Search.Results" xml:space="preserve"><value>النتائج</value></data>
   <data name="Search.NoResults" xml:space="preserve"><value>لا توجد نتائج.</value></data>
   <data name="Search.Summary" xml:space="preserve"><value>الملخص</value></data>

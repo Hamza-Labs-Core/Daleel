@@ -30,6 +30,10 @@ public interface IConversationBroadcaster
 {
     Task ProgressAsync(string userId, int jobId, string message);
     Task CompletedAsync(string userId, int jobId, string status, string? resultJson, string? resultType, string? error);
+
+    /// <summary>A refreshed result for an already-completed job (item deep-dive specs arrived) — the UI
+    /// re-renders in place. Separate from Completed so the "done" state isn't reset to "running".</summary>
+    Task EnrichedAsync(string userId, int jobId, string resultJson, string resultType);
 }
 
 /// <summary>
@@ -41,6 +45,9 @@ public interface IConversationNotifier
 {
     event Action<string, int, string>? Progress;
     event Action<string, int, string, string?, string?, string?>? Completed;
+
+    /// <summary>(userId, jobId, resultJson, resultType) — a streamed result refresh after completion.</summary>
+    event Action<string, int, string, string>? Enriched;
 }
 
 /// <summary>
@@ -55,6 +62,7 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
 
     public event Action<string, int, string>? Progress;
     public event Action<string, int, string, string?, string?, string?>? Completed;
+    public event Action<string, int, string, string>? Enriched;
 
     public Task ProgressAsync(string userId, int jobId, string message)
     {
@@ -66,5 +74,11 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
     {
         Completed?.Invoke(userId, jobId, status, resultJson, resultType, error);
         return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Completed", jobId, status, resultJson, resultType, error);
+    }
+
+    public Task EnrichedAsync(string userId, int jobId, string resultJson, string resultType)
+    {
+        Enriched?.Invoke(userId, jobId, resultJson, resultType);
+        return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Enriched", jobId, resultJson, resultType);
     }
 }
