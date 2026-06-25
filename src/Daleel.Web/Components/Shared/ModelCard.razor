@@ -1,5 +1,6 @@
 @* A single aggregated product model: image, name, lowest price across all its sources,
    how many sellers carry it, deal flag, a Details button and an optional compare checkbox. *@
+@inject IStringLocalizer<SharedResource> L
 
 <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;display:flex;flex-direction:column;">
     @if (!string.IsNullOrWhiteSpace(Model.ImageUrl))
@@ -18,7 +19,7 @@
             @if (ShowCompare)
             {
                 <MudCheckBox T="bool" Value="Selected" ValueChanged="OnToggleCompare" Dense="true"
-                             Size="Size.Small" Disabled="@(!Selected && !CanSelectMore)" Label="Compare" />
+                             Size="Size.Small" Disabled="@(!Selected && !CanSelectMore)" Label="@L["Products.Compare"]" />
             }
         </div>
 
@@ -41,32 +42,32 @@
         <div class="d-flex align-center gap-2 mt-2" style="flex-wrap:wrap;">
             @if (Model.LowestPrice is { } price && Model.LowestOffer?.Currency is { } cur)
             {
-                <MudText Typo="Typo.h6" Color="Color.Primary">from @(new Money(price, cur).ToDisplay())</MudText>
+                <MudText Typo="Typo.h6" Color="Color.Primary">@L["ModelCard.From"] @(new Money(price, cur).ToDisplay())</MudText>
             }
             else
             {
-                <MudText Typo="Typo.body2" Color="Color.Secondary">Price on site</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">@L["ModelCard.PriceOnSite"]</MudText>
             }
 
             @if (Model.Offers.Any(o => o.IsDeal))
             {
-                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">SALE</MudChip>
+                <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">@L["ModelCard.Sale"]</MudChip>
             }
         </div>
 
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
             <MudIcon Icon="@Icons.Material.Filled.Storefront" Size="Size.Small" />
-            @Model.SellerCount @(Model.SellerCount == 1 ? "seller" : "sellers")
+            @Model.SellerCount @(Model.SellerCount == 1 ? L["ModelCard.Seller"] : L["Products.Sellers"])
         </MudText>
     </MudCardContent>
 
     <MudCardActions>
         <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
-                   StartIcon="@Icons.Material.Filled.Info" OnClick="OnDetailsClicked">Details &amp; prices</MudButton>
+                   StartIcon="@Icons.Material.Filled.Info" OnClick="OnDetailsClicked">@L["Products.Details"]</MudButton>
         @if (Model.LowestOffer?.Url is { Length: > 0 } url)
         {
             <MudButton Href="@url" Target="_blank" Size="Size.Small" Variant="Variant.Text"
-                       StartIcon="@Icons.Material.Filled.OpenInNew">View</MudButton>
+                       StartIcon="@Icons.Material.Filled.OpenInNew">@L["Products.View"]</MudButton>
         }
     </MudCardActions>
 </MudCard>

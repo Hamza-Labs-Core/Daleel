@@ -4,6 +4,7 @@
 @* Static SSR (flagged [StaticSsrPage]) so this plain HTML form makes a real HTTP POST to /auth/register,
    where the account is created and signed in (cookie write) in one raw request. See Login.razor for the
    failure mode this avoids ("Headers are read-only, response has already started"). *@
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Create account</PageTitle>
 
@@ -11,7 +12,7 @@
     <MudPaper Class="pa-8" Elevation="0" Outlined="true" Style="max-width:460px;width:100%;border-radius:18px;">
         <div class="text-center mb-4">
             <div class="daleel-logo" style="font-size:2rem;">دليل · Daleel</div>
-            <MudText Typo="Typo.h5" Class="mt-2">إنشاء حساب · Create account</MudText>
+            <MudText Typo="Typo.h5" Class="mt-2">@L["Auth.CreateAccount"]</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
                 Create your free account — you get 5 free searches every month.
             </MudText>

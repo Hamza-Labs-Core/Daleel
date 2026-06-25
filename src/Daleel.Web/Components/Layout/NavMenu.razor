@@ -10,7 +10,11 @@
 
     <AuthorizeView>
         <Authorized>
+            <MudNavLink Href="/deals" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.LocalOffer">@L["Nav.Deals"]</MudNavLink>
+            <MudNavLink Href="/compare" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Compare">@L["Nav.Compare"]</MudNavLink>
+            <MudNavLink Href="/stores" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Storefront">@L["Nav.Stores"]</MudNavLink>
             <MudNavLink Href="/brand" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Verified">@L["Nav.Brand"]</MudNavLink>
+            <MudNavLink Href="/monitor" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.NotificationsActive">@L["Nav.Monitor"]</MudNavLink>
             <MudDivider Class="my-2" />
             <MudNavLink Href="/history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.History">@L["Nav.History"]</MudNavLink>
             <MudTooltip Text="Your bookmarked reports — saved searches you can revisit anytime" Placement="Placement.End">

@@ -1,4 +1,5 @@
 @* Loading animation + streamed agent progress lines. Shown while a query runs. *@
+@inject IStringLocalizer<SharedResource> L
 @if (Busy || Lines.Count > 0)
 {
     <MudPaper Class="pa-4 my-4 daleel-card" Elevation="0" Outlined="true">
@@ -12,7 +13,7 @@
                 <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Class="mr-3" />
             }
             <MudText Typo="Typo.subtitle2">
-                @(Busy ? "دليل يبحث… · Daleel is researching…" : "اكتمل البحث · Research complete")
+                @(Busy ? L["Progress.Researching"] : L["Progress.Complete"])
             </MudText>
         </div>
 

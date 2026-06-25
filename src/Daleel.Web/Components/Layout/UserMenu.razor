@@ -1,5 +1,6 @@
 @* App-bar account control: a Sign-in button when anonymous, avatar + menu when signed in.
    MainLayout is InteractiveServer, so the MudMenu dropdown opens as a plain child. *@
+@inject IStringLocalizer<SharedResource> L
 
 <AuthorizeView>
     <Authorized>
@@ -21,23 +22,23 @@
             <ChildContent>
                 <MudText Typo="Typo.body2" Class="px-4 py-2">@DisplayName(context)</MudText>
                 <MudDivider />
-                <MudMenuItem Href="/account" Icon="@Icons.Material.Filled.AccountCircle">Account</MudMenuItem>
-                <MudMenuItem Href="/history" Icon="@Icons.Material.Filled.History">History</MudMenuItem>
-                <MudMenuItem Href="/saved" Icon="@Icons.Material.Filled.Bookmarks">Saved</MudMenuItem>
+                <MudMenuItem Href="/account" Icon="@Icons.Material.Filled.AccountCircle">@L["Nav.Account"]</MudMenuItem>
+                <MudMenuItem Href="/history" Icon="@Icons.Material.Filled.History">@L["Nav.History"]</MudMenuItem>
+                <MudMenuItem Href="/saved" Icon="@Icons.Material.Filled.Bookmarks">@L["Nav.Saved"]</MudMenuItem>
                 @if (context.User.IsInRole("Admin"))
                 {
-                    <MudMenuItem Href="/admin" Icon="@Icons.Material.Filled.AdminPanelSettings">Admin</MudMenuItem>
+                    <MudMenuItem Href="/admin" Icon="@Icons.Material.Filled.AdminPanelSettings">@L["Nav.Admin"]</MudMenuItem>
                 }
                 <MudDivider />
                 <MudMenuItem Href="/logout" Icon="@Icons.Material.Filled.Logout">
-                    Sign out
+                    @L["Nav.Logout"]
                 </MudMenuItem>
             </ChildContent>
         </MudMenu>
     </Authorized>
     <NotAuthorized>
         <MudButton Href="/login" Variant="Variant.Outlined" Color="Color.Inherit" Size="Size.Small"
-                   StartIcon="@Icons.Material.Filled.Login">Sign in</MudButton>
+                   StartIcon="@Icons.Material.Filled.Login">@L["Nav.Login"]</MudButton>
     </NotAuthorized>
 </AuthorizeView>
 

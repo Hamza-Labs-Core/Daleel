@@ -5,6 +5,7 @@
    form below makes a real HTTP POST to /auth/login. That endpoint — not this page, not the circuit —
    calls SignInManager and writes the auth cookie, which is the only context where the Set-Cookie header
    write is safe. Rendering static also guarantees <AntiforgeryToken /> emits a valid token. *@
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Sign in</PageTitle>
 
@@ -12,7 +13,7 @@
     <MudPaper Class="pa-8" Elevation="0" Outlined="true" Style="max-width:460px;width:100%;border-radius:18px;">
         <div class="text-center mb-4">
             <div class="daleel-logo" style="font-size:2rem;">دليل · Daleel</div>
-            <MudText Typo="Typo.h5" Class="mt-2">تسجيل الدخول · Sign in</MudText>
+            <MudText Typo="Typo.h5" Class="mt-2">@L["Nav.Login"]</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
                 Sign in to keep your search history and saved results.
             </MudText>

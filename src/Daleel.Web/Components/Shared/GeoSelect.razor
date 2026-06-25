@@ -1,5 +1,6 @@
 @* Market picker — bilingual labels, two-way bound to a geo key. ToStringFunc maps the stored key
    (e.g. "jordan") to its human-readable bilingual label so the closed select never shows the raw key. *@
+@inject IStringLocalizer<SharedResource> L
 <MudSelect T="string" Value="Value" ValueChanged="OnChanged" Label="@Label"
            ToStringFunc="@(key => Catalog.ResolveGeo(key).Display)"
            Dense="true" Variant="Variant.Outlined" Adornment="Adornment.Start"
@@ -13,7 +14,15 @@
 @code {
     [Parameter] public string Value { get; set; } = "jordan";
     [Parameter] public EventCallback<string> ValueChanged { get; set; }
-    [Parameter] public string Label { get; set; } = "Market · السوق";
+    [Parameter] public string Label { get; set; } = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        if (string.IsNullOrEmpty(Label))
+        {
+            Label = L["Common.Market"];
+        }
+    }
 
     private Task OnChanged(string value)
     {

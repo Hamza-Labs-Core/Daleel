@@ -10,10 +10,11 @@
 @inject IDialogService Dialogs
 @inject NavigationManager Nav
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Account</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-4">حسابي · My Account</MudText>
+<MudText Typo="Typo.h4" Class="mb-4">@L["Account.Title"]</MudText>
 
 @if (_status is null)
 {

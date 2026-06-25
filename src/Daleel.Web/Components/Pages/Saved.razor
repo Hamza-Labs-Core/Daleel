@@ -6,11 +6,12 @@
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
 @inject IJSRuntime JS
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Saved</PageTitle>
 
 <div class="d-flex align-center mb-1">
-    <MudText Typo="Typo.h4">النتائج المحفوظة · Saved Results</MudText>
+    <MudText Typo="Typo.h4">@L["Saved.Title"]</MudText>
     <MudSpacer />
     @if (_items.Count > 0 && _exportEnabled)
     {

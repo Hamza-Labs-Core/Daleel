@@ -204,4 +204,150 @@
   <data name="Faq.Q6" xml:space="preserve"><value>كيف تُستخدم بيانات بحثي؟</value></data>
   <data name="Faq.A6" xml:space="preserve"><value>يُحفظ سجلّ بحثك الشخصي لك وحدك ضمن حسابك. وبشكل منفصل، تُحلَّل عمليات البحث بشكل مجهول لتحسين النتائج — نسجّل ما تم البحث عنه والسوق والوقت والتكلفة، لكن لا نسجّل أي شيء يحدّد هويتك. وتحتوي سجلّات التحليلات والتكلفة على تجزئة أحادية الاتجاه فقط، بحيث لا يمكن تتبّع أي بحث إلى حسابك.</value></data>
   <data name="Footer.Privacy" xml:space="preserve"><value>تُحلَّل عمليات البحث بشكل مجهول لتحسين النتائج.</value></data>
+
+  <data name="Home.Tagline" xml:space="preserve"><value>مساعدك الذكي للتسوّق</value></data>
+  <data name="Home.NoSearches" xml:space="preserve"><value>لا توجد عمليات بحث بعد.</value></data>
+  <data name="Home.NoResults.Title" xml:space="preserve"><value>لم نجد نتائج</value></data>
+  <data name="Home.NoResults.Hint" xml:space="preserve"><value>جرّب صياغة أخرى أو أعد البحث.</value></data>
+  <data name="Home.SignInDialog.Title" xml:space="preserve"><value>سجّل الدخول للبحث</value></data>
+  <data name="Home.SignInDialog.Body" xml:space="preserve"><value>أنشئ حسابًا مجانيًا لتشغيل عمليات البحث — تحصل على ٥ عمليات بحث مجانية كل شهر.</value></data>
+
+  <data name="Deals.Title" xml:space="preserve"><value>باحث العروض</value></data>
+  <data name="Deals.Subtitle" xml:space="preserve"><value>الأسعار الحالية والعروض وأين تشتري — مرتّبة.</value></data>
+  <data name="Deals.ProductLabel" xml:space="preserve"><value>المنتج</value></data>
+  <data name="Deals.FindDeals" xml:space="preserve"><value>عروض</value></data>
+  <data name="Deals.BestDeals" xml:space="preserve"><value>أفضل العروض</value></data>
+  <data name="Deals.Listings" xml:space="preserve"><value>القوائم</value></data>
+
+  <data name="Compare.Title" xml:space="preserve"><value>قارن المنتجات</value></data>
+  <data name="Compare.Subtitle" xml:space="preserve"><value>منتجان وجهًا لوجه، مع سياق محلي وحكم نهائي.</value></data>
+  <data name="Compare.ProductA" xml:space="preserve"><value>المنتج الأول</value></data>
+  <data name="Compare.ProductB" xml:space="preserve"><value>المنتج الثاني</value></data>
+  <data name="Compare.Pros" xml:space="preserve"><value>المزايا</value></data>
+  <data name="Compare.Cons" xml:space="preserve"><value>العيوب</value></data>
+  <data name="Compare.Verdict" xml:space="preserve"><value>الحكم</value></data>
+
+  <data name="Stores.Title" xml:space="preserve"><value>باحث المتاجر</value></data>
+  <data name="Stores.Subtitle" xml:space="preserve"><value>اعثر على المتاجر التي تبيع منتجًا بالقرب من موقع معيّن (خرائط جوجل).</value></data>
+  <data name="Stores.ProductLabel" xml:space="preserve"><value>المنتج</value></data>
+  <data name="Stores.Find" xml:space="preserve"><value>بحث</value></data>
+  <data name="Stores.UseMyLocation" xml:space="preserve"><value>استخدم موقعي</value></data>
+  <data name="Stores.MapPreview" xml:space="preserve"><value>خريطة</value></data>
+  <data name="Stores.StoresCount" xml:space="preserve"><value>متجر</value></data>
+
+  <data name="Brand.Title" xml:space="preserve"><value>ذكاء العلامات التجارية</value></data>
+  <data name="Brand.Subtitle" xml:space="preserve"><value>الحضور والمشاعر والمتاجر والمنافسون لعلامة تجارية في سوق واحد.</value></data>
+  <data name="Brand.BrandLabel" xml:space="preserve"><value>العلامة التجارية</value></data>
+  <data name="Brand.Analyze" xml:space="preserve"><value>تحليل</value></data>
+  <data name="Brand.Overview" xml:space="preserve"><value>نظرة عامة</value></data>
+  <data name="Brand.WhereItSells" xml:space="preserve"><value>حضور البيع</value></data>
+  <data name="Brand.PhysicalLocations" xml:space="preserve"><value>المواقع</value></data>
+  <data name="Brand.Competitors" xml:space="preserve"><value>المنافسون</value></data>
+
+  <data name="Monitor.Title" xml:space="preserve"><value>لوحة المراقبة</value></data>
+  <data name="Monitor.Subtitle" xml:space="preserve"><value>راقب الكلمات المفتاحية عبر منصات التواصل. يجلب «تشغيل الآن» التطابقات عبر Apify عند ضبط رمز الوصول.</value></data>
+  <data name="Monitor.NewMonitor" xml:space="preserve"><value>مراقبة جديدة</value></data>
+  <data name="Monitor.KeywordLabel" xml:space="preserve"><value>الكلمة</value></data>
+  <data name="Monitor.IntervalLabel" xml:space="preserve"><value>الفترة</value></data>
+  <data name="Monitor.AddMonitor" xml:space="preserve"><value>إضافة</value></data>
+  <data name="Monitor.ActiveMonitors" xml:space="preserve"><value>المراقبات النشطة</value></data>
+  <data name="Monitor.ResultsFeed" xml:space="preserve"><value>سجل النتائج</value></data>
+
+  <data name="Results.AlsoFound" xml:space="preserve"><value>أيضاً</value></data>
+  <data name="Results.RelatedArticles" xml:space="preserve"><value>مقالات ذات صلة</value></data>
+  <data name="Results.NoneInCountry" xml:space="preserve"><value>لم نجد منتجات أو متاجر أو علامات تجارية محلية لهذا البحث في {0}.</value></data>
+  <data name="Results.ModelsLabel" xml:space="preserve"><value>منتج</value></data>
+  <data name="Results.AllLocalTo" xml:space="preserve"><value>الكل محلي في {0}</value></data>
+  <data name="Results.NofMShown" xml:space="preserve"><value>عرض {0} من {1}</value></data>
+  <data name="Results.NoMatch" xml:space="preserve"><value>لا توجد منتجات تطابق عوامل التصفية الحالية.</value></data>
+  <data name="Results.PreGrouped" xml:space="preserve"><value>مقارنة مُجمّعة مسبقًا: اقتصادي · متوسط · مميّز</value></data>
+  <data name="Results.NSelected" xml:space="preserve"><value>{0} محدد</value></data>
+  <data name="Results.Clear" xml:space="preserve"><value>مسح</value></data>
+  <data name="Results.CompareProducts" xml:space="preserve"><value>قارن المنتجات</value></data>
+
+  <data name="ProductFilters.AllBrands" xml:space="preserve"><value>كل العلامات التجارية</value></data>
+  <data name="ProductFilters.AllSources" xml:space="preserve"><value>كل المصادر</value></data>
+  <data name="ProductFilters.Marketplaces" xml:space="preserve"><value>الأسواق الإلكترونية</value></data>
+  <data name="ProductFilters.BrandSites" xml:space="preserve"><value>مواقع العلامات التجارية</value></data>
+  <data name="ProductFilters.Any" xml:space="preserve"><value>الكل</value></data>
+  <data name="ProductFilters.MostSellers" xml:space="preserve"><value>الأكثر بائعين</value></data>
+
+  <data name="Progress.Researching" xml:space="preserve"><value>دليل يبحث…</value></data>
+  <data name="Progress.Complete" xml:space="preserve"><value>اكتمل البحث</value></data>
+
+  <data name="Sources.Label" xml:space="preserve"><value>المصادر</value></data>
+
+  <data name="ModelCard.From" xml:space="preserve"><value>يبدأ من</value></data>
+  <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>السعر على الموقع</value></data>
+  <data name="ModelCard.Sale" xml:space="preserve"><value>تخفيض</value></data>
+  <data name="ModelCard.Seller" xml:space="preserve"><value>بائع</value></data>
+
+  <data name="History.Title" xml:space="preserve"><value>سجل البحث</value></data>
+  <data name="History.Subtitle" xml:space="preserve"><value>يُحفظ كل استعلام تجريه هنا تلقائيًا. أعد تشغيله أو افتح نسخة محفوظة.</value></data>
+  <data name="History.SignInPrompt" xml:space="preserve"><value>سجّل الدخول لحفظ عمليات بحثك.</value></data>
+  <data name="History.FilterPlaceholder" xml:space="preserve"><value>تصفية حسب نص الاستعلام…</value></data>
+  <data name="History.ClearAll" xml:space="preserve"><value>مسح الكل</value></data>
+  <data name="History.Col.When" xml:space="preserve"><value>متى</value></data>
+  <data name="History.Col.Type" xml:space="preserve"><value>النوع</value></data>
+  <data name="History.Col.Query" xml:space="preserve"><value>الاستعلام</value></data>
+  <data name="History.Col.Market" xml:space="preserve"><value>السوق</value></data>
+  <data name="History.Col.Summary" xml:space="preserve"><value>الملخص</value></data>
+  <data name="History.Col.Actions" xml:space="preserve"><value>إجراءات</value></data>
+  <data name="History.Rerun" xml:space="preserve"><value>إعادة التشغيل</value></data>
+  <data name="History.Delete" xml:space="preserve"><value>حذف</value></data>
+  <data name="History.Empty" xml:space="preserve"><value>لا يوجد سجل بعد — أجرِ عملية بحث للبدء.</value></data>
+  <data name="History.Deleted" xml:space="preserve"><value>تم الحذف.</value></data>
+  <data name="History.ClearDialog.Title" xml:space="preserve"><value>مسح كل السجل؟</value></data>
+  <data name="History.ClearDialog.Body" xml:space="preserve"><value>سيؤدي هذا إلى إزالة كل سجل بحثك نهائيًا.</value></data>
+  <data name="History.Cleared" xml:space="preserve"><value>تم مسح {0} عنصر.</value></data>
+
+  <data name="Settings.Title" xml:space="preserve"><value>الإعدادات</value></data>
+  <data name="Settings.Subtitle" xml:space="preserve"><value>كل ما هنا يُخزَّن في متصفحك فقط (التخزين المحلي) ويُرسَل مباشرةً إلى المساعد — ولا يُكتب أبدًا في سجلّات الخادم.</value></data>
+  <data name="Settings.ApiKeys" xml:space="preserve"><value>مفاتيح API</value></data>
+  <data name="Settings.Show" xml:space="preserve"><value>إظهار</value></data>
+  <data name="Settings.SaveKeys" xml:space="preserve"><value>حفظ المفاتيح</value></data>
+  <data name="Settings.Preferences" xml:space="preserve"><value>التفضيلات</value></data>
+  <data name="Settings.DefaultMarket" xml:space="preserve"><value>السوق الافتراضي</value></data>
+  <data name="Settings.DefaultModel" xml:space="preserve"><value>النموذج الافتراضي</value></data>
+  <data name="Settings.DarkTheme" xml:space="preserve"><value>المظهر الداكن</value></data>
+  <data name="Settings.LightTheme" xml:space="preserve"><value>المظهر الفاتح</value></data>
+  <data name="Settings.PreferencesNote" xml:space="preserve"><value>تُطبَّق التفضيلات فورًا وتبقى محفوظة في هذا المتصفح.</value></data>
+  <data name="Settings.ContentFilter" xml:space="preserve"><value>فلتر المحتوى</value></data>
+  <data name="Settings.HalalFiltering" xml:space="preserve"><value>تصفية حلال</value></data>
+  <data name="Settings.Strict" xml:space="preserve"><value>صارم (موصى به)</value></data>
+  <data name="Settings.Moderate" xml:space="preserve"><value>معتدل</value></data>
+  <data name="Settings.Off" xml:space="preserve"><value>إيقاف (للمشرفين فقط)</value></data>
+  <data name="Settings.FilterDesc" xml:space="preserve"><value>يُصفّي الكحول ولحم الخنزير والقمار ومحتوى البالغين والمخدرات من كل النتائج.</value></data>
+  <data name="Settings.FilterDesc.Strict" xml:space="preserve"><value>يُصفّي الكحول ولحم الخنزير والقمار ومحتوى البالغين والمخدرات والتبغ والربا من كل النتائج.</value></data>
+  <data name="Settings.FilterAdminNote" xml:space="preserve"><value>يتطلّب إيقاف الفلتر حساب مشرف.</value></data>
+  <data name="Settings.ImageSafety" xml:space="preserve"><value>أمان الصور</value></data>
+  <data name="Settings.BlurImages" xml:space="preserve"><value>إخفاء كل الصور الخارجية</value></data>
+  <data name="Settings.HaramBlurPrompt" xml:space="preserve"><value>إظهار نافذة تثبيت HaramBlur</value></data>
+  <data name="Settings.TrustedDomains" xml:space="preserve"><value>نطاقات الصور الموثوقة</value></data>
+  <data name="Settings.NoTrustedDomains" xml:space="preserve"><value>لا يوجد بعد. أظهِر صورة واختر «الوثوق بالمصدر».</value></data>
+  <data name="Settings.Snack.KeysSaved" xml:space="preserve"><value>تم حفظ مفاتيح API في هذا المتصفح.</value></data>
+  <data name="Settings.Snack.KeysCleared" xml:space="preserve"><value>تم مسح كل المفاتيح.</value></data>
+  <data name="Settings.Snack.FilterSet" xml:space="preserve"><value>فلتر المحتوى: {0}.</value></data>
+
+  <data name="Common.Market" xml:space="preserve"><value>السوق</value></data>
+  <data name="Common.Model" xml:space="preserve"><value>النموذج</value></data>
+  <data name="SaveResult.Button" xml:space="preserve"><value>حفظ النتيجة</value></data>
+  <data name="SaveResult.Saved" xml:space="preserve"><value>محفوظ</value></data>
+  <data name="SaveResult.TitleLabel" xml:space="preserve"><value>العنوان</value></data>
+  <data name="SaveResult.NotesLabel" xml:space="preserve"><value>ملاحظات (اختياري)</value></data>
+
+  <data name="Common.Save" xml:space="preserve"><value>حفظ</value></data>
+  <data name="Common.Close" xml:space="preserve"><value>إغلاق</value></data>
+  <data name="Common.Cancel" xml:space="preserve"><value>إلغاء</value></data>
+
+  <data name="Sentiment.Title" xml:space="preserve"><value>الانطباع العام</value></data>
+  <data name="Saved.Title" xml:space="preserve"><value>النتائج المحفوظة</value></data>
+  <data name="Account.Title" xml:space="preserve"><value>حسابي</value></data>
+
+  <data name="Auth.ResetPassword" xml:space="preserve"><value>إعادة تعيين كلمة المرور</value></data>
+  <data name="Auth.CreateAccount" xml:space="preserve"><value>إنشاء حساب</value></data>
+
+  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>لا يوجد مفتاح ذكاء اصطناعي</value></data>
+  <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>أو اضبط</value></data>
+  <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>على الخادم.</value></data>
 </root>

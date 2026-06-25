@@ -3,6 +3,7 @@
    secondary collapsible sections below the products. When a search returns no products at all,
    the secondary content is shown directly so the page is never empty.
    Brand cards drill into the product list pre-filtered to that brand. *@
+@inject IStringLocalizer<SharedResource> L
 
 @if (Result.ProductCount > 0)
 {
@@ -12,34 +13,34 @@
     @if (HasSecondary)
     {
         <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mt-5 mb-1">
-            Also found · أيضاً
+            @L["Results.AlsoFound"]
         </MudText>
         <MudExpansionPanels MultiExpansion="true" Elevation="0">
             @if (Result.StoreCount > 0)
             {
                 <MudExpansionPanel Icon="@Icons.Material.Filled.Store"
-                                   Text="@($"Stores ({Result.StoreCount})")">
+                                   Text="@($"{L["Products.Stores"]} ({Result.StoreCount})")">
                     <StoreCards Stores="Result.Stores" />
                 </MudExpansionPanel>
             }
             @if (Result.BrandCount > 0)
             {
                 <MudExpansionPanel Icon="@Icons.Material.Filled.Verified"
-                                   Text="@($"Brands ({Result.BrandCount})")">
+                                   Text="@($"{L["Products.Brands"]} ({Result.BrandCount})")">
                     <BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />
                 </MudExpansionPanel>
             }
             @if (Result.HasUserReviews)
             {
                 <MudExpansionPanel Icon="@Icons.Material.Filled.RateReview"
-                                   Text="@($"Reviews ({Result.UserReviewCount})")">
+                                   Text="@($"{L["Products.Reviews"]} ({Result.UserReviewCount})")">
                     <UserReviewList Result="Result" />
                 </MudExpansionPanel>
             }
             @if (Result.ArticleCount > 0)
             {
                 <MudExpansionPanel Icon="@Icons.Material.Filled.Article"
-                                   Text="@($"Related articles ({Result.ArticleCount})")">
+                                   Text="@($"{L["Results.RelatedArticles"]} ({Result.ArticleCount})")">
                     <ReviewList Reviews="Result.Reviews" />
                 </MudExpansionPanel>
             }
@@ -52,28 +53,28 @@ else if (HasSecondary)
     @if (Result.StoreCount > 0)
     {
         <MudText Typo="Typo.h6" Class="mb-2">
-            <MudIcon Icon="@Icons.Material.Filled.Store" Class="mr-1" />Stores (@Result.StoreCount)
+            <MudIcon Icon="@Icons.Material.Filled.Store" Class="mr-1" />@L["Products.Stores"] (@Result.StoreCount)
         </MudText>
         <StoreCards Stores="Result.Stores" />
     }
     @if (Result.BrandCount > 0)
     {
         <MudText Typo="Typo.h6" Class="mb-2 mt-4">
-            <MudIcon Icon="@Icons.Material.Filled.Verified" Class="mr-1" />Brands (@Result.BrandCount)
+            <MudIcon Icon="@Icons.Material.Filled.Verified" Class="mr-1" />@L["Products.Brands"] (@Result.BrandCount)
         </MudText>
         <BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />
     }
     @if (Result.HasUserReviews)
     {
         <MudText Typo="Typo.h6" Class="mb-2 mt-4">
-            <MudIcon Icon="@Icons.Material.Filled.RateReview" Class="mr-1" />Reviews (@Result.UserReviewCount)
+            <MudIcon Icon="@Icons.Material.Filled.RateReview" Class="mr-1" />@L["Products.Reviews"] (@Result.UserReviewCount)
         </MudText>
         <UserReviewList Result="Result" />
     }
     @if (Result.ArticleCount > 0)
     {
         <MudText Typo="Typo.h6" Class="mb-2 mt-4">
-            <MudIcon Icon="@Icons.Material.Filled.Article" Class="mr-1" />Related articles (@Result.ArticleCount)
+            <MudIcon Icon="@Icons.Material.Filled.Article" Class="mr-1" />@L["Results.RelatedArticles"] (@Result.ArticleCount)
         </MudText>
         <ReviewList Reviews="Result.Reviews" />
     }
@@ -81,7 +82,7 @@ else if (HasSecondary)
 else
 {
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">
-        No local products, stores, or brands were found for this search in @Result.Country.
+        @string.Format(L["Results.NoneInCountry"], Result.Country)
     </MudAlert>
 }
 
