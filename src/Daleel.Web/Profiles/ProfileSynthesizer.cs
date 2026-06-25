@@ -47,7 +47,9 @@ public sealed class ProfileSynthesizer
         var prompt =
             $"Store: {storeName}\n\n" +
             "Schema: { \"location\": string, \"type\": string, \"brandsCarried\": string[], " +
-            "\"rating\": number (0-5), \"website\": string }\n\n" +
+            "\"rating\": number (0-5), \"website\": string, \"phone\": string, \"email\": string, " +
+            "\"address\": string }\n\n" +
+            "Extract phone/email/address only if explicitly present in the context; never invent them.\n\n" +
             "Research context:\n" + Trim(researchContext);
 
         var text = await _llm.CompleteTextAsync(StoreSystem, prompt, ct).ConfigureAwait(false);
@@ -88,6 +90,9 @@ public sealed class ProfileSynthesizer
         [JsonPropertyName("brandsCarried")] public List<string>? BrandsCarried { get; set; }
         [JsonPropertyName("rating")] public double? Rating { get; set; }
         [JsonPropertyName("website")] public string? Website { get; set; }
+        [JsonPropertyName("phone")] public string? Phone { get; set; }
+        [JsonPropertyName("email")] public string? Email { get; set; }
+        [JsonPropertyName("address")] public string? Address { get; set; }
 
         public Store ToStore(string name) => new()
         {
@@ -96,7 +101,10 @@ public sealed class ProfileSynthesizer
             Type = Type,
             BrandsCarried = BrandsCarried ?? new List<string>(),
             Rating = Rating,
-            Website = Website
+            Website = Website,
+            Phone = Phone,
+            Email = Email,
+            Address = Address
         };
     }
 }

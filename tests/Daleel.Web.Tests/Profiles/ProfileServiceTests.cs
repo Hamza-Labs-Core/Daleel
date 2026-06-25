@@ -68,7 +68,8 @@ public class ProfileServiceTests
     {
         var llm = new FakeLlm("""
         { "location": "Amman, Jordan", "type": "electronics retailer",
-          "brandsCarried": ["Samsung", "LG"], "rating": 4.2, "website": "https://x.com" }
+          "brandsCarried": ["Samsung", "LG"], "rating": 4.2, "website": "https://x.com",
+          "phone": "+962 6 123 4567", "email": "info@smartbuy.jo", "address": "King St, Amman" }
         """);
         var synth = new ProfileSynthesizer(llm);
 
@@ -78,6 +79,9 @@ public class ProfileServiceTests
         store.Location.Should().Be("Amman, Jordan");
         store.BrandsCarried.Should().BeEquivalentTo("Samsung", "LG");
         store.Rating.Should().Be(4.2);
+        store.Phone.Should().Be("+962 6 123 4567");
+        store.Email.Should().Be("info@smartbuy.jo");
+        store.Address.Should().Be("King St, Amman");
     }
 
     // ── DB-first / staleness ─────────────────────────────────────────────────────

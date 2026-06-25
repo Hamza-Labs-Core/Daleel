@@ -1,4 +1,5 @@
 using System.Text;
+using Daleel.Core.Geo;
 using Daleel.Search.Abstractions;
 using Daleel.Search.Providers;
 using Daleel.Web.Data;
@@ -68,11 +69,87 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         }
 
         var context = await GatherStoreContextAsync(contextDev, storeName, geo, ct).ConfigureAwait(false);
-        return await new ProfileSynthesizer(llm).SynthesizeStoreAsync(storeName, context, ct).ConfigureAwait(false);
+        var store = await new ProfileSynthesizer(llm).SynthesizeStoreAsync(storeName, context, ct).ConfigureAwait(false);
+
+        // Fall back to contact details scraped from the store page when the LLM didn't surface them.
+        store.Phone ??= ContactExtractor.FirstPhone(context);
+        store.Email ??= ContactExtractor.FirstEmail(context);
+
+        // Cross-reference Google Places for authoritative location, coordinates, hours, rating + place id.
+        await VerifyOnPlacesAsync(store, storeName, geo, ct).ConfigureAwait(false);
+        return store;
+    }
+
+    /// <summary>
+    /// Verifies a store against Google Places: finds the best-matching place near the market centre,
+    /// then pulls its full details (hours/reviews need the detail field mask) and stamps the
+    /// authoritative coordinates, opening hours, Google rating and place id onto the profile. Best
+    /// effort — a missing Places key or no confident match simply leaves the profile un-verified.
+    /// </summary>
+    private async Task VerifyOnPlacesAsync(Store store, string storeName, string? geo, CancellationToken ct)
+    {
+        var places = TryBuildPlaces();
+        if (places is null)
+        {
+            return;
+        }
+
+        var profile = GeoProfiles.ResolveOrDefault(geo);
+        try
+        {
+            var matches = await places
+                .SearchStoresAsync(storeName, profile.Center, 15000, profile.PrimaryLanguage, ct)
+                .ConfigureAwait(false);
+
+            // Prefer a name-matching place; fall back to the closest result only if none matches.
+            var match = matches.FirstOrDefault(m => NameMatches(storeName, m.Name));
+            if (match is null || string.IsNullOrEmpty(match.PlaceId))
+            {
+                return;
+            }
+
+            // The text-search field mask omits opening hours/reviews, so re-fetch full details.
+            var detail = await places.GetPlaceDetailsAsync(match.PlaceId, ct).ConfigureAwait(false) ?? match;
+
+            store.GooglePlaceId = detail.PlaceId;
+            store.GoogleMapsUrl = detail.GoogleMapsUrl;
+            store.GoogleRating = detail.Rating;
+            store.GoogleReviewCount = detail.ReviewCount;
+            store.Latitude = detail.Location?.Latitude;
+            store.Longitude = detail.Location?.Longitude;
+            if (detail.OpeningHours.Count > 0)
+            {
+                store.OpeningHours = detail.OpeningHours.ToList();
+            }
+
+            // Places is authoritative for these — but only fill where we don't already have a value.
+            store.Address ??= detail.Address;
+            store.Phone ??= detail.Phone;
+            store.Website ??= detail.Website;
+            store.Rating ??= detail.Rating;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Google Places verification failed for {Store}", storeName);
+        }
+    }
+
+    /// <summary>Loose name match (normalized, accent/space-insensitive, either-contains-the-other).</summary>
+    public static bool NameMatches(string a, string b)
+    {
+        static string Norm(string s) =>
+            new string((s ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+
+        var x = Norm(a);
+        var y = Norm(b);
+        return x.Length > 0 && y.Length > 0 && (x.Contains(y) || y.Contains(x));
     }
 
     private ContextDevProvider? TryBuildContextDev() =>
         _factory.Resolve("CONTEXT_DEV_API_KEY") is { } key ? new ContextDevProvider(key) : null;
+
+    private GooglePlacesProvider? TryBuildPlaces() =>
+        _factory.Resolve("GOOGLE_PLACES_API_KEY") is { } key ? new GooglePlacesProvider(key) : null;
 
     private async Task<string> GatherBrandContextAsync(
         ContextDevProvider contextDev, string brandName, CancellationToken ct)
