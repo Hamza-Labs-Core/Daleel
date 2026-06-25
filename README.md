@@ -171,6 +171,7 @@ you want — the agent wires up whatever is available and skips the rest.
 | `CONTEXT_DEV_API_KEY` | Context.dev — scrape→markdown, brand data, AI extract | deep-reading pages, brand enrichment |
 | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` | Cloudflare Browser Rendering (scrape fallback) | rendering JS-heavy / anti-bot pages |
 | `APIFY_TOKEN` | Apify actors | social monitoring (`search`, `monitor`), social fetch in agent |
+| `POSTGRES_CONNECTION_STRING` _or_ `DATABASE_URL` | PostgreSQL pipeline **event store** (optional) | `/admin/usage` cost dashboard; unset ⇒ SQLite-only, store is a no-op |
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
@@ -335,3 +336,8 @@ real values under **Settings → Secrets and variables → Actions**.
 > `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_API_TOKEN` are **not** per-repo secrets — they're
 > provided at the GitHub org level. The app still reads them at runtime from `/opt/daleel/.env`
 > (documented in [`deploy/.env.example`](deploy/.env.example)).
+>
+> The PostgreSQL **event store** (`POSTGRES_PASSWORD`, `POSTGRES_CONNECTION_STRING` / `DATABASE_URL`)
+> is optional and configured via `/opt/daleel/.env`; the bundled `postgres` service in
+> [`deploy/docker-compose.yml`](deploy/docker-compose.yml) provides it. Unset ⇒ the app runs
+> SQLite-only and the `/admin/usage` dashboard shows a "not configured" hint.

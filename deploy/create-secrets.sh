@@ -38,6 +38,12 @@ SECRETS=(
 # configured and try to connect with bogus credentials. Set them by hand only if you want R2
 # logging: gh secret set R2_ACCESS_KEY --body '<real>' --repo "$REPO" (and likewise for the
 # secret key + bucket). The R2 endpoint is derived from CLOUDFLARE_ACCOUNT_ID.
+#
+# NOTE: the Postgres event store (POSTGRES_PASSWORD / POSTGRES_CONNECTION_STRING / DATABASE_URL)
+# is likewise OPTIONAL and NOT seeded — when unset the app runs SQLite-only and the /admin/usage
+# event store is a no-op. To enable it, set POSTGRES_PASSWORD (for the bundled postgres service)
+# and POSTGRES_CONNECTION_STRING in /opt/daleel/.env (see deploy/.env.example). Seeding a bogus
+# connection string would make the app try to migrate against an unreachable database at boot.
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "ERROR: GitHub CLI (gh) is not installed. See https://cli.github.com/" >&2
