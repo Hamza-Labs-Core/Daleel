@@ -458,99 +458,122 @@ public sealed partial class AgentService
             return Array.Empty<ProductListing>();
         }
 
-        try
+        // Ask the LLM for structured products; if its JSON can't be parsed, retry once before
+        // falling back gracefully to no LLM listings (the deterministic sources still stand).
+        var dto = await ExtractProductsDtoAsync(query, geo, context, cancellationToken).ConfigureAwait(false);
+        if (dto?.Products is null)
         {
-            var text = await _llm.CompleteTextAsync(
-                PromptTemplates.ProductExtractionSystem,
-                PromptTemplates.ExtractProducts(query, geo, context),
-                cancellationToken).ConfigureAwait(false);
-
-            var dto = LlmJson.Deserialize<ExtractedProductsDto>(text);
-            if (dto?.Products is null)
-            {
-                return Array.Empty<ProductListing>();
-            }
-
-            var listings = new List<ProductListing>();
-            foreach (var p in dto.Products)
-            {
-                var name = string.IsNullOrWhiteSpace(p.Name) ? p.Model : p.Name;
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    continue; // nothing to identify the product by
-                }
-
-                var brand = string.IsNullOrWhiteSpace(p.Brand) ? null : p.Brand!.Trim();
-                var model = string.IsNullOrWhiteSpace(p.Model) ? null : p.Model!.Trim();
-                var image = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl!.Trim();
-                var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                if (p.Specs is { Count: > 0 })
-                {
-                    foreach (var (key, value) in p.Specs)
-                    {
-                        if (!string.IsNullOrWhiteSpace(key) && SpecValue(value) is { Length: > 0 } sv)
-                        {
-                            specs[key] = sv;
-                        }
-                    }
-                }
-
-                var added = 0;
-                foreach (var o in p.Offers ?? new List<ExtractedOfferDto>())
-                {
-                    var url = string.IsNullOrWhiteSpace(o.Url) ? null : o.Url!.Trim();
-                    // Honour the same locality rule as the deterministic path: drop a linked offer
-                    // we can confirm is non-local (keep link-less offers — the prompt asks local-only).
-                    if (url is not null && !includeIntl &&
-                        !LocalityClassifier.IsLocal(url, geo.CountryCode, geo.Country))
-                    {
-                        continue;
-                    }
-
-                    var price = ParsePrice(o.Price);
-                    listings.Add(new ProductListing
-                    {
-                        Name = name!.Trim(),
-                        Brand = brand,
-                        Model = model,
-                        Price = price,
-                        Currency = string.IsNullOrWhiteSpace(o.Currency)
-                            ? (price is not null ? geo.Currency : null)
-                            : o.Currency!.Trim(),
-                        Url = url,
-                        ImageUrl = image,
-                        Source = string.IsNullOrWhiteSpace(o.Source) ? (brand ?? "Search") : o.Source!.Trim(),
-                        SourceType = ResultType.Marketplace,
-                        Specs = specs,
-                        Condition = o.Condition,
-                    });
-                    added++;
-                }
-
-                // A product whose only offers were non-local is dropped; one with no offers at all is
-                // still surfaced (brand/name/specs visible) so the shopper knows the option exists.
-                if (added == 0 && (p.Offers is null || p.Offers.Count == 0))
-                {
-                    listings.Add(new ProductListing
-                    {
-                        Name = name!.Trim(),
-                        Brand = brand,
-                        Model = model,
-                        ImageUrl = image,
-                        Source = brand ?? "Search",
-                        SourceType = ResultType.Marketplace,
-                        Specs = specs,
-                    });
-                }
-            }
-
-            return listings;
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            Log($"product extraction failed: {ex.Message}");
             return Array.Empty<ProductListing>();
         }
+
+        var listings = new List<ProductListing>();
+        foreach (var p in dto.Products)
+        {
+            var name = string.IsNullOrWhiteSpace(p.Name) ? p.Model : p.Name;
+            if (string.IsNullOrWhiteSpace(name))
+            {
+                continue; // nothing to identify the product by
+            }
+
+            var brand = string.IsNullOrWhiteSpace(p.Brand) ? null : p.Brand!.Trim();
+            var model = string.IsNullOrWhiteSpace(p.Model) ? null : p.Model!.Trim();
+            var image = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl!.Trim();
+            var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (p.Specs is { Count: > 0 })
+            {
+                foreach (var (key, value) in p.Specs)
+                {
+                    if (!string.IsNullOrWhiteSpace(key) && SpecValue(value) is { Length: > 0 } sv)
+                    {
+                        specs[key] = sv;
+                    }
+                }
+            }
+
+            var added = 0;
+            foreach (var o in p.Offers ?? new List<ExtractedOfferDto>())
+            {
+                var url = string.IsNullOrWhiteSpace(o.Url) ? null : o.Url!.Trim();
+                // Honour the same locality rule as the deterministic path: drop a linked offer
+                // we can confirm is non-local (keep link-less offers — the prompt asks local-only).
+                if (url is not null && !includeIntl &&
+                    !LocalityClassifier.IsLocal(url, geo.CountryCode, geo.Country))
+                {
+                    continue;
+                }
+
+                var price = ParsePrice(o.Price);
+                listings.Add(new ProductListing
+                {
+                    Name = name!.Trim(),
+                    Brand = brand,
+                    Model = model,
+                    Price = price,
+                    Currency = string.IsNullOrWhiteSpace(o.Currency)
+                        ? (price is not null ? geo.Currency : null)
+                        : o.Currency!.Trim(),
+                    Url = url,
+                    ImageUrl = image,
+                    Source = string.IsNullOrWhiteSpace(o.Source) ? (brand ?? "Search") : o.Source!.Trim(),
+                    SourceType = ResultType.Marketplace,
+                    Specs = specs,
+                    Condition = o.Condition,
+                });
+                added++;
+            }
+
+            // A product whose only offers were non-local is dropped; one with no offers at all is
+            // still surfaced (brand/name/specs visible) so the shopper knows the option exists.
+            if (added == 0 && (p.Offers is null || p.Offers.Count == 0))
+            {
+                listings.Add(new ProductListing
+                {
+                    Name = name!.Trim(),
+                    Brand = brand,
+                    Model = model,
+                    ImageUrl = image,
+                    Source = brand ?? "Search",
+                    SourceType = ResultType.Marketplace,
+                    Specs = specs,
+                });
+            }
+        }
+
+        return listings;
+    }
+
+    /// <summary>
+    /// Calls the LLM extraction prompt and parses its JSON response, retrying once when the
+    /// model returns something we can't parse into the expected shape. Returns null when both
+    /// attempts fail, so the caller can fall back gracefully to no LLM-extracted listings.
+    /// </summary>
+    private async Task<ExtractedProductsDto?> ExtractProductsDtoAsync(
+        string query, GeoProfile geo, string context, CancellationToken cancellationToken)
+    {
+        var prompt = PromptTemplates.ExtractProducts(query, geo, context);
+
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            try
+            {
+                var text = await _llm.CompleteTextAsync(
+                    PromptTemplates.ProductExtractionSystem, prompt, cancellationToken).ConfigureAwait(false);
+
+                var dto = LlmJson.Deserialize<ExtractedProductsDto>(text);
+                if (dto?.Products is not null)
+                {
+                    return dto;
+                }
+
+                Log($"product extraction returned unparseable JSON (attempt {attempt}/2)");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log($"product extraction failed (attempt {attempt}/2): {ex.Message}");
+            }
+        }
+
+        return null;
     }
 
     private static ProductListing ToRepresentative(ProductModel m)
