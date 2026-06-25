@@ -50,19 +50,30 @@ public sealed class AgentSearchRunner : ISearchRunner
         _logger = logger;
     }
 
-    /// <summary>The cached shape of a completed search — enough to replay the report verbatim.</summary>
-    private sealed record CachedResult(string ResultJson, string ResultType);
+    /// <summary>
+    /// The cached shape of a completed search — enough to replay the report verbatim, including the
+    /// content-filter stats (<see cref="FilteredCount"/>/<see cref="FilteredCategories"/>) so a cache
+    /// hit reports the same moderation telemetry the original run did rather than zeroes.
+    /// </summary>
+    private sealed record CachedResult(
+        string ResultJson, string ResultType, int FilteredCount = 0, string FilteredCategories = "");
 
     public async Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct)
     {
+        // Normalize the language the same way the agent does (blank/whitespace ⇒ "en") so an
+        // unspecified-language search shares a cache entry with an explicit "en" one rather than
+        // missing the full-result cache.
+        var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
+
         // Full-result cache: an identical normalized query+geo within the TTL replays the whole
         // report without running the agent at all (no LLM/provider calls). Hit or miss is logged.
-        var resultKey = CacheKey.ForResult(job.Query, job.Geo, job.Language);
+        var resultKey = CacheKey.ForResult(job.Query, job.Geo, language);
         if (await TryGetResultAsync(resultKey, ct).ConfigureAwait(false) is { } cached)
         {
             progress("⚡ Loaded from cache — identical search run recently.");
             await RecordResultCacheAsync(job, "hit", ct).ConfigureAwait(false);
-            return new SearchRunResult(cached.ResultJson, cached.ResultType, FilteredCount: 0, FilteredCategories: "");
+            return new SearchRunResult(
+                cached.ResultJson, cached.ResultType, cached.FilteredCount, cached.FilteredCategories ?? "");
         }
         await RecordResultCacheAsync(job, "miss", ct).ConfigureAwait(false);
 
@@ -82,7 +93,7 @@ public sealed class AgentSearchRunner : ISearchRunner
         {
             Geo = job.Geo,
             Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model,
-            Language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language,
+            Language = language,
             Log = progress,
             ApiObserver = collector,
             CostEstimator = estimator,
@@ -95,9 +106,9 @@ public sealed class AgentSearchRunner : ISearchRunner
             var answer = await agent.AskAsync(job.Query, job.Geo, capTrip.Token).ConfigureAwait(false);
 
             var audit = agent.ContentFilter.AuditLog;
-            var categories = audit
+            var filteredCategories = string.Join(",", audit
                 .Select(a => a.Contains(':') ? a[(a.IndexOf(':') + 1)..] : a)
-                .Distinct();
+                .Distinct());
 
             // Telemetry for analytics / cost optimisation (server-side only).
             var providers = string.Join(",", collector.Calls
@@ -109,14 +120,16 @@ public sealed class AgentSearchRunner : ISearchRunner
 
             var resultJson = ResultSerialization.Serialize(answer);
 
-            // Cache the finished (already content-filtered) report for the next identical search.
-            await TrySetResultAsync(resultKey, new CachedResult(resultJson, "ask"), ct).ConfigureAwait(false);
+            // Cache the finished (already content-filtered) report — with its moderation stats — so
+            // the next identical search replays the same FilteredCount/categories rather than zeroes.
+            await TrySetResultAsync(
+                resultKey, new CachedResult(resultJson, "ask", audit.Count, filteredCategories), ct).ConfigureAwait(false);
 
             return new SearchRunResult(
                 resultJson,
                 "ask",
                 audit.Count,
-                string.Join(",", categories),
+                filteredCategories,
                 collector.Calls.Count,
                 collector.TotalCost,
                 resultCount,
@@ -242,7 +255,7 @@ public sealed class AgentSearchRunner : ISearchRunner
             JobId = job.Id,
             Provider = "cache",
             Endpoint = $"result/{outcome}",
-            RequestSummary = job.Query,
+            RequestSummary = RequestSummaries.Truncate(job.Query),
             Status = "success",
             EstimatedCost = 0m,
             CreatedAt = DateTimeOffset.UtcNow

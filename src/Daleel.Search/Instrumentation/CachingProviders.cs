@@ -80,7 +80,7 @@ internal sealed class CachingSearchProvider : ISearchProvider
             Timestamp = DateTimeOffset.UtcNow,
             Provider = "cache",
             Endpoint = $"search/{outcome}",
-            RequestSummary = query,
+            RequestSummary = RequestSummaries.Truncate(query),
             ResponseBytes = bytes,
             Status = ApiCallStatus.Success,
             EstimatedCost = 0m
