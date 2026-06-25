@@ -2,6 +2,7 @@ using Daleel.Web.Auth;
 using Daleel.Web.Components;
 using Daleel.Web.Conversation;
 using Daleel.Web.Data;
+using Daleel.Web.Logging;
 using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -14,6 +15,12 @@ using Microsoft.EntityFrameworkCore;
 using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ── Logging (Serilog) ─────────────────────────────────────────────────────────
+// Replace the default console logger with Serilog: Information+ to the console for debugging, and
+// Warning and above as JSON Lines to Cloudflare R2 (when R2_* env vars are set) or to local files
+// under /app/data/logs otherwise. See Daleel.Web.Logging.SerilogConfiguration.
+builder.AddDaleelLogging();
 
 // Razor components with both interactive runtimes (Server for the secret-bearing agent pages,
 // WebAssembly available for the Auto runtime).

@@ -301,6 +301,17 @@ jobs:
             # resolve to empty, which the app treats as "absent" — harmless.
             CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
             CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
+            # Cloudflare R2 error-logging creds (optional). If unset they resolve to
+            # empty and the app falls back to file logging at /app/data/logs/ — so
+            # these are intentionally NOT in the required-secrets validation above.
+            # R2_ENDPOINT is normally unnecessary: the app derives it from
+            # CLOUDFLARE_ACCOUNT_ID (set above). It is passed through here only so an
+            # override secret (e.g. a jurisdiction-specific endpoint) takes effect when
+            # set; unset it resolves to empty and the derived endpoint is used.
+            R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
+            R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
+            R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
+            R2_ENDPOINT=${{ secrets.R2_ENDPOINT }}
             CADDY_DOMAIN=daleel.hamzalabs.dev
             CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
             EOF
