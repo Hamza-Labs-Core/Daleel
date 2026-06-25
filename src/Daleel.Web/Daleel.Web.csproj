@@ -7,6 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Elsa 3 workflow engine. The pipeline orchestration (plan → gather → extract → enrich →
+         aggregate → moderate → cache) is expressed as an Elsa workflow of CodeActivity steps.
+         NOTE: the v2 packages named in the original brief (Elsa.Core, Elsa.Activities) no longer
+         exist in v3 — the `Elsa` meta-package supplies the Core engine, the Runtime (IWorkflowRunner,
+         AddElsa) and the built-in activities (Sequence, Parallel) we use. We run workflows in-process
+         only (no Elsa Server/Studio/EF persistence), so no extra migrations or hosted services. -->
+    <PackageReference Include="Elsa" Version="3.3.3" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.22" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.11" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.11">

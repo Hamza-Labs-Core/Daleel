@@ -5,6 +5,7 @@ using Daleel.Web.Data;
 using Daleel.Web.Logging;
 using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
+using Elsa.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.DataProtection;
@@ -179,7 +180,12 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.ISearchJobQueue, Daleel.We
 builder.Services.AddSingleton<Daleel.Web.Conversation.SignalRConversationBroadcaster>();
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationBroadcaster>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
-builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.AgentSearchRunner>();
+// The search pipeline runs as an in-process Elsa 3 workflow of CodeActivity steps (plan → cache →
+// gather → extract → enrich → aggregate → moderate → cache → return). Elsa is registered core-only
+// (no Server/Studio/EF persistence), and the workflow runner replaces the old direct-AskAsync runner.
+builder.Services.AddElsa(elsa => elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>());
+builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
+builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
 builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();

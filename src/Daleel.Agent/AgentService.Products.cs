@@ -39,7 +39,7 @@ public sealed partial class AgentService
     /// web hit, drops non-local buyable sources, extracts/normalizes listings, aggregates them
     /// into per-model entries (one model, many price sources), and builds comparison tiers.
     /// </summary>
-    internal async Task<ProductSearchResult> BuildProductSearchResultAsync(
+    public async Task<ProductSearchResult> BuildProductSearchResultAsync(
         string query, GeoProfile geo, ResearchBundle bundle, string summary, CancellationToken cancellationToken,
         bool assessReputation = true, bool useLlmExtraction = true)
     {
