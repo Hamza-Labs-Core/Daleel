@@ -108,7 +108,7 @@ jobs:
       name: qa
       # Display link only (the `secrets` context isn't allowed here). The real CADDY_DOMAIN
       # is written from the QA_CADDY_DOMAIN secret in the .env step below.
-      url: https://qa.daleel.hamzalabs.dev
+      url: https://qa-daleel.hamzalabs.dev
     steps:
       # Fail fast (before touching the box) if a required secret is missing, empty, or
       # still the create-secrets.sh "CHANGE_ME" placeholder. Identical to production
@@ -289,7 +289,7 @@ jobs:
             POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=daleel_events;Username=daleel;Password=${{ secrets.QA_POSTGRES_PASSWORD || 'daleel-qa-events' }}
             # QA hostname for Caddy/TLS. Point DNS for this name at the QA server IP,
             # or override via the QA_CADDY_DOMAIN secret.
-            CADDY_DOMAIN=${{ secrets.QA_CADDY_DOMAIN || 'qa.daleel.hamzalabs.dev' }}
+            CADDY_DOMAIN=${{ secrets.QA_CADDY_DOMAIN || 'qa-daleel.hamzalabs.dev' }}
             CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
             EOF
             install -m 0600 "/tmp/daleel.env.$$" /opt/daleel/.env
@@ -329,7 +329,7 @@ jobs:
         # Pass values through env (not interpolated into the JS source) per the
         # GitHub Actions injection guidance — the script reads them from process.env.
         env:
-          QA_DOMAIN: ${{ secrets.QA_CADDY_DOMAIN || 'qa.daleel.hamzalabs.dev' }}
+          QA_DOMAIN: ${{ secrets.QA_CADDY_DOMAIN || 'qa-daleel.hamzalabs.dev' }}
           QA_TAG: ${{ env.QA_TAG }}
         with:
           script: |
