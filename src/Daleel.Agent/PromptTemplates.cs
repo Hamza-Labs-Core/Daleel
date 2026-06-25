@@ -325,7 +325,7 @@ public static class PromptTemplates
             }
             One entry per distinct model; gather all its sellers into offers. Only include products evidenced in
             the context — never invent products, prices, models or links. Use an empty products array if the context
-            has no concrete products. No prose outside the JSON.
+            has no concrete products. Respond ONLY with valid JSON.
             """);
         return sb.ToString();
     }
