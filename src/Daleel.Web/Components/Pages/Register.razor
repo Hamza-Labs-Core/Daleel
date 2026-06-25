@@ -6,7 +6,7 @@
    failure mode this avoids ("Headers are read-only, response has already started"). *@
 @inject IStringLocalizer<SharedResource> L
 
-<PageTitle>دليل · Create account</PageTitle>
+<PageTitle>دليل · @L["Auth.CreateAccount"]</PageTitle>
 
 <div class="d-flex justify-center mt-4">
     <MudPaper Class="pa-8" Elevation="0" Outlined="true" Style="max-width:460px;width:100%;border-radius:18px;">
@@ -14,17 +14,17 @@
             <div class="daleel-logo" style="font-size:2rem;">دليل · Daleel</div>
             <MudText Typo="Typo.h5" Class="mt-2">@L["Auth.CreateAccount"]</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Create your free account — you get 5 free searches every month.
+                @L["Auth.Register.Subtitle"]
             </MudText>
         </div>
 
         <AuthorizeView>
             <Authorized>
                 <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-4">
-                    You're already signed in as @(context.User.Identity?.Name).
+                    @L["Auth.AlreadySignedIn", context.User.Identity?.Name ?? string.Empty]
                 </MudAlert>
                 <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
-                    Go to Daleel
+                    @L["Auth.GoToDaleel"]
                 </MudButton>
             </Authorized>
             <NotAuthorized>
@@ -37,36 +37,35 @@
                     <AntiforgeryToken />
                     <input type="hidden" name="returnUrl" value="@ReturnUrl" />
 
-                    <label class="daleel-field-label" for="reg-email">Email</label>
+                    <label class="daleel-field-label" for="reg-email">@L["Auth.Email"]</label>
                     <input id="reg-email" name="email" class="daleel-field" type="email" required
-                           autocomplete="username" placeholder="you@example.com" />
+                           autocomplete="username" placeholder="@L["Auth.EmailPlaceholder"]" />
 
-                    <label class="daleel-field-label" for="reg-password">Password</label>
+                    <label class="daleel-field-label" for="reg-password">@L["Auth.Password"]</label>
                     <input id="reg-password" name="password" class="daleel-field" type="password" required
-                           autocomplete="new-password" placeholder="At least 8 characters" />
+                           autocomplete="new-password" placeholder="@L["Auth.RegPasswordPlaceholder"]" />
 
-                    <label class="daleel-field-label" for="reg-confirm">Confirm password</label>
+                    <label class="daleel-field-label" for="reg-confirm">@L["Auth.ConfirmPassword"]</label>
                     <input id="reg-confirm" name="confirmPassword" class="daleel-field" type="password" required
-                           autocomplete="new-password" placeholder="Re-enter your password" />
+                           autocomplete="new-password" placeholder="@L["Auth.ConfirmPasswordPlaceholder"]" />
 
                     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-2">
-                        Use at least 8 characters with upper- and lower-case letters and a number.
+                        @L["Auth.PasswordHint"]
                     </MudText>
 
                     <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
                                Size="Size.Large" FullWidth="true" Class="mt-4">
-                        Create account
+                        @L["Auth.CreateAccount"]
                     </MudButton>
                 </form>
 
                 <MudText Typo="Typo.caption" Color="Color.Secondary" Align="Align.Center" Class="d-block mt-3">
-                    Your search history is private to your account. Searches are also analyzed
-                    anonymously to improve results — never linked to your identity.
-                    <MudLink Href="/faq" Typo="Typo.caption">Learn more</MudLink>
+                    @L["Auth.PrivacyNote"]
+                    <MudLink Href="/faq" Typo="Typo.caption">@L["Auth.LearnMore"]</MudLink>
                 </MudText>
 
                 <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-4">
-                    Already have an account? <MudLink Href="/login">Sign in</MudLink>
+                    @L["Auth.AlreadyHaveAccount"] <MudLink Href="/login">@L["Auth.SignIn"]</MudLink>
                 </MudText>
             </NotAuthorized>
         </AuthorizeView>
@@ -80,11 +79,11 @@
     // /auth/register redirects back here with ?error=<code> on failure; map the code to a message.
     private string? ErrorMessage => Error switch
     {
-        "missing" => "Please enter both an email and a password.",
-        "mismatch" => "The passwords do not match.",
-        "duplicate" => "An account with that email already exists. Try signing in instead.",
-        "weakpassword" => "Password must be at least 8 characters with upper- and lower-case letters and a number.",
-        "failed" => "We couldn't create your account. Please check your details and try again.",
+        "missing" => (string)L["Auth.Error.Missing"],
+        "mismatch" => (string)L["Auth.Error.Mismatch"],
+        "duplicate" => (string)L["Auth.Error.Duplicate"],
+        "weakpassword" => (string)L["Auth.Error.WeakPassword"],
+        "failed" => (string)L["Auth.Error.Failed"],
         _ => null,
     };
 }

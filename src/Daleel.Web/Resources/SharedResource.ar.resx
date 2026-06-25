@@ -346,6 +346,33 @@
 
   <data name="Auth.ResetPassword" xml:space="preserve"><value>إعادة تعيين كلمة المرور</value></data>
   <data name="Auth.CreateAccount" xml:space="preserve"><value>إنشاء حساب</value></data>
+  <data name="Auth.SignIn" xml:space="preserve"><value>تسجيل الدخول</value></data>
+  <data name="Auth.Email" xml:space="preserve"><value>البريد الإلكتروني</value></data>
+  <data name="Auth.EmailPlaceholder" xml:space="preserve"><value>you@example.com</value></data>
+  <data name="Auth.Password" xml:space="preserve"><value>كلمة المرور</value></data>
+  <data name="Auth.GoToDaleel" xml:space="preserve"><value>الذهاب إلى دليل</value></data>
+  <data name="Auth.AlreadySignedIn" xml:space="preserve"><value>أنت مسجّل الدخول بالفعل باسم {0}.</value></data>
+  <data name="Auth.Login.Subtitle" xml:space="preserve"><value>سجّل الدخول للاحتفاظ بسجل بحثك ونتائجك المحفوظة.</value></data>
+  <data name="Auth.PasswordPlaceholder" xml:space="preserve"><value>كلمة المرور الخاصة بك</value></data>
+  <data name="Auth.ForgotPassword" xml:space="preserve"><value>هل نسيت كلمة المرور؟</value></data>
+  <data name="Auth.NewToDaleel" xml:space="preserve"><value>جديد على دليل؟</value></data>
+  <data name="Auth.CreateFreeAccount" xml:space="preserve"><value>أنشئ حسابًا مجانيًا</value></data>
+  <data name="Auth.Register.Subtitle" xml:space="preserve"><value>أنشئ حسابك المجاني — تحصل على 5 عمليات بحث مجانية كل شهر.</value></data>
+  <data name="Auth.ConfirmPassword" xml:space="preserve"><value>تأكيد كلمة المرور</value></data>
+  <data name="Auth.RegPasswordPlaceholder" xml:space="preserve"><value>8 أحرف على الأقل</value></data>
+  <data name="Auth.ConfirmPasswordPlaceholder" xml:space="preserve"><value>أعد إدخال كلمة المرور</value></data>
+  <data name="Auth.PasswordHint" xml:space="preserve"><value>استخدم 8 أحرف على الأقل تتضمن حروفًا كبيرة وصغيرة ورقمًا.</value></data>
+  <data name="Auth.PrivacyNote" xml:space="preserve"><value>سجل بحثك خاص بحسابك. كما تُحلَّل عمليات البحث بشكل مجهول لتحسين النتائج — دون ربطها بهويتك أبدًا.</value></data>
+  <data name="Auth.LearnMore" xml:space="preserve"><value>اعرف المزيد</value></data>
+  <data name="Auth.AlreadyHaveAccount" xml:space="preserve"><value>لديك حساب بالفعل؟</value></data>
+  <data name="Auth.Error.Invalid" xml:space="preserve"><value>بريد إلكتروني أو كلمة مرور غير صحيحة.</value></data>
+  <data name="Auth.Error.Disabled" xml:space="preserve"><value>تم تعطيل هذا الحساب. تواصل مع الدعم إذا كنت تعتقد أن هذا خطأ.</value></data>
+  <data name="Auth.Error.LockedOut" xml:space="preserve"><value>هذا الحساب مقفل. يُرجى المحاولة لاحقًا.</value></data>
+  <data name="Auth.Error.Missing" xml:space="preserve"><value>يُرجى إدخال البريد الإلكتروني وكلمة المرور.</value></data>
+  <data name="Auth.Error.Mismatch" xml:space="preserve"><value>كلمتا المرور غير متطابقتين.</value></data>
+  <data name="Auth.Error.Duplicate" xml:space="preserve"><value>يوجد حساب بهذا البريد الإلكتروني بالفعل. جرّب تسجيل الدخول بدلاً من ذلك.</value></data>
+  <data name="Auth.Error.WeakPassword" xml:space="preserve"><value>يجب أن تتكون كلمة المرور من 8 أحرف على الأقل تتضمن حروفًا كبيرة وصغيرة ورقمًا.</value></data>
+  <data name="Auth.Error.Failed" xml:space="preserve"><value>تعذّر إنشاء حسابك. يُرجى التحقق من بياناتك والمحاولة مرة أخرى.</value></data>
 
   <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>لا يوجد مفتاح ذكاء اصطناعي</value></data>
   <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>أو اضبط</value></data>

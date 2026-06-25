@@ -211,11 +211,25 @@ else
         try
         {
             row.User.IsAdmin = granting;
-            await Users.UpdateAsync(row.User);
+            // IdentityResult reports failure via Succeeded/Errors rather than throwing, so check it
+            // explicitly and roll back the optimistic flip before surfacing the error.
+            var updateResult = await Users.UpdateAsync(row.User);
+            if (!updateResult.Succeeded)
+            {
+                row.User.IsAdmin = !granting;
+                Snackbar.Add($"Couldn't change admin role: {Describe(updateResult)}", Severity.Error);
+                return;
+            }
             // Rotate the security stamp so live sessions/circuits are revalidated and the role change
             // (especially a *revocation*) takes effect without waiting for the cookie to expire.
-            await Users.UpdateSecurityStampAsync(row.User);
-            Snackbar.Add(row.User.IsAdmin ? "Granted admin (effective on next sign-in)." : "Revoked admin (signed out everywhere).", Severity.Success);
+            var stampResult = await Users.UpdateSecurityStampAsync(row.User);
+            if (!stampResult.Succeeded)
+            {
+                row.User.IsAdmin = !granting;
+                Snackbar.Add($"Couldn't change admin role: {Describe(stampResult)}", Severity.Error);
+                return;
+            }
+            Snackbar.Add(granting ? "Granted admin (effective on next sign-in)." : "Revoked admin (signed out everywhere).", Severity.Success);
         }
         catch (Exception ex)
         {
@@ -243,12 +257,26 @@ else
         try
         {
             row.User.IsDisabled = disabling;
-            await Users.UpdateAsync(row.User);
+            // IdentityResult reports failure via Succeeded/Errors rather than throwing, so check it
+            // explicitly and roll back the optimistic flip before surfacing the error.
+            var updateResult = await Users.UpdateAsync(row.User);
+            if (!updateResult.Succeeded)
+            {
+                row.User.IsDisabled = !disabling;
+                Snackbar.Add($"Couldn't change account status: {Describe(updateResult)}", Severity.Error);
+                return;
+            }
             // Rotate the security stamp: disabling must terminate the user's existing sessions, not just
             // block the next sign-in. The revalidating auth-state provider picks this up and tears down
             // their live circuits; the cookie's stamp validation rejects subsequent requests.
-            await Users.UpdateSecurityStampAsync(row.User);
-            Snackbar.Add(row.User.IsDisabled ? "Account disabled (signed out everywhere)." : "Account enabled.", Severity.Success);
+            var stampResult = await Users.UpdateSecurityStampAsync(row.User);
+            if (!stampResult.Succeeded)
+            {
+                row.User.IsDisabled = !disabling;
+                Snackbar.Add($"Couldn't change account status: {Describe(stampResult)}", Severity.Error);
+                return;
+            }
+            Snackbar.Add(disabling ? "Account disabled (signed out everywhere)." : "Account enabled.", Severity.Success);
         }
         catch (Exception ex)
         {
@@ -256,4 +284,8 @@ else
             Snackbar.Add($"Couldn't change account status: {ex.Message}", Severity.Error);
         }
     }
+
+    // IdentityResult exposes failures as a collection of IdentityError; join their descriptions for display.
+    private static string Describe(IdentityResult result) =>
+        result.Errors.Any() ? string.Join(" ", result.Errors.Select(e => e.Description)) : "Unknown error.";
 }

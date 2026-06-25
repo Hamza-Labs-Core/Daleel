@@ -90,10 +90,15 @@ else
                 Snackbar.Add($"\"{item.Key}\" must be a whole number.", Severity.Warning);
                 return;
             }
-            if (item.Type == "bool" && item.Value is not ("true" or "false"))
+            if (item.Type == "bool")
             {
-                Snackbar.Add($"\"{item.Key}\" must be true or false.", Severity.Warning);
-                return;
+                if (!bool.TryParse(item.Value, out var boolValue))
+                {
+                    Snackbar.Add($"\"{item.Key}\" must be true or false.", Severity.Warning);
+                    return;
+                }
+                // Canonicalize to lowercase ("True"/"TRUE" → "true") so persisted values stay consistent.
+                item.Value = boolValue.ToString().ToLowerInvariant();
             }
         }
 
