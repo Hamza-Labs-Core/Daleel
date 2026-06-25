@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Daleel.Web.Data;
@@ -31,10 +33,63 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
     public DbSet<FilteredContentLog> FilteredContentLogs => Set<FilteredContentLog>();
     public DbSet<SearchCache> SearchCache => Set<SearchCache>();
+    public DbSet<Brand> Brands => Set<Brand>();
+    public DbSet<Store> Stores => Set<Store>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        // Stores a string list as a JSON text column. The accompanying ValueComparer lets EF detect
+        // in-place mutations to the list (without it, change tracking treats the reference as constant).
+        var stringListConverter = new ValueConverter<List<string>, string>(
+            v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+            v => string.IsNullOrEmpty(v)
+                ? new List<string>()
+                : JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>());
+        var stringListComparer = new ValueComparer<List<string>>(
+            (a, b) => (a ?? new List<string>()).SequenceEqual(b ?? new List<string>()),
+            c => c == null ? 0 : c.Aggregate(0, (h, s) => HashCode.Combine(h, s.GetHashCode())),
+            c => c.ToList());
+
+        // Profiles persist LastRefreshed as Unix-ms: SQLite can't translate DateTimeOffset ordering
+        // (<, <=) in a WHERE clause, and the staleness sweep filters on exactly that. Same trick as
+        // SearchCache.ExpiresAt below.
+        var toUnixMs = new ValueConverter<DateTimeOffset, long>(
+            v => v.ToUnixTimeMilliseconds(),
+            v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+
+        builder.Entity<Brand>(e =>
+        {
+            // Upsert/lookup is an exact match on the normalized name, so it's unique + indexed.
+            // The LastRefreshed index serves the staleness sweep (delete/refresh where older than cutoff).
+            e.HasIndex(x => x.NameKey).IsUnique();
+            e.HasIndex(x => x.LastRefreshed);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.NameKey).HasMaxLength(200);
+            e.Property(x => x.CountryOfOrigin).HasMaxLength(100);
+            e.Property(x => x.PriceRange).HasMaxLength(100);
+            e.Property(x => x.Website).HasMaxLength(500);
+            e.Property(x => x.Description).HasMaxLength(4000);
+            e.Property(x => x.Pros).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.Cons).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.PopularModels).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+        });
+
+        builder.Entity<Store>(e =>
+        {
+            e.HasIndex(x => x.NameKey).IsUnique();
+            e.HasIndex(x => x.LastRefreshed);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.NameKey).HasMaxLength(200);
+            e.Property(x => x.Location).HasMaxLength(300);
+            e.Property(x => x.Type).HasMaxLength(100);
+            e.Property(x => x.Website).HasMaxLength(500);
+            e.Property(x => x.BrandsCarried).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.Rating);
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+        });
 
         builder.Entity<SearchHistoryEntry>(e =>
         {
