@@ -40,14 +40,39 @@ public sealed class BrandRepository : IBrandRepository
     {
         var key = Brand.Normalize(brand.Name);
         var existing = await _db.Brands.FirstOrDefaultAsync(b => b.NameKey == key, ct);
-        if (existing is null)
+        if (existing is not null)
         {
-            brand.NameKey = key;
-            _db.Brands.Add(brand);
+            ApplyUpdates(existing, brand);
+            await _db.SaveChangesAsync(ct);
+            return existing;
+        }
+
+        brand.NameKey = key;
+        _db.Brands.Add(brand);
+        try
+        {
             await _db.SaveChangesAsync(ct);
             return brand;
         }
+        catch (DbUpdateException)
+        {
+            // A concurrent insert for the same NameKey won the unique-index race. Drop our pending
+            // insert, reload the row the other writer committed, and merge our values onto it.
+            _db.Entry(brand).State = EntityState.Detached;
+            var winner = await _db.Brands.FirstOrDefaultAsync(b => b.NameKey == key, ct);
+            if (winner is null)
+            {
+                throw; // not the race we expected (no row to update) — surface the original failure
+            }
 
+            ApplyUpdates(winner, brand);
+            await _db.SaveChangesAsync(ct);
+            return winner;
+        }
+    }
+
+    private static void ApplyUpdates(Brand existing, Brand brand)
+    {
         existing.Name = brand.Name;
         existing.CountryOfOrigin = brand.CountryOfOrigin;
         existing.ReputationScore = brand.ReputationScore;
@@ -58,8 +83,6 @@ public sealed class BrandRepository : IBrandRepository
         existing.PriceRange = brand.PriceRange;
         existing.Website = brand.Website;
         existing.LastRefreshed = brand.LastRefreshed;
-        await _db.SaveChangesAsync(ct);
-        return existing;
     }
 
     public async Task<IReadOnlyList<Brand>> ListAsync(CancellationToken ct = default) =>

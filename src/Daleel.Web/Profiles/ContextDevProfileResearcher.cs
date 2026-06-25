@@ -40,10 +40,14 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         }
 
         var contextDev = TryBuildContextDev();
-        var context = contextDev is null
-            ? string.Empty
-            : await GatherBrandContextAsync(contextDev, brandName, ct).ConfigureAwait(false);
+        if (contextDev is null)
+        {
+            // No research keys configured: honor the documented contract (return null and let the
+            // profile service degrade) rather than burning an LLM call on empty context.
+            return null;
+        }
 
+        var context = await GatherBrandContextAsync(contextDev, brandName, ct).ConfigureAwait(false);
         return await new ProfileSynthesizer(llm).SynthesizeBrandAsync(brandName, context, ct).ConfigureAwait(false);
     }
 
@@ -56,10 +60,14 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         }
 
         var contextDev = TryBuildContextDev();
-        var context = contextDev is null
-            ? string.Empty
-            : await GatherStoreContextAsync(contextDev, storeName, geo, ct).ConfigureAwait(false);
+        if (contextDev is null)
+        {
+            // No research keys configured: honor the documented contract (return null and let the
+            // profile service degrade) rather than burning an LLM call on empty context.
+            return null;
+        }
 
+        var context = await GatherStoreContextAsync(contextDev, storeName, geo, ct).ConfigureAwait(false);
         return await new ProfileSynthesizer(llm).SynthesizeStoreAsync(storeName, context, ct).ConfigureAwait(false);
     }
 

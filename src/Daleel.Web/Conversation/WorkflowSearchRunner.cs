@@ -85,7 +85,17 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             state.Progress = progress;
 
             var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
-            await runner.RunAsync(new SearchWorkflow(), cancellationToken: capTrip.Token).ConfigureAwait(false);
+            var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: capTrip.Token).ConfigureAwait(false);
+
+            // A faulted/cancelled run reports Status == Finished but a non-Finished SubStatus, leaving
+            // ResultJson empty or partial. Surface that as a failure instead of returning a broken result.
+            if (run.WorkflowState.SubStatus != WorkflowSubStatus.Finished)
+            {
+                var reason = string.Join("; ", run.WorkflowState.Incidents.Select(i => i.Message));
+                throw new InvalidOperationException(
+                    $"Search workflow did not finish (sub-status: {run.WorkflowState.SubStatus})" +
+                    (string.IsNullOrWhiteSpace(reason) ? "." : $": {reason}"));
+            }
 
             await RecordResultCacheAsync(job, state.FromCache ? "hit" : "miss", ct).ConfigureAwait(false);
 

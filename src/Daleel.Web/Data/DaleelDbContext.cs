@@ -49,7 +49,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
                 : JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>());
         var stringListComparer = new ValueComparer<List<string>>(
             (a, b) => (a ?? new List<string>()).SequenceEqual(b ?? new List<string>()),
-            c => c == null ? 0 : c.Aggregate(0, (h, s) => HashCode.Combine(h, s.GetHashCode())),
+            // JSON deserialization can yield null list entries, so hash null-safely.
+            c => c == null ? 0 : c.Aggregate(0, (h, s) => HashCode.Combine(h, s == null ? 0 : s.GetHashCode())),
             c => c.ToList());
 
         // Profiles persist LastRefreshed as Unix-ms: SQLite can't translate DateTimeOffset ordering

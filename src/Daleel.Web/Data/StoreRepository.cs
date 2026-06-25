@@ -28,14 +28,39 @@ public sealed class StoreRepository : IStoreRepository
     {
         var key = Store.Normalize(store.Name);
         var existing = await _db.Stores.FirstOrDefaultAsync(s => s.NameKey == key, ct);
-        if (existing is null)
+        if (existing is not null)
         {
-            store.NameKey = key;
-            _db.Stores.Add(store);
+            ApplyUpdates(existing, store);
+            await _db.SaveChangesAsync(ct);
+            return existing;
+        }
+
+        store.NameKey = key;
+        _db.Stores.Add(store);
+        try
+        {
             await _db.SaveChangesAsync(ct);
             return store;
         }
+        catch (DbUpdateException)
+        {
+            // A concurrent insert for the same NameKey won the unique-index race. Drop our pending
+            // insert, reload the row the other writer committed, and merge our values onto it.
+            _db.Entry(store).State = EntityState.Detached;
+            var winner = await _db.Stores.FirstOrDefaultAsync(s => s.NameKey == key, ct);
+            if (winner is null)
+            {
+                throw; // not the race we expected (no row to update) — surface the original failure
+            }
 
+            ApplyUpdates(winner, store);
+            await _db.SaveChangesAsync(ct);
+            return winner;
+        }
+    }
+
+    private static void ApplyUpdates(Store existing, Store store)
+    {
         existing.Name = store.Name;
         existing.Location = store.Location;
         existing.Type = store.Type;
@@ -43,8 +68,6 @@ public sealed class StoreRepository : IStoreRepository
         existing.BrandsCarried = store.BrandsCarried;
         existing.Rating = store.Rating;
         existing.LastRefreshed = store.LastRefreshed;
-        await _db.SaveChangesAsync(ct);
-        return existing;
     }
 
     public async Task<IReadOnlyList<Store>> ListAsync(CancellationToken ct = default) =>

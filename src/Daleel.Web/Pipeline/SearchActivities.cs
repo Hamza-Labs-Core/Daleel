@@ -159,6 +159,7 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
         IBrandProfileService svc, string name, string geo, CancellationToken ct)
     {
         try { return await svc.GetOrCreateAsync(name, geo, ct); }
+        catch (OperationCanceledException) { throw; }
         catch { return null; }
     }
 
@@ -166,6 +167,7 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
         IStoreProfileService svc, string name, string geo, CancellationToken ct)
     {
         try { return await svc.GetOrCreateAsync(name, geo, ct); }
+        catch (OperationCanceledException) { throw; }
         catch { return null; }
     }
 
