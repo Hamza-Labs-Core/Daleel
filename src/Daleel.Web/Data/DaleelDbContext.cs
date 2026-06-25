@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Daleel.Web.Data;
 
@@ -29,6 +30,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<UserConversation> UserConversations => Set<UserConversation>();
     public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
     public DbSet<FilteredContentLog> FilteredContentLogs => Set<FilteredContentLog>();
+    public DbSet<SearchCache> SearchCache => Set<SearchCache>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -93,6 +95,25 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Status).HasMaxLength(16);
             e.Property(x => x.Model).HasMaxLength(128);
             e.Property(x => x.EstimatedCost).HasColumnType("decimal(12,6)");
+        });
+
+        builder.Entity<SearchCache>(e =>
+        {
+            // Reads are exact-key lookups, so the key is unique and indexed. The {Layer, ExpiresAt}
+            // index serves the weekly purge sweep (delete where ExpiresAt < now) and per-layer stats.
+            e.HasIndex(x => x.CacheKey).IsUnique();
+            e.HasIndex(x => new { x.Layer, x.ExpiresAt });
+            e.Property(x => x.CacheKey).HasMaxLength(80);
+            e.Property(x => x.Layer).HasMaxLength(16);
+
+            // Store the timestamps as Unix-ms integers. SQLite can't translate DateTimeOffset
+            // ordering comparisons (>, <=) in a WHERE clause, but the cache's whole job is to filter
+            // and purge by ExpiresAt — so persist these as longs, which translate on any provider.
+            var toUnixMs = new ValueConverter<DateTimeOffset, long>(
+                v => v.ToUnixTimeMilliseconds(),
+                v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+            e.Property(x => x.ExpiresAt).HasConversion(toUnixMs);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 
         builder.Entity<FilteredContentLog>(e =>

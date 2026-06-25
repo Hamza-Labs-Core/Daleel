@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Daleel.Core.Caching;
 using Daleel.Core.Moderation;
 using Daleel.Core.Observability;
 using Daleel.Web.Data;
@@ -27,24 +29,43 @@ public interface ISearchRunner
 /// <summary>Production runner: builds an agent from server-side keys and runs the unified ask flow.</summary>
 public sealed class AgentSearchRunner : ISearchRunner
 {
+    /// <summary>TTL for both cache layers — a cached search stays valid for 30 days.</summary>
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromDays(30);
+
     private readonly IAgentFactory _agents;
     private readonly ISystemConfigService _config;
     private readonly IApiCallLogRepository _apiLog;
     private readonly IFilteredContentLogRepository _filteredLog;
+    private readonly ICacheStore _cache;
     private readonly ILogger<AgentSearchRunner> _logger;
 
     public AgentSearchRunner(IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
-        IFilteredContentLogRepository filteredLog, ILogger<AgentSearchRunner> logger)
+        IFilteredContentLogRepository filteredLog, ICacheStore cache, ILogger<AgentSearchRunner> logger)
     {
         _agents = agents;
         _config = config;
         _apiLog = apiLog;
         _filteredLog = filteredLog;
+        _cache = cache;
         _logger = logger;
     }
 
+    /// <summary>The cached shape of a completed search — enough to replay the report verbatim.</summary>
+    private sealed record CachedResult(string ResultJson, string ResultType);
+
     public async Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct)
     {
+        // Full-result cache: an identical normalized query+geo within the TTL replays the whole
+        // report without running the agent at all (no LLM/provider calls). Hit or miss is logged.
+        var resultKey = CacheKey.ForResult(job.Query, job.Geo, job.Language);
+        if (await TryGetResultAsync(resultKey, ct).ConfigureAwait(false) is { } cached)
+        {
+            progress("⚡ Loaded from cache — identical search run recently.");
+            await RecordResultCacheAsync(job, "hit", ct).ConfigureAwait(false);
+            return new SearchRunResult(cached.ResultJson, cached.ResultType, FilteredCount: 0, FilteredCategories: "");
+        }
+        await RecordResultCacheAsync(job, "miss", ct).ConfigureAwait(false);
+
         // Per-job cost instrumentation: estimate + cap from admin config, stream each call live.
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
         var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
@@ -64,7 +85,9 @@ public sealed class AgentSearchRunner : ISearchRunner
             Language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language,
             Log = progress,
             ApiObserver = collector,
-            CostEstimator = estimator
+            CostEstimator = estimator,
+            Cache = _cache,
+            CacheTtl = CacheTtl
         });
 
         try
@@ -84,8 +107,13 @@ public sealed class AgentSearchRunner : ISearchRunner
             var resultCount = answer.Products?.ProductCount
                 ?? (answer.Research.WebResults.Count + answer.Research.ShoppingResults.Count);
 
+            var resultJson = ResultSerialization.Serialize(answer);
+
+            // Cache the finished (already content-filtered) report for the next identical search.
+            await TrySetResultAsync(resultKey, new CachedResult(resultJson, "ask"), ct).ConfigureAwait(false);
+
             return new SearchRunResult(
-                ResultSerialization.Serialize(answer),
+                resultJson,
                 "ask",
                 audit.Count,
                 string.Join(",", categories),
@@ -175,6 +203,58 @@ public sealed class AgentSearchRunner : ISearchRunner
         catch
         {
             // best-effort
+        }
+    }
+
+    /// <summary>Reads + deserializes the full-result cache. Any failure is treated as a miss.</summary>
+    private async Task<CachedResult?> TryGetResultAsync(string key, CancellationToken ct)
+    {
+        try
+        {
+            var payload = await _cache.GetAsync(key, ct).ConfigureAwait(false);
+            return payload is null ? null : JsonSerializer.Deserialize<CachedResult>(payload);
+        }
+        catch
+        {
+            return null; // cache/db hiccup or corrupt payload ⇒ run the search live
+        }
+    }
+
+    /// <summary>Stores the finished report under the result key. Best-effort; never fails the search.</summary>
+    private async Task TrySetResultAsync(string key, CachedResult value, CancellationToken ct)
+    {
+        try
+        {
+            await _cache.SetAsync(key, JsonSerializer.Serialize(value), CacheTtl, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
+
+    /// <summary>Records a result-layer cache hit/miss to <see cref="ApiCallLog"/> (Provider "cache").</summary>
+    private async Task RecordResultCacheAsync(SearchJob job, string outcome, CancellationToken ct)
+    {
+        var row = new ApiCallLog
+        {
+            UserId = Anonymizer.HashUserId(job.UserId),
+            JobId = job.Id,
+            Provider = "cache",
+            Endpoint = $"result/{outcome}",
+            RequestSummary = job.Query,
+            Status = "success",
+            EstimatedCost = 0m,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        try
+        {
+            await _apiLog.AddBatchAsync(new[] { row }, CancellationToken.None).ConfigureAwait(false);
+        }
+        catch
+        {
+            // best-effort: cache telemetry must never affect the search outcome
         }
     }
 }
