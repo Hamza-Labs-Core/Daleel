@@ -89,6 +89,13 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Website).HasMaxLength(500);
             e.Property(x => x.BrandsCarried).HasConversion(stringListConverter, stringListComparer);
             e.Property(x => x.Rating);
+            // Contact + Google-Maps verification columns (added with store enrichment).
+            e.Property(x => x.Phone).HasMaxLength(64);
+            e.Property(x => x.Email).HasMaxLength(256);
+            e.Property(x => x.Address).HasMaxLength(500);
+            e.Property(x => x.GooglePlaceId).HasMaxLength(256);
+            e.Property(x => x.GoogleMapsUrl).HasMaxLength(500);
+            e.Property(x => x.OpeningHours).HasConversion(stringListConverter, stringListComparer);
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
         });
 
