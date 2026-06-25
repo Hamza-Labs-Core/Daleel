@@ -204,4 +204,177 @@
   <data name="Faq.Q6" xml:space="preserve"><value>How is my search data used?</value></data>
   <data name="Faq.A6" xml:space="preserve"><value>Your personal search history is saved only for you, under your account. Separately, searches are analyzed anonymously to improve results — we record what was searched, the market, timing and cost, but never anything that identifies you. Analytics and cost logs carry only a one-way hash, so a search can't be traced back to your account.</value></data>
   <data name="Footer.Privacy" xml:space="preserve"><value>Searches are analyzed anonymously to improve results.</value></data>
+
+  <data name="Home.Tagline" xml:space="preserve"><value>Your smart shopping assistant</value></data>
+  <data name="Home.NoSearches" xml:space="preserve"><value>No searches yet.</value></data>
+  <data name="Home.NoResults.Title" xml:space="preserve"><value>No results just yet</value></data>
+  <data name="Home.NoResults.Hint" xml:space="preserve"><value>Try rephrasing your search or searching again.</value></data>
+  <data name="Home.SignInDialog.Title" xml:space="preserve"><value>Sign in to search</value></data>
+  <data name="Home.SignInDialog.Body" xml:space="preserve"><value>Create a free account to run searches — you get 5 free searches every month.</value></data>
+
+  <data name="Deals.Title" xml:space="preserve"><value>Deal Finder</value></data>
+  <data name="Deals.Subtitle" xml:space="preserve"><value>Current prices, promotions and where to buy — ranked.</value></data>
+  <data name="Deals.ProductLabel" xml:space="preserve"><value>Product</value></data>
+  <data name="Deals.FindDeals" xml:space="preserve"><value>Find deals</value></data>
+  <data name="Deals.BestDeals" xml:space="preserve"><value>Best deals</value></data>
+  <data name="Deals.Listings" xml:space="preserve"><value>Listings</value></data>
+
+  <data name="Compare.Title" xml:space="preserve"><value>Product Compare</value></data>
+  <data name="Compare.Subtitle" xml:space="preserve"><value>Two products, head-to-head, with local context and a verdict.</value></data>
+  <data name="Compare.ProductA" xml:space="preserve"><value>Product A</value></data>
+  <data name="Compare.ProductB" xml:space="preserve"><value>Product B</value></data>
+  <data name="Compare.Pros" xml:space="preserve"><value>Pros</value></data>
+  <data name="Compare.Cons" xml:space="preserve"><value>Cons</value></data>
+  <data name="Compare.Verdict" xml:space="preserve"><value>Verdict</value></data>
+
+  <data name="Stores.Title" xml:space="preserve"><value>Store Finder</value></data>
+  <data name="Stores.Subtitle" xml:space="preserve"><value>Find physical stores selling a product near a location (Google Places).</value></data>
+  <data name="Stores.ProductLabel" xml:space="preserve"><value>Product / category</value></data>
+  <data name="Stores.Find" xml:space="preserve"><value>Find</value></data>
+  <data name="Stores.UseMyLocation" xml:space="preserve"><value>Use my location</value></data>
+  <data name="Stores.MapPreview" xml:space="preserve"><value>Map preview (Google Maps embed coming soon)</value></data>
+  <data name="Stores.StoresCount" xml:space="preserve"><value>stores</value></data>
+
+  <data name="Brand.Title" xml:space="preserve"><value>Brand Intelligence</value></data>
+  <data name="Brand.Subtitle" xml:space="preserve"><value>Presence, sentiment, stores and competitors for a brand in one market.</value></data>
+  <data name="Brand.BrandLabel" xml:space="preserve"><value>Brand</value></data>
+  <data name="Brand.Analyze" xml:space="preserve"><value>Analyze</value></data>
+  <data name="Brand.Overview" xml:space="preserve"><value>Overview</value></data>
+  <data name="Brand.WhereItSells" xml:space="preserve"><value>Where it sells</value></data>
+  <data name="Brand.PhysicalLocations" xml:space="preserve"><value>Physical locations</value></data>
+  <data name="Brand.Competitors" xml:space="preserve"><value>Competitors</value></data>
+
+  <data name="Monitor.Title" xml:space="preserve"><value>Monitor Dashboard</value></data>
+  <data name="Monitor.Subtitle" xml:space="preserve"><value>Watch keywords across social platforms. "Run now" fetches matches via Apify when a token is set.</value></data>
+  <data name="Monitor.NewMonitor" xml:space="preserve"><value>New monitor</value></data>
+  <data name="Monitor.KeywordLabel" xml:space="preserve"><value>Keyword</value></data>
+  <data name="Monitor.IntervalLabel" xml:space="preserve"><value>Interval</value></data>
+  <data name="Monitor.AddMonitor" xml:space="preserve"><value>Add monitor</value></data>
+  <data name="Monitor.ActiveMonitors" xml:space="preserve"><value>Active monitors</value></data>
+  <data name="Monitor.ResultsFeed" xml:space="preserve"><value>Results feed</value></data>
+
+  <data name="Results.AlsoFound" xml:space="preserve"><value>Also found</value></data>
+  <data name="Results.RelatedArticles" xml:space="preserve"><value>Related articles</value></data>
+  <data name="Results.NoneInCountry" xml:space="preserve"><value>No local products, stores, or brands were found for this search in {0}.</value></data>
+  <data name="Results.ModelsLabel" xml:space="preserve"><value>products</value></data>
+  <data name="Results.AllLocalTo" xml:space="preserve"><value>All local to {0}</value></data>
+  <data name="Results.NofMShown" xml:space="preserve"><value>{0} of {1} shown</value></data>
+  <data name="Results.NoMatch" xml:space="preserve"><value>No products match the current filters.</value></data>
+  <data name="Results.PreGrouped" xml:space="preserve"><value>Pre-grouped comparison: budget · mid-range · premium</value></data>
+  <data name="Results.NSelected" xml:space="preserve"><value>{0} selected</value></data>
+  <data name="Results.Clear" xml:space="preserve"><value>Clear</value></data>
+  <data name="Results.CompareProducts" xml:space="preserve"><value>Compare products</value></data>
+
+  <data name="ProductFilters.AllBrands" xml:space="preserve"><value>All brands</value></data>
+  <data name="ProductFilters.AllSources" xml:space="preserve"><value>All sources</value></data>
+  <data name="ProductFilters.Marketplaces" xml:space="preserve"><value>Marketplaces</value></data>
+  <data name="ProductFilters.BrandSites" xml:space="preserve"><value>Brand sites</value></data>
+  <data name="ProductFilters.Any" xml:space="preserve"><value>Any</value></data>
+  <data name="ProductFilters.MostSellers" xml:space="preserve"><value>Most sellers</value></data>
+
+  <data name="Progress.Researching" xml:space="preserve"><value>Daleel is researching…</value></data>
+  <data name="Progress.Complete" xml:space="preserve"><value>Research complete</value></data>
+
+  <data name="Sources.Label" xml:space="preserve"><value>Sources</value></data>
+
+  <data name="ModelCard.From" xml:space="preserve"><value>from</value></data>
+  <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>Price on site</value></data>
+  <data name="ModelCard.Sale" xml:space="preserve"><value>SALE</value></data>
+  <data name="ModelCard.Seller" xml:space="preserve"><value>seller</value></data>
+
+  <data name="History.Title" xml:space="preserve"><value>Search History</value></data>
+  <data name="History.Subtitle" xml:space="preserve"><value>Every query you run is saved here automatically. Re-run it or open a saved copy.</value></data>
+  <data name="History.SignInPrompt" xml:space="preserve"><value>Sign in to save your searches.</value></data>
+  <data name="History.FilterPlaceholder" xml:space="preserve"><value>Filter by query text…</value></data>
+  <data name="History.ClearAll" xml:space="preserve"><value>Clear all</value></data>
+  <data name="History.Col.When" xml:space="preserve"><value>When</value></data>
+  <data name="History.Col.Type" xml:space="preserve"><value>Type</value></data>
+  <data name="History.Col.Query" xml:space="preserve"><value>Query</value></data>
+  <data name="History.Col.Market" xml:space="preserve"><value>Market</value></data>
+  <data name="History.Col.Summary" xml:space="preserve"><value>Summary</value></data>
+  <data name="History.Col.Actions" xml:space="preserve"><value>Actions</value></data>
+  <data name="History.Rerun" xml:space="preserve"><value>Re-run</value></data>
+  <data name="History.Delete" xml:space="preserve"><value>Delete</value></data>
+  <data name="History.Empty" xml:space="preserve"><value>No history yet — run a search to get started.</value></data>
+  <data name="History.Deleted" xml:space="preserve"><value>Deleted.</value></data>
+  <data name="History.ClearDialog.Title" xml:space="preserve"><value>Clear all history?</value></data>
+  <data name="History.ClearDialog.Body" xml:space="preserve"><value>This permanently removes all of your search history.</value></data>
+  <data name="History.Cleared" xml:space="preserve"><value>Cleared {0} item(s).</value></data>
+
+  <data name="Settings.Title" xml:space="preserve"><value>Settings</value></data>
+  <data name="Settings.Subtitle" xml:space="preserve"><value>Everything here is stored in your browser only (localStorage) and sent straight to the agent — never written to server logs.</value></data>
+  <data name="Settings.ApiKeys" xml:space="preserve"><value>API Keys</value></data>
+  <data name="Settings.Show" xml:space="preserve"><value>Show</value></data>
+  <data name="Settings.SaveKeys" xml:space="preserve"><value>Save keys</value></data>
+  <data name="Settings.Preferences" xml:space="preserve"><value>Preferences</value></data>
+  <data name="Settings.DefaultMarket" xml:space="preserve"><value>Default market</value></data>
+  <data name="Settings.DefaultModel" xml:space="preserve"><value>Default model</value></data>
+  <data name="Settings.DarkTheme" xml:space="preserve"><value>Dark theme</value></data>
+  <data name="Settings.LightTheme" xml:space="preserve"><value>Light theme</value></data>
+  <data name="Settings.PreferencesNote" xml:space="preserve"><value>Preferences apply instantly and persist in this browser.</value></data>
+  <data name="Settings.ContentFilter" xml:space="preserve"><value>Content Filter</value></data>
+  <data name="Settings.HalalFiltering" xml:space="preserve"><value>Halal filtering</value></data>
+  <data name="Settings.Strict" xml:space="preserve"><value>Strict (recommended)</value></data>
+  <data name="Settings.Moderate" xml:space="preserve"><value>Moderate</value></data>
+  <data name="Settings.Off" xml:space="preserve"><value>Off (admin only)</value></data>
+  <data name="Settings.FilterDesc" xml:space="preserve"><value>Filters alcohol, pork, gambling, adult, drugs from all results.</value></data>
+  <data name="Settings.FilterDesc.Strict" xml:space="preserve"><value>Filters alcohol, pork, gambling, adult, drugs, tobacco and riba from all results.</value></data>
+  <data name="Settings.FilterAdminNote" xml:space="preserve"><value>Turning the filter off requires an admin account.</value></data>
+  <data name="Settings.ImageSafety" xml:space="preserve"><value>Image Safety</value></data>
+  <data name="Settings.BlurImages" xml:space="preserve"><value>Blur all external images</value></data>
+  <data name="Settings.HaramBlurPrompt" xml:space="preserve"><value>Show HaramBlur install prompt</value></data>
+  <data name="Settings.TrustedDomains" xml:space="preserve"><value>Trusted image domains</value></data>
+  <data name="Settings.NoTrustedDomains" xml:space="preserve"><value>None yet. Reveal an image and choose "Trust source".</value></data>
+  <data name="Settings.Snack.KeysSaved" xml:space="preserve"><value>API keys saved to this browser.</value></data>
+  <data name="Settings.Snack.KeysCleared" xml:space="preserve"><value>All keys cleared.</value></data>
+  <data name="Settings.Snack.FilterSet" xml:space="preserve"><value>Content filter: {0}.</value></data>
+
+  <data name="Common.Market" xml:space="preserve"><value>Market</value></data>
+  <data name="Common.Model" xml:space="preserve"><value>Model</value></data>
+  <data name="SaveResult.Button" xml:space="preserve"><value>Save result</value></data>
+  <data name="SaveResult.Saved" xml:space="preserve"><value>Saved</value></data>
+  <data name="SaveResult.TitleLabel" xml:space="preserve"><value>Title</value></data>
+  <data name="SaveResult.NotesLabel" xml:space="preserve"><value>Notes (optional)</value></data>
+
+  <data name="Common.Save" xml:space="preserve"><value>Save</value></data>
+  <data name="Common.Close" xml:space="preserve"><value>Close</value></data>
+  <data name="Common.Cancel" xml:space="preserve"><value>Cancel</value></data>
+
+  <data name="Sentiment.Title" xml:space="preserve"><value>Sentiment</value></data>
+  <data name="Saved.Title" xml:space="preserve"><value>Saved Results</value></data>
+  <data name="Account.Title" xml:space="preserve"><value>My Account</value></data>
+
+  <data name="Auth.ResetPassword" xml:space="preserve"><value>Reset password</value></data>
+  <data name="Auth.CreateAccount" xml:space="preserve"><value>Create account</value></data>
+  <data name="Auth.SignIn" xml:space="preserve"><value>Sign in</value></data>
+  <data name="Auth.Email" xml:space="preserve"><value>Email</value></data>
+  <data name="Auth.EmailPlaceholder" xml:space="preserve"><value>you@example.com</value></data>
+  <data name="Auth.Password" xml:space="preserve"><value>Password</value></data>
+  <data name="Auth.GoToDaleel" xml:space="preserve"><value>Go to Daleel</value></data>
+  <data name="Auth.AlreadySignedIn" xml:space="preserve"><value>You're already signed in as {0}.</value></data>
+  <data name="Auth.Login.Subtitle" xml:space="preserve"><value>Sign in to keep your search history and saved results.</value></data>
+  <data name="Auth.PasswordPlaceholder" xml:space="preserve"><value>Your password</value></data>
+  <data name="Auth.ForgotPassword" xml:space="preserve"><value>Forgot password?</value></data>
+  <data name="Auth.NewToDaleel" xml:space="preserve"><value>New to Daleel?</value></data>
+  <data name="Auth.CreateFreeAccount" xml:space="preserve"><value>Create a free account</value></data>
+  <data name="Auth.Register.Subtitle" xml:space="preserve"><value>Create your free account — you get 5 free searches every month.</value></data>
+  <data name="Auth.ConfirmPassword" xml:space="preserve"><value>Confirm password</value></data>
+  <data name="Auth.RegPasswordPlaceholder" xml:space="preserve"><value>At least 8 characters</value></data>
+  <data name="Auth.ConfirmPasswordPlaceholder" xml:space="preserve"><value>Re-enter your password</value></data>
+  <data name="Auth.PasswordHint" xml:space="preserve"><value>Use at least 8 characters with upper- and lower-case letters and a number.</value></data>
+  <data name="Auth.PrivacyNote" xml:space="preserve"><value>Your search history is private to your account. Searches are also analyzed anonymously to improve results — never linked to your identity.</value></data>
+  <data name="Auth.LearnMore" xml:space="preserve"><value>Learn more</value></data>
+  <data name="Auth.AlreadyHaveAccount" xml:space="preserve"><value>Already have an account?</value></data>
+  <data name="Auth.Error.Invalid" xml:space="preserve"><value>Invalid email or password.</value></data>
+  <data name="Auth.Error.Disabled" xml:space="preserve"><value>This account has been disabled. Contact support if you think this is a mistake.</value></data>
+  <data name="Auth.Error.LockedOut" xml:space="preserve"><value>This account is locked out. Please try again later.</value></data>
+  <data name="Auth.Error.Missing" xml:space="preserve"><value>Please enter both an email and a password.</value></data>
+  <data name="Auth.Error.Mismatch" xml:space="preserve"><value>The passwords do not match.</value></data>
+  <data name="Auth.Error.Duplicate" xml:space="preserve"><value>An account with that email already exists. Try signing in instead.</value></data>
+  <data name="Auth.Error.WeakPassword" xml:space="preserve"><value>Password must be at least 8 characters with upper- and lower-case letters and a number.</value></data>
+  <data name="Auth.Error.Failed" xml:space="preserve"><value>We couldn't create your account. Please check your details and try again.</value></data>
+
+  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>No LLM key configured. Add one on the</value></data>
+  <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>page, or set</value></data>
+  <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>on the server.</value></data>
 </root>

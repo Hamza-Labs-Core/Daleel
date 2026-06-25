@@ -1,18 +1,19 @@
 @page "/stores"
 @inherits AgentPageBase
 @inject IJSRuntime JS
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>دليل · Store Finder</PageTitle>
+<PageTitle>دليل · @L["Stores.Title"]</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-1">باحث المتاجر · Store Finder</MudText>
+<MudText Typo="Typo.h4" Class="mb-1">@L["Stores.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Find physical stores selling a product near a location (Google Places).
+    @L["Stores.Subtitle"]
 </MudText>
 
 <MudPaper Class="pa-4" Elevation="0" Outlined="true">
     <div class="d-flex flex-wrap gap-3 align-center">
         <div style="min-width:240px;flex:2;">
-            <MudTextField @bind-Value="_subject" Label="Product / category · المنتج"
+            <MudTextField @bind-Value="_subject" Label="@L["Stores.ProductLabel"]"
                           Placeholder="e.g. air conditioner, مكيف"
                           Variant="Variant.Outlined" Adornment="Adornment.Start"
                           AdornmentIcon="@Icons.Material.Filled.ShoppingBag" OnKeyDown="OnKey" />
@@ -20,12 +21,12 @@
         <div style="min-width:230px;flex:1;"><GeoSelect @bind-Value="Geo" /></div>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
                    StartIcon="@Icons.Material.Filled.TravelExplore" OnClick="Run"
-                   Disabled="Busy || string.IsNullOrWhiteSpace(_subject)">بحث · Find</MudButton>
+                   Disabled="Busy || string.IsNullOrWhiteSpace(_subject)">@L["Stores.Find"]</MudButton>
     </div>
     <div class="d-flex flex-wrap gap-3 align-center mt-3">
         <MudButton Variant="Variant.Text" Color="@(_coords is null ? Color.Default : Color.Success)"
                    StartIcon="@Icons.Material.Filled.MyLocation" OnClick="UseMyLocation" Disabled="_locating">
-            @(_coords is null ? "استخدم موقعي · Use my location" : $"📍 {_coords.Value.Lat:0.00}, {_coords.Value.Lng:0.00}")
+            @(_coords is null ? L["Stores.UseMyLocation"].Value : $"📍 {_coords.Value.Lat:0.00}, {_coords.Value.Lng:0.00}")
         </MudButton>
         @if (_coords is not null)
         {
@@ -55,7 +56,7 @@
           Style="height:200px;background:repeating-linear-gradient(45deg,var(--mud-palette-surface),var(--mud-palette-surface) 12px,var(--mud-palette-background-grey) 12px,var(--mud-palette-background-grey) 24px);">
     <div class="text-center">
         <MudIcon Icon="@Icons.Material.Filled.Map" Size="Size.Large" Color="Color.Secondary" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">خريطة · Map preview (Google Maps embed coming soon)</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Stores.MapPreview"]</MudText>
     </div>
 </MudPaper>
 
@@ -70,7 +71,7 @@
     else
     {
         <div class="d-flex align-center mb-2">
-            <MudText Typo="Typo.subtitle1">@_stores.Count stores · @Catalog.ResolveGeo(Geo).English</MudText>
+            <MudText Typo="Typo.subtitle1">@_stores.Count @L["Stores.StoresCount"] · @Catalog.ResolveGeo(Geo).English</MudText>
             <MudSpacer />
             <SaveResultButton Result="_stores" ResultType="stores" DefaultTitle="@_subject" SearchHistoryId="LastHistoryId" />
         </div>

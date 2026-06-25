@@ -1,9 +1,11 @@
 @* Visualizes an aggregated SentimentSummary as a stacked bar + counts. *@
+@inject IStringLocalizer<SharedResource> L
+
 @if (Summary.Total > 0)
 {
     <MudPaper Class="pa-4 my-3" Elevation="0" Outlined="true">
         <div class="d-flex justify-space-between align-center mb-2">
-            <MudText Typo="Typo.subtitle2">الانطباع العام · Sentiment</MudText>
+            <MudText Typo="Typo.subtitle2">@L["Sentiment.Title"]</MudText>
             <MudChip T="string" Size="Size.Small" Color="@LabelColor" Variant="Variant.Filled">@Summary.Label</MudChip>
         </div>
 

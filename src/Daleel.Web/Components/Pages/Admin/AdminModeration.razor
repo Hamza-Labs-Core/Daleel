@@ -7,7 +7,14 @@
 <AdminNav />
 <MudText Typo="Typo.h4" Class="mb-4">Content Filter Stats</MudText>
 
-@if (_loading)
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load moderation stats: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="RetryAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
@@ -41,6 +48,7 @@ else
 
 @code {
     private bool _loading = true;
+    private string? _error;
     private int _totalFiltered;
     private int _withFilters;
     private IReadOnlyList<(string Category, int Count)> _byCategory = new List<(string, int)>();
@@ -48,11 +56,27 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        var (total, withFilters, byCat) = await Analytics.ModerationStatsAsync(DateTime.UtcNow.AddDays(-30));
-        _totalFiltered = total;
-        _withFilters = withFilters;
-        _byCategory = byCat;
-        _loading = false;
+        await RetryAsync();
+    }
+
+    private async Task RetryAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            var (total, withFilters, byCat) = await Analytics.ModerationStatsAsync(DateTime.UtcNow.AddDays(-30));
+            _totalFiltered = total;
+            _withFilters = withFilters;
+            _byCategory = byCat;
+            _loading = false;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _loading = false;
+        }
         StateHasChanged();
     }
 }

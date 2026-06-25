@@ -3,23 +3,24 @@
 @inherits AgentPageBase
 @inject MonitorService Monitors
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>دليل · Monitor</PageTitle>
+<PageTitle>دليل · @L["Nav.Monitor"]</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-1">لوحة المراقبة · Monitor Dashboard</MudText>
+<MudText Typo="Typo.h4" Class="mb-1">@L["Monitor.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Watch keywords across social platforms. "Run now" fetches matches via Apify when a token is set.
+    @L["Monitor.Subtitle"]
 </MudText>
 
 <MudGrid Spacing="3">
     <MudItem xs="12" md="4">
         <MudPaper Class="pa-4" Elevation="0" Outlined="true">
-            <MudText Typo="Typo.h6" Class="mb-3">مراقبة جديدة · New monitor</MudText>
-            <MudTextField @bind-Value="_keyword" Label="Keyword · الكلمة"
+            <MudText Typo="Typo.h6" Class="mb-3">@L["Monitor.NewMonitor"]</MudText>
+            <MudTextField @bind-Value="_keyword" Label="@L["Monitor.KeywordLabel"]"
                           Placeholder="e.g. مكيف, iPhone" Variant="Variant.Outlined"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Tag" Class="mb-3" />
             <GeoSelect @bind-Value="Geo" />
-            <MudSelect T="int" @bind-Value="_interval" Label="Interval · الفترة" Dense="true"
+            <MudSelect T="int" @bind-Value="_interval" Label="@L["Monitor.IntervalLabel"]" Dense="true"
                        Variant="Variant.Outlined" Class="mt-3"
                        Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Schedule">
                 <MudSelectItem T="int" Value="15">Every 15 min</MudSelectItem>
@@ -30,7 +31,7 @@
             </MudSelect>
             <MudButton Variant="Variant.Filled" Color="Color.Primary" FullWidth="true" Class="mt-4"
                        StartIcon="@Icons.Material.Filled.Add" OnClick="AddMonitor"
-                       Disabled="string.IsNullOrWhiteSpace(_keyword)">إضافة · Add monitor</MudButton>
+                       Disabled="string.IsNullOrWhiteSpace(_keyword)">@L["Monitor.AddMonitor"]</MudButton>
         </MudPaper>
 
         @if (Ready)
@@ -40,7 +41,7 @@
     </MudItem>
 
     <MudItem xs="12" md="8">
-        <MudText Typo="Typo.h6" Class="mb-2">المراقبات النشطة · Active monitors (@_monitors.Count)</MudText>
+        <MudText Typo="Typo.h6" Class="mb-2">@L["Monitor.ActiveMonitors"] (@_monitors.Count)</MudText>
         @if (_monitors.Count == 0)
         {
             <MudPaper Class="pa-6 text-center" Elevation="0" Outlined="true">
@@ -86,7 +87,7 @@
             </MudGrid>
         }
 
-        <MudText Typo="Typo.h6" Class="mt-6 mb-2">سجل النتائج · Results feed (@_feed.Count)</MudText>
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">@L["Monitor.ResultsFeed"] (@_feed.Count)</MudText>
         @if (_feed.Count == 0)
         {
             <MudText Color="Color.Secondary" Typo="Typo.body2">No matches yet. Run a monitor to populate the feed.</MudText>

@@ -1,5 +1,6 @@
 @* Capability chips: which providers are wired up given current keys. Warns when no LLM key. *@
 @inject IAgentFactory Agents
+@inject IStringLocalizer<SharedResource> L
 
 @{
     var status = Agents.Describe(Keys);
@@ -9,8 +10,8 @@
 {
     <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-4"
               Icon="@Icons.Material.Filled.Key">
-        لا يوجد مفتاح ذكاء اصطناعي · No LLM key configured. Add one on the
-        <MudLink Href="/settings">Settings</MudLink> page, or set <code>OPENROUTER_API_KEY</code> on the server.
+        @L["ProviderStatus.NoLlmKeyBefore"]
+        <MudLink Href="/settings">@L["Nav.Settings"]</MudLink> @L["ProviderStatus.NoLlmKeyAfter"] <code>OPENROUTER_API_KEY</code> @L["ProviderStatus.NoLlmKeyServer"]
     </MudAlert>
 }
 

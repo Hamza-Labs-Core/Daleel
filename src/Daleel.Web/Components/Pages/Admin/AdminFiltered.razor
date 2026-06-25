@@ -12,7 +12,14 @@
     Anonymous by design: no user is recorded against a removal.
 </MudText>
 
-@if (_loading)
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load filtered content: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="RetryAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_loading)
 {
     <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
 }
@@ -60,6 +67,7 @@ else
 
 @code {
     private bool _loading = true;
+    private string? _error;
     private int _count;
     private IReadOnlyList<FilteredContentLog> _rows = Array.Empty<FilteredContentLog>();
 
@@ -70,9 +78,25 @@ else
             return;
         }
 
-        _count = await FilteredLog.CountSinceAsync(DateTimeOffset.UtcNow.AddDays(-30));
-        _rows = await FilteredLog.ListRecentAsync(200);
-        _loading = false;
+        await RetryAsync();
+    }
+
+    private async Task RetryAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _count = await FilteredLog.CountSinceAsync(DateTimeOffset.UtcNow.AddDays(-30));
+            _rows = await FilteredLog.ListRecentAsync(200);
+            _loading = false;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _loading = false;
+        }
         StateHasChanged();
     }
 }

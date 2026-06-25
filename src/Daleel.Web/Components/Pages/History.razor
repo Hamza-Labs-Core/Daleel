@@ -5,19 +5,20 @@
 @inject NavigationManager Nav
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · History</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-1">سجل البحث · Search History</MudText>
+<MudText Typo="Typo.h4" Class="mb-1">@L["History.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Every query you run is saved here automatically. Re-run it or open a saved copy.
+    @L["History.Subtitle"]
 </MudText>
 
 @if (_ready && !_authenticated)
 {
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-        <MudText>Sign in to save your searches.</MudText>
-        <MudButton Href="/login" Variant="Variant.Text" Color="Color.Primary" Class="mt-2">Sign in</MudButton>
+        <MudText>@L["History.SignInPrompt"]</MudText>
+        <MudButton Href="/login" Variant="Variant.Text" Color="Color.Primary" Class="mt-2">@L["Nav.Login"]</MudButton>
     </MudAlert>
 }
 else if (_authenticated)
@@ -25,13 +26,13 @@ else if (_authenticated)
     <MudPaper Class="pa-3 mb-3" Elevation="0" Outlined="true">
         <div class="d-flex flex-wrap gap-3 align-center">
             <MudTextField @bind-Value="_search" @bind-Value:after="OnSearchChanged"
-                          Placeholder="Filter by query text…" Variant="Variant.Outlined"
+                          Placeholder="@L["History.FilterPlaceholder"]" Variant="Variant.Outlined"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.FilterList"
                           Immediate="false" DebounceInterval="300" Style="flex:1;min-width:240px;" />
             <MudSpacer />
             <MudButton Variant="Variant.Outlined" Color="Color.Error"
                        StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearAllAsync">
-                Clear all
+                @L["History.ClearAll"]
             </MudButton>
         </div>
     </MudPaper>
@@ -39,42 +40,42 @@ else if (_authenticated)
     <MudTable T="SearchHistoryEntry" ServerData="LoadAsync" @ref="_table" Hover="true"
               Dense="true" Bordered="false" Striped="true">
         <HeaderContent>
-            <MudTh>When</MudTh>
-            <MudTh>Type</MudTh>
-            <MudTh>Query</MudTh>
-            <MudTh>Market</MudTh>
-            <MudTh>Summary</MudTh>
-            <MudTh Style="text-align:right;">Actions</MudTh>
+            <MudTh>@L["History.Col.When"]</MudTh>
+            <MudTh>@L["History.Col.Type"]</MudTh>
+            <MudTh>@L["History.Col.Query"]</MudTh>
+            <MudTh>@L["History.Col.Market"]</MudTh>
+            <MudTh>@L["History.Col.Summary"]</MudTh>
+            <MudTh Style="text-align:right;">@L["History.Col.Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
-            <MudTd DataLabel="When">
+            <MudTd DataLabel="@L["History.Col.When"]">
                 <MudText Typo="Typo.caption">@context.CreatedAt.LocalDateTime.ToString("g")</MudText>
             </MudTd>
-            <MudTd DataLabel="Type">
+            <MudTd DataLabel="@L["History.Col.Type"]">
                 <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@context.QueryType</MudChip>
             </MudTd>
-            <MudTd DataLabel="Query">
+            <MudTd DataLabel="@L["History.Col.Query"]">
                 <MudText Typo="Typo.body2" dir="@Catalog.Dir(context.Query)">@context.Query</MudText>
             </MudTd>
-            <MudTd DataLabel="Market">@Catalog.ResolveGeo(context.Geo).English</MudTd>
-            <MudTd DataLabel="Summary">
+            <MudTd DataLabel="@L["History.Col.Market"]">@Catalog.ResolveGeo(context.Geo).English</MudTd>
+            <MudTd DataLabel="@L["History.Col.Summary"]">
                 <MudText Typo="Typo.caption" Color="Color.Secondary" dir="@Catalog.Dir(context.ResultSummary ?? "")">
                     @context.ResultSummary
                 </MudText>
             </MudTd>
             <MudTd Style="text-align:right;">
-                <MudTooltip Text="Re-run">
+                <MudTooltip Text="@L["History.Rerun"]">
                     <MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small"
                                    OnClick="@(() => Rerun(context))" />
                 </MudTooltip>
-                <MudTooltip Text="Delete">
+                <MudTooltip Text="@L["History.Delete"]">
                     <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
                                    OnClick="@(() => DeleteAsync(context))" />
                 </MudTooltip>
             </MudTd>
         </RowTemplate>
         <NoRecordsContent>
-            <MudText Class="pa-4" Color="Color.Secondary">No history yet — run a search to get started.</MudText>
+            <MudText Class="pa-4" Color="Color.Secondary">@L["History.Empty"]</MudText>
         </NoRecordsContent>
         <PagerContent>
             <MudTablePager PageSizeOptions="new[] { 10, 20, 50 }" />
@@ -123,7 +124,7 @@ else if (_authenticated)
         }
 
         await HistoryRepo.DeleteAsync(_userId, entry.Id);
-        Snackbar.Add("Deleted.", Severity.Success);
+        Snackbar.Add(L["History.Deleted"], Severity.Success);
         if (_table is not null)
         {
             await _table.ReloadServerData();
@@ -132,15 +133,15 @@ else if (_authenticated)
 
     private async Task ClearAllAsync()
     {
-        var ok = await Dialogs.ShowMessageBox("Clear all history?",
-            "This permanently removes all of your search history.", yesText: "Clear all", cancelText: "Cancel");
+        var ok = await Dialogs.ShowMessageBox(L["History.ClearDialog.Title"],
+            L["History.ClearDialog.Body"], yesText: L["History.ClearAll"], cancelText: L["Search.Cancel"]);
         if (ok != true || _userId is null)
         {
             return;
         }
 
         var count = await HistoryRepo.ClearAsync(_userId);
-        Snackbar.Add($"Cleared {count} item(s).", Severity.Success);
+        Snackbar.Add(string.Format(L["History.Cleared"], count), Severity.Success);
         if (_table is not null)
         {
             await _table.ReloadServerData();

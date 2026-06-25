@@ -3,13 +3,14 @@
 @inject LayoutState Layout
 @inject ISnackbar Snackbar
 @inject ICurrentUser CurrentUser
+@inject IStringLocalizer<SharedResource> L
 @using Daleel.Core.Moderation
 
 <PageTitle>دليل · Settings</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-1">الإعدادات · Settings</MudText>
+<MudText Typo="Typo.h4" Class="mb-1">@L["Settings.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Everything here is stored in your browser only (localStorage) and sent straight to the agent — never written to server logs.
+    @L["Settings.Subtitle"]
 </MudText>
 
 <MudGrid Spacing="3">
@@ -17,9 +18,9 @@
         <MudPaper Class="pa-4" Elevation="0" Outlined="true">
             <div class="d-flex align-center mb-3">
                 <MudIcon Icon="@Icons.Material.Filled.Key" Class="mr-2" />
-                <MudText Typo="Typo.h6">مفاتيح API · API Keys</MudText>
+                <MudText Typo="Typo.h6">@L["Settings.ApiKeys"]</MudText>
                 <MudSpacer />
-                <MudSwitch T="bool" @bind-Value="_showKeys" Color="Color.Primary" Label="Show" />
+                <MudSwitch T="bool" @bind-Value="_showKeys" Color="Color.Primary" Label="@L["Settings.Show"]" />
             </div>
 
             @if (!_ready)
@@ -40,9 +41,9 @@
 
                 <div class="d-flex gap-2 mt-2">
                     <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.Save" OnClick="SaveKeys">حفظ · Save keys</MudButton>
+                               StartIcon="@Icons.Material.Filled.Save" OnClick="SaveKeys">@L["Settings.SaveKeys"]</MudButton>
                     <MudButton Variant="Variant.Outlined" Color="Color.Error"
-                               StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearKeys">Clear all</MudButton>
+                               StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearKeys">@L["History.ClearAll"]</MudButton>
                 </div>
             }
         </MudPaper>
@@ -52,46 +53,46 @@
         <MudPaper Class="pa-4" Elevation="0" Outlined="true">
             <div class="d-flex align-center mb-3">
                 <MudIcon Icon="@Icons.Material.Filled.Tune" Class="mr-2" />
-                <MudText Typo="Typo.h6">التفضيلات · Preferences</MudText>
+                <MudText Typo="Typo.h6">@L["Settings.Preferences"]</MudText>
             </div>
 
-            <GeoSelect Value="@_geo" ValueChanged="OnGeoChanged" Label="Default market · السوق الافتراضي" />
+            <GeoSelect Value="@_geo" ValueChanged="OnGeoChanged" Label="@L["Settings.DefaultMarket"]" />
             <div class="mt-3">
-                <ModelSelect Value="@_model" ValueChanged="OnModelChanged" Label="Default model · النموذج الافتراضي" />
+                <ModelSelect Value="@_model" ValueChanged="OnModelChanged" Label="@L["Settings.DefaultModel"]" />
             </div>
 
             <MudDivider Class="my-4" />
 
             <MudSwitch T="bool" Value="_dark" ValueChanged="OnDarkChanged" Color="Color.Primary"
-                       Label="@(_dark ? "Dark theme · داكن" : "Light theme · فاتح")"
+                       Label="@(_dark ? L["Settings.DarkTheme"] : L["Settings.LightTheme"])"
                        ThumbIcon="@(_dark ? Icons.Material.Filled.DarkMode : Icons.Material.Filled.LightMode)" />
 
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-4">
-                Preferences apply instantly and persist in this browser.
+                @L["Settings.PreferencesNote"]
             </MudAlert>
         </MudPaper>
 
         <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
             <div class="d-flex align-center mb-3">
                 <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Class="mr-2" Color="Color.Success" />
-                <MudText Typo="Typo.h6">فلتر المحتوى · Content Filter</MudText>
+                <MudText Typo="Typo.h6">@L["Settings.ContentFilter"]</MudText>
             </div>
 
             <MudSelect T="FilterStrictness" Value="_strictness" ValueChanged="OnStrictnessChanged"
-                       Label="Halal filtering · تصفية حلال" Variant="Variant.Outlined" Dense="true">
-                <MudSelectItem Value="FilterStrictness.Strict">Strict (recommended) · صارم</MudSelectItem>
-                <MudSelectItem Value="FilterStrictness.Moderate">Moderate · معتدل</MudSelectItem>
+                       Label="@L["Settings.HalalFiltering"]" Variant="Variant.Outlined" Dense="true">
+                <MudSelectItem Value="FilterStrictness.Strict">@L["Settings.Strict"]</MudSelectItem>
+                <MudSelectItem Value="FilterStrictness.Moderate">@L["Settings.Moderate"]</MudSelectItem>
                 @if (_isAdmin)
                 {
-                    <MudSelectItem Value="FilterStrictness.Off">Off (admin only) · إيقاف</MudSelectItem>
+                    <MudSelectItem Value="FilterStrictness.Off">@L["Settings.Off"]</MudSelectItem>
                 }
             </MudSelect>
 
             <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
-                Filters alcohol, pork, gambling, adult, drugs@(_strictness == FilterStrictness.Strict ? ", tobacco and riba" : "") from all results.
+                @(_strictness == FilterStrictness.Strict ? L["Settings.FilterDesc.Strict"] : L["Settings.FilterDesc"])
                 @if (!_isAdmin)
                 {
-                    <text> Turning the filter off requires an admin account.</text>
+                    <text> @L["Settings.FilterAdminNote"]</text>
                 }
             </MudText>
         </MudPaper>
@@ -99,20 +100,20 @@
         <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
             <div class="d-flex align-center mb-3">
                 <MudIcon Icon="@Icons.Material.Filled.HideImage" Class="mr-2" Color="Color.Info" />
-                <MudText Typo="Typo.h6">أمان الصور · Image Safety</MudText>
+                <MudText Typo="Typo.h6">@L["Settings.ImageSafety"]</MudText>
             </div>
 
             <MudSwitch T="bool" Value="_blurImages" ValueChanged="OnBlurChanged" Color="Color.Primary"
-                       Label="Blur all external images · إخفاء الصور الخارجية"
+                       Label="@L["Settings.BlurImages"]"
                        ThumbIcon="@Icons.Material.Filled.BlurOn" />
             <MudSwitch T="bool" Value="_haramBlurPrompt" ValueChanged="OnHaramBlurPromptChanged" Color="Color.Primary"
-                       Label="Show HaramBlur install prompt"
+                       Label="@L["Settings.HaramBlurPrompt"]"
                        ThumbIcon="@Icons.Material.Filled.Extension" />
 
-            <MudText Typo="Typo.subtitle2" Class="mt-3">Trusted image domains</MudText>
+            <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Settings.TrustedDomains"]</MudText>
             @if (_trustedDomains.Count == 0)
             {
-                <MudText Typo="Typo.caption" Color="Color.Secondary">None yet. Reveal an image and choose "Trust source".</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Settings.NoTrustedDomains"]</MudText>
             }
             else
             {
@@ -190,7 +191,7 @@
             }
         }
 
-        Snackbar.Add("API keys saved to this browser.", Severity.Success);
+        Snackbar.Add(L["Settings.Snack.KeysSaved"], Severity.Success);
     }
 
     private async Task ClearKeys()
@@ -201,7 +202,7 @@
             _keys[name] = string.Empty;
         }
 
-        Snackbar.Add("All keys cleared.", Severity.Info);
+        Snackbar.Add(L["Settings.Snack.KeysCleared"], Severity.Info);
     }
 
     private async Task OnGeoChanged(string value)
@@ -233,7 +234,7 @@
 
         _strictness = value;
         await Store.SetAsync("filter.strictness", value.ToString().ToLowerInvariant());
-        Snackbar.Add($"Content filter: {value}.", Severity.Success);
+        Snackbar.Add(string.Format(L["Settings.Snack.FilterSet"], value), Severity.Success);
     }
 
     private async Task OnBlurChanged(bool value)

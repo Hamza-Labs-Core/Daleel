@@ -1,17 +1,18 @@
 @page "/deals"
 @inherits AgentPageBase
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>دليل · Deal Finder</PageTitle>
+<PageTitle>دليل · @L["Deals.Title"]</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-1">باحث العروض · Deal Finder</MudText>
+<MudText Typo="Typo.h4" Class="mb-1">@L["Deals.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Current prices, promotions and where to buy — ranked.
+    @L["Deals.Subtitle"]
 </MudText>
 
 <MudPaper Class="pa-4" Elevation="0" Outlined="true">
     <div class="d-flex flex-wrap gap-3 align-center">
         <div style="min-width:240px;flex:2;">
-            <MudTextField @bind-Value="_subject" Label="Product · المنتج"
+            <MudTextField @bind-Value="_subject" Label="@L["Deals.ProductLabel"]"
                           Placeholder="e.g. iPhone 15, شاشة سامسونج"
                           Variant="Variant.Outlined" Adornment="Adornment.Start"
                           AdornmentIcon="@Icons.Material.Filled.LocalOffer" OnKeyDown="OnKey" />
@@ -20,7 +21,7 @@
         <div style="min-width:230px;flex:1;"><ModelSelect @bind-Value="Model" /></div>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
                    StartIcon="@Icons.Material.Filled.Sell" OnClick="Run"
-                   Disabled="Busy || string.IsNullOrWhiteSpace(_subject)">عروض · Find deals</MudButton>
+                   Disabled="Busy || string.IsNullOrWhiteSpace(_subject)">@L["Deals.FindDeals"]</MudButton>
     </div>
 </MudPaper>
 
@@ -43,12 +44,12 @@
         <SaveResultButton Result="_answer" ResultType="deals" DefaultTitle="@($"Deals · {_subject}")" SearchHistoryId="LastHistoryId" />
     </div>
 
-    <ReportView Title="أفضل العروض · Best deals" Text="@_answer.Summary" />
+    <ReportView Title="@L["Deals.BestDeals"]" Text="@_answer.Summary" />
 
     @if (deals.Count > 0)
     {
         <div class="d-flex align-center mt-6 mb-2">
-            <MudText Typo="Typo.h6">القوائم · Listings (@deals.Count)</MudText>
+            <MudText Typo="Typo.h6">@L["Deals.Listings"] (@deals.Count)</MudText>
             <MudSpacer />
             <MudSelect T="DealSort" @bind-Value="_sort" Label="Sort" Dense="true" Variant="Variant.Outlined" Style="max-width:220px;">
                 <MudSelectItem Value="DealSort.PriceAsc">Price: low → high</MudSelectItem>

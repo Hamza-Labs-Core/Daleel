@@ -1,8 +1,9 @@
 @* Source URLs the report drew on, as clickable chips. *@
+@inject IStringLocalizer<SharedResource> L
 @if (Sources.Count > 0)
 {
     <MudExpansionPanels Class="my-4" Elevation="0">
-        <MudExpansionPanel Text="@($"المصادر · Sources ({Sources.Count})")" Icon="@Icons.Material.Filled.Link">
+        <MudExpansionPanel Text="@($"{L["Sources.Label"]} ({Sources.Count})")" Icon="@Icons.Material.Filled.Link">
             <div class="d-flex flex-wrap gap-2">
                 @foreach (var url in Sources.Take(Max))
                 {

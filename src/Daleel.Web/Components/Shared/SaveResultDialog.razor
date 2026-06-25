@@ -1,18 +1,19 @@
 @* Small modal that captures a title + optional notes before bookmarking a result. *@
+@inject IStringLocalizer<SharedResource> L
 
 <MudDialog>
     <DialogContent>
-        <MudTextField @bind-Value="_title" Label="Title · العنوان" Variant="Variant.Outlined"
+        <MudTextField @bind-Value="_title" Label="@L["SaveResult.TitleLabel"]" Variant="Variant.Outlined"
                       Immediate="true" MaxLength="300" Class="mb-3" />
-        <MudTextField @bind-Value="_notes" Label="Notes · ملاحظات (optional)" Variant="Variant.Outlined"
+        <MudTextField @bind-Value="_notes" Label="@L["SaveResult.NotesLabel"]" Variant="Variant.Outlined"
                       Lines="3" AutoGrow="true" />
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Cancel">إلغاء · Cancel</MudButton>
+        <MudButton OnClick="Cancel">@L["Common.Cancel"]</MudButton>
         <MudButton Color="Color.Primary" Variant="Variant.Filled"
                    StartIcon="@Icons.Material.Filled.Bookmark"
                    Disabled="string.IsNullOrWhiteSpace(_title)" OnClick="Submit">
-            حفظ · Save
+            @L["Common.Save"]
         </MudButton>
     </DialogActions>
 </MudDialog>

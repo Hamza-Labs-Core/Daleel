@@ -1,5 +1,6 @@
 @* OpenRouter model picker with a short note per model. ToStringFunc maps the model id (e.g.
    "anthropic/claude-sonnet-4") to its friendly label so the closed select shows "Claude Sonnet 4". *@
+@inject IStringLocalizer<SharedResource> L
 <MudSelect T="string" Value="Value" ValueChanged="OnChanged" Label="@Label"
            ToStringFunc="@(id => Catalog.Models.FirstOrDefault(m => m.Id == id)?.Label ?? id)"
            Dense="true" Variant="Variant.Outlined" Adornment="Adornment.Start"
@@ -18,7 +19,15 @@
 @code {
     [Parameter] public string Value { get; set; } = Catalog.DefaultModel;
     [Parameter] public EventCallback<string> ValueChanged { get; set; }
-    [Parameter] public string Label { get; set; } = "Model · النموذج";
+    [Parameter] public string Label { get; set; } = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        if (string.IsNullOrEmpty(Label))
+        {
+            Label = L["Common.Model"];
+        }
+    }
 
     private Task OnChanged(string value)
     {

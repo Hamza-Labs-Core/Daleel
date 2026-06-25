@@ -1,17 +1,18 @@
 @page "/brand"
 @inherits AgentPageBase
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>دليل · Brand Intelligence</PageTitle>
+<PageTitle>دليل · @L["Brand.Title"]</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-1">ذكاء العلامات التجارية · Brand Intelligence</MudText>
+<MudText Typo="Typo.h4" Class="mb-1">@L["Brand.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Presence, sentiment, stores and competitors for a brand in one market.
+    @L["Brand.Subtitle"]
 </MudText>
 
 <MudPaper Class="pa-4" Elevation="0" Outlined="true">
     <div class="d-flex flex-wrap gap-3 align-center">
         <div style="min-width:240px;flex:2;">
-            <MudTextField @bind-Value="_brand" Label="Brand · العلامة التجارية"
+            <MudTextField @bind-Value="_brand" Label="@L["Brand.BrandLabel"]"
                           Placeholder="e.g. Zain, Samsung, نون"
                           Variant="Variant.Outlined" Adornment="Adornment.Start"
                           AdornmentIcon="@Icons.Material.Filled.Verified" OnKeyDown="OnKey" />
@@ -20,7 +21,7 @@
         <div style="min-width:230px;flex:1;"><ModelSelect @bind-Value="Model" /></div>
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
                    StartIcon="@Icons.Material.Filled.Insights" OnClick="Run"
-                   Disabled="Busy || string.IsNullOrWhiteSpace(_brand)">تحليل · Analyze</MudButton>
+                   Disabled="Busy || string.IsNullOrWhiteSpace(_brand)">@L["Brand.Analyze"]</MudButton>
     </div>
 </MudPaper>
 
@@ -42,7 +43,7 @@
     </div>
     <MudGrid Spacing="3" Class="mt-2">
         <MudItem xs="12" md="8">
-            <ReportView Title="@($"نظرة عامة · {_report.Brand}")" Text="@_report.Summary" />
+            <ReportView Title="@($"{L["Brand.Overview"]} · {_report.Brand}")" Text="@_report.Summary" />
         </MudItem>
         <MudItem xs="12" md="4">
             <SentimentView Summary="_report.Sentiment" />
@@ -51,7 +52,7 @@
 
     @if (_report.Stores.Count > 0)
     {
-        <MudText Typo="Typo.h6" Class="mt-6 mb-2">حضور البيع · Where it sells</MudText>
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">@L["Brand.WhereItSells"]</MudText>
         <MudGrid Spacing="3">
             @foreach (var s in _report.Stores.Take(9))
             {
@@ -89,7 +90,7 @@
 
     @if (_report.Locations.Count > 0)
     {
-        <MudText Typo="Typo.h6" Class="mt-6 mb-2">المواقع · Physical locations</MudText>
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">@L["Brand.PhysicalLocations"]</MudText>
         <MudGrid Spacing="3">
             @foreach (var loc in _report.Locations.Take(6))
             {
@@ -100,7 +101,7 @@
 
     @if (_report.Competitors.Count > 0)
     {
-        <MudText Typo="Typo.h6" Class="mt-6 mb-2">المنافسون · Competitors</MudText>
+        <MudText Typo="Typo.h6" Class="mt-6 mb-2">@L["Brand.Competitors"]</MudText>
         <div class="d-flex flex-wrap gap-2">
             @foreach (var c in _report.Competitors)
             {

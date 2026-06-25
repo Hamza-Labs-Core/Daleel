@@ -1,11 +1,12 @@
 @* Hosts SavedResultView inside a MudDialog so saved reports can be viewed in place. *@
+@inject IStringLocalizer<SharedResource> L
 
 <MudDialog>
     <DialogContent>
         <SavedResultView Saved="Saved" />
     </DialogContent>
     <DialogActions>
-        <MudButton OnClick="Close">إغلاق · Close</MudButton>
+        <MudButton OnClick="Close">@L["Common.Close"]</MudButton>
     </DialogActions>
 </MudDialog>
 

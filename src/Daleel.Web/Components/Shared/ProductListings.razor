@@ -1,20 +1,21 @@
 @* Products tab: filter/sort bar, model grid (one card per model, aggregating all its
    price sources), pre-grouped comparison tiers, and a 2–4 model compare flow. *@
 @inject IDialogService Dialogs
+@inject IStringLocalizer<SharedResource> L
 
 <MudPaper Class="pa-3 mb-3" Outlined="true" Elevation="0">
     <div class="d-flex align-center mb-2">
         <MudIcon Icon="@Icons.Material.Filled.ShoppingBag" Color="Color.Primary" Class="mr-2" />
-        <MudText Typo="Typo.h6">@Result.Models.Count models · المنتجات</MudText>
+        <MudText Typo="Typo.h6">@Result.Models.Count @L["Results.ModelsLabel"]</MudText>
         <MudSpacer />
         <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success"
-                 Icon="@Icons.Material.Filled.Place">All local to @Result.Country</MudChip>
+                 Icon="@Icons.Material.Filled.Place">@string.Format(L["Results.AllLocalTo"], Result.Country)</MudChip>
     </div>
 
     <MudGrid Spacing="2" Class="align-end">
         <MudItem xs="6" sm="3">
-            <MudSelect T="string" @bind-Value="_brand" Label="Brand" Dense="true" Margin="Margin.Dense">
-                <MudSelectItem T="string" Value="@AllValue">All brands</MudSelectItem>
+            <MudSelect T="string" @bind-Value="Brand" Label="@L["Filter.Brand"]" Dense="true" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@AllValue">@L["ProductFilters.AllBrands"]</MudSelectItem>
                 @foreach (var b in _brands)
                 {
                     <MudSelectItem T="string" Value="@b">@b</MudSelectItem>
@@ -22,39 +23,39 @@
             </MudSelect>
         </MudItem>
         <MudItem xs="6" sm="3">
-            <MudSelect T="string" @bind-Value="_sourceType" Label="Source" Dense="true" Margin="Margin.Dense">
-                <MudSelectItem T="string" Value="@AllValue">All sources</MudSelectItem>
-                <MudSelectItem T="string" Value="@("marketplace")">Marketplaces</MudSelectItem>
-                <MudSelectItem T="string" Value="@("brand")">Brand sites</MudSelectItem>
-                <MudSelectItem T="string" Value="@("store")">Stores</MudSelectItem>
+            <MudSelect T="string" @bind-Value="SourceType" Label="@L["Filter.Source"]" Dense="true" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@AllValue">@L["ProductFilters.AllSources"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("marketplace")">@L["ProductFilters.Marketplaces"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("brand")">@L["ProductFilters.BrandSites"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("store")">@L["Products.Stores"]</MudSelectItem>
             </MudSelect>
         </MudItem>
         <MudItem xs="6" sm="3">
-            <MudSelect T="string" @bind-Value="_condition" Label="Condition" Dense="true" Margin="Margin.Dense">
-                <MudSelectItem T="string" Value="@AllValue">Any</MudSelectItem>
-                <MudSelectItem T="string" Value="@("new")">New</MudSelectItem>
-                <MudSelectItem T="string" Value="@("used")">Used</MudSelectItem>
-                <MudSelectItem T="string" Value="@("refurbished")">Refurbished</MudSelectItem>
+            <MudSelect T="string" @bind-Value="Condition" Label="@L["Filter.Condition"]" Dense="true" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@AllValue">@L["ProductFilters.Any"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("new")">@L["Filter.New"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("used")">@L["Filter.Used"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("refurbished")">@L["Filter.Refurbished"]</MudSelectItem>
             </MudSelect>
         </MudItem>
         <MudItem xs="6" sm="3">
-            <MudSelect T="string" @bind-Value="_sort" Label="Sort by" Dense="true" Margin="Margin.Dense">
-                <MudSelectItem T="string" Value="@("relevance")">Relevance</MudSelectItem>
-                <MudSelectItem T="string" Value="@("price_asc")">Price: low → high</MudSelectItem>
-                <MudSelectItem T="string" Value="@("price_desc")">Price: high → low</MudSelectItem>
-                <MudSelectItem T="string" Value="@("sellers")">Most sellers</MudSelectItem>
+            <MudSelect T="string" @bind-Value="Sort" Label="@L["Filter.SortBy"]" Dense="true" Margin="Margin.Dense">
+                <MudSelectItem T="string" Value="@("relevance")">@L["Filter.Relevance"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("price_asc")">@L["Filter.PriceLowHigh"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("price_desc")">@L["Filter.PriceHighLow"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("sellers")">@L["ProductFilters.MostSellers"]</MudSelectItem>
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="6">
             <div class="d-flex align-center gap-2">
-                <MudNumericField T="decimal?" @bind-Value="_minPrice" Label="Min price" Variant="Variant.Text"
+                <MudNumericField T="decimal?" @bind-Value="MinPrice" Label="@L["Filter.MinPrice"]" Variant="Variant.Text"
                                  Margin="Margin.Dense" Clearable="true" HideSpinButtons="true" />
-                <MudNumericField T="decimal?" @bind-Value="_maxPrice" Label="Max price" Variant="Variant.Text"
+                <MudNumericField T="decimal?" @bind-Value="MaxPrice" Label="@L["Filter.MaxPrice"]" Variant="Variant.Text"
                                  Margin="Margin.Dense" Clearable="true" HideSpinButtons="true" />
             </div>
         </MudItem>
         <MudItem xs="12" sm="6" Class="d-flex align-center justify-end">
-            <MudText Typo="Typo.caption" Color="Color.Secondary">@Filtered.Count of @Result.Models.Count shown</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@string.Format(L["Results.NofMShown"], _filtered.Count, Result.Models.Count)</MudText>
         </MudItem>
     </MudGrid>
 </MudPaper>
@@ -62,7 +63,7 @@
 @if (Result.Marketplaces.Count > 0)
 {
     <div class="d-flex align-center gap-2 mb-3" style="flex-wrap:wrap;">
-        <MudText Typo="Typo.body2" Color="Color.Secondary">Browse all on:</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Products.BrowseAllOn"]</MudText>
         @foreach (var m in Result.Marketplaces.Where(m => !string.IsNullOrWhiteSpace(m.Url)).Take(8))
         {
             <MudButton Href="@m.Url" Target="_blank" Size="Size.Small" Variant="Variant.Outlined"
@@ -71,16 +72,16 @@
     </div>
 }
 
-@if (Filtered.Count == 0)
+@if (_filtered.Count == 0)
 {
-    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">No products match the current filters.</MudAlert>
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="mb-3">@L["Results.NoMatch"]</MudAlert>
 }
 else
 {
     <MudGrid Spacing="3">
-        @foreach (var (idx, model) in Filtered)
+        @foreach (var (idx, model) in _filtered)
         {
-            <MudItem xs="12" sm="6" md="4">
+            <MudItem xs="12" sm="6" md="4" @key="model">
                 <ModelCard Model="model"
                            Selected="@_selected.Contains(idx)"
                            CanSelectMore="@(_selected.Count < MaxCompare)"
@@ -94,7 +95,7 @@ else
 @if (Result.Comparisons.Count > 0)
 {
     <MudExpansionPanels Class="mt-4" Elevation="0">
-        <MudExpansionPanel Text="Pre-grouped comparison: budget · mid-range · premium">
+        <MudExpansionPanel Text="@L["Results.PreGrouped"]">
             <MudGrid Spacing="2">
                 @foreach (var group in Result.Comparisons)
                 {
@@ -128,11 +129,11 @@ else
 {
     <MudPaper Class="pa-2 px-4" Elevation="6"
               Style="position:sticky;bottom:80px;z-index:5;border-radius:24px;display:flex;align-items:center;gap:12px;width:fit-content;margin:16px auto 0;">
-        <MudText Typo="Typo.body2">@_selected.Count selected</MudText>
+        <MudText Typo="Typo.body2">@string.Format(L["Results.NSelected"], _selected.Count)</MudText>
         <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
                    StartIcon="@Icons.Material.Filled.Compare" Disabled="@(_selected.Count < 2)"
-                   OnClick="OpenComparison">Compare</MudButton>
-        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ClearCompare">Clear</MudButton>
+                   OnClick="OpenComparison">@L["Products.Compare"]</MudButton>
+        <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="ClearCompare">@L["Results.Clear"]</MudButton>
     </MudPaper>
 }
 
@@ -156,6 +157,20 @@ else
     private List<string> _brands = new();
     private List<(int Index, ProductModel Model)> _indexed = new();
 
+    // Cached filtered/sorted view. Recomputed only when a filter input actually changes (via the
+    // property setters below) or when the Result parameter changes — never per render. Reading it from
+    // markup is then O(1), so unrelated re-renders (e.g. toggling a compare checkbox) stay cheap. PERF-2.
+    private List<(int Index, ProductModel Model)> _filtered = new();
+
+    // Filter/sort inputs are exposed as properties so the bound MudBlazor controls trigger a single
+    // recompute on change instead of the markup re-running the LINQ pipeline on every render.
+    private string Brand { get => _brand; set { if (_brand != value) { _brand = value; Recompute(); } } }
+    private string SourceType { get => _sourceType; set { if (_sourceType != value) { _sourceType = value; Recompute(); } } }
+    private string Condition { get => _condition; set { if (_condition != value) { _condition = value; Recompute(); } } }
+    private string Sort { get => _sort; set { if (_sort != value) { _sort = value; Recompute(); } } }
+    private decimal? MinPrice { get => _minPrice; set { if (_minPrice != value) { _minPrice = value; Recompute(); } } }
+    private decimal? MaxPrice { get => _maxPrice; set { if (_maxPrice != value) { _maxPrice = value; Recompute(); } } }
+
     protected override void OnParametersSet()
     {
         if (!string.IsNullOrWhiteSpace(InitialBrand))
@@ -171,39 +186,38 @@ else
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(b => b)
             .ToList();
+
+        Recompute();
     }
 
-    private List<(int Index, ProductModel Model)> Filtered
+    private void Recompute()
     {
-        get
+        IEnumerable<(int Index, ProductModel Model)> q = _indexed;
+
+        if (_brand != AllValue)
+            q = q.Where(x => string.Equals(x.Model.Brand, _brand, StringComparison.OrdinalIgnoreCase));
+
+        if (_sourceType != AllValue)
+            q = q.Where(x => x.Model.Offers.Any(o => MatchesSourceType(o.SourceType)));
+
+        if (_condition != AllValue)
+            q = q.Where(x => x.Model.Offers.Any(o => string.Equals(o.Condition, _condition, StringComparison.OrdinalIgnoreCase)));
+
+        if (_minPrice is { } min)
+            q = q.Where(x => x.Model.LowestPrice is { } p && p >= min);
+
+        if (_maxPrice is { } max)
+            q = q.Where(x => x.Model.LowestPrice is { } p && p <= max);
+
+        q = _sort switch
         {
-            IEnumerable<(int Index, ProductModel Model)> q = _indexed;
+            "price_asc" => q.OrderBy(x => x.Model.LowestPrice ?? decimal.MaxValue),
+            "price_desc" => q.OrderByDescending(x => x.Model.LowestPrice ?? decimal.MinValue),
+            "sellers" => q.OrderByDescending(x => x.Model.SellerCount),
+            _ => q
+        };
 
-            if (_brand != AllValue)
-                q = q.Where(x => string.Equals(x.Model.Brand, _brand, StringComparison.OrdinalIgnoreCase));
-
-            if (_sourceType != AllValue)
-                q = q.Where(x => x.Model.Offers.Any(o => MatchesSourceType(o.SourceType)));
-
-            if (_condition != AllValue)
-                q = q.Where(x => x.Model.Offers.Any(o => string.Equals(o.Condition, _condition, StringComparison.OrdinalIgnoreCase)));
-
-            if (_minPrice is { } min)
-                q = q.Where(x => x.Model.LowestPrice is { } p && p >= min);
-
-            if (_maxPrice is { } max)
-                q = q.Where(x => x.Model.LowestPrice is { } p && p <= max);
-
-            q = _sort switch
-            {
-                "price_asc" => q.OrderBy(x => x.Model.LowestPrice ?? decimal.MaxValue),
-                "price_desc" => q.OrderByDescending(x => x.Model.LowestPrice ?? decimal.MinValue),
-                "sellers" => q.OrderByDescending(x => x.Model.SellerCount),
-                _ => q
-            };
-
-            return q.ToList();
-        }
+        _filtered = q.ToList();
     }
 
     private bool MatchesSourceType(ResultType type) => _sourceType switch
@@ -244,6 +258,6 @@ else
         var items = _selected.OrderBy(i => i).Select(i => Result.Models[i]).ToList();
         var parameters = new DialogParameters<ComparisonDialog> { { x => x.Items, items } };
         var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
-        return Dialogs.ShowAsync<ComparisonDialog>("Compare products", parameters, options);
+        return Dialogs.ShowAsync<ComparisonDialog>(L["Results.CompareProducts"], parameters, options);
     }
 }

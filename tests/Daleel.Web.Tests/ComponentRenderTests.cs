@@ -17,6 +17,10 @@ public class ComponentRenderTests : TestContext
     public ComponentRenderTests()
     {
         Services.AddMudServices();
+        // Shared components now resolve display strings through IStringLocalizer<SharedResource>;
+        // register localization so they can be constructed in the test container (default culture
+        // → the English .resx values embedded in the Daleel.Web assembly).
+        Services.AddLocalization();
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 

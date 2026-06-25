@@ -5,16 +5,17 @@
 @inject ISystemConfigService Config
 @inject IDialogService Dialogs
 @inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
 
 @if (_savedId is not null)
 {
     <MudButton Variant="Variant.Text" Color="Color.Success" StartIcon="@Icons.Material.Filled.BookmarkAdded"
-               Disabled="true">محفوظ · Saved</MudButton>
+               Disabled="true">@L["SaveResult.Saved"]</MudButton>
 }
 else
 {
     <MudButton Variant="Variant.Outlined" Color="Color.Primary" StartIcon="@Icons.Material.Filled.BookmarkBorder"
-               OnClick="OpenAsync" Disabled="_busy">حفظ النتيجة · Save</MudButton>
+               OnClick="OpenAsync" Disabled="_busy">@L["Common.Save"]</MudButton>
 }
 
 @code {
@@ -50,7 +51,7 @@ else
         {
             { x => x.DefaultTitle, string.IsNullOrWhiteSpace(DefaultTitle) ? ResultType : DefaultTitle }
         };
-        var dialog = await Dialogs.ShowAsync<SaveResultDialog>("حفظ النتيجة · Save result", parameters);
+        var dialog = await Dialogs.ShowAsync<SaveResultDialog>(L["SaveResult.Button"], parameters);
         var result = await dialog.Result;
         if (result is null || result.Canceled || result.Data is not SaveResultDialog.SaveDetails details)
         {

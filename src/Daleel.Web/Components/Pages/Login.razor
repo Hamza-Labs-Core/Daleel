@@ -5,26 +5,27 @@
    form below makes a real HTTP POST to /auth/login. That endpoint — not this page, not the circuit —
    calls SignInManager and writes the auth cookie, which is the only context where the Set-Cookie header
    write is safe. Rendering static also guarantees <AntiforgeryToken /> emits a valid token. *@
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>دليل · Sign in</PageTitle>
+<PageTitle>دليل · @L["Auth.SignIn"]</PageTitle>
 
 <div class="d-flex justify-center mt-8">
     <MudPaper Class="pa-8" Elevation="0" Outlined="true" Style="max-width:460px;width:100%;border-radius:18px;">
         <div class="text-center mb-4">
             <div class="daleel-logo" style="font-size:2rem;">دليل · Daleel</div>
-            <MudText Typo="Typo.h5" Class="mt-2">تسجيل الدخول · Sign in</MudText>
+            <MudText Typo="Typo.h5" Class="mt-2">@L["Nav.Login"]</MudText>
             <MudText Typo="Typo.body2" Color="Color.Secondary">
-                Sign in to keep your search history and saved results.
+                @L["Auth.Login.Subtitle"]
             </MudText>
         </div>
 
         <AuthorizeView>
             <Authorized>
                 <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mb-4">
-                    You are already signed in as @(context.User.Identity?.Name).
+                    @L["Auth.AlreadySignedIn", context.User.Identity?.Name ?? string.Empty]
                 </MudAlert>
                 <MudButton Href="/" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
-                    Go to Daleel
+                    @L["Auth.GoToDaleel"]
                 </MudButton>
             </Authorized>
             <NotAuthorized>
@@ -37,26 +38,26 @@
                     <AntiforgeryToken />
                     <input type="hidden" name="returnUrl" value="@ReturnUrl" />
 
-                    <label class="daleel-field-label" for="login-email">Email</label>
+                    <label class="daleel-field-label" for="login-email">@L["Auth.Email"]</label>
                     <input id="login-email" name="email" class="daleel-field" type="email" required
-                           autocomplete="username" placeholder="you@example.com" />
+                           autocomplete="username" placeholder="@L["Auth.EmailPlaceholder"]" />
 
-                    <label class="daleel-field-label" for="login-password">Password</label>
+                    <label class="daleel-field-label" for="login-password">@L["Auth.Password"]</label>
                     <input id="login-password" name="password" class="daleel-field" type="password" required
-                           autocomplete="current-password" placeholder="Your password" />
+                           autocomplete="current-password" placeholder="@L["Auth.PasswordPlaceholder"]" />
 
                     <div class="d-flex justify-end mt-2">
-                        <MudLink Href="/forgot-password" Typo="Typo.body2">Forgot password?</MudLink>
+                        <MudLink Href="/forgot-password" Typo="Typo.body2">@L["Auth.ForgotPassword"]</MudLink>
                     </div>
 
                     <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary"
                                Size="Size.Large" FullWidth="true" Class="mt-4">
-                        Sign in
+                        @L["Auth.SignIn"]
                     </MudButton>
                 </form>
 
                 <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-4">
-                    New to Daleel? <MudLink Href="/register">Create a free account</MudLink>
+                    @L["Auth.NewToDaleel"] <MudLink Href="/register">@L["Auth.CreateFreeAccount"]</MudLink>
                 </MudText>
             </NotAuthorized>
         </AuthorizeView>
@@ -71,9 +72,9 @@
     // email and wrong password both surface as the same "invalid" — never reveal which accounts exist.
     private string? ErrorMessage => Error switch
     {
-        "invalid" => "Invalid email or password.",
-        "disabled" => "This account has been disabled. Contact support if you think this is a mistake.",
-        "lockedout" => "This account is locked out. Please try again later.",
+        "invalid" => (string)L["Auth.Error.Invalid"],
+        "disabled" => (string)L["Auth.Error.Disabled"],
+        "lockedout" => (string)L["Auth.Error.LockedOut"],
         _ => null,
     };
 }

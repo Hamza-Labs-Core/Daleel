@@ -25,7 +25,7 @@
             <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Search.Recent"]</MudText>
             @if (_recent.Count == 0)
             {
-                <MudText Typo="Typo.caption" Color="Color.Secondary">No searches yet.</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Home.NoSearches"]</MudText>
             }
             else
             {
@@ -50,7 +50,7 @@
             <div class="daleel-hero">
                 <div class="daleel-logo">دليل</div>
                 <MudText Typo="Typo.subtitle1" Color="Color.Secondary" Class="mt-1">
-                    Your smart shopping assistant · مساعدك الذكي للتسوّق
+                    @L["Home.Tagline"]
                 </MudText>
             </div>
         }
@@ -86,9 +86,9 @@
         {
             <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
                 <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
-                <MudText Typo="Typo.subtitle1" Align="Align.Center">لم نجد نتائج · No results just yet</MudText>
+                <MudText Typo="Typo.subtitle1" Align="Align.Center">@L["Home.NoResults.Title"]</MudText>
                 <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-1">
-                    Try rephrasing your search or searching again. · جرّب صياغة أخرى أو أعد البحث.
+                    @L["Home.NoResults.Hint"]
                 </MudText>
             </MudPaper>
         }
@@ -105,9 +105,9 @@
             {
                 <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
                     <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
-                    <MudText Typo="Typo.subtitle1" Align="Align.Center">لم نجد نتائج · No results just yet</MudText>
+                    <MudText Typo="Typo.subtitle1" Align="Align.Center">@L["Home.NoResults.Title"]</MudText>
                     <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-1">
-                        Try rephrasing your search or searching again. · جرّب صياغة أخرى أو أعد البحث.
+                        @L["Home.NoResults.Hint"]
                     </MudText>
                 </MudPaper>
             }
@@ -261,9 +261,9 @@
 
     private async Task PromptSignInAsync()
     {
-        var ok = await Dialogs.ShowMessageBox("Sign in to search",
-            "Create a free account to run searches — you get 5 free searches every month.",
-            yesText: "Sign in", cancelText: "Cancel");
+        var ok = await Dialogs.ShowMessageBox(L["Home.SignInDialog.Title"],
+            L["Home.SignInDialog.Body"],
+            yesText: L["Nav.Login"], cancelText: L["Search.Cancel"]);
         if (ok == true)
         {
             Nav.NavigateTo("/login?returnUrl=%2F");

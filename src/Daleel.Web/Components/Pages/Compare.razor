@@ -1,17 +1,18 @@
 @page "/compare"
 @inherits AgentPageBase
+@inject IStringLocalizer<SharedResource> L
 
-<PageTitle>دليل · Compare</PageTitle>
+<PageTitle>دليل · @L["Compare.Title"]</PageTitle>
 
-<MudText Typo="Typo.h4" Class="mb-1">قارن المنتجات · Product Compare</MudText>
+<MudText Typo="Typo.h4" Class="mb-1">@L["Compare.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Two products, head-to-head, with local context and a verdict.
+    @L["Compare.Subtitle"]
 </MudText>
 
 <MudPaper Class="pa-4" Elevation="0" Outlined="true">
     <MudGrid Spacing="3" Class="align-center">
         <MudItem xs="12" md="5">
-            <MudTextField @bind-Value="_a" Label="Product A · المنتج الأول"
+            <MudTextField @bind-Value="_a" Label="@L["Compare.ProductA"]"
                           Placeholder="e.g. iPhone 15" Variant="Variant.Outlined"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Smartphone" />
         </MudItem>
@@ -19,7 +20,7 @@
             <MudChip T="string" Color="Color.Secondary" Variant="Variant.Filled">VS</MudChip>
         </MudItem>
         <MudItem xs="12" md="5">
-            <MudTextField @bind-Value="_b" Label="Product B · المنتج الثاني"
+            <MudTextField @bind-Value="_b" Label="@L["Compare.ProductB"]"
                           Placeholder="e.g. Galaxy S24" Variant="Variant.Outlined"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Smartphone" />
         </MudItem>
@@ -30,7 +31,7 @@
         <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Large"
                    StartIcon="@Icons.Material.Filled.Compare" OnClick="Run"
                    Disabled="Busy || string.IsNullOrWhiteSpace(_a) || string.IsNullOrWhiteSpace(_b)">
-            قارن · Compare
+            @L["Products.Compare"]
         </MudButton>
     </div>
 </MudPaper>
@@ -69,7 +70,7 @@
                     {
                         @if (b.Pros.Count > 0)
                         {
-                            <MudText Typo="Typo.subtitle2" Color="Color.Success" Class="mt-2">المزايا · Pros</MudText>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Success" Class="mt-2">@L["Compare.Pros"]</MudText>
                             @foreach (var pro in b.Pros)
                             {
                                 <MudText Typo="Typo.body2" dir="@Catalog.Dir(pro)">＋ @pro</MudText>
@@ -77,7 +78,7 @@
                         }
                         @if (b.Cons.Count > 0)
                         {
-                            <MudText Typo="Typo.subtitle2" Color="Color.Error" Class="mt-2">العيوب · Cons</MudText>
+                            <MudText Typo="Typo.subtitle2" Color="Color.Error" Class="mt-2">@L["Compare.Cons"]</MudText>
                             @foreach (var con in b.Cons)
                             {
                                 <MudText Typo="Typo.body2" dir="@Catalog.Dir(con)">－ @con</MudText>
@@ -89,7 +90,7 @@
         }
     </MudGrid>
 
-    <ReportView Title="الحكم · Verdict" Text="@_result.Summary" />
+    <ReportView Title="@L["Compare.Verdict"]" Text="@_result.Summary" />
     <SourceChips Sources="_result.Sources" />
 }
 
