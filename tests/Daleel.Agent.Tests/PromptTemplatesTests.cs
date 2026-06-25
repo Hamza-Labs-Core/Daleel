@@ -47,4 +47,32 @@ public class PromptTemplatesTests
         // Anti-hallucination guard.
         prompt.Should().Contain("never invent");
     }
+
+    [Fact]
+    public void ExtractProducts_AsksForBreadthAndPerModelProsConsVerdict()
+    {
+        var prompt = PromptTemplates.ExtractProducts("best ACs", GeoProfiles.Jordan, "context");
+
+        // Push for many brands / multiple models so the grid isn't just the top one or two.
+        prompt.Should().Contain("COMPREHENSIVE");
+        prompt.Should().Contain("EVERY distinct model");
+        // The per-model verdict fields the UI now surfaces.
+        prompt.Should().Contain("\"pros\"");
+        prompt.Should().Contain("\"cons\"");
+        prompt.Should().Contain("\"summary\"");
+    }
+
+    [Fact]
+    public void PlanProduct_ExpandsAbbreviationsAndPushesForBrandBreadth()
+    {
+        var prompt = PromptTemplates.PlanProduct("AC", GeoProfiles.Jordan);
+
+        // Ambiguous two-letter queries must be expanded, not searched literally.
+        prompt.Should().Contain("expand");
+        prompt.Should().Contain("air conditioner");
+        // Breadth: many brands and multiple models per brand.
+        prompt.Should().Contain("MANY brands");
+        // Several review/buying-guide queries feed the "related articles" section.
+        prompt.Should().Contain("buying-guide");
+    }
 }

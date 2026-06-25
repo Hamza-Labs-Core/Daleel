@@ -143,6 +143,29 @@ public record BrandInfo
     /// <summary>How many of the gathered listings carry this brand.</summary>
     public int ListingCount { get; init; }
 
+    /// <summary>
+    /// A sample of distinct model names available under this brand, so the brand card can show
+    /// "what's actually on offer" at a glance rather than just a count.
+    /// </summary>
+    public IReadOnlyList<string> Models { get; init; } = Array.Empty<string>();
+
+    /// <summary>Cheapest priced model under this brand in the market, when any are priced.</summary>
+    public Money? PriceFrom { get; init; }
+
+    /// <summary>Most expensive priced model under this brand in the market, when any are priced.</summary>
+    public Money? PriceTo { get; init; }
+
+    /// <summary>
+    /// Human price range for the brand, e.g. "320 JD – 1,200 JD" (or a single price when the
+    /// low and high coincide), or null when none of the brand's models carry a price.
+    /// </summary>
+    public string? PriceRange =>
+        PriceFrom is { } from
+            ? PriceTo is { } to && to.Amount > from.Amount
+                ? $"{from.ToDisplay()} – {to.ToDisplay()}"
+                : from.ToDisplay()
+            : null;
+
     /// <summary>Reputation of this brand in the target market, when assessed.</summary>
     public BrandReputation? Reputation { get; init; }
 }

@@ -98,9 +98,10 @@ public sealed partial class AgentService
         // products + per-store offers the structured parsers miss (markets where the shopping/scrape
         // APIs return thin or no data — the common case for e.g. "best ACs in Jordan"). The aggregator
         // turns every source — structured and LLM-extracted alike — into a price offer on the same model.
-        var llmListings = useLlmExtraction
+        var (llmListings, llmInsights) = useLlmExtraction
             ? await ExtractProductListingsAsync(query, geo, bundle, includeIntl, cancellationToken).ConfigureAwait(false)
-            : Array.Empty<ProductListing>();
+            : (Array.Empty<ProductListing>(),
+               (IReadOnlyDictionary<string, ModelInsight>)new Dictionary<string, ModelInsight>(StringComparer.Ordinal));
 
         // De-duplicate the LLM offers against the deterministic ones (and each other) before
         // concatenating, so an offer the structured parsers already found isn't surfaced twice.
@@ -120,6 +121,23 @@ public sealed partial class AgentService
             .ToList();
 
         var models = ListingAggregator.Aggregate(listings);
+
+        // Attach the LLM-distilled pros/cons + verdict to each model up-front (keyed the same way
+        // the aggregator groups listings), so the grid card and detail panel can show an honest
+        // summary without waiting for the per-model on-demand deep scrape.
+        if (llmInsights.Count > 0)
+        {
+            models = models
+                .Select(m => llmInsights.TryGetValue(ModelInsightKey(m), out var ins)
+                    ? m with
+                    {
+                        Pros = m.Pros.Count > 0 ? m.Pros : ins.Pros,
+                        Cons = m.Cons.Count > 0 ? m.Cons : ins.Cons,
+                        ReviewSummary = string.IsNullOrWhiteSpace(m.ReviewSummary) ? ins.Summary : m.ReviewSummary
+                    }
+                    : m)
+                .ToList();
+        }
 
         // Follow-up step: assess each brand's reputation in-market (reliability, local service,
         // warranty) so a cheap product from an unsupported brand can be flagged.
@@ -153,12 +171,36 @@ public sealed partial class AgentService
             .Where(b => !string.IsNullOrWhiteSpace(b))
             .Select(b => b!.Trim())
             .GroupBy(b => b, StringComparer.OrdinalIgnoreCase)
-            .Select(g => new BrandInfo
+            .Select(g =>
             {
-                Name = g.Key,
-                ListingCount = models.Count(m => MatchesBrand(m, g.Key)),
-                Reputation = FindReputation(reputations, g.Key),
-                Url = brands.Values.FirstOrDefault(bp => NameMatch(bp.Name, g.Key))?.Url
+                var brandModels = models.Where(m => MatchesBrand(m, g.Key)).ToList();
+                var prices = brandModels
+                    .Select(m => m.LowestPrice)
+                    .Where(p => p is not null)
+                    .Select(p => p!.Value)
+                    .ToList();
+                var currency = brandModels
+                    .Select(m => m.LowestOffer?.Currency)
+                    .FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)) ?? geo.Currency;
+
+                return new BrandInfo
+                {
+                    Name = g.Key,
+                    ListingCount = brandModels.Count,
+                    // Surface the actual models on offer (model number if known, else the product
+                    // name) so the brand card answers "what can I buy?", not just "how many?".
+                    Models = brandModels
+                        .Select(m => string.IsNullOrWhiteSpace(m.Model) ? m.Name : m.Model!)
+                        .Where(s => !string.IsNullOrWhiteSpace(s))
+                        .Select(s => s.Trim())
+                        .Distinct(StringComparer.OrdinalIgnoreCase)
+                        .Take(6)
+                        .ToList(),
+                    PriceFrom = prices.Count > 0 ? new Money(prices.Min(), currency) : null,
+                    PriceTo = prices.Count > 0 ? new Money(prices.Max(), currency) : null,
+                    Reputation = FindReputation(reputations, g.Key),
+                    Url = brands.Values.FirstOrDefault(bp => NameMatch(bp.Name, g.Key))?.Url
+                };
             })
             .OrderByDescending(b => b.ListingCount)
             .ThenBy(b => b.Name)
@@ -460,13 +502,18 @@ public sealed partial class AgentService
     /// many price sources). Non-local offers are dropped unless the user asked for international.
     /// Returns empty on thin context or any failure, so the rest of the report is unaffected.
     /// </summary>
-    private async Task<IReadOnlyList<ProductListing>> ExtractProductListingsAsync(
+    private async Task<(IReadOnlyList<ProductListing> Listings, IReadOnlyDictionary<string, ModelInsight> Insights)>
+        ExtractProductListingsAsync(
         string query, GeoProfile geo, ResearchBundle bundle, bool includeIntl, CancellationToken cancellationToken)
     {
+        var empty = (
+            (IReadOnlyList<ProductListing>)Array.Empty<ProductListing>(),
+            (IReadOnlyDictionary<string, ModelInsight>)new Dictionary<string, ModelInsight>(StringComparer.Ordinal));
+
         var context = BuildContext(bundle);
         if (context.Length == 0)
         {
-            return Array.Empty<ProductListing>();
+            return empty;
         }
 
         // Ask the LLM for structured products; if its JSON can't be parsed, retry once before
@@ -474,10 +521,11 @@ public sealed partial class AgentService
         var dto = await ExtractProductsDtoAsync(query, geo, context, cancellationToken).ConfigureAwait(false);
         if (dto?.Products is null)
         {
-            return Array.Empty<ProductListing>();
+            return empty;
         }
 
         var listings = new List<ProductListing>();
+        var insights = new Dictionary<string, ModelInsight>(StringComparer.Ordinal);
         foreach (var p in dto.Products)
         {
             var name = string.IsNullOrWhiteSpace(p.Name) ? p.Model : p.Name;
@@ -489,6 +537,17 @@ public sealed partial class AgentService
             var brand = string.IsNullOrWhiteSpace(p.Brand) ? null : p.Brand!.Trim();
             var model = string.IsNullOrWhiteSpace(p.Model) ? null : p.Model!.Trim();
             var image = string.IsNullOrWhiteSpace(p.ImageUrl) ? null : p.ImageUrl!.Trim();
+
+            // Capture the model's distilled pros/cons/verdict (when the LLM provided them), keyed
+            // the same way the aggregator groups listings, so they can be re-attached after grouping.
+            var pros = CleanList(p.Pros);
+            var cons = CleanList(p.Cons);
+            var verdict = string.IsNullOrWhiteSpace(p.Summary) ? null : p.Summary!.Trim();
+            if (pros.Count > 0 || cons.Count > 0 || verdict is not null)
+            {
+                insights[ModelInsightKey(brand, model, name!.Trim())] =
+                    new ModelInsight(pros, cons, verdict);
+            }
             var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (p.Specs is { Count: > 0 })
             {
@@ -550,8 +609,32 @@ public sealed partial class AgentService
             }
         }
 
-        return listings;
+        return (listings, insights);
     }
+
+    /// <summary>An LLM-distilled verdict for a model: short pros/cons and a one-line summary.</summary>
+    private sealed record ModelInsight(
+        IReadOnlyList<string> Pros, IReadOnlyList<string> Cons, string? Summary);
+
+    /// <summary>
+    /// Insight-map key matching <see cref="ListingExtractor.DedupKey"/>'s identity rules
+    /// (brand+model, else normalized name), so a model aggregated from listings can look up the
+    /// insight extracted for the same product.
+    /// </summary>
+    private static string ModelInsightKey(string? brand, string? model, string name) =>
+        ListingExtractor.DedupKey(new ProductListing { Brand = brand, Model = model, Name = name });
+
+    private static string ModelInsightKey(ProductModel m) =>
+        ListingExtractor.DedupKey(new ProductListing { Brand = m.Brand, Model = m.Model, Name = m.Name });
+
+    /// <summary>Trims, drops blanks and de-dupes a possibly-null LLM string list.</summary>
+    private static IReadOnlyList<string> CleanList(IEnumerable<string>? items) =>
+        items is null
+            ? Array.Empty<string>()
+            : items.Where(s => !string.IsNullOrWhiteSpace(s))
+                   .Select(s => s.Trim())
+                   .Distinct(StringComparer.OrdinalIgnoreCase)
+                   .ToList();
 
     /// <summary>
     /// Calls the LLM extraction prompt and parses its JSON response, retrying once when the
@@ -701,6 +784,11 @@ public sealed partial class AgentService
         // Tolerant of mixed value types: LLMs emit spec values as strings, numbers or bools.
         [JsonPropertyName("specs")] public Dictionary<string, JsonElement>? Specs { get; set; }
         [JsonPropertyName("offers")] public List<ExtractedOfferDto>? Offers { get; set; }
+
+        // Optional per-model verdict distilled from the reviews/opinions in the context.
+        [JsonPropertyName("pros")] public List<string>? Pros { get; set; }
+        [JsonPropertyName("cons")] public List<string>? Cons { get; set; }
+        [JsonPropertyName("summary")] public string? Summary { get; set; }
     }
 
     private sealed class ExtractedOfferDto
