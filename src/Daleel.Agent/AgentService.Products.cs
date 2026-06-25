@@ -239,10 +239,10 @@ public sealed partial class AgentService
 
         var strategy = await PlanAsync(PromptTemplates.PlanModel(model, geo), cancellationToken).ConfigureAwait(false);
         var bundle = await GatherAsync(strategy, geo, cancellationToken).ConfigureAwait(false);
-        // Skip the per-brand reputation pass here — the detail panel is about one model, and we
-        // keep the on-demand deep scrape lean.
+        // Skip the per-brand reputation pass AND the LLM extraction pass here — the detail panel is
+        // about one model, and we keep the on-demand deep scrape lean (no extra LLM round-trips).
         var result = await BuildProductSearchResultAsync(model, geo, bundle, string.Empty, cancellationToken,
-            assessReputation: false).ConfigureAwait(false);
+            assessReputation: false, useLlmExtraction: false).ConfigureAwait(false);
 
         var best = PickBestModel(result.Models, model);
         if (best is null)

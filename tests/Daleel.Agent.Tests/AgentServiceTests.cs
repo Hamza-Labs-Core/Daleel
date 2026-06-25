@@ -134,7 +134,7 @@ public class AgentServiceTests
               { "name": "Samsung WindFree 1.5 ton Split AC", "brand": "Samsung", "model": "AR18TXHQ",
                 "specs": { "capacity": 1.5, "energy": "A++" },
                 "offers": [ { "source": "Smart Buy", "price": "320 JOD", "currency": "JOD",
-                              "url": "https://smartbuy.com.jo/p/ar18", "condition": "new" } ] },
+                              "url": "https://smartbuy.com.jo/p/ar18", "condition": "New " } ] },
               { "name": "LG DualCool 2 ton", "brand": "LG", "model": "S4-Q24",
                 "offers": [ { "source": "Leaders", "price": 410, "currency": "JOD",
                               "url": "https://leaders.jo/p/s4q24" } ] }
@@ -157,6 +157,9 @@ public class AgentServiceTests
         products.Models.Should().Contain(m => m.Brand == "Samsung"
             && m.Specs.ContainsKey("capacity")
             && m.Offers.Any(o => o.Price == 320 && o.Currency == "JOD" && (o.Url ?? "").Contains("smartbuy")));
+        // The non-canonical "New " condition is normalized to "new" on the extracted offer.
+        products.Models.SelectMany(m => m.Offers)
+            .Should().Contain(o => (o.Url ?? "").Contains("smartbuy") && o.Condition == "new");
         products.Models.Should().Contain(m => m.Brand == "LG" && m.Offers.Any(o => o.Price == 410));
         // Brands are derived from the extracted models, so they populate too.
         products.Brands.Should().Contain(b => b.Name == "Samsung");
