@@ -11,6 +11,11 @@ on:
     # `synchronize`/`reopened` → re-deploy on new commits while the PR stays labelled.
     types: [labeled, synchronize, reopened]
 
+# Least privilege by default (CodeQL): the read-only token covers checkout. The jobs that
+# need more (GHCR push, PR comment) widen it themselves.
+permissions:
+  contents: read
+
 env:
   IMAGE_NAME: ghcr.io/hamza-labs-core/daleel
   # PR-scoped tag keeps QA isolated from production's `latest` and from other PRs.

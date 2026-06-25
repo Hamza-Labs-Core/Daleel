@@ -80,6 +80,10 @@ public sealed class CheckCacheActivity : CodeActivity
                 state.Log("⚡ Loaded from cache — identical search run recently.");
             }
         }
+        catch (OperationCanceledException)
+        {
+            throw; // a cap-trip / user cancel must stop the job, not be swallowed as a cache miss
+        }
         catch
         {
             // Cache hiccup or corrupt payload ⇒ treat as a miss and run the search live.
@@ -351,6 +355,10 @@ public sealed class CacheResultsActivity : CodeActivity
                     state.ResultJson, state.ResultType, state.FilteredCount, state.FilteredCategories);
                 await state.Cache.SetAsync(
                     state.ResultKey, JsonSerializer.Serialize(cached), state.CacheTtl, context.CancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // cancellation must propagate; only swallow genuine cache-write failures
             }
             catch
             {

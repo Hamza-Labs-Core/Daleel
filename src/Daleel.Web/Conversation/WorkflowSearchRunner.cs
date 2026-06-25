@@ -213,6 +213,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 enrichedJson, baseResult.ResultType, baseResult.FilteredCount, baseResult.FilteredCategories);
             await _cache.SetAsync(resultKey, JsonSerializer.Serialize(cached), CacheTtl, ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException)
+        {
+            throw; // cancellation propagates; SearchJobService treats it as a cancelled enrichment
+        }
         catch
         {
             // best-effort: a cache write must never fail enrichment
