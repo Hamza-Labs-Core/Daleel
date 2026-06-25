@@ -1,0 +1,141 @@
+@page "/admin/brands"
+@attribute [Authorize(Roles = "Admin")]
+@inject IBrandRepository Brands
+@inject Daleel.Web.Profiles.IBrandProfileService BrandProfiles
+
+<PageTitle>دليل · Admin · Brands</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">Brand profiles</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Brand profiles researched once via Context.dev + the LLM and saved here, then joined against
+    search results to enrich them without re-fetching. Profiles older than 30 days are refreshed
+    automatically; use Refresh to force one now.
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load brands: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="LoadAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="d-flex align-center mb-2 gap-2">
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@_rows.Count saved brand profile(s)</MudText>
+        <MudSpacer />
+        @if (_status is not null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Primary">@_status</MudText>
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
+                   StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshStaleAsync">
+            Refresh stale
+        </MudButton>
+    </div>
+
+    @if (_rows.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            No brand profiles yet — they're created the first time a search surfaces a brand.
+        </MudAlert>
+    }
+    else
+    {
+        <MudPaper Outlined="true" Elevation="0" Class="pa-2">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead>
+                    <tr>
+                        <th>Brand</th>
+                        <th>Origin</th>
+                        <th>Reputation</th>
+                        <th>Price range</th>
+                        <th>Popular models</th>
+                        <th>Refreshed (UTC)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var b in _rows)
+                    {
+                        <tr>
+                            <td dir="@Catalog.Dir(b.Name)"><strong>@b.Name</strong></td>
+                            <td>@(b.CountryOfOrigin ?? "—")</td>
+                            <td>@(b.ReputationScore is { } s ? $"{s:0.0}/10" : "—")</td>
+                            <td>@(b.PriceRange ?? "—")</td>
+                            <td style="max-width:280px;">@(b.PopularModels.Count > 0 ? string.Join(", ", b.PopularModels.Take(4)) : "—")</td>
+                            <td style="white-space:nowrap;">@b.LastRefreshed.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy"
+                                           OnClick="@(() => RefreshOneAsync(b.Name))">Refresh</MudButton>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _status;
+    private IReadOnlyList<Brand> _rows = Array.Empty<Brand>();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _rows = await Brands.ListAsync();
+            _loading = false;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _loading = false;
+        }
+        StateHasChanged();
+    }
+
+    private async Task RefreshOneAsync(string name)
+    {
+        _busy = true;
+        _status = $"Refreshing {name}…";
+        StateHasChanged();
+        var updated = await BrandProfiles.RefreshAsync(name);
+        _status = updated is null
+            ? "Research unavailable — set CONTEXT_DEV_API_KEY + an LLM key."
+            : $"Refreshed {name}.";
+        _busy = false;
+        await LoadAsync();
+    }
+
+    private async Task RefreshStaleAsync()
+    {
+        _busy = true;
+        _status = "Refreshing stale profiles…";
+        StateHasChanged();
+        var count = await BrandProfiles.RefreshStaleAsync(50);
+        _status = $"Refreshed {count} stale profile(s).";
+        _busy = false;
+        await LoadAsync();
+    }
+}
