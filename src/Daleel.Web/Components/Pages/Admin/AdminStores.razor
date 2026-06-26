@@ -1,0 +1,141 @@
+@page "/admin/stores"
+@attribute [Authorize(Roles = "Admin")]
+@inject IStoreRepository Stores
+@inject Daleel.Web.Profiles.IStoreProfileService StoreProfiles
+
+<PageTitle>دليل · Admin · Stores</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">Store profiles</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Retailer profiles researched via Context.dev + the LLM and saved here, joined against search
+    results to enrich the stores a search surfaces. Profiles older than 30 days refresh automatically;
+    use Refresh to force one now.
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load stores: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="LoadAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="d-flex align-center mb-2 gap-2">
+        <MudText Typo="Typo.caption" Color="Color.Secondary">@_rows.Count saved store profile(s)</MudText>
+        <MudSpacer />
+        @if (_status is not null)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Primary">@_status</MudText>
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
+                   StartIcon="@Icons.Material.Filled.Refresh" OnClick="RefreshStaleAsync">
+            Refresh stale
+        </MudButton>
+    </div>
+
+    @if (_rows.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            No store profiles yet — they're created the first time a search surfaces a store.
+        </MudAlert>
+    }
+    else
+    {
+        <MudPaper Outlined="true" Elevation="0" Class="pa-2">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead>
+                    <tr>
+                        <th>Store</th>
+                        <th>Location</th>
+                        <th>Type</th>
+                        <th>Rating</th>
+                        <th>Brands carried</th>
+                        <th>Refreshed (UTC)</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in _rows)
+                    {
+                        <tr>
+                            <td dir="@Catalog.Dir(s.Name)"><strong>@s.Name</strong></td>
+                            <td>@(s.Location ?? "—")</td>
+                            <td>@(s.Type ?? "—")</td>
+                            <td>@(s.Rating is { } r ? $"{r:0.0}/5" : "—")</td>
+                            <td style="max-width:280px;">@(s.BrandsCarried.Count > 0 ? string.Join(", ", s.BrandsCarried.Take(5)) : "—")</td>
+                            <td style="white-space:nowrap;">@s.LastRefreshed.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy"
+                                           OnClick="@(() => RefreshOneAsync(s.Name))">Refresh</MudButton>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string? _status;
+    private IReadOnlyList<Store> _rows = Array.Empty<Store>();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _rows = await Stores.ListAsync();
+            _loading = false;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _loading = false;
+        }
+        StateHasChanged();
+    }
+
+    private async Task RefreshOneAsync(string name)
+    {
+        _busy = true;
+        _status = $"Refreshing {name}…";
+        StateHasChanged();
+        var updated = await StoreProfiles.RefreshAsync(name);
+        _status = updated is null
+            ? "Research unavailable — set CONTEXT_DEV_API_KEY + an LLM key."
+            : $"Refreshed {name}.";
+        _busy = false;
+        await LoadAsync();
+    }
+
+    private async Task RefreshStaleAsync()
+    {
+        _busy = true;
+        _status = "Refreshing stale profiles…";
+        StateHasChanged();
+        var count = await StoreProfiles.RefreshStaleAsync(50);
+        _status = $"Refreshed {count} stale profile(s).";
+        _busy = false;
+        await LoadAsync();
+    }
+}

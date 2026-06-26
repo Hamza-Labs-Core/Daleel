@@ -42,12 +42,13 @@ public sealed class ConversationService : IConversationService
             return new SubmitResult(false, null, "Query is required.", 400);
         }
 
-        // Cheap pre-check so we don't even create a job row for a user who is clearly over limit.
+        // Cheap pre-check: a user with no credits left can't start a search. The actual cost is
+        // charged after it runs (it depends on the providers it calls).
         var status = await _quota.GetStatusAsync(userId, isAdmin, ct);
         if (!status.CanSearch)
         {
             return new SubmitResult(false, null,
-                $"You've used all {status.Limit} free searches this month. Upgrade for unlimited access.", 429);
+                $"You're out of credits for this month ({status.Limit} included). Upgrade for more.", 429);
         }
 
         // When the caller didn't pick a model, fall back to the admin-configured per-plan default.
@@ -58,8 +59,6 @@ public sealed class ConversationService : IConversationService
             resolvedModel = await _config.GetAsync(key, ct);
         }
 
-        // Create and COMMIT the job row before consuming quota. If persistence fails the user is never
-        // charged for a search that didn't start; quota is only consumed once the job durably exists.
         var job = new SearchJob
         {
             UserId = userId,
@@ -74,16 +73,8 @@ public sealed class ConversationService : IConversationService
         _db.SearchJobs.Add(job);
         await _db.SaveChangesAsync(ct);
 
-        // Atomic consume. If we lost a concurrency race for the last slot, roll back the job we created.
-        if (!await _quota.TryConsumeAsync(userId, isAdmin, ct))
-        {
-            _db.SearchJobs.Remove(job);
-            await _db.SaveChangesAsync(ct);
-            var refreshed = await _quota.GetStatusAsync(userId, isAdmin, ct);
-            return new SubmitResult(false, null,
-                $"You've used all {refreshed.Limit} free searches this month. Upgrade for unlimited access.", 429);
-        }
-
+        // No up-front consume: credits are charged for the actual provider calls once the job finishes
+        // (see SearchJobService), so the CanSearch pre-check above is the gate.
         await _queue.EnqueueAsync(job.Id, ct);
         return new SubmitResult(true, job.Id, null, 202);
     }

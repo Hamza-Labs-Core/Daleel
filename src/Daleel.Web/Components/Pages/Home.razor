@@ -65,15 +65,20 @@
             </MudPaper>
         }
 
-        @* While the search runs we show only a neutral spinner. The detailed step/cost/provider
-           log is internal — it's logged and recorded for analytics, never surfaced here. *@
+        @* A single, smoothly-animated status line that updates in place as the pipeline moves through
+           its stages (analyzing → searching → extracting → verifying → ranking) — not a scrolling log.
+           The @key re-renders the line on each new message, replaying the cross-fade animation. *@
         @if (_status == "running")
         {
-            <MudPaper Class="pa-4 mb-3" Outlined="true" Elevation="0">
-                <div class="d-flex align-center">
-                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-3" />
-                    <MudText Typo="Typo.subtitle2">@L["Search.Searching"]</MudText>
-                    <MudSpacer />
+            <MudPaper Class="pa-4 mb-3 daleel-card" Outlined="true" Elevation="0">
+                <div class="d-flex align-center gap-3">
+                    <span class="daleel-status-pulse"></span>
+                    <div style="flex:1;min-width:0;">
+                        @{ var _line = _progress.Count > 0 ? _progress[^1] : (string)L["Search.Searching"]; }
+                        <MudText Typo="Typo.subtitle2" Style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                            <span class="daleel-status-line" @key="_line">@_line</span>
+                        </MudText>
+                    </div>
                     <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
                                OnClick="CancelAsync">@L["Search.Cancel"]</MudButton>
                 </div>
@@ -93,10 +98,28 @@
             </MudPaper>
         }
 
+        @if (_status == "cancelled")
+        {
+            <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
+                <MudIcon Icon="@Icons.Material.Filled.Cancel" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                <MudText Typo="Typo.subtitle1" Align="Align.Center">@L["Search.Cancelled"]</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-1">
+                    @L["Search.CancelledHint"]
+                </MudText>
+            </MudPaper>
+        }
+
         @* Results render as a structured product list (with stores/brands/reviews secondary).
            No text-summary paragraph — the data speaks for itself. *@
         @if (_status == "completed" && _answer is not null)
         {
+            @if (_enriching)
+            {
+                <div class="d-flex align-center mb-2">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Search.FetchingSpecs"]</MudText>
+                </div>
+            }
             @if (_answer.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
             {
                 <AdaptiveResults Result="products" />
@@ -131,6 +154,9 @@
 @code {
     [SupplyParameterFromQuery] private string? Q { get; set; }
 
+    // When set, open a saved history entry's results read-only (no re-run). See LoadHistoryResultAsync.
+    [SupplyParameterFromQuery(Name = "historyId")] private int? HistoryId { get; set; }
+
     private string? _userId;
     private string _input = string.Empty;
     private string? _query;
@@ -138,6 +164,7 @@
     private string? _error;
     private int? _jobId;
     private bool _running => _status == "running";
+    private bool _enriching;
     private readonly List<string> _progress = new();
     private AgentAnswer? _answer;
     private List<SearchHistoryEntry> _recent = new();
@@ -146,6 +173,7 @@
     {
         Notifier.Progress += OnProgress;
         Notifier.Completed += OnCompleted;
+        Notifier.Enriched += OnEnriched;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -158,9 +186,68 @@
         if (_userId is not null)
         {
             await LoadStateAsync();
+            await EnsureMarketAsync();
+
+            // Opening a saved search from History: show its stored results instead of the live convo.
+            if (HistoryId is int hid)
+            {
+                await LoadHistoryResultAsync(hid);
+            }
         }
 
         StateHasChanged();
+    }
+
+    // Re-display a saved history entry's results (no network). Falls back to prefilling the query for
+    // older entries saved before results were persisted.
+    private async Task LoadHistoryResultAsync(int id)
+    {
+        var entry = await History.GetAsync(_userId!, id);
+        if (entry is null)
+        {
+            return;
+        }
+
+        if (entry.ResultJson is { Length: > 0 } resultJson)
+        {
+            _query = entry.Query;
+            _status = "completed";
+            _jobId = null;
+            _enriching = false;
+            _progress.Clear();
+            _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson);
+        }
+        else
+        {
+            _input = entry.Query; // pre-results entry — let the user re-run it
+        }
+    }
+
+    /// <summary>
+    /// On a visitor's first search session we don't silently assume a market. Try to auto-detect it
+    /// from the browser (locale/timezone) and persist it; if we can't determine a supported market,
+    /// ask the user to pick one rather than defaulting to a fixed country.
+    /// </summary>
+    private async Task EnsureMarketAsync()
+    {
+        if (await Store.GetAsync("geo") is not null)
+        {
+            return; // already detected or chosen previously
+        }
+
+        var detected = GeoProfiles.Resolve(await Store.DetectMarketCodeAsync())?.Key;
+        if (detected is not null)
+        {
+            await Store.SetAsync("geo", detected);
+            return;
+        }
+
+        // Couldn't detect — ask the user.
+        var dialog = await Dialogs.ShowAsync<MarketPickerDialog>(
+            L["Common.Market"], new DialogParameters(), new DialogOptions { BackdropClick = false });
+        var result = await dialog.Result;
+        var chosen = result is { Canceled: false, Data: string key } ? key : "jordan";
+        await Store.SetAsync("geo", chosen);
     }
 
     private async Task LoadStateAsync()
@@ -223,10 +310,26 @@
 
     private async Task CancelAsync()
     {
-        if (_userId is not null && _jobId is { } id)
+        if (_userId is null || _jobId is not { } id)
         {
-            await Conversations.CancelAsync(_userId, id);
+            return;
         }
+
+        await Conversations.CancelAsync(_userId, id);
+
+        // Respond immediately rather than waiting for the worker to reach its next cancellation
+        // checkpoint. Clearing _jobId makes OnProgress/OnCompleted ignore any in-flight broadcasts for
+        // this job, so a late progress message can't resurrect the "running" UI. The query stays in the
+        // box so the user can tweak and retry.
+        _jobId = null;
+        _status = "cancelled";
+        _enriching = false;
+        _progress.Clear();
+        if (!string.IsNullOrWhiteSpace(_query))
+        {
+            _input = _query!;
+        }
+        StateHasChanged();
     }
 
     // Real-time updates from the background worker — fan out to every device of this user.
@@ -235,6 +338,9 @@
         if (userId != _userId || jobId != _jobId) return;
         InvokeAsync(() =>
         {
+            // Never resurrect "running" once the job has completed/errored — a late or background
+            // (enrichment) progress message must not hide the result that's already on screen.
+            if (_status is "completed" or "error" or "cancelled") return;
             _status = "running";
             _query ??= "…";
             if (_progress.Count == 0 || _progress[^1] != message) _progress.Add(message);
@@ -252,10 +358,38 @@
             _answer = status == "completed" && resultJson is not null
                 ? ResultSerialization.Deserialize<AgentAnswer>(resultJson)
                 : null;
+            // Base results are now on screen; the server is deep-diving item specs in the background.
+            // Show a "more coming" hint until the Enriched update arrives (auto-clears as a safety net).
+            _enriching = _answer?.Products is { HasListings: true };
+            if (_enriching) ScheduleEnrichTimeout(jobId);
             _recent = (await History.ListAsync(_userId!, page: 1, pageSize: 15)).Items.ToList();
             StateHasChanged();
         });
     }
+
+    // A streamed result refresh after completion (item deep-dive specs arrived). Re-render in place
+    // without resetting the "completed" state.
+    private void OnEnriched(string userId, int jobId, string resultJson, string resultType)
+    {
+        if (userId != _userId || jobId != _jobId) return;
+        InvokeAsync(() =>
+        {
+            _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson) ?? _answer;
+            _enriching = false;
+            StateHasChanged();
+        });
+    }
+
+    // Safety net so the "fetching specs" hint never sticks if no enrichment update arrives.
+    private void ScheduleEnrichTimeout(int jobId) => _ = Task.Delay(TimeSpan.FromSeconds(60)).ContinueWith(_ =>
+        InvokeAsync(() =>
+        {
+            if (_enriching && _jobId == jobId)
+            {
+                _enriching = false;
+                StateHasChanged();
+            }
+        }));
 
     private void Prefill(string query) => _input = query;
 
@@ -274,5 +408,6 @@
     {
         Notifier.Progress -= OnProgress;
         Notifier.Completed -= OnCompleted;
+        Notifier.Enriched -= OnEnriched;
     }
 }

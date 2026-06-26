@@ -7,9 +7,13 @@
             <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
                 <MudCardContent>
                     <div class="d-flex align-center gap-2">
-                        @if (!string.IsNullOrWhiteSpace(b.LogoUrl))
+                        @if (LogoSrc(b) is { } logo)
                         {
-                            <SafeImage Src="@b.LogoUrl" Alt="@b.Name" Style="height:32px;width:32px;object-fit:contain;" />
+                            @* Plain img (logos are benign): a logo-service miss just hides itself, falling
+                               back to no icon rather than a broken-image glyph. *@
+                            <img src="@logo" alt="@b.Name" loading="lazy"
+                                 style="height:32px;width:32px;object-fit:contain;border-radius:6px;"
+                                 onerror="this.style.display='none'" />
                         }
                         else
                         {
@@ -69,4 +73,40 @@
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<BrandInfo> Brands { get; set; } = Array.Empty<BrandInfo>();
     [Parameter] public EventCallback<string> OnViewProducts { get; set; }
+
+    // Logo source: the enriched LogoUrl if we have one, else an icon service keyed off the brand's own
+    // domain, else a guess from a single-word brand name (Samsung→samsung.com). A miss hides gracefully.
+    // DuckDuckGo's icon service (not Clearbit — its free logo API was shut down and no longer resolves).
+    private static string? LogoSrc(BrandInfo b)
+    {
+        if (!string.IsNullOrWhiteSpace(b.LogoUrl))
+        {
+            return b.LogoUrl;
+        }
+
+        var host = HostOf(b.Url) ?? GuessHost(b.Name);
+        return host is null ? null : $"https://icons.duckduckgo.com/ip3/{host}.ico";
+    }
+
+    private static string? HostOf(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        var s = url.Contains("://") ? url : "https://" + url;
+        if (!Uri.TryCreate(s, UriKind.Absolute, out var u))
+        {
+            return null;
+        }
+
+        return u.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? u.Host[4..] : u.Host;
+    }
+
+    private static string? GuessHost(string? name) =>
+        !string.IsNullOrWhiteSpace(name)
+        && System.Text.RegularExpressions.Regex.IsMatch(name.Trim(), "^[A-Za-z][A-Za-z0-9]+$")
+            ? name.Trim().ToLowerInvariant() + ".com"
+            : null;
 }

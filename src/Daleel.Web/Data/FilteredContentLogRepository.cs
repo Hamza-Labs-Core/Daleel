@@ -23,8 +23,10 @@ public sealed class FilteredContentLogRepository : IFilteredContentLogRepository
     }
 
     public async Task<IReadOnlyList<FilteredContentLog>> ListRecentAsync(int take, CancellationToken ct = default) =>
+        // Order by the auto-increment Id (newest = highest), not CreatedAt: SQLite can't translate
+        // ORDER BY on a DateTimeOffset column and throws NotSupportedException, crashing the page.
         await _db.FilteredContentLogs.AsNoTracking()
-            .OrderByDescending(x => x.CreatedAt)
+            .OrderByDescending(x => x.Id)
             .Take(take)
             .ToListAsync(ct);
 

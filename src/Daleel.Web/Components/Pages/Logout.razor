@@ -16,7 +16,9 @@
             Are you sure you want to sign out?
         </MudText>
 
-        <form method="post" action="/auth/logout">
+        @* data-enhance="false": real full-page POST so the sign-out cookie clear + redirect happen
+           as a true navigation (consistent with login/register). *@
+        <form method="post" action="/auth/logout" data-enhance="false">
             <AntiforgeryToken />
             <MudButton ButtonType="ButtonType.Submit" Variant="Variant.Filled" Color="Color.Primary" FullWidth="true">
                 Sign out

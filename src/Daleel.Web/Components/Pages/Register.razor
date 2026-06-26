@@ -33,7 +33,11 @@
                     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@ErrorMessage</MudAlert>
                 }
 
-                <form method="post" action="/auth/register">
+                @* data-enhance="false": this MUST be a real full-page POST. Blazor's enhanced form
+                   handling (blazor.web.js) otherwise intercepts it as a fetch, which desyncs the
+                   antiforgery cookie/token on the FIRST submit (works only on retry) and mishandles the
+                   auth-cookie + redirect the endpoint sets. A native POST behaves like the curl path. *@
+                <form method="post" action="/auth/register" data-enhance="false">
                     <AntiforgeryToken />
                     <input type="hidden" name="returnUrl" value="@ReturnUrl" />
 
@@ -84,6 +88,7 @@
         "duplicate" => (string)L["Auth.Error.Duplicate"],
         "weakpassword" => (string)L["Auth.Error.WeakPassword"],
         "failed" => (string)L["Auth.Error.Failed"],
+        "expired" => (string)L["Auth.Error.Expired"],
         _ => null,
     };
 }

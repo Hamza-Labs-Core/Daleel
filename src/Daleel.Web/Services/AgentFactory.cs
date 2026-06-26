@@ -64,6 +64,13 @@ public interface IAgentFactory
     /// <summary>Builds an agent for one request. Throws if no LLM key is available.</summary>
     AgentService Build(AgentRequest request);
 
+    /// <summary>
+    /// Builds a bare LLM client from the resolved keys, or null when none is configured. Used by
+    /// collaborators that need the LLM outside a full agent (e.g. the profile researcher and the
+    /// background refresh job), so they can degrade gracefully rather than throw.
+    /// </summary>
+    ILlmClient? TryBuildLlm(string? model = null, IReadOnlyDictionary<string, string>? keys = null);
+
     /// <summary>Resolves a value (user key first, then environment), or null if neither set.</summary>
     string? Resolve(string name, IReadOnlyDictionary<string, string>? keys = null);
 }
@@ -144,7 +151,12 @@ public sealed class AgentFactory : IAgentFactory
     }
 
     /// <summary>Selects an LLM client, preferring OpenRouter (one key, every model), then OpenAI, then Anthropic.</summary>
-    private ILlmClient BuildLlm(string? model, IReadOnlyDictionary<string, string>? keys)
+    private ILlmClient BuildLlm(string? model, IReadOnlyDictionary<string, string>? keys) =>
+        TryBuildLlm(model, keys) ?? throw new InvalidOperationException(
+            "No LLM key available. Set OPENROUTER_API_KEY (recommended), OPENAI_API_KEY or ANTHROPIC_API_KEY " +
+            "as a server environment variable, or enter one on the Settings page.");
+
+    public ILlmClient? TryBuildLlm(string? model = null, IReadOnlyDictionary<string, string>? keys = null)
     {
         if (Resolve("OPENROUTER_API_KEY", keys) is { } openrouter)
         {
@@ -161,9 +173,7 @@ public sealed class AgentFactory : IAgentFactory
             return string.IsNullOrWhiteSpace(model) ? new AnthropicClient(anthropic) : new AnthropicClient(anthropic, model);
         }
 
-        throw new InvalidOperationException(
-            "No LLM key available. Set OPENROUTER_API_KEY (recommended), OPENAI_API_KEY or ANTHROPIC_API_KEY " +
-            "as a server environment variable, or enter one on the Settings page.");
+        return null;
     }
 
     /// <summary>Builds the scrape router (Context.dev → Cloudflare) from whatever is configured.</summary>

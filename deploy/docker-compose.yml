@@ -16,12 +16,43 @@ services:
       - "8080"
     volumes:
       - daleel_data:/app/data   # persisted SQLite database — survives redeploys
+    depends_on:
+      # Start Postgres first when the optional event store is in use. Not a hard
+      # health gate: the app degrades to dropping events if Postgres is unavailable.
+      - postgres
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+    networks:
+      - web
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional PostgreSQL for the pipeline event store (admin /admin/usage dashboard).
+  # The app only uses it when POSTGRES_CONNECTION_STRING / DATABASE_URL is set; this
+  # service can be left running harmlessly even when the event store is disabled.
+  postgres:
+    image: postgres:16-alpine
+    container_name: daleel-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: daleel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: daleel_events
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U daleel -d daleel_events"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     networks:
       - web
     logging:
@@ -61,5 +92,6 @@ networks:
 
 volumes:
   daleel_data:
+  postgres_data:
   caddy_data:
   caddy_config:

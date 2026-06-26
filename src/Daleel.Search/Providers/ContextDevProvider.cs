@@ -4,6 +4,19 @@ using Daleel.Search.Http;
 
 namespace Daleel.Search.Providers;
 
+/// <summary>One product from Context.dev's brand-catalogue extraction (<c>/v1/brand/ai/products</c>).</summary>
+public record CatalogProduct
+{
+    public string Name { get; init; } = string.Empty;
+    public string? Description { get; init; }
+    public decimal? Price { get; init; }
+    public string? Currency { get; init; }
+    public string? Url { get; init; }
+    public string? Category { get; init; }
+    public string? ImageUrl { get; init; }
+    public string? Sku { get; init; }
+}
+
 /// <summary>Brand intelligence returned by Context.dev's <c>/v1/brand</c> endpoint.</summary>
 public record BrandProfile
 {
@@ -60,11 +73,16 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
         ScrapeFormat format = ScrapeFormat.Markdown,
         CancellationToken cancellationToken = default)
     {
-        var path = format == ScrapeFormat.Html ? "/v1/web/scrape/html" : "/v1/web/scrape/markdown";
+        // Context.dev's web endpoints are GET with the url as a query param — NOT POST with a JSON
+        // body. Posting returned "API you have tried to access does not exist", which silently routed
+        // every scrape to the Cloudflare fallback. Verified against the live API: GET
+        // /v1/web/scrape/markdown?url=… → 200 { "success": true, "markdown": "…" }.
+        var kind = format == ScrapeFormat.Html ? "html" : "markdown";
+        var path = $"/v1/web/scrape/{kind}?url={Uri.EscapeDataString(url)}";
 
         try
         {
-            using var doc = await PostAsync(path, new { url }, cancellationToken).ConfigureAwait(false);
+            using var doc = await GetAsync(path, cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
 
             var content = FirstString(root, "markdown", "html", "content", "text", "data") ?? string.Empty;
@@ -112,10 +130,11 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
         return root.Clone();
     }
 
-    /// <summary>Enriches a domain into a brand profile.</summary>
+    /// <summary>Enriches a domain into a brand profile (GET /v1/brand/retrieve?domain=…).</summary>
     public async Task<BrandProfile> GetBrandAsync(string domain, CancellationToken cancellationToken = default)
     {
-        using var doc = await PostAsync("/v1/brand", new { domain }, cancellationToken).ConfigureAwait(false);
+        using var doc = await GetAsync($"/v1/brand/retrieve?domain={Uri.EscapeDataString(domain)}", cancellationToken)
+            .ConfigureAwait(false);
         var root = doc.RootElement;
         if (root.TryGetProperty("data", out var data))
         {
@@ -185,6 +204,69 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
 
         return pages;
     }
+
+    /// <summary>
+    /// Extracts a brand/store's product catalogue WITH PRICING from its website
+    /// (<c>POST /v1/brand/ai/products</c>) — the purpose-built endpoint for "scrape the models + prices
+    /// a site sells". Slow (it crawls + AI-extracts), so callers should run it off the hot path and give
+    /// it a generous timeout. Best-effort: returns empty on any failure.
+    /// </summary>
+    public async Task<IReadOnlyList<CatalogProduct>> ExtractProductsAsync(
+        string domain, int maxProducts = 12, int timeoutMs = 45_000, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            using var doc = await PostAsync(
+                "/v1/brand/ai/products",
+                new { domain, maxProducts, timeoutMS = timeoutMs },
+                cancellationToken).ConfigureAwait(false);
+
+            if (!doc.RootElement.TryGetProperty("products", out var arr) || arr.ValueKind != JsonValueKind.Array)
+            {
+                return Array.Empty<CatalogProduct>();
+            }
+
+            var list = new List<CatalogProduct>();
+            foreach (var p in arr.EnumerateArray())
+            {
+                var name = FirstString(p, "name");
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                list.Add(new CatalogProduct
+                {
+                    Name = name,
+                    Description = FirstString(p, "description"),
+                    Price = p.TryGetProperty("price", out var pr) && pr.ValueKind == JsonValueKind.Number
+                            && pr.TryGetDecimal(out var d) ? d : null,
+                    Currency = FirstString(p, "currency"),
+                    Url = FirstString(p, "url"),
+                    Category = FirstString(p, "category"),
+                    ImageUrl = FirstString(p, "image_url", "imageUrl"),
+                    Sku = FirstString(p, "sku")
+                });
+            }
+
+            return list;
+        }
+        catch (ProviderException)
+        {
+            return Array.Empty<CatalogProduct>();
+        }
+    }
+
+    /// <summary>GET helper — Context.dev's web/brand endpoints take query params with a Bearer token.</summary>
+    private async Task<JsonDocument> GetAsync(string pathAndQuery, CancellationToken cancellationToken) =>
+        await SendJsonAsync(
+            () =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, pathAndQuery);
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+                return req;
+            },
+            cancellationToken).ConfigureAwait(false);
 
     private async Task<JsonDocument> PostAsync(string path, object body, CancellationToken cancellationToken) =>
         await SendJsonAsync(

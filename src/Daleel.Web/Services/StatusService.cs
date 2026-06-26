@@ -62,9 +62,12 @@ public sealed class StatusService : IStatusService
         var providerTasks = Probes.Select(p => ProbeAsync(p.Name, p.EnvKey, p.Url, ct)).ToArray();
 
         // The last completed search across the whole system — a strong "searches are working" signal.
+        // Order by the auto-increment Id (monotonic with creation, so the newest completed job has the
+        // highest Id) instead of CompletedAt: SQLite cannot translate ORDER BY on a DateTimeOffset
+        // column and threw NotSupportedException, which crashed the entire status page.
         var lastSearch = await _db.SearchJobs.AsNoTracking()
             .Where(j => j.Status == JobStatus.Completed && j.CompletedAt != null)
-            .OrderByDescending(j => j.CompletedAt)
+            .OrderByDescending(j => j.Id)
             .Select(j => j.CompletedAt)
             .FirstOrDefaultAsync(ct);
 

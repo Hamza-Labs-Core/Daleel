@@ -33,7 +33,7 @@ public class PlansAndConfigTests
         var now = new DateTimeOffset(2026, 6, 10, 0, 0, 0, TimeSpan.Zero);
         var quota = new QuotaService(ctx.Db, () => now);
 
-        (await quota.GetStatusAsync("user", false)).Limit.Should().Be(5); // Basic by default
+        (await quota.GetStatusAsync("user", false)).Limit.Should().Be(500); // Basic credits by default
 
         // Admin "changes the plan" → an active Pro subscription.
         ctx.Db.UserSubscriptions.Add(new UserSubscription
@@ -42,7 +42,7 @@ public class PlansAndConfigTests
         });
         await ctx.Db.SaveChangesAsync();
 
-        (await quota.GetStatusAsync("user", false)).Limit.Should().Be(50);
+        (await quota.GetStatusAsync("user", false)).Limit.Should().Be(5000);
     }
 
     [Fact]

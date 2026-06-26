@@ -84,8 +84,8 @@ namespace Daleel.Web.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("INTEGER");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Endpoint")
                         .IsRequired()
@@ -224,6 +224,66 @@ namespace Daleel.Web.Data.Migrations
                     b.ToTable("AspNetUsers", (string)null);
                 });
 
+            modelBuilder.Entity("Daleel.Web.Data.Brand", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Cons")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CountryOfOrigin")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(4000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("LastRefreshed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NameKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PopularModels")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PriceRange")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Pros")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("ReputationScore")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Website")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastRefreshed");
+
+                    b.HasIndex("NameKey")
+                        .IsUnique();
+
+                    b.ToTable("Brands");
+                });
+
             modelBuilder.Entity("Daleel.Web.Data.FilteredContentLog", b =>
                 {
                     b.Property<long>("Id")
@@ -239,8 +299,8 @@ namespace Daleel.Web.Data.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("TEXT");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("TEXT");
+                    b.Property<long>("CreatedAt")
+                        .HasColumnType("INTEGER");
 
                     b.Property<string>("Geo")
                         .HasMaxLength(64)
@@ -265,6 +325,51 @@ namespace Daleel.Web.Data.Migrations
                     b.HasIndex("Category", "CreatedAt");
 
                     b.ToTable("FilteredContentLogs");
+                });
+
+            modelBuilder.Entity("Daleel.Web.Data.ProductProfile", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Brand")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Details")
+                        .HasMaxLength(8000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<long>("LastRefreshed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Model")
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NameKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("SourceUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastRefreshed");
+
+                    b.HasIndex("NameKey")
+                        .IsUnique();
+
+                    b.ToTable("ProductProfiles");
                 });
 
             modelBuilder.Entity("Daleel.Web.Data.SavedResult", b =>
@@ -374,6 +479,9 @@ namespace Daleel.Web.Data.Migrations
                         .HasMaxLength(32)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("ResultJson")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("ResultSummary")
                         .HasMaxLength(1000)
                         .HasColumnType("TEXT");
@@ -450,6 +558,90 @@ namespace Daleel.Web.Data.Migrations
                     b.ToTable("SearchJobs");
                 });
 
+            modelBuilder.Entity("Daleel.Web.Data.Store", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("BrandsCarried")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GoogleMapsUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("GooglePlaceId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("GoogleRating")
+                        .HasColumnType("REAL");
+
+                    b.Property<int?>("GoogleReviewCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<long>("LastRefreshed")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double?>("Latitude")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Location")
+                        .HasMaxLength(300)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("Longitude")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("NameKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("OpeningHours")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(64)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("Rating")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("Type")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Website")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastRefreshed");
+
+                    b.HasIndex("NameKey")
+                        .IsUnique();
+
+                    b.ToTable("Stores");
+                });
+
             modelBuilder.Entity("Daleel.Web.Data.SubscriptionPlan", b =>
                 {
                     b.Property<int>("Id")
@@ -461,6 +653,9 @@ namespace Daleel.Web.Data.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MonthlyCredits")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Name")
@@ -487,8 +682,9 @@ namespace Daleel.Web.Data.Migrations
                         new
                         {
                             Id = 1,
-                            FeaturesJson = "[\"5 searches per month\",\"Smart product & price search\",\"Price & store comparison\",\"Brand reputation & reviews\",\"Deal monitoring & alerts\",\"Search history & saved results\",\"English & Arabic interface\"]",
+                            FeaturesJson = "[\"500 credits per month\",\"Smart product & price search\",\"Price & store comparison\",\"Brand reputation & reviews\",\"Deal monitoring & alerts\",\"Search history & saved results\",\"English & Arabic interface\"]",
                             IsActive = true,
+                            MonthlyCredits = 500,
                             Name = "Basic",
                             PriceMonthly = 0m,
                             SearchesPerMonth = 5,
@@ -497,8 +693,9 @@ namespace Daleel.Web.Data.Migrations
                         new
                         {
                             Id = 2,
-                            FeaturesJson = "[\"50 searches per month\",\"Smart product & price search\",\"Price & store comparison\",\"Brand reputation & reviews\",\"Deal monitoring & alerts\",\"Search history & saved results\",\"English & Arabic interface\"]",
+                            FeaturesJson = "[\"5,000 credits per month\",\"Smart product & price search\",\"Price & store comparison\",\"Brand reputation & reviews\",\"Deal monitoring & alerts\",\"Search history & saved results\",\"English & Arabic interface\"]",
                             IsActive = true,
+                            MonthlyCredits = 5000,
                             Name = "Pro",
                             PriceMonthly = 9.99m,
                             SearchesPerMonth = 50,
@@ -507,8 +704,9 @@ namespace Daleel.Web.Data.Migrations
                         new
                         {
                             Id = 3,
-                            FeaturesJson = "[\"250 searches per month\",\"Smart product & price search\",\"Price & store comparison\",\"Brand reputation & reviews\",\"Deal monitoring & alerts\",\"Search history & saved results\",\"English & Arabic interface\"]",
+                            FeaturesJson = "[\"50,000 credits per month\",\"Smart product & price search\",\"Price & store comparison\",\"Brand reputation & reviews\",\"Deal monitoring & alerts\",\"Search history & saved results\",\"English & Arabic interface\"]",
                             IsActive = true,
+                            MonthlyCredits = 50000,
                             Name = "Unlimited",
                             PriceMonthly = 100m,
                             SearchesPerMonth = 250,
@@ -570,6 +768,9 @@ namespace Daleel.Web.Data.Migrations
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("CreditsUsed")
                         .HasColumnType("INTEGER");
 
                     b.Property<DateTimeOffset>("PeriodEnd")

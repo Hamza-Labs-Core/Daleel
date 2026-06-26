@@ -1,5 +1,6 @@
-@* Blurs external images by default (HaramBlur-style). User must actively reveal each one,
-   or trust the whole source domain. Trusted domains + the global blur toggle live in localStorage. *@
+@* Shows product/brand images by default — blurring inappropriate ones is the job of the HaramBlur
+   browser extension we recommend, not the app. Users who still want app-side blur can opt in via the
+   Settings toggle (img.blur), and per-domain "trust" choices live in localStorage. *@
 @inject BrowserStore Store
 
 @if (string.IsNullOrWhiteSpace(Src))
@@ -48,8 +49,8 @@ else
 
         _domain = ExtractDomain(Src);
 
-        // Blur is ON unless the user disabled it; a trusted domain also reveals automatically.
-        var blurOn = (await Store.GetAsync("img.blur") ?? "1") != "0";
+        // Images show by default (the HaramBlur extension handles hiding); app-side blur is opt-in.
+        var blurOn = (await Store.GetAsync("img.blur") ?? "0") != "0";
         var trusted = await TrustedDomainsAsync();
         var reveal = !blurOn || (_domain is not null && trusted.Contains(_domain));
         if (reveal && !_revealed)

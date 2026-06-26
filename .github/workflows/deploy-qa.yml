@@ -1,0 +1,345 @@
+name: Deploy QA
+
+# Deploys a pull request to the QA server when it carries the `qa` label.
+# Mirrors deploy.yml (production) but: targets QA_SSH_HOST instead of DEPLOY_SSH_HOST,
+# publishes a PR-scoped image tag (never the production `latest`), and deploys to the
+# `qa` environment. All other secrets (LLM/provider keys, SSH user + key) are shared
+# with production.
+on:
+  pull_request:
+    # `labeled`  → deploy as soon as the `qa` label is applied.
+    # `synchronize`/`reopened` → re-deploy on new commits while the PR stays labelled.
+    types: [labeled, synchronize, reopened]
+
+# Least privilege by default (CodeQL): the read-only token covers checkout. The jobs that
+# need more (GHCR push, PR comment) widen it themselves.
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/hamza-labs-core/daleel
+  # PR-scoped tag keeps QA isolated from production's `latest` and from other PRs.
+  QA_TAG: qa-pr-${{ github.event.pull_request.number }}
+
+concurrency:
+  # One in-flight QA deploy per PR; a newer push supersedes an older one.
+  group: deploy-qa-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    # Only PRs that (a) carry the `qa` label and (b) come from a branch in THIS repo
+    # (not a fork — fork PRs don't get secrets, and we must never run a secret-bearing
+    # deploy for untrusted code). Dependent jobs inherit the skip via `needs`.
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'qa') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore Daleel.sln
+
+      - name: Build
+        run: dotnet build Daleel.sln -c Release --no-restore -warnaserror
+
+      - name: Test
+        run: dotnet test Daleel.sln -c Release --no-restore --verbosity normal
+
+  docker:
+    name: Docker build & push (QA tag)
+    runs-on: ubuntu-latest
+    needs: build-test
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # Deliberately NO `latest` here — that tag is production's. QA publishes a
+          # PR-scoped tag plus the commit sha for traceability.
+          tags: |
+            type=raw,value=${{ env.QA_TAG }}
+            type=sha,format=long
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy to QA VPS
+    runs-on: ubuntu-latest
+    needs: docker
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: write   # to comment the QA URL back on the PR
+    # The `qa` environment is created on first use (unprotected by default). Add
+    # required reviewers under Settings → Environments → qa if you want a gate.
+    environment:
+      name: qa
+      # Display link only (the `secrets` context isn't allowed here). The real CADDY_DOMAIN
+      # is written from the QA_CADDY_DOMAIN secret in the .env step below.
+      url: https://qa-daleel.hamzalabs.dev
+    steps:
+      # Fail fast (before touching the box) if a required secret is missing, empty, or
+      # still the create-secrets.sh "CHANGE_ME" placeholder. Identical to production
+      # except the host secret is QA_SSH_HOST (the QA server IP).
+      - name: Validate required secrets
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}   # critical — LLM backend
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          QA_SSH_HOST: ${{ secrets.QA_SSH_HOST }}                 # QA server IP
+          DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN QA_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
+          missing=""
+          for var in $required; do
+            val="${!var:-}"
+            if [ -z "$val" ] || [ "$val" = "CHANGE_ME" ]; then
+              missing="$missing $var"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::QA deploy aborted — required secrets unset/empty/placeholder:$missing"
+            echo "ERROR: the following required secrets are missing, empty, or still the CHANGE_ME placeholder:" >&2
+            for m in $missing; do echo "  - $m" >&2; done
+            echo "Set each with: gh secret set <NAME> --body '<real-value>' --repo Hamza-Labs-Core/Daleel" >&2
+            exit 1
+          fi
+          echo "All required secrets are present and non-placeholder."
+
+      - uses: actions/checkout@v4   # need deploy/ config files to sync to the box
+
+      # Bootstrap the QA VPS in-place — identical idempotent provisioning to production
+      # (Docker, /opt/daleel, systemd unit, UFW, log rotation, GHCR login). First run
+      # provisions; subsequent runs are fast no-ops.
+      - name: Bootstrap QA VPS (idempotent)
+        uses: appleboy/ssh-action@v1
+        env:
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          host: ${{ secrets.QA_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: GHCR_USER,GHCR_TOKEN
+          script: |
+            set -euo pipefail
+            APP_DIR=/opt/daleel
+            log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+
+            # --- 1. Docker Engine + Compose plugin (official repo) ---------------
+            if command -v docker >/dev/null 2>&1; then
+              log "Docker already installed — skipping."
+            else
+              log "Installing Docker Engine + Compose plugin..."
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -y
+              apt-get install -y ca-certificates curl gnupg ufw
+              install -m 0755 -d /etc/apt/keyrings
+              curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+                | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+              chmod a+r /etc/apt/keyrings/docker.gpg
+              . /etc/os-release
+              echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu ${VERSION_CODENAME} stable" \
+                > /etc/apt/sources.list.d/docker.list
+              apt-get update -y
+              apt-get install -y docker-ce docker-ce-cli containerd.io \
+                docker-buildx-plugin docker-compose-plugin
+              systemctl enable --now docker
+            fi
+
+            # --- 2. /opt/daleel layout -------------------------------------------
+            if [ -d "$APP_DIR" ]; then
+              log "$APP_DIR already exists — skipping."
+            else
+              log "Creating $APP_DIR ..."
+              mkdir -p "$APP_DIR"
+            fi
+
+            # --- 3. systemd unit — keeps the compose stack up across reboots -----
+            if [ ! -f /etc/systemd/system/daleel.service ]; then
+              log "Installing systemd unit daleel.service ..."
+              cat > /etc/systemd/system/daleel.service <<'UNIT'
+            [Unit]
+            Description=Daleel QA stack (docker compose)
+            Requires=docker.service
+            After=docker.service network-online.target
+            Wants=network-online.target
+
+            [Service]
+            Type=oneshot
+            RemainAfterExit=true
+            WorkingDirectory=/opt/daleel
+            ExecStart=/usr/bin/docker compose up -d --wait
+            ExecStop=/usr/bin/docker compose down
+            ExecReload=/usr/bin/docker compose up -d --wait
+            TimeoutStartSec=300
+
+            [Install]
+            WantedBy=multi-user.target
+            UNIT
+              systemctl daemon-reload
+              systemctl enable daleel.service
+            else
+              log "systemd unit daleel.service already present — skipping."
+            fi
+
+            # --- 4. UFW firewall — SSH + HTTP + HTTPS ----------------------------
+            if command -v ufw >/dev/null 2>&1; then
+              log "Ensuring UFW allows 22, 80, 443 ..."
+              ufw allow 22/tcp
+              ufw allow 80/tcp
+              ufw allow 443/tcp
+              ufw allow 443/udp        # HTTP/3 (QUIC)
+              ufw status | grep -q "Status: active" || ufw --force enable
+            fi
+
+            # --- 5. Docker log rotation -----------------------------------------
+            mkdir -p /etc/docker
+            if [ ! -f /etc/docker/daemon.json ]; then
+              log "Configuring Docker daemon log rotation..."
+              cat > /etc/docker/daemon.json <<'JSON'
+            {
+              "log-driver": "json-file",
+              "log-opts": { "max-size": "10m", "max-file": "3" }
+            }
+            JSON
+              systemctl restart docker
+            fi
+            if [ ! -f /etc/logrotate.d/daleel ]; then
+              cat > /etc/logrotate.d/daleel <<'ROT'
+            /var/lib/docker/containers/*/*.log {
+              rotate 7
+              daily
+              compress
+              missingok
+              delaycompress
+              copytruncate
+            }
+            ROT
+            fi
+
+            # --- 6. GHCR login so `docker pull` of the private image works -------
+            log "Logging in to ghcr.io ..."
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+
+            log "Bootstrap complete — QA VPS is ready to deploy."
+
+      - name: Write /opt/daleel/.env from GitHub secrets
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.QA_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            umask 077
+            cat > "/tmp/daleel.env.$$" << 'EOF'
+            OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
+            SERPAPI_KEY=${{ secrets.SERPAPI_KEY }}
+            CONTEXT_DEV_API_KEY=${{ secrets.CONTEXT_DEV_API_KEY }}
+            GOOGLE_PLACES_API_KEY=${{ secrets.GOOGLE_PLACES_API_KEY }}
+            APIFY_TOKEN=${{ secrets.APIFY_TOKEN }}
+            CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+            CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
+            R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
+            R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
+            R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
+            R2_ENDPOINT=${{ secrets.R2_ENDPOINT }}
+            # QA runs the PR-scoped image tag (not production's latest).
+            DALEEL_IMAGE=ghcr.io/hamza-labs-core/daleel:${{ env.QA_TAG }}
+            # QA exercises the PostgreSQL event store (the bundled `postgres` compose
+            # service). Password seeds that service AND the connection string below.
+            POSTGRES_PASSWORD=${{ secrets.QA_POSTGRES_PASSWORD || 'daleel-qa-events' }}
+            POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=daleel_events;Username=daleel;Password=${{ secrets.QA_POSTGRES_PASSWORD || 'daleel-qa-events' }}
+            # QA-only: enables the public /diagnostics provider testbench (never set in production).
+            DIAGNOSTICS_ENABLED=true
+            # QA hostname for Caddy/TLS. Point DNS for this name at the QA server IP,
+            # or override via the QA_CADDY_DOMAIN secret.
+            CADDY_DOMAIN=${{ secrets.QA_CADDY_DOMAIN || 'qa-daleel.hamzalabs.dev' }}
+            CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
+            EOF
+            install -m 0600 "/tmp/daleel.env.$$" /opt/daleel/.env
+            rm -f "/tmp/daleel.env.$$"
+
+      - name: Stage deploy config on the QA VPS
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.QA_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: "deploy/Caddyfile,deploy/docker-compose.yml,deploy/deploy.sh"
+          target: "/tmp/daleel-config"
+          strip_components: 1
+
+      - name: Deploy over SSH (install config, pull, restart, health-check, rollback)
+        uses: appleboy/ssh-action@v1
+        env:
+          DALEEL_TAG: ${{ env.QA_TAG }}
+        with:
+          host: ${{ secrets.QA_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: DALEEL_TAG
+          script: |
+            set -euo pipefail
+            install -m 0644 /tmp/daleel-config/Caddyfile           /opt/daleel/Caddyfile
+            install -m 0644 /tmp/daleel-config/docker-compose.yml   /opt/daleel/docker-compose.yml
+            install -m 0755 /tmp/daleel-config/deploy.sh            /opt/daleel/deploy.sh
+            rm -rf /tmp/daleel-config
+            cd /opt/daleel
+            DALEEL_TAG="$DALEEL_TAG" ./deploy.sh "$DALEEL_TAG"
+
+      - name: Comment the QA URL on the PR
+        if: success()
+        uses: actions/github-script@v7
+        # Pass values through env (not interpolated into the JS source) per the
+        # GitHub Actions injection guidance — the script reads them from process.env.
+        env:
+          QA_DOMAIN: ${{ secrets.QA_CADDY_DOMAIN || 'qa-daleel.hamzalabs.dev' }}
+          QA_TAG: ${{ env.QA_TAG }}
+        with:
+          script: |
+            const url = `https://${process.env.QA_DOMAIN}`;
+            const body = `🚀 **Deployed to QA** — \`${process.env.QA_TAG}\`\n\n${url}`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body,
+            });

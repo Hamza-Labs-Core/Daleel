@@ -39,7 +39,7 @@ public sealed partial class AgentService
     /// web hit, drops non-local buyable sources, extracts/normalizes listings, aggregates them
     /// into per-model entries (one model, many price sources), and builds comparison tiers.
     /// </summary>
-    internal async Task<ProductSearchResult> BuildProductSearchResultAsync(
+    public async Task<ProductSearchResult> BuildProductSearchResultAsync(
         string query, GeoProfile geo, ResearchBundle bundle, string summary, CancellationToken cancellationToken,
         bool assessReputation = true, bool useLlmExtraction = true)
     {
@@ -64,23 +64,32 @@ public sealed partial class AgentService
         {
             switch (type)
             {
-                // Brands & reviews are informational context — kept regardless of locality.
-                case ResultType.BrandPage:
+                // Brands & reviews are informational context — kept regardless of locality. A social /
+                // forum / reference host (reddit, youtube, wikipedia…) is never a brand or a store, even
+                // if the classifier mislabels it — surface it only as a review/discussion source.
+                case ResultType.BrandPage when !IsNonCommerceHost(r.Url):
                     AddBrand(brands, r);
                     break;
                 case ResultType.ReviewArticle:
                     reviews.Add(new ReviewSource { Title = r.Title, Url = r.Url, Snippet = r.Snippet, Source = r.Source });
                     break;
 
-                // Buyable surfaces — only kept when confirmed local.
-                case ResultType.StorePage when KeepLocal(r.Url, false):
+                // Buyable surfaces — only kept when confirmed local AND on an actual commerce host.
+                case ResultType.StorePage when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
                     AddStore(stores, r);
                     break;
-                case ResultType.Marketplace when KeepLocal(r.Url, false):
+                case ResultType.Marketplace when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
                     AddMarketplace(marketplaces, r);
                     break;
-                case ResultType.ProductListing when KeepLocal(r.Url, false):
+                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
                     webListings.Add(WebResultToListing(r, type));
+                    break;
+
+                // A mislabeled social/forum/reference hit that fell into a buyable bucket: keep it as a
+                // discussion source rather than dropping it (so the data isn't lost), never as a store.
+                case ResultType.StorePage or ResultType.Marketplace or ResultType.ProductListing
+                    when IsNonCommerceHost(r.Url):
+                    reviews.Add(new ReviewSource { Title = r.Title, Url = r.Url, Snippet = r.Snippet, Source = r.Source });
                     break;
             }
         }
@@ -499,7 +508,7 @@ public sealed partial class AgentService
             .Where(c => c.type is ResultType.Marketplace or ResultType.StorePage && !string.IsNullOrWhiteSpace(c.r.Url))
             .Where(c => includeIntl || LocalityClassifier.IsLocal(c.r.Url, geo.CountryCode, geo.Country))
             .Select(c => (c.r.Url!, Source: SourceName(c.r), c.type))
-            .Take(_options.MaxUrlsToRead)
+            .Take(_options.MaxListingUrls)
             .ToList();
 
         if (targets.Count == 0)
@@ -725,6 +734,33 @@ public sealed partial class AgentService
     {
         var name = SourceName(r);
         stores.TryAdd(name, new StoreInfo { Name = name, Url = r.Url, IsOnline = true });
+    }
+
+    /// <summary>
+    /// Social networks, forums, video, and reference sites — never a store, brand, or buyable listing,
+    /// even when a result classifier mislabels one (e.g. a reddit thread tagged as a "store"). Matches
+    /// the registrable host and any subdomain (jo.reddit.com, m.facebook.com…).
+    /// </summary>
+    private static readonly string[] NonCommerceHosts =
+    {
+        "reddit.com", "youtube.com", "youtu.be", "facebook.com", "twitter.com", "x.com",
+        "instagram.com", "tiktok.com", "pinterest.com", "linkedin.com", "wikipedia.org",
+        "quora.com", "medium.com", "blogspot.com", "wordpress.com", "tumblr.com", "threads.net",
+        "telegram.org", "t.me", "whatsapp.com", "snapchat.com",
+    };
+
+    /// <summary>True when the URL's host is a known non-commerce site (so it must not become a store/brand).</summary>
+    public static bool IsNonCommerceHost(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        var host = uri.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? uri.Host[4..] : uri.Host;
+        return NonCommerceHosts.Any(h =>
+            host.Equals(h, StringComparison.OrdinalIgnoreCase) ||
+            host.EndsWith("." + h, StringComparison.OrdinalIgnoreCase));
     }
 
     private static void AddMarketplace(IDictionary<string, MarketplaceLink> marketplaces, SearchResult r)

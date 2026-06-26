@@ -5,6 +5,7 @@ using Daleel.Web.Data;
 using Daleel.Web.Logging;
 using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
+using Elsa.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.DataProtection;
@@ -59,6 +60,22 @@ var connection = builder.Configuration.GetConnectionString("DefaultConnection")
                  ?? "Data Source=data/daleel.db";
 builder.Services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(connection));
 
+// ── Pipeline event store (PostgreSQL, optional) ───────────────────────────────
+// A separate append-only store on Postgres records every pipeline action (provider call, scrape,
+// LLM, cache, profile, places, extract) for the admin usage/cost dashboard. It is OPTIONAL: with no
+// POSTGRES_CONNECTION_STRING / DATABASE_URL set, the app runs SQLite-only and the store is a no-op.
+var eventStoreConn = Daleel.Web.Events.PostgresConnection.Resolve(builder.Configuration);
+if (eventStoreConn is not null)
+{
+    builder.Services.AddDbContextFactory<Daleel.Web.Events.EventStoreDbContext>(
+        o => o.UseNpgsql(eventStoreConn));
+    builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.PostgresEventStore>();
+}
+else
+{
+    builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.NullEventStore>();
+}
+
 // ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
 // ASP.NET encrypts the Identity auth cookie with Data Protection keys. By default those keys live in
 // $HOME/.aspnet/DataProtection-Keys, but the container runs as a --no-create-home user (see Dockerfile),
@@ -108,6 +125,20 @@ builder.Services.ConfigureApplicationCookie(o =>
     // .ValidationInterval (5 min, configured below), so disabling/role changes (which rotate the stamp
     // via UpdateSecurityStampAsync) take effect within minutes everywhere. See SEC-1.
     o.Events.OnValidatePrincipal = SecurityStampValidator.ValidatePrincipalAsync;
+});
+
+// Antiforgery cookie settings. The framework default is SameSite=Strict with no Secure flag, which
+// iOS Safari withholds on the login form POST when the user arrived from an external context (tapping
+// a link, a search result) — antiforgery then fails and /auth/login returns a blank HTTP 400, i.e. the
+// "blank page / stuck on the login page on mobile" report. Lax (the same as the auth cookie) is still
+// CSRF-safe — a cross-site POST never carries the cookie under Lax either — but is reliably sent on the
+// same-site, top-level form submit. SameAsRequest marks it Secure over the proxied HTTPS in production.
+builder.Services.AddAntiforgery(o =>
+{
+    o.Cookie.Name = "Daleel.Antiforgery";
+    o.Cookie.SameSite = SameSiteMode.Lax;
+    o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    o.Cookie.HttpOnly = true;
 });
 
 static Task ApiAwareRedirect(Microsoft.AspNetCore.Authentication.RedirectContext<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions> ctx, int statusCode)
@@ -163,13 +194,30 @@ builder.Services.AddScoped<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddScoped<IFilteredContentLogRepository, FilteredContentLogRepository>();
 builder.Services.AddHttpContextAccessor();
 
+// Persistent brand/store profiles: researched once via Context.dev + the LLM, saved to SQLite, and
+// refreshed only when stale (>30 days). Search results JOIN against these instead of re-fetching.
+builder.Services.AddScoped<IBrandRepository, BrandRepository>();
+builder.Services.AddScoped<IStoreRepository, StoreRepository>();
+builder.Services.AddScoped<IProductProfileRepository, ProductProfileRepository>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.IItemEnrichmentService, Daleel.Web.Pipeline.ItemEnrichmentService>();
+builder.Services.AddSingleton(new Daleel.Web.Profiles.ProfileOptions());
+builder.Services.AddSingleton<Daleel.Web.Profiles.IProfileResearcher, Daleel.Web.Profiles.ContextDevProfileResearcher>();
+builder.Services.AddScoped<Daleel.Web.Profiles.IBrandProfileService, Daleel.Web.Profiles.BrandProfileService>();
+builder.Services.AddScoped<Daleel.Web.Profiles.IStoreProfileService, Daleel.Web.Profiles.StoreProfileService>();
+builder.Services.AddHostedService<Daleel.Web.Profiles.ProfileRefreshService>();
+
 // Async conversation backend: SignalR + a queue + a background worker run searches off the request.
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<Daleel.Web.Conversation.ISearchJobQueue, Daleel.Web.Conversation.SearchJobQueue>();
 builder.Services.AddSingleton<Daleel.Web.Conversation.SignalRConversationBroadcaster>();
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationBroadcaster>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
-builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.AgentSearchRunner>();
+// The search pipeline runs as an in-process Elsa 3 workflow of CodeActivity steps (plan → cache →
+// gather → extract → enrich → aggregate → moderate → cache → return). Elsa is registered core-only
+// (no Server/Studio/EF persistence), and the workflow runner replaces the old direct-AskAsync runner.
+builder.Services.AddElsa(elsa => elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>());
+builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
+builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
 builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
@@ -189,6 +237,8 @@ builder.Services.AddSingleton<MonitorService>();
 // /status page: HTTP probes against each provider's host + last-search lookup.
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IStatusService, StatusService>();
+// QA-only raw provider diagnostics (gated by DIAGNOSTICS_ENABLED — off in production).
+builder.Services.AddScoped<IProviderDiagnostics, ProviderDiagnostics>();
 
 // Liveness probe consumed by the Docker HEALTHCHECK, deploy.sh, and Caddy upstream checks.
 builder.Services.AddHealthChecks();
@@ -280,4 +330,22 @@ static void EnsureDatabase(WebApplication app)
 
     // Seed admin-editable system settings (idempotent).
     scope.ServiceProvider.GetRequiredService<ISystemConfigService>().SeedDefaultsAsync().GetAwaiter().GetResult();
+
+    // Bring the Postgres event store up to schema when it's configured. Best-effort: a Postgres that
+    // is unreachable at boot must not stop the app — the event store just degrades to dropping writes.
+    var events = scope.ServiceProvider.GetService<Daleel.Web.Events.IEventStore>();
+    if (events?.IsEnabled == true)
+    {
+        try
+        {
+            var factory = scope.ServiceProvider
+                .GetRequiredService<IDbContextFactory<Daleel.Web.Events.EventStoreDbContext>>();
+            using var eventDb = factory.CreateDbContext();
+            eventDb.Database.Migrate();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Event store migration skipped — Postgres unavailable at startup");
+        }
+    }
 }

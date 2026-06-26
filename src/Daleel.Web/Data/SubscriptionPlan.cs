@@ -14,8 +14,16 @@ public sealed class SubscriptionPlan
     [Required]
     public string Name { get; set; } = string.Empty;
 
-    /// <summary>Monthly search allowance, or null for unlimited.</summary>
+    /// <summary>Legacy monthly search allowance. Superseded by <see cref="MonthlyCredits"/> — kept for
+    /// historical rows, no longer used for gating.</summary>
     public int? SearchesPerMonth { get; set; }
+
+    /// <summary>
+    /// Monthly credit allowance, or null for truly unlimited. Each search charges a variable number of
+    /// credits based on the provider calls it actually made (see <see cref="CreditCost"/>), so this is
+    /// the real gate: a user may search while they have credits left this billing period.
+    /// </summary>
+    public int? MonthlyCredits { get; set; }
 
     public decimal PriceMonthly { get; set; }
     public decimal? PriceYearly { get; set; }
@@ -55,8 +63,8 @@ public sealed class SubscriptionPlan
     public bool IsActive { get; set; } = true;
     public int SortOrder { get; set; }
 
-    /// <summary>True when this plan grants unlimited searches.</summary>
-    public bool IsUnlimited => SearchesPerMonth is null;
+    /// <summary>True when this plan grants unlimited (uncapped) credits.</summary>
+    public bool IsUnlimited => MonthlyCredits is null;
 
     // Stable ids so seeding and the default-plan lookup are deterministic.
     public const int BasicId = 1;

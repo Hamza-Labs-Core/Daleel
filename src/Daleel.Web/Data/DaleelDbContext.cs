@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 namespace Daleel.Web.Data;
@@ -31,10 +33,86 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
     public DbSet<FilteredContentLog> FilteredContentLogs => Set<FilteredContentLog>();
     public DbSet<SearchCache> SearchCache => Set<SearchCache>();
+    public DbSet<Brand> Brands => Set<Brand>();
+    public DbSet<Store> Stores => Set<Store>();
+    public DbSet<ProductProfile> ProductProfiles => Set<ProductProfile>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        // Stores a string list as a JSON text column. The accompanying ValueComparer lets EF detect
+        // in-place mutations to the list (without it, change tracking treats the reference as constant).
+        var stringListConverter = new ValueConverter<List<string>, string>(
+            v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+            v => string.IsNullOrEmpty(v)
+                ? new List<string>()
+                : JsonSerializer.Deserialize<List<string>>(v, (JsonSerializerOptions?)null) ?? new List<string>());
+        var stringListComparer = new ValueComparer<List<string>>(
+            (a, b) => (a ?? new List<string>()).SequenceEqual(b ?? new List<string>()),
+            // JSON deserialization can yield null list entries, so hash null-safely.
+            c => c == null ? 0 : c.Aggregate(0, (h, s) => HashCode.Combine(h, s == null ? 0 : s.GetHashCode())),
+            c => c.ToList());
+
+        // Profiles persist LastRefreshed as Unix-ms: SQLite can't translate DateTimeOffset ordering
+        // (<, <=) in a WHERE clause, and the staleness sweep filters on exactly that. Same trick as
+        // SearchCache.ExpiresAt below.
+        var toUnixMs = new ValueConverter<DateTimeOffset, long>(
+            v => v.ToUnixTimeMilliseconds(),
+            v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+
+        builder.Entity<Brand>(e =>
+        {
+            // Upsert/lookup is an exact match on the normalized name, so it's unique + indexed.
+            // The LastRefreshed index serves the staleness sweep (delete/refresh where older than cutoff).
+            e.HasIndex(x => x.NameKey).IsUnique();
+            e.HasIndex(x => x.LastRefreshed);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.NameKey).HasMaxLength(200);
+            e.Property(x => x.CountryOfOrigin).HasMaxLength(100);
+            e.Property(x => x.PriceRange).HasMaxLength(100);
+            e.Property(x => x.Website).HasMaxLength(500);
+            e.Property(x => x.Description).HasMaxLength(4000);
+            e.Property(x => x.Pros).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.Cons).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.PopularModels).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+        });
+
+        builder.Entity<Store>(e =>
+        {
+            e.HasIndex(x => x.NameKey).IsUnique();
+            e.HasIndex(x => x.LastRefreshed);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.NameKey).HasMaxLength(200);
+            e.Property(x => x.Location).HasMaxLength(300);
+            e.Property(x => x.Type).HasMaxLength(100);
+            e.Property(x => x.Website).HasMaxLength(500);
+            e.Property(x => x.BrandsCarried).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.Rating);
+            // Contact + Google-Maps verification columns (added with store enrichment).
+            e.Property(x => x.Phone).HasMaxLength(64);
+            e.Property(x => x.Email).HasMaxLength(256);
+            e.Property(x => x.Address).HasMaxLength(500);
+            e.Property(x => x.GooglePlaceId).HasMaxLength(256);
+            e.Property(x => x.GoogleMapsUrl).HasMaxLength(500);
+            e.Property(x => x.OpeningHours).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+        });
+
+        builder.Entity<ProductProfile>(e =>
+        {
+            // Upsert/lookup keyed on the normalized brand+model; LastRefreshed index backs staleness.
+            e.HasIndex(x => x.NameKey).IsUnique();
+            e.HasIndex(x => x.LastRefreshed);
+            e.Property(x => x.Name).HasMaxLength(300);
+            e.Property(x => x.NameKey).HasMaxLength(300);
+            e.Property(x => x.Brand).HasMaxLength(200);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Details).HasMaxLength(8000);
+            e.Property(x => x.SourceUrl).HasMaxLength(1000);
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+        });
 
         builder.Entity<SearchHistoryEntry>(e =>
         {
@@ -95,6 +173,11 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Status).HasMaxLength(16);
             e.Property(x => x.Model).HasMaxLength(128);
             e.Property(x => x.EstimatedCost).HasColumnType("decimal(12,6)");
+
+            // Persist CreatedAt as Unix-ms. SQLite can't translate DateTimeOffset comparisons in a
+            // WHERE clause (>= since), which every usage/cost aggregate does — so a long, which
+            // translates on any provider. Same trick as SearchCache.ExpiresAt / ProductProfile.
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 
         builder.Entity<SearchCache>(e =>
@@ -127,6 +210,10 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Rule).HasMaxLength(128);
             e.Property(x => x.Kind).HasMaxLength(64);
             e.Property(x => x.Content).HasMaxLength(300);
+
+            // CreatedAt as Unix-ms so CountSinceAsync(>= since) and the newest-first browse translate
+            // on SQLite (it can't compare/order a DateTimeOffset column). Same trick as SearchCache.
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 
         builder.Entity<SubscriptionPlan>(e =>
@@ -149,21 +236,21 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.HasData(
                 new SubscriptionPlan
                 {
-                    Id = SubscriptionPlan.BasicId, Name = "Basic", SearchesPerMonth = 5,
+                    Id = SubscriptionPlan.BasicId, Name = "Basic", SearchesPerMonth = 5, MonthlyCredits = 500,
                     PriceMonthly = 0m, IsActive = true, SortOrder = 1,
-                    FeaturesJson = "[\"5 searches per month\"," + CommonFeatures + "]"
+                    FeaturesJson = "[\"500 credits per month\"," + CommonFeatures + "]"
                 },
                 new SubscriptionPlan
                 {
-                    Id = SubscriptionPlan.ProId, Name = "Pro", SearchesPerMonth = 50,
+                    Id = SubscriptionPlan.ProId, Name = "Pro", SearchesPerMonth = 50, MonthlyCredits = 5000,
                     PriceMonthly = 9.99m, IsActive = true, SortOrder = 2,
-                    FeaturesJson = "[\"50 searches per month\"," + CommonFeatures + "]"
+                    FeaturesJson = "[\"5,000 credits per month\"," + CommonFeatures + "]"
                 },
                 new SubscriptionPlan
                 {
-                    Id = SubscriptionPlan.UnlimitedId, Name = "Unlimited", SearchesPerMonth = 250,
+                    Id = SubscriptionPlan.UnlimitedId, Name = "Unlimited", SearchesPerMonth = 250, MonthlyCredits = 50000,
                     PriceMonthly = 100m, IsActive = true, SortOrder = 3,
-                    FeaturesJson = "[\"250 searches per month\"," + CommonFeatures + "]"
+                    FeaturesJson = "[\"50,000 credits per month\"," + CommonFeatures + "]"
                 });
         });
     }

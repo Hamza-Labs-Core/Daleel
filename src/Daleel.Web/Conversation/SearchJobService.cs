@@ -53,6 +53,7 @@ public sealed class SearchJobService : BackgroundService
         var convos = scope.ServiceProvider.GetRequiredService<IConversationStore>();
         var analytics = scope.ServiceProvider.GetRequiredService<IAnalyticsService>();
         var history = scope.ServiceProvider.GetRequiredService<ISearchHistoryRepository>();
+        var quota = scope.ServiceProvider.GetRequiredService<IQuotaService>();
 
         var job = await db.SearchJobs.FirstOrDefaultAsync(j => j.Id == jobId, stoppingToken);
         if (job is null || job.Status is JobStatus.Cancelled or JobStatus.Completed)
@@ -74,8 +75,18 @@ public sealed class SearchJobService : BackgroundService
         var sw = Stopwatch.StartNew();
         try
         {
-            // Stream each agent log line to all devices (fire-and-forget; don't touch DbContext here).
-            void Progress(string message) => _ = _broadcaster.ProgressAsync(job.UserId, job.Id, message);
+            // Stream curated status to all devices (fire-and-forget; don't touch DbContext here).
+            // Internal provider diagnostics ("… failed: …") are agent-level noise — keep them in the
+            // server log, never surface raw error text in the user's status line.
+            void Progress(string message)
+            {
+                if (message.Contains("failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("Search job {JobId} · {Message}", job.Id, message);
+                    return;
+                }
+                _ = _broadcaster.ProgressAsync(job.UserId, job.Id, message);
+            }
 
             var result = await runner.RunAsync(job, Progress, cts.Token);
             sw.Stop();
@@ -86,11 +97,25 @@ public sealed class SearchJobService : BackgroundService
             job.CompletedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(stoppingToken);
 
+            // Charge the search's actual credit cost now that the provider calls are known. Best-effort:
+            // a billing hiccup must never fail a search the user already received.
+            try
+            {
+                await quota.ChargeCreditsAsync(job.UserId, result.Credits, stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to charge {Credits} credits for job {JobId}", result.Credits, job.Id);
+            }
+
             await convos.CompleteAsync(job.UserId, "completed", result.ResultJson, result.ResultType, job.CompletedAt.Value, stoppingToken);
             await history.AddAsync(new SearchHistoryEntry
             {
                 UserId = job.UserId, Query = job.Query, QueryType = job.QueryType,
-                Geo = job.Geo, Model = job.Model, ResultSummary = null, CreatedAt = job.CompletedAt.Value
+                Geo = job.Geo, Model = job.Model, ResultSummary = null,
+                // Persist the full result so opening this entry later re-displays it without re-running.
+                ResultJson = result.ResultJson,
+                CreatedAt = job.CompletedAt.Value
             }, stoppingToken);
             // Record the search for analytics / cost optimisation — providers called, api-call
             // count, result count and timing. This is server-side telemetry, never shown to the user.
@@ -105,6 +130,14 @@ public sealed class SearchJobService : BackgroundService
             }, stoppingToken);
 
             await _broadcaster.CompletedAsync(job.UserId, job.Id, "completed", result.ResultJson, result.ResultType, null);
+
+            // Progressive enrichment: base results are already on screen — now deep-dive each item
+            // (official-brand-site specs via Context.dev) and stream the refreshed result so the UI
+            // fills specs in place. DETACHED on purpose: it must never block this worker from picking
+            // up the next queued search, so a slow/hanging scrape can't make subsequent searches
+            // "stuck". Runs in its own DI scope with a hard timeout; failures are swallowed (the base
+            // result is already delivered).
+            _ = EnrichInBackgroundAsync(job.Id, job.UserId, result);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
         {
@@ -124,6 +157,61 @@ public sealed class SearchJobService : BackgroundService
         finally
         {
             _queue.Unregister(job.Id);
+        }
+    }
+
+    /// <summary>
+    /// Hard ceiling on the detached enrichment pass so a hung scrape can't leak a worker. Generous
+    /// because the deep-dive now also harvests store catalogues for live prices (a slow site crawl).
+    /// </summary>
+    private static readonly TimeSpan EnrichTimeout = TimeSpan.FromSeconds(90);
+
+    /// <summary>
+    /// Runs the post-result item deep-dive OFF the worker loop, in its own DI scope and under a hard
+    /// timeout, then streams the enriched result. Fire-and-forget: never awaited by the job processor,
+    /// so it can't block the queue; all failures are logged and swallowed.
+    /// </summary>
+    private async Task EnrichInBackgroundAsync(int jobId, string userId, SearchRunResult baseResult)
+    {
+        using var timeout = new CancellationTokenSource(EnrichTimeout);
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var runner = sp.GetRequiredService<ISearchRunner>();
+            var db = sp.GetRequiredService<DaleelDbContext>();
+            var convos = sp.GetRequiredService<IConversationStore>();
+
+            var job = await db.SearchJobs.FirstOrDefaultAsync(j => j.Id == jobId, timeout.Token);
+            if (job is null)
+            {
+                return;
+            }
+
+            // Enrichment runs AFTER the result is on screen, so its progress must NOT be broadcast as
+            // normal progress — that would flip the UI back to "running" and hide the completed result.
+            // The UI shows a quiet "fetching specs…" hint instead; here we only log server-side.
+            void Progress(string message) => _logger.LogDebug("Enrich job {JobId}: {Message}", jobId, message);
+
+            var enriched = await runner.EnrichAsync(job, baseResult, Progress, timeout.Token);
+            if (enriched is null)
+            {
+                return; // nothing changed — no UI update
+            }
+
+            job.ResultJson = enriched.ResultJson;
+            await db.SaveChangesAsync(timeout.Token);
+            await convos.CompleteAsync(
+                userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+            await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
+        }
+        catch (OperationCanceledException)
+        {
+            // Timed out or cancelled — the base result is already on screen; nothing to undo.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Background enrichment failed for job {JobId}", jobId);
         }
     }
 

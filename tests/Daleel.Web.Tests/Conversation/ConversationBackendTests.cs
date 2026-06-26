@@ -116,11 +116,11 @@ public class ConversationBackendTests : IDisposable
     [Fact]
     public async Task ConversationService_OverQuota_Returns429_AndDoesNotEnqueue()
     {
-        // Exhaust the Basic (5) quota for the user.
+        // Exhaust the Basic (500-credit) monthly allowance for the user.
         using (var scope = _provider.CreateScope())
         {
             var quota = scope.ServiceProvider.GetRequiredService<IQuotaService>();
-            for (var i = 0; i < 5; i++) { await quota.TryConsumeAsync("heavy", false); }
+            await quota.ChargeCreditsAsync("heavy", 500);
         }
 
         await using var db = NewDb();
@@ -175,6 +175,7 @@ public class ConversationBackendTests : IDisposable
     {
         public ConcurrentBag<(string UserId, int JobId, string Message)> Progress { get; } = new();
         public ConcurrentBag<(string UserId, int JobId, string Status)> Completed { get; } = new();
+        public ConcurrentBag<(string UserId, int JobId, string ResultJson)> Enriched { get; } = new();
 
         public Task ProgressAsync(string userId, int jobId, string message)
         {
@@ -185,6 +186,12 @@ public class ConversationBackendTests : IDisposable
         public Task CompletedAsync(string userId, int jobId, string status, string? resultJson, string? resultType, string? error)
         {
             Completed.Add((userId, jobId, status));
+            return Task.CompletedTask;
+        }
+
+        public Task EnrichedAsync(string userId, int jobId, string resultJson, string resultType)
+        {
+            Enriched.Add((userId, jobId, resultJson));
             return Task.CompletedTask;
         }
     }

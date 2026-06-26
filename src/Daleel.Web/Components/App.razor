@@ -1,7 +1,16 @@
 @* Host document. MudBlazor drives styling; Cairo gives crisp Arabic glyphs, Roboto the Latin UI. *@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @{
     var culture = System.Globalization.CultureInfo.CurrentUICulture;
     var dir = culture.TextInfo.IsRightToLeft ? "rtl" : "ltr";
+
+    // Establish the antiforgery cookie on EVERY full document load (this runs before any HTML flushes,
+    // and reuses an existing cookie). Without this, the cookie is first set only when the static /login
+    // page renders its token — and if the user reaches /login via Blazor enhanced navigation, that
+    // Set-Cookie rides a fetch() response Safari doesn't reliably persist, so the very first POST has no
+    // cookie and antiforgery fails ("works the second time"). Seeding it here means the login form's
+    // token always has its matching cookie already in the jar on the first submit.
+    Antiforgery.GetAndStoreTokens(HttpContext);
 }
 <!DOCTYPE html>
 <html lang="@culture.TwoLetterISOLanguageName" dir="@dir">
@@ -17,7 +26,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet" />
 
     <link rel="stylesheet" href="_content/MudBlazor/MudBlazor.min.css" />
-    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="app.css?v=@AssetVersion" />
     @* No Daleel.Web.styles.css link: this app has zero component-scoped (.razor.css) stylesheets —
        all styling comes from MudBlazor + the global app.css — so the SDK's scoped-CSS bundle is never
        emitted and linking it only yields a 404. If a *.razor.css file is ever added, re-add:
@@ -50,10 +59,10 @@
     </div>
 
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
-    <script src="daleel.js"></script>
+    <script src="daleel.js?v=@AssetVersion"></script>
     @* autostart=false lets boot.js call Blazor.start() with our silent reconnection handler. *@
     <script src="_framework/blazor.web.js" autostart="false"></script>
-    <script src="boot.js"></script>
+    <script src="boot.js?v=@AssetVersion"></script>
 </body>
 
 </html>
@@ -66,6 +75,13 @@
     // posts work; the posts target raw /auth/* endpoints (see AuthEndpoints) where the cookie write
     // happens in a real HTTP request, never a streaming circuit.
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    // Cache-buster for our OWN static assets (daleel.js/boot.js/app.css), which Cloudflare/the browser
+    // cache for hours. The module version id changes on every build, so a deploy invalidates the cached
+    // copy — fixing "I deployed new JS but the browser still runs the old one" (e.g. the store map's
+    // daleelRenderMap missing from a stale daleel.js). Stable within a deploy, so it stays cacheable.
+    private static readonly string AssetVersion =
+        typeof(App).Assembly.ManifestModule.ModuleVersionId.ToString("N")[..8];
 
     // The host document is static SSR, so the reconnection card (which lives outside the Blazor circuit)
     // can't be localized via IStringLocalizer at runtime — read the request culture directly instead.

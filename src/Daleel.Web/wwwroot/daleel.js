@@ -65,3 +65,101 @@ window.daleel = {
         URL.revokeObjectURL(url);
     }
 };
+
+// Best-guess the visitor's market (2-letter country code) for first-visit defaulting:
+//   1) the region subtag of the browser's preferred languages ("ar-JO" -> "JO"), then
+//   2) a small timezone -> country fallback for the markets we support.
+// Returns "" when nothing usable is found, so the app knows to ask the user instead of guessing.
+window.daleelDetectMarket = function () {
+    try {
+        const langs = (navigator.languages && navigator.languages.length)
+            ? navigator.languages
+            : [navigator.language];
+        for (const l of langs) {
+            const m = /[-_]([A-Za-z]{2})$/.exec(l || "");
+            if (m) return m[1].toUpperCase();
+        }
+        const tz = (Intl.DateTimeFormat().resolvedOptions().timeZone) || "";
+        const tzMap = {
+            "Asia/Amman": "JO", "Asia/Riyadh": "SA", "Asia/Dubai": "AE",
+            "Asia/Abu_Dhabi": "AE", "Africa/Cairo": "EG"
+        };
+        if (tzMap[tz]) return tzMap[tz];
+    } catch (e) { /* ignore */ }
+    return "";
+};
+
+// ── Store map (Leaflet + OpenStreetMap, lazy-loaded from CDN) ────────────────
+let _leafletPromise;
+function _ensureLeaflet() {
+    if (window.L) return Promise.resolve();
+    if (!_leafletPromise) {
+        _leafletPromise = new Promise((resolve, reject) => {
+            const css = document.createElement("link");
+            css.rel = "stylesheet";
+            css.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+            document.head.appendChild(css);
+            const js = document.createElement("script");
+            js.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+            js.onload = () => resolve();
+            js.onerror = reject;
+            document.head.appendChild(js);
+        });
+    }
+    return _leafletPromise;
+}
+
+// Ask the browser for the visitor's location. Resolves to {lat,lng} or null (denied/unavailable).
+window.daleelGetLocation = function () {
+    return new Promise((resolve) => {
+        if (!navigator.geolocation) { resolve(null); return; }
+        navigator.geolocation.getCurrentPosition(
+            (p) => resolve({ lat: p.coords.latitude, lng: p.coords.longitude }),
+            () => resolve(null),
+            { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+        );
+    });
+};
+
+const _daleelMaps = {};
+// Render (or re-render) a store map. markers: [{lat,lng,name,address,url}]; user: {lat,lng}|null.
+window.daleelRenderMap = async function (elId, markers, user) {
+  try {
+    try {
+        await _ensureLeaflet();
+    } catch (e) { return; }
+    const el = document.getElementById(elId);
+    if (!el || !window.L) return;
+
+    if (_daleelMaps[elId]) { _daleelMaps[elId].remove(); delete _daleelMaps[elId]; }
+
+    const pts = (markers || []).filter((m) => m && m.lat != null && m.lng != null);
+    const center = user ? [user.lat, user.lng] : (pts.length ? [pts[0].lat, pts[0].lng] : [31.95, 35.93]);
+    const map = L.map(el, { scrollWheelZoom: false }).setView(center, pts.length ? 11 : 6);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap", maxZoom: 19
+    }).addTo(map);
+
+    const bounds = [];
+    const esc = (s) => (s || "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+    pts.forEach((m) => {
+        const popup = "<b>" + esc(m.name) + "</b>" +
+            (m.address ? "<br>" + esc(m.address) : "") +
+            (m.url ? '<br><a href="' + esc(m.url) + '" target="_blank" rel="noopener">View store</a>' : "");
+        L.marker([m.lat, m.lng]).addTo(map).bindPopup(popup);
+        bounds.push([m.lat, m.lng]);
+    });
+    if (user) {
+        L.circleMarker([user.lat, user.lng], { radius: 7, color: "#1976d2", fillColor: "#1976d2", fillOpacity: 0.9 })
+            .addTo(map).bindPopup("You are here");
+        bounds.push([user.lat, user.lng]);
+    }
+    if (bounds.length > 1) { map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 }); }
+    _daleelMaps[elId] = map;
+    // The map often initializes inside a still-expanding panel; re-measure a few times so the tiles
+    // fill the container instead of leaving grey gaps (Leaflet needs invalidateSize after a resize).
+    [120, 400, 900].forEach((d) => setTimeout(() => { try { map.invalidateSize(); } catch (e) {} }, d));
+  } catch (e) {
+    // Never throw back into the .NET interop call — that would tear down the Blazor circuit.
+  }
+};

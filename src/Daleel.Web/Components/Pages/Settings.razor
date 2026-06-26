@@ -3,8 +3,10 @@
 @inject LayoutState Layout
 @inject ISnackbar Snackbar
 @inject ICurrentUser CurrentUser
+@inject IQuotaService Quota
 @inject IStringLocalizer<SharedResource> L
 @using Daleel.Core.Moderation
+@using Daleel.Web.Data
 
 <PageTitle>دليل · Settings</PageTitle>
 
@@ -14,6 +16,41 @@
 </MudText>
 
 <MudGrid Spacing="3">
+    @if (_credits is not null)
+    {
+        <MudItem xs="12">
+            <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+                <div class="d-flex align-center mb-2">
+                    <MudIcon Icon="@Icons.Material.Filled.Bolt" Class="mr-2" Color="Color.Primary" />
+                    <MudText Typo="Typo.h6">@L["Settings.Credits"]</MudText>
+                    <MudSpacer />
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@_credits.PlanName</MudChip>
+                </div>
+                @if (_credits.IsAdmin || _credits.Unlimited)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Settings.CreditsUnlimited"]</MudText>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Class="mb-1">
+                        <b>@_credits.Remaining</b> / @_credits.Limit @L["Settings.CreditsLeft"]
+                    </MudText>
+                    <MudProgressLinear Color="@(_credits.CanSearch ? Color.Primary : Color.Error)"
+                                       Value="@CreditPercent" Class="my-2" Size="Size.Large" Rounded="true" />
+                    <div class="d-flex align-center flex-wrap gap-2">
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">
+                            @L["Settings.CreditsHelp"] @_credits.PeriodEnd.ToString("MMM d").
+                        </MudText>
+                        <MudSpacer />
+                        <MudButton Href="/pricing" Size="Size.Small" Variant="Variant.Outlined"
+                                   Color="Color.Primary" StartIcon="@Icons.Material.Filled.Upgrade">
+                            @L["Settings.CreditsGetMore"]
+                        </MudButton>
+                    </div>
+                }
+            </MudPaper>
+        </MudItem>
+    }
     <MudItem xs="12" md="7">
         <MudPaper Class="pa-4" Elevation="0" Outlined="true">
             <div class="d-flex align-center mb-3">
@@ -130,6 +167,9 @@
 
 @code {
     private bool _ready;
+    private QuotaStatus? _credits;
+    private double CreditPercent => _credits?.Limit is int lim && lim > 0
+        ? Math.Min(100, 100.0 * _credits.Used / lim) : 0;
     private bool _showKeys;
     private readonly Dictionary<string, string> _keys = new(StringComparer.OrdinalIgnoreCase);
     private string _geo = "jordan";
@@ -157,13 +197,18 @@
         _model = await Store.GetAsync("model") ?? _model;
         _dark = (await Store.GetAsync("theme") ?? "dark") != "light";
         _isAdmin = await CurrentUser.IsAdminAsync();
+        var userId = await CurrentUser.GetUserIdAsync();
+        if (userId is not null)
+        {
+            _credits = await Quota.GetStatusAsync(userId, _isAdmin);
+        }
         _strictness = (await Store.GetAsync("filter.strictness")) switch
         {
             "off" when _isAdmin => FilterStrictness.Off,
             "moderate" => FilterStrictness.Moderate,
             _ => FilterStrictness.Strict
         };
-        _blurImages = (await Store.GetAsync("img.blur") ?? "1") != "0";
+        _blurImages = (await Store.GetAsync("img.blur") ?? "0") != "0";
         _haramBlurPrompt = (await Store.GetAsync("img.haramblur_prompt") ?? "1") != "0";
         _trustedDomains = (await Store.GetAsync("img.trusted") ?? string.Empty)
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();

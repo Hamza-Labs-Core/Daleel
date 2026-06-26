@@ -47,26 +47,34 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
     public async Task<IReadOnlyList<ApiCallLog>> ListByJobAsync(int jobId, CancellationToken ct = default) =>
         await _db.ApiCallLogs.AsNoTracking().Where(c => c.JobId == jobId).OrderBy(c => c.Id).ToListAsync(ct);
 
+    // NOTE on aggregation: SQLite can't SUM/AVG a `decimal` in SQL (NotSupportedException), so every
+    // cost rollup below materializes the (time-windowed, index-backed) rows first and aggregates in
+    // memory. The WHERE stays server-side — CreatedAt is a Unix-ms long, so `>= since` translates fine.
+
     public async Task<(int Calls, decimal Cost)> UserUsageSinceAsync(string userId, DateTimeOffset since, CancellationToken ct = default)
     {
         // Rows store a hashed user id (privacy); hash the lookup the same way to find the user's own.
         var key = Anonymizer.HashUserId(userId);
-        var rows = _db.ApiCallLogs.AsNoTracking().Where(c => c.UserId == key && c.CreatedAt >= since);
-        var calls = await rows.CountAsync(ct);
-        var cost = calls == 0 ? 0m : await rows.SumAsync(c => c.EstimatedCost, ct);
-        return (calls, cost);
+        var costs = await _db.ApiCallLogs.AsNoTracking()
+            .Where(c => c.UserId == key && c.CreatedAt >= since)
+            .Select(c => c.EstimatedCost)
+            .ToListAsync(ct);
+        return (costs.Count, costs.Sum());
     }
 
     public async Task<IReadOnlyList<QueryCost>> RecentJobUsageAsync(string userId, int take, CancellationToken ct = default)
     {
         var key = Anonymizer.HashUserId(userId);
-        var perJob = await _db.ApiCallLogs.AsNoTracking()
+        var rows = await _db.ApiCallLogs.AsNoTracking()
             .Where(c => c.UserId == key && c.JobId != null)
+            .Select(c => new { c.JobId, c.EstimatedCost })
+            .ToListAsync(ct);
+        var perJob = rows
             .GroupBy(c => c.JobId!.Value)
             .Select(g => new { JobId = g.Key, Calls = g.Count(), Cost = g.Sum(x => x.EstimatedCost) })
             .OrderByDescending(x => x.JobId) // newest jobs have the highest id
             .Take(take)
-            .ToListAsync(ct);
+            .ToList();
 
         var jobIds = perJob.Select(p => p.JobId).ToList();
         var queries = await _db.SearchJobs.AsNoTracking()
@@ -82,20 +90,18 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
     {
         var rows = await _db.ApiCallLogs.AsNoTracking()
             .Where(c => c.CreatedAt >= since)
-            .GroupBy(c => c.Provider)
-            .Select(g => new
-            {
-                Provider = g.Key,
-                Calls = g.Count(),
-                Cost = g.Sum(x => x.EstimatedCost),
-                AvgMs = g.Average(x => (double)x.ResponseTimeMs),
-                Errors = g.Count(x => x.Status != "success")
-            })
-            .OrderByDescending(x => x.Cost)
+            .Select(c => new { c.Provider, c.EstimatedCost, c.ResponseTimeMs, c.Status })
             .ToListAsync(ct);
 
         return rows
-            .Select(x => new ProviderUsage(x.Provider, x.Calls, x.Cost, x.AvgMs, x.Calls == 0 ? 0 : (double)x.Errors / x.Calls))
+            .GroupBy(c => c.Provider)
+            .Select(g => new ProviderUsage(
+                g.Key,
+                g.Count(),
+                g.Sum(x => x.EstimatedCost),
+                g.Average(x => (double)x.ResponseTimeMs),
+                (double)g.Count(x => x.Status != "success") / g.Count()))
+            .OrderByDescending(x => x.Cost)
             .ToList();
     }
 
@@ -116,30 +122,36 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
 
     public async Task<decimal> TotalCostAsync(DateTimeOffset since, CancellationToken ct = default)
     {
-        var rows = _db.ApiCallLogs.AsNoTracking().Where(c => c.CreatedAt >= since);
-        return await rows.AnyAsync(ct) ? await rows.SumAsync(c => c.EstimatedCost, ct) : 0m;
+        var costs = await _db.ApiCallLogs.AsNoTracking()
+            .Where(c => c.CreatedAt >= since)
+            .Select(c => c.EstimatedCost)
+            .ToListAsync(ct);
+        return costs.Sum();
     }
 
     public async Task<double> AverageCostPerJobAsync(DateTimeOffset since, CancellationToken ct = default)
     {
-        var perJob = await _db.ApiCallLogs.AsNoTracking()
+        var rows = await _db.ApiCallLogs.AsNoTracking()
             .Where(c => c.CreatedAt >= since && c.JobId != null)
-            .GroupBy(c => c.JobId)
-            .Select(g => g.Sum(x => x.EstimatedCost))
+            .Select(c => new { c.JobId, c.EstimatedCost })
             .ToListAsync(ct);
+        var perJob = rows.GroupBy(c => c.JobId!.Value).Select(g => g.Sum(x => x.EstimatedCost)).ToList();
         return perJob.Count == 0 ? 0 : (double)perJob.Average();
     }
 
     public async Task<IReadOnlyList<QueryCost>> MostExpensiveQueriesAsync(DateTimeOffset since, int top, CancellationToken ct = default)
     {
-        // Aggregate cost per job, then join to the job's query text.
-        var perJob = await _db.ApiCallLogs.AsNoTracking()
+        // Aggregate cost per job (in memory — see the SUM note above), then join to the job's query text.
+        var rows = await _db.ApiCallLogs.AsNoTracking()
             .Where(c => c.CreatedAt >= since && c.JobId != null)
+            .Select(c => new { c.JobId, c.EstimatedCost })
+            .ToListAsync(ct);
+        var perJob = rows
             .GroupBy(c => c.JobId!.Value)
             .Select(g => new { JobId = g.Key, Calls = g.Count(), Cost = g.Sum(x => x.EstimatedCost) })
             .OrderByDescending(x => x.Cost)
             .Take(top)
-            .ToListAsync(ct);
+            .ToList();
 
         var jobIds = perJob.Select(p => p.JobId).ToList();
         var queries = await _db.SearchJobs.AsNoTracking()
@@ -155,6 +167,9 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
     {
         var rows = await _db.ApiCallLogs.AsNoTracking()
             .Where(c => c.CreatedAt >= since && c.Model != null && (c.InputTokens != null || c.OutputTokens != null))
+            .Select(c => new { c.Model, c.InputTokens, c.OutputTokens, c.EstimatedCost })
+            .ToListAsync(ct);
+        return rows
             .GroupBy(c => c.Model!)
             .Select(g => new TokenUsage(
                 g.Key,
@@ -162,7 +177,6 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
                 g.Sum(x => (long)(x.OutputTokens ?? 0)),
                 g.Sum(x => x.EstimatedCost)))
             .OrderByDescending(x => x.Cost)
-            .ToListAsync(ct);
-        return rows;
+            .ToList();
     }
 }

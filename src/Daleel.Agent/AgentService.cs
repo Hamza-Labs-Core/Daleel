@@ -198,7 +198,12 @@ public sealed partial class AgentService
 
     // ── Analyze ─────────────────────────────────────────────────────────────────
 
-    private async Task<string> AnalyzeAsync(
+    /// <summary>
+    /// The analyst pass: flattens the gathered bundle into context and asks the LLM for a written
+    /// summary. Public so the Elsa search workflow can drive it as a discrete activity (the
+    /// orchestration <see cref="AskAsync"/> performs inline).
+    /// </summary>
+    public async Task<string> AnalyzeAsync(
         string task, GeoProfile geo, ResearchBundle bundle, CancellationToken cancellationToken,
         string? systemPrompt = null)
     {

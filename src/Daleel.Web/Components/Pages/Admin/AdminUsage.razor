@@ -1,0 +1,169 @@
+@page "/admin/usage"
+@using Daleel.Web.Events
+@using System.Globalization
+@attribute [Authorize(Roles = "Admin")]
+@inject IEventStore Events
+
+<PageTitle>دليل · Admin · Provider usage</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">Provider usage &amp; cost</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Every external action the search pipeline took — provider calls, scrapes, LLM completions, cache
+    and profile lookups — with an estimated cost per provider. Sourced from the PostgreSQL event store.
+</MudText>
+
+@if (!Events.IsEnabled)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        The event store isn't configured. Set <code>POSTGRES_CONNECTION_STRING</code> (or
+        <code>DATABASE_URL</code>) to start recording provider usage and cost here.
+    </MudAlert>
+}
+else
+{
+    <div class="d-flex align-center gap-2 mb-4">
+        <MudButtonGroup OverrideStyles="false" Variant="Variant.Outlined" Size="Size.Small">
+            <MudButton Color="@PeriodColor("today")" OnClick="@(() => SetPeriodAsync("today"))">Today</MudButton>
+            <MudButton Color="@PeriodColor("week")" OnClick="@(() => SetPeriodAsync("week"))">7 days</MudButton>
+            <MudButton Color="@PeriodColor("month")" OnClick="@(() => SetPeriodAsync("month"))">30 days</MudButton>
+        </MudButtonGroup>
+        @if (_loading)
+        {
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+        }
+    </div>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+            Couldn't load usage: @_error
+            <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="ReloadAsync">Retry</MudButton>
+        </MudAlert>
+    }
+
+    <MudGrid Class="mb-2">
+        <MudItem xs="12" sm="4">
+            <MudPaper Outlined="true" Elevation="0" Class="pa-4">
+                <MudText Typo="Typo.overline" Color="Color.Secondary">Estimated cost</MudText>
+                <MudText Typo="Typo.h4">@Usd(_report.TotalCost)</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudPaper Outlined="true" Elevation="0" Class="pa-4">
+                <MudText Typo="Typo.overline" Color="Color.Secondary">Recorded actions</MudText>
+                <MudText Typo="Typo.h4">@_report.TotalEvents.ToString("N0")</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudPaper Outlined="true" Elevation="0" Class="pa-4">
+                <MudText Typo="Typo.overline" Color="Color.Secondary">Providers</MudText>
+                <MudText Typo="Typo.h4">@_report.Providers.Count</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudText Typo="Typo.h6" Class="mt-4 mb-2">By provider</MudText>
+    <MudPaper Outlined="true" Elevation="0" Class="pa-2 mb-4">
+        <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+            <thead>
+                <tr>
+                    <th>Provider</th>
+                    <th style="text-align:right;">Calls</th>
+                    <th style="text-align:right;">Errors</th>
+                    <th style="text-align:right;">Avg ms</th>
+                    <th style="text-align:right;">Est. cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_report.Providers.Count == 0)
+                {
+                    <tr><td colspan="5"><MudText Typo="Typo.body2" Color="Color.Secondary">No activity in this period.</MudText></td></tr>
+                }
+                @foreach (var p in _report.Providers)
+                {
+                    <tr>
+                        <td>@p.Provider</td>
+                        <td style="text-align:right;">@p.Count.ToString("N0")</td>
+                        <td style="text-align:right;">@(p.Errors > 0 ? p.Errors.ToString("N0") : "—")</td>
+                        <td style="text-align:right;">@p.AvgMs.ToString("N0")</td>
+                        <td style="text-align:right;">@Usd(p.Cost)</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
+
+    <MudText Typo="Typo.h6" Class="mb-2">By category</MudText>
+    <MudPaper Outlined="true" Elevation="0" Class="pa-2">
+        <MudSimpleTable Dense="true" Hover="true">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th style="text-align:right;">Actions</th>
+                    <th style="text-align:right;">Est. cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _report.Categories)
+                {
+                    <tr>
+                        <td><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@c.Category</MudChip></td>
+                        <td style="text-align:right;">@c.Count.ToString("N0")</td>
+                        <td style="text-align:right;">@Usd(c.Cost)</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
+}
+
+@code {
+    private string _period = "week";
+    private bool _loading;
+    private string? _error;
+    private UsageReport _report = UsageReport.Empty;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && Events.IsEnabled)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task SetPeriodAsync(string period)
+    {
+        _period = period;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _report = await Events.GetUsageAsync(Since(_period));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    // Window start for each period (UTC). "today" is midnight UTC; the rest are rolling windows.
+    private static DateTimeOffset Since(string period) => period switch
+    {
+        "today" => new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero),
+        "month" => DateTimeOffset.UtcNow.AddDays(-30),
+        _ => DateTimeOffset.UtcNow.AddDays(-7)
+    };
+
+    private Color PeriodColor(string period) => _period == period ? Color.Primary : Color.Default;
+
+    private static string Usd(decimal cost) => "$" + cost.ToString("0.0000", CultureInfo.InvariantCulture);
+}

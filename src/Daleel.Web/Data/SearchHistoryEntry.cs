@@ -31,6 +31,13 @@ public sealed class SearchHistoryEntry
     /// <summary>Short, human-readable preview of the result (truncated summary).</summary>
     public string? ResultSummary { get; set; }
 
+    /// <summary>
+    /// The full serialized result (the same JSON the search rendered), so opening a history entry
+    /// re-displays the saved results instantly instead of re-running the search. Null for entries
+    /// created before results were persisted — those fall back to re-running the query.
+    /// </summary>
+    public string? ResultJson { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
 
     /// <summary>Saved results spun off from this search (back-reference; optional).</summary>

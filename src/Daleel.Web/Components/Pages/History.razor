@@ -55,7 +55,10 @@ else if (_authenticated)
                 <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@context.QueryType</MudChip>
             </MudTd>
             <MudTd DataLabel="@L["History.Col.Query"]">
-                <MudText Typo="Typo.body2" dir="@Catalog.Dir(context.Query)">@context.Query</MudText>
+                <MudLink Typo="Typo.body2" Underline="Underline.Hover" dir="@Catalog.Dir(context.Query)"
+                         OnClick="@(() => Open(context))" Style="cursor:pointer;text-align:start;">
+                    @context.Query
+                </MudLink>
             </MudTd>
             <MudTd DataLabel="@L["History.Col.Market"]">@Catalog.ResolveGeo(context.Geo).English</MudTd>
             <MudTd DataLabel="@L["History.Col.Summary"]">
@@ -64,6 +67,10 @@ else if (_authenticated)
                 </MudText>
             </MudTd>
             <MudTd Style="text-align:right;">
+                <MudTooltip Text="@L["History.Open"]">
+                    <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small" Color="Color.Primary"
+                                   OnClick="@(() => Open(context))" />
+                </MudTooltip>
                 <MudTooltip Text="@L["History.Rerun"]">
                     <MudIconButton Icon="@Icons.Material.Filled.Replay" Size="Size.Small"
                                    OnClick="@(() => Rerun(context))" />
@@ -147,6 +154,10 @@ else if (_authenticated)
             await _table.ReloadServerData();
         }
     }
+
+    // Open loads the SAVED results for this search (no re-run) — Home renders the stored ResultJson.
+    private void Open(SearchHistoryEntry entry) =>
+        Nav.NavigateTo($"/?historyId={entry.Id}");
 
     // Re-run sends the visitor to the originating feature page with the query pre-filled (?q=).
     private void Rerun(SearchHistoryEntry entry)

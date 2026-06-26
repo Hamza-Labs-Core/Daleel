@@ -73,10 +73,15 @@
   <data name="Search.CheckStatus" xml:space="preserve"><value>Check our status page</value></data>
   <data name="Search.Search" xml:space="preserve"><value>Search</value></data>
   <data name="Search.Searching" xml:space="preserve"><value>Searching…</value></data>
+  <data name="Search.FetchingSpecs" xml:space="preserve"><value>Fetching official specs — more details loading…</value></data>
+  <data name="Market.Prompt" xml:space="preserve"><value>We couldn't detect your market. Which country are you shopping in?</value></data>
+  <data name="Market.Confirm" xml:space="preserve"><value>Continue</value></data>
   <data name="Search.Results" xml:space="preserve"><value>Results</value></data>
   <data name="Search.NoResults" xml:space="preserve"><value>No results found.</value></data>
   <data name="Search.Summary" xml:space="preserve"><value>Summary</value></data>
   <data name="Search.Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Search.Cancelled" xml:space="preserve"><value>Search cancelled</value></data>
+  <data name="Search.CancelledHint" xml:space="preserve"><value>Your search was stopped. Edit the query and try again whenever you're ready.</value></data>
   <data name="Search.Recent" xml:space="preserve"><value>Recent</value></data>
   <data name="Search.ViewAll" xml:space="preserve"><value>View all</value></data>
 
@@ -133,7 +138,7 @@
   <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>Daleel is your personal shopping assistant. Ask in plain English or Arabic to compare prices across stores, check brand reputation and catch the best deals — without the endless browser tabs.</value></data>
   <data name="Landing.Hero.GetStarted" xml:space="preserve"><value>Get started free</value></data>
   <data name="Landing.Hero.SignIn" xml:space="preserve"><value>Sign in</value></data>
-  <data name="Landing.Hero.NoCard" xml:space="preserve"><value>No credit card needed · 5 free searches every month</value></data>
+  <data name="Landing.Hero.NoCard" xml:space="preserve"><value>No credit card needed · 500 free credits every month</value></data>
   <data name="Landing.Features.Title" xml:space="preserve"><value>Everything you need to shop smarter</value></data>
   <data name="Landing.Features.Subtitle" xml:space="preserve"><value>One assistant for finding products, comparing prices and tracking the best deals.</value></data>
   <data name="Landing.Feature.Search.Title" xml:space="preserve"><value>Smart Arabic search</value></data>
@@ -160,11 +165,11 @@
   <data name="Landing.Pricing.Feature.History" xml:space="preserve"><value>Search history &amp; saved results</value></data>
   <data name="Landing.Pricing.Feature.Bilingual" xml:space="preserve"><value>English &amp; Arabic interface</value></data>
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>For getting started</value></data>
-  <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>5 searches per month</value></data>
+  <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>500 credits per month</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>For regular shoppers</value></data>
-  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>50 searches per month</value></data>
+  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>5,000 credits per month</value></data>
   <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>For power users &amp; teams</value></data>
-  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>250 searches per month</value></data>
+  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>50,000 credits per month</value></data>
   <data name="Landing.Cta.Title" xml:space="preserve"><value>Ready to shop smarter?</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>Create a free account and run your first search in seconds.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>Create free account</value></data>
@@ -198,11 +203,13 @@
   <data name="Faq.Q3" xml:space="preserve"><value>How does Daleel filter results?</value></data>
   <data name="Faq.A3" xml:space="preserve"><value>Daleel applies a halal content filter by default: results and images that include alcohol, pork, gambling, adult or other non-halal content are removed so what you see stays family-friendly. You can adjust the strictness — or, for admin accounts, turn it off — under Content Filter in Settings.</value></data>
   <data name="Faq.Q4" xml:space="preserve"><value>Is Daleel free?</value></data>
-  <data name="Faq.A4" xml:space="preserve"><value>Yes — every account starts with 5 free searches each month, no credit card required. If you need more, paid plans add higher monthly limits, deal monitoring and saved results. See the Pricing page for details.</value></data>
+  <data name="Faq.A4" xml:space="preserve"><value>Yes — every account starts with 500 free credits each month, no credit card required. Each search spends credits based on the providers it uses, so a quick lookup costs little and a deep search costs more. If you need more, paid plans add larger monthly credit allowances, deal monitoring and saved results. See the Pricing page for details.</value></data>
   <data name="Faq.Q5" xml:space="preserve"><value>Do I need my own API keys?</value></data>
   <data name="Faq.A5" xml:space="preserve"><value>No. Daleel works out of the box. Power users can optionally add their own model and search provider keys under Settings — they stay in your browser and are never written to our server logs.</value></data>
   <data name="Faq.Q6" xml:space="preserve"><value>How is my search data used?</value></data>
   <data name="Faq.A6" xml:space="preserve"><value>Your personal search history is saved only for you, under your account. Separately, searches are analyzed anonymously to improve results — we record what was searched, the market, timing and cost, but never anything that identifies you. Analytics and cost logs carry only a one-way hash, so a search can't be traced back to your account.</value></data>
+  <data name="Faq.Q7" xml:space="preserve"><value>How is a brand's reputation score calculated?</value></data>
+  <data name="Faq.A7" xml:space="preserve"><value>Reputation is assessed for your specific market, not globally, and is grounded in live search and the brand's own pages — never invented. We weigh five factors: (1) reliability, (2) after-sales service and local service centres, (3) local warranty terms, (4) spare-parts availability, and (5) real user reviews from forums and social media. These produce a 1–5 score plus a badge. The badge rule is exact: "Strong local presence" = the brand has local service AND scores 4.0 or higher; "Limited local support" = no local service centre in your market (a cheap product from such a brand is usually a poor deal); otherwise no badge is shown. Local after-sales service is weighted heavily on purpose — without it, even a cheap, well-built product is a risk.</value></data>
   <data name="Footer.Privacy" xml:space="preserve"><value>Searches are analyzed anonymously to improve results.</value></data>
 
   <data name="Home.Tagline" xml:space="preserve"><value>Your smart shopping assistant</value></data>
@@ -210,7 +217,7 @@
   <data name="Home.NoResults.Title" xml:space="preserve"><value>No results just yet</value></data>
   <data name="Home.NoResults.Hint" xml:space="preserve"><value>Try rephrasing your search or searching again.</value></data>
   <data name="Home.SignInDialog.Title" xml:space="preserve"><value>Sign in to search</value></data>
-  <data name="Home.SignInDialog.Body" xml:space="preserve"><value>Create a free account to run searches — you get 5 free searches every month.</value></data>
+  <data name="Home.SignInDialog.Body" xml:space="preserve"><value>Create a free account to run searches — you get 500 free credits every month.</value></data>
 
   <data name="Deals.Title" xml:space="preserve"><value>Deal Finder</value></data>
   <data name="Deals.Subtitle" xml:space="preserve"><value>Current prices, promotions and where to buy — ranked.</value></data>
@@ -232,6 +239,14 @@
   <data name="Stores.ProductLabel" xml:space="preserve"><value>Product / category</value></data>
   <data name="Stores.Find" xml:space="preserve"><value>Find</value></data>
   <data name="Stores.UseMyLocation" xml:space="preserve"><value>Use my location</value></data>
+  <data name="Stores.NearMe" xml:space="preserve"><value>Stores near me</value></data>
+  <data name="Stores.UpdateLocation" xml:space="preserve"><value>Update my location</value></data>
+  <data name="Stores.WithinKm" xml:space="preserve"><value>Within {0} km · {1} nearby</value></data>
+  <data name="Stores.LocationUnavailable" xml:space="preserve"><value>Location unavailable — showing all stores.</value></data>
+  <data name="Stores.KmAway" xml:space="preserve"><value>{0} km away</value></data>
+  <data name="Stores.Directions" xml:space="preserve"><value>Directions</value></data>
+  <data name="Stores.ViewStore" xml:space="preserve"><value>View store</value></data>
+  <data name="Stores.Online" xml:space="preserve"><value>Online store</value></data>
   <data name="Stores.MapPreview" xml:space="preserve"><value>Map preview (Google Maps embed coming soon)</value></data>
   <data name="Stores.StoresCount" xml:space="preserve"><value>stores</value></data>
 
@@ -294,6 +309,7 @@
   <data name="History.Col.Summary" xml:space="preserve"><value>Summary</value></data>
   <data name="History.Col.Actions" xml:space="preserve"><value>Actions</value></data>
   <data name="History.Rerun" xml:space="preserve"><value>Re-run</value></data>
+  <data name="History.Open" xml:space="preserve"><value>Open saved results</value></data>
   <data name="History.Delete" xml:space="preserve"><value>Delete</value></data>
   <data name="History.Empty" xml:space="preserve"><value>No history yet — run a search to get started.</value></data>
   <data name="History.Deleted" xml:space="preserve"><value>Deleted.</value></data>
@@ -302,6 +318,11 @@
   <data name="History.Cleared" xml:space="preserve"><value>Cleared {0} item(s).</value></data>
 
   <data name="Settings.Title" xml:space="preserve"><value>Settings</value></data>
+  <data name="Settings.Credits" xml:space="preserve"><value>Credits</value></data>
+  <data name="Settings.CreditsUnlimited" xml:space="preserve"><value>Unlimited credits on this account.</value></data>
+  <data name="Settings.CreditsLeft" xml:space="preserve"><value>credits left this month</value></data>
+  <data name="Settings.CreditsHelp" xml:space="preserve"><value>Each search costs credits based on the providers it uses. Resets</value></data>
+  <data name="Settings.CreditsGetMore" xml:space="preserve"><value>Get more</value></data>
   <data name="Settings.Subtitle" xml:space="preserve"><value>Everything here is stored in your browser only (localStorage) and sent straight to the agent — never written to server logs.</value></data>
   <data name="Settings.ApiKeys" xml:space="preserve"><value>API Keys</value></data>
   <data name="Settings.Show" xml:space="preserve"><value>Show</value></data>
@@ -357,7 +378,7 @@
   <data name="Auth.ForgotPassword" xml:space="preserve"><value>Forgot password?</value></data>
   <data name="Auth.NewToDaleel" xml:space="preserve"><value>New to Daleel?</value></data>
   <data name="Auth.CreateFreeAccount" xml:space="preserve"><value>Create a free account</value></data>
-  <data name="Auth.Register.Subtitle" xml:space="preserve"><value>Create your free account — you get 5 free searches every month.</value></data>
+  <data name="Auth.Register.Subtitle" xml:space="preserve"><value>Create your free account — you get 500 free credits every month.</value></data>
   <data name="Auth.ConfirmPassword" xml:space="preserve"><value>Confirm password</value></data>
   <data name="Auth.RegPasswordPlaceholder" xml:space="preserve"><value>At least 8 characters</value></data>
   <data name="Auth.ConfirmPasswordPlaceholder" xml:space="preserve"><value>Re-enter your password</value></data>
@@ -366,6 +387,7 @@
   <data name="Auth.LearnMore" xml:space="preserve"><value>Learn more</value></data>
   <data name="Auth.AlreadyHaveAccount" xml:space="preserve"><value>Already have an account?</value></data>
   <data name="Auth.Error.Invalid" xml:space="preserve"><value>Invalid email or password.</value></data>
+  <data name="Auth.Error.Expired" xml:space="preserve"><value>Your session expired before the form was submitted. Please try again.</value></data>
   <data name="Auth.Error.Disabled" xml:space="preserve"><value>This account has been disabled. Contact support if you think this is a mistake.</value></data>
   <data name="Auth.Error.LockedOut" xml:space="preserve"><value>This account is locked out. Please try again later.</value></data>
   <data name="Auth.Error.Missing" xml:space="preserve"><value>Please enter both an email and a password.</value></data>

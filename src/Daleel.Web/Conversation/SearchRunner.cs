@@ -15,7 +15,8 @@ namespace Daleel.Web.Conversation;
 /// </remarks>
 public sealed record SearchRunResult(
     string ResultJson, string ResultType, int FilteredCount, string FilteredCategories,
-    int ApiCalls = 0, decimal EstimatedCost = 0m, int ResultCount = 0, string Providers = "");
+    int ApiCalls = 0, decimal EstimatedCost = 0m, int ResultCount = 0, string Providers = "",
+    int Credits = 0);
 
 /// <summary>
 /// Runs the actual agent query for a job. Abstracted from <c>SearchJobService</c> so the worker can
@@ -24,6 +25,15 @@ public sealed record SearchRunResult(
 public interface ISearchRunner
 {
     Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct);
+
+    /// <summary>
+    /// Optional post-result enrichment: deep-dives the items in an already-returned base result
+    /// (official-brand-site specs, price comparison) and returns an updated result to stream to the
+    /// UI, or null when there's nothing to enrich. Default is a no-op so legacy/test runners opt out.
+    /// </summary>
+    Task<SearchRunResult?> EnrichAsync(
+        SearchJob job, SearchRunResult baseResult, Action<string> progress, CancellationToken ct) =>
+        Task.FromResult<SearchRunResult?>(null);
 }
 
 /// <summary>Production runner: builds an agent from server-side keys and runs the unified ask flow.</summary>
@@ -133,7 +143,8 @@ public sealed class AgentSearchRunner : ISearchRunner
                 collector.Calls.Count,
                 collector.TotalCost,
                 resultCount,
-                providers);
+                providers,
+                collector.TotalCredits);
         }
         finally
         {

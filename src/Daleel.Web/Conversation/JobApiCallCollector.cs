@@ -1,4 +1,5 @@
 using Daleel.Core.Observability;
+using Daleel.Web.Data;
 
 namespace Daleel.Web.Conversation;
 
@@ -40,6 +41,19 @@ public sealed class JobApiCallCollector : IApiCallObserver
     public decimal TotalCost
     {
         get { lock (_gate) { return _total; } }
+    }
+
+    /// <summary>Billable credits for the job so far — the per-call prices summed (see <see cref="CreditCost"/>).</summary>
+    public int TotalCredits
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _calls.Sum(c =>
+                    CreditCost.ForCall(c.Provider, c.Endpoint, c.InputTokens, c.OutputTokens, c.EstimatedCost));
+            }
+        }
     }
 
     public void Record(ApiCall call)

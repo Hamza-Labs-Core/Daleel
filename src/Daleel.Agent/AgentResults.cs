@@ -9,14 +9,29 @@ public sealed class AgentOptions
     /// <summary>Default market when a query doesn't specify one.</summary>
     public string DefaultGeo { get; init; } = "usa";
 
-    /// <summary>Max results to request per search query.</summary>
+    /// <summary>Max results to request per search query (places/social depth).</summary>
     public int ResultsPerQuery { get; init; } = 10;
+
+    /// <summary>
+    /// Depth for web/shopping queries: the provider pages through Google until it reaches this many
+    /// results (SerpAPI caps at 10 pages). Defaults to a deep 100-result scan; total cost is still
+    /// bounded by <see cref="MaxQueriesPerKind"/> and the per-job API-call cap.
+    /// </summary>
+    public int DeepResultsPerQuery { get; init; } = 100;
 
     /// <summary>Max web/shopping queries to actually execute from a plan (cost guard).</summary>
     public int MaxQueriesPerKind { get; init; } = 4;
 
     /// <summary>Max URLs to deep-read per run.</summary>
     public int MaxUrlsToRead { get; init; } = 3;
+
+    /// <summary>
+    /// Max store/marketplace pages to deep-extract priced listings from per run. Higher than
+    /// <see cref="MaxUrlsToRead"/> because Google Shopping coverage is thin in many markets, so real
+    /// prices have to be scraped from the store pages themselves — going deeper here is what turns
+    /// "Price on site" into actual prices. Cost stays bounded by the per-job API-call cap.
+    /// </summary>
+    public int MaxListingUrls { get; init; } = 12;
 
     /// <summary>
     /// BCP-47 language the analyst summary should be written in (e.g. "ar", "en"). Product and

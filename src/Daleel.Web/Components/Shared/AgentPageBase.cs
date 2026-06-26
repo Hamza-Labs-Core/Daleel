@@ -147,17 +147,16 @@ public abstract class AgentPageBase : ComponentBase
             return;
         }
 
-        // Per-user monthly quota (reads the user's plan limit; admins bypass).
+        // Per-user monthly credits (reads the user's plan allowance; admins bypass). The actual cost is
+        // charged after the run below, once the providers it called are known.
         var isAdmin = await CurrentUser.IsAdminAsync();
-        if (!await Quota.TryConsumeAsync(userId, isAdmin))
+        Quota_Status = await Quota.GetStatusAsync(userId, isAdmin);
+        if (!Quota_Status.CanSearch)
         {
-            Quota_Status = await Quota.GetStatusAsync(userId, isAdmin);
-            Error = $"You've used all {Quota_Status.Limit} free searches this month. Upgrade for unlimited access.";
+            Error = $"You're out of credits for this month ({Quota_Status.Limit} included). Upgrade for more.";
             StateHasChanged();
             return;
         }
-
-        Quota_Status = await Quota.GetStatusAsync(userId, isAdmin);
 
         Busy = true;
         Error = null;
@@ -165,6 +164,8 @@ public abstract class AgentPageBase : ComponentBase
         LogLines.Clear();
         StateHasChanged();
 
+        // Meter the provider calls this search makes so we can charge its real credit cost afterwards.
+        var meter = new Daleel.Web.Conversation.JobApiCallCollector(_ => { }, 0m, null);
         try
         {
             var agent = Agents.Build(new AgentRequest
@@ -173,12 +174,16 @@ public abstract class AgentPageBase : ComponentBase
                 Model = Model,
                 Keys = Keys,
                 Log = AppendLog,
-                Strictness = Strictness
+                Strictness = Strictness,
+                ApiObserver = meter
             });
 
             var sw = Stopwatch.StartNew();
             await work(agent, CancellationToken.None);
             sw.Stop();
+
+            await Quota.ChargeCreditsAsync(userId, meter.TotalCredits);
+            Quota_Status = await Quota.GetStatusAsync(userId, isAdmin);
 
             if (recordHistory is not null)
             {
@@ -261,7 +266,7 @@ public abstract class AgentPageBase : ComponentBase
     {
         var result = await Dialogs.ShowMessageBox(
             "Sign in to search",
-            "Create a free account to run searches — you get 5 free searches every month.",
+            "Create a free account to run searches — you get 500 free credits every month.",
             yesText: "Sign in", cancelText: "Cancel");
 
         if (result == true)
