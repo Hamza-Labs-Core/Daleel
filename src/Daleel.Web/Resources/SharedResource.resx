@@ -376,6 +376,7 @@
   <data name="Auth.LearnMore" xml:space="preserve"><value>Learn more</value></data>
   <data name="Auth.AlreadyHaveAccount" xml:space="preserve"><value>Already have an account?</value></data>
   <data name="Auth.Error.Invalid" xml:space="preserve"><value>Invalid email or password.</value></data>
+  <data name="Auth.Error.Expired" xml:space="preserve"><value>Your session expired before the form was submitted. Please try again.</value></data>
   <data name="Auth.Error.Disabled" xml:space="preserve"><value>This account has been disabled. Contact support if you think this is a mistake.</value></data>
   <data name="Auth.Error.LockedOut" xml:space="preserve"><value>This account is locked out. Please try again later.</value></data>
   <data name="Auth.Error.Missing" xml:space="preserve"><value>Please enter both an email and a password.</value></data>

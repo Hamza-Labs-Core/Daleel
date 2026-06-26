@@ -127,6 +127,20 @@ builder.Services.ConfigureApplicationCookie(o =>
     o.Events.OnValidatePrincipal = SecurityStampValidator.ValidatePrincipalAsync;
 });
 
+// Antiforgery cookie settings. The framework default is SameSite=Strict with no Secure flag, which
+// iOS Safari withholds on the login form POST when the user arrived from an external context (tapping
+// a link, a search result) — antiforgery then fails and /auth/login returns a blank HTTP 400, i.e. the
+// "blank page / stuck on the login page on mobile" report. Lax (the same as the auth cookie) is still
+// CSRF-safe — a cross-site POST never carries the cookie under Lax either — but is reliably sent on the
+// same-site, top-level form submit. SameAsRequest marks it Secure over the proxied HTTPS in production.
+builder.Services.AddAntiforgery(o =>
+{
+    o.Cookie.Name = "Daleel.Antiforgery";
+    o.Cookie.SameSite = SameSiteMode.Lax;
+    o.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
+    o.Cookie.HttpOnly = true;
+});
+
 static Task ApiAwareRedirect(Microsoft.AspNetCore.Authentication.RedirectContext<Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationOptions> ctx, int statusCode)
 {
     if (ctx.Request.Path.StartsWithSegments("/api") || ctx.Request.Path.StartsWithSegments("/hubs"))

@@ -376,6 +376,7 @@
   <data name="Auth.LearnMore" xml:space="preserve"><value>اعرف المزيد</value></data>
   <data name="Auth.AlreadyHaveAccount" xml:space="preserve"><value>لديك حساب بالفعل؟</value></data>
   <data name="Auth.Error.Invalid" xml:space="preserve"><value>بريد إلكتروني أو كلمة مرور غير صحيحة.</value></data>
+  <data name="Auth.Error.Expired" xml:space="preserve"><value>انتهت صلاحية الجلسة قبل إرسال النموذج. يُرجى المحاولة مرة أخرى.</value></data>
   <data name="Auth.Error.Disabled" xml:space="preserve"><value>تم تعطيل هذا الحساب. تواصل مع الدعم إذا كنت تعتقد أن هذا خطأ.</value></data>
   <data name="Auth.Error.LockedOut" xml:space="preserve"><value>هذا الحساب مقفل. يُرجى المحاولة لاحقًا.</value></data>
   <data name="Auth.Error.Missing" xml:space="preserve"><value>يُرجى إدخال البريد الإلكتروني وكلمة المرور.</value></data>

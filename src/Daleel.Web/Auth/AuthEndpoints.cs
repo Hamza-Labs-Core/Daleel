@@ -1,4 +1,5 @@
 using Daleel.Web.Data;
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -28,11 +29,20 @@ public static class AuthEndpoints
             [FromForm] string? password,
             [FromForm] string? returnUrl,
             HttpContext http,
+            IAntiforgery antiforgery,
             SignInManager<ApplicationUser> signInManager,
             UserManager<ApplicationUser> userManager,
             IAnalyticsService analytics) =>
         {
             var safeReturn = SafeLocalPath(returnUrl);
+
+            // Validate antiforgery ourselves (the endpoint opts out of the automatic check via
+            // DisableAntiforgery) so a failure becomes a friendly "your session expired, try again"
+            // instead of a blank HTTP 400 — the page the mobile/Safari report saw.
+            if (!await IsAntiforgeryValidAsync(antiforgery, http))
+            {
+                return RedirectWithError("/login", "expired", safeReturn);
+            }
 
             if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
             {
@@ -66,7 +76,7 @@ public static class AuthEndpoints
             }
 
             return RedirectWithError("/login", result.IsLockedOut ? "lockedout" : "invalid", safeReturn);
-        });
+        }).DisableAntiforgery();
 
         // ── Register ───────────────────────────────────────────────────────────
         app.MapPost("/auth/register", async (
@@ -75,11 +85,17 @@ public static class AuthEndpoints
             [FromForm] string? confirmPassword,
             [FromForm] string? returnUrl,
             HttpContext http,
+            IAntiforgery antiforgery,
             UserManager<ApplicationUser> userManager,
             SignInManager<ApplicationUser> signInManager,
             IAnalyticsService analytics) =>
         {
             var safeReturn = SafeLocalPath(returnUrl);
+
+            if (!await IsAntiforgeryValidAsync(antiforgery, http))
+            {
+                return RedirectWithError("/register", "expired", safeReturn);
+            }
 
             if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
             {
@@ -121,7 +137,7 @@ public static class AuthEndpoints
             await signInManager.SignInAsync(user, isPersistent: true);
             await analytics.RecordLoginAsync(user.Id, "Password", http.Connection.RemoteIpAddress?.ToString());
             return Results.LocalRedirect(safeReturn);
-        });
+        }).DisableAntiforgery();
 
         // ── Sign out ───────────────────────────────────────────────────────────
         // Clear the auth cookie. POST-only so a third-party page can't force a logout with an <img>/GET
@@ -134,6 +150,23 @@ public static class AuthEndpoints
         });
 
         return app;
+    }
+
+    /// <summary>
+    /// Validates the antiforgery token, returning false instead of throwing so the caller can redirect
+    /// to a friendly "session expired" page rather than surface a blank HTTP 400.
+    /// </summary>
+    private static async Task<bool> IsAntiforgeryValidAsync(IAntiforgery antiforgery, HttpContext http)
+    {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(http);
+            return true;
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return false;
+        }
     }
 
     /// <summary>
