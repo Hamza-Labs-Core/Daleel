@@ -173,6 +173,11 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Status).HasMaxLength(16);
             e.Property(x => x.Model).HasMaxLength(128);
             e.Property(x => x.EstimatedCost).HasColumnType("decimal(12,6)");
+
+            // Persist CreatedAt as Unix-ms. SQLite can't translate DateTimeOffset comparisons in a
+            // WHERE clause (>= since), which every usage/cost aggregate does — so a long, which
+            // translates on any provider. Same trick as SearchCache.ExpiresAt / ProductProfile.
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 
         builder.Entity<SearchCache>(e =>
@@ -205,6 +210,10 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Rule).HasMaxLength(128);
             e.Property(x => x.Kind).HasMaxLength(64);
             e.Property(x => x.Content).HasMaxLength(300);
+
+            // CreatedAt as Unix-ms so CountSinceAsync(>= since) and the newest-first browse translate
+            // on SQLite (it can't compare/order a DateTimeOffset column). Same trick as SearchCache.
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 
         builder.Entity<SubscriptionPlan>(e =>
