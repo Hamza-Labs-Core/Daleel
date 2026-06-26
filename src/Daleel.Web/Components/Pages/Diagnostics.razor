@@ -80,28 +80,23 @@ else
 
 @code {
     private string _testUrl = "https://leaders.jo";
-    private string _method = "POST";
-    private string _path = "/v1/web/scrape-markdown";
+    private string _method = "GET";
+    private string _path = "/v1/web/scrape/markdown?url=https%3A%2F%2Fleaders.jo";
     private string _body = "";
     private bool _running;
     private DiagResult? _result;
 
     private sealed record Preset(string Label, string Method, string Path, string Body);
 
-    // Both the documented (-dash) and the currently-used (/slash) variants, so we can see which the
-    // live key accepts, plus the purpose-built product endpoints.
+    // Verified against the live key (✓ = confirmed working). Context.dev's web/brand reads are GET with
+    // query params; product extraction is POST. {url} = the test field as-is; {host} = its bare domain.
     private static readonly Preset[] PresetTemplates =
     {
-        new("scrape-markdown (GET)", "GET", "/v1/web/scrape-markdown?url={url}", ""),
-        new("scrape/markdown (POST)", "POST", "/v1/web/scrape/markdown", "{\"url\":\"{url}\"}"),
-        new("extract-product (POST)", "POST", "/v1/web/extract-product", "{\"url\":\"{url}\"}"),
-        new("extract-products (POST)", "POST", "/v1/web/extract-products", "{\"domain\":\"{url}\"}"),
-        new("extract-structured (POST)", "POST", "/v1/web/extract-structured", "{\"url\":\"{url}\",\"schema\":{\"type\":\"object\",\"properties\":{\"products\":{\"type\":\"array\"}}}}"),
-        new("extract (POST, current)", "POST", "/v1/web/extract", "{\"url\":\"{url}\",\"schema\":{\"type\":\"object\"}}"),
-        new("crawl (POST)", "POST", "/v1/web/crawl", "{\"url\":\"{url}\",\"limit\":5}"),
-        new("brand/by-domain (GET)", "GET", "/v1/brand/by-domain?domain={url}", ""),
-        new("brand (POST, current)", "POST", "/v1/brand", "{\"domain\":\"{url}\"}"),
-        new("web/search (GET)", "GET", "/v1/web/search?query={url}", ""),
+        new("scrape markdown (GET) ✓", "GET", "/v1/web/scrape/markdown?url={url}", ""),
+        new("scrape html (GET)", "GET", "/v1/web/scrape/html?url={url}", ""),
+        new("brand retrieve (GET) ✓", "GET", "/v1/brand/retrieve?domain={host}", ""),
+        new("products (POST) ✓", "POST", "/v1/brand/ai/products", "{\"domain\":\"{host}\",\"maxProducts\":8,\"timeoutMS\":30000}"),
+        new("classify txn (GET)", "GET", "/v1/brand/transaction_identifier?transaction_info={url}&country_gl=jo", ""),
     };
 
     private IEnumerable<Preset> Presets => PresetTemplates;
@@ -109,9 +104,24 @@ else
     private void ApplyPreset(Preset p)
     {
         var u = _testUrl?.Trim() ?? "";
+        var host = HostOf(u);
         _method = p.Method;
-        _path = p.Path.Replace("{url}", Uri.EscapeDataString(u));
-        _body = p.Body.Replace("{url}", u);
+        _path = p.Path.Replace("{url}", Uri.EscapeDataString(u)).Replace("{host}", Uri.EscapeDataString(host));
+        _body = p.Body.Replace("{url}", u).Replace("{host}", host);
+    }
+
+    private static string HostOf(string url)
+    {
+        var s = url.Trim();
+        if (s.Length == 0)
+        {
+            return s;
+        }
+        if (!s.Contains("://"))
+        {
+            s = "https://" + s;
+        }
+        return Uri.TryCreate(s, UriKind.Absolute, out var uri) ? uri.Host : url;
     }
 
     private async Task RunAsync()

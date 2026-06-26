@@ -1,9 +1,11 @@
 using Daleel.Agent;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
+using Daleel.Search.Providers;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
 using Daleel.Web.Profiles;
+using Daleel.Web.Services;
 
 namespace Daleel.Web.Pipeline;
 
@@ -38,13 +40,24 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// <summary>Cap on a saved detail blob (entity column is 8000).</summary>
     private const int MaxDetailChars = 4000;
 
+    /// <summary>How many of the found stores' catalogues we harvest for live prices (each is a slow crawl).</summary>
+    private const int MaxCatalogSites = 2;
+
+    /// <summary>Per-catalogue crawl budget — kept under the background enrichment timeout.</summary>
+    private const int CatalogTimeoutMs = 30_000;
+
+    /// <summary>Min shared significant tokens (brand/model/SKU) to trust a catalogue→item price match.</summary>
+    private const int MinMatchTokens = 2;
+
     private readonly IProductProfileRepository _repo;
     private readonly ProfileOptions _options;
+    private readonly IAgentFactory _factory;
 
-    public ItemEnrichmentService(IProductProfileRepository repo, ProfileOptions options)
+    public ItemEnrichmentService(IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory)
     {
         _repo = repo;
         _options = options;
+        _factory = factory;
     }
 
     public async Task<ItemEnrichmentResult> EnrichAsync(
@@ -133,12 +146,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             }, ct);
         }
 
-        if (enriched.Count == 0)
-        {
-            return new ItemEnrichmentResult(null, events);
-        }
-
-        var rebuilt = models
+        // Merge any fresh/cached spec details into the working models.
+        var withSpecs = models
             .Select((m, idx) =>
             {
                 if (!enriched.TryGetValue(idx, out var detail))
@@ -148,11 +157,183 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 var specs = new Dictionary<string, string>(m.Specs) { ["details"] = detail };
                 return m with { Specs = specs };
             })
-            .Concat(products.Models.Skip(MaxItems))
             .ToList();
 
-        progress($"Deep-dived {enriched.Count} item(s) — {fresh} new, {enriched.Count - fresh} reused from earlier searches.");
+        // Phase 4 — fill PRICES into items that still lack one, from the found stores' catalogues
+        // (Context.dev /v1/brand/ai/products). Runs last because the catalogue crawl is the slowest call.
+        var (pricedModels, priced) = await AttachCatalogPricesAsync(withSpecs, products, progress, Record, ct);
+
+        if (enriched.Count == 0 && priced == 0)
+        {
+            return new ItemEnrichmentResult(null, events);
+        }
+
+        var rebuilt = pricedModels.Concat(products.Models.Skip(MaxItems)).ToList();
+
+        progress(
+            $"Deep-dived {enriched.Count} item(s) — {fresh} new, {enriched.Count - fresh} reused" +
+            (priced > 0 ? $"; added live prices to {priced}." : "."));
         return new ItemEnrichmentResult(products with { Models = rebuilt }, events);
+    }
+
+    /// <summary>
+    /// For items that still have no price, harvest the top found stores' product catalogues from their
+    /// websites (Context.dev's purpose-built <c>/v1/brand/ai/products</c>) and attach a matching priced
+    /// offer. Targeted on purpose — we only fill gaps on items already shown, so a store's full catalogue
+    /// never floods the results with unrelated products. Best-effort: any failure leaves the item as-is.
+    /// </summary>
+    private async Task<(List<ProductModel> Models, int Priced)> AttachCatalogPricesAsync(
+        List<ProductModel> models, ProductSearchResult products, Action<string> progress,
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
+    {
+        var key = _factory.Resolve("CONTEXT_DEV_API_KEY");
+        if (string.IsNullOrWhiteSpace(key) || !models.Any(m => !HasPrice(m)))
+        {
+            return (models, 0);
+        }
+
+        var domains = products.Stores
+            .Select(s => DomainOf(s.Url))
+            .Where(d => d is not null).Select(d => d!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxCatalogSites)
+            .ToList();
+        if (domains.Count == 0)
+        {
+            return (models, 0);
+        }
+
+        var ctx = new ContextDevProvider(key);
+        progress($"Reading {domains.Count} store catalogue(s) for live prices…");
+
+        // Hard cap on the whole catalogue phase so a slow crawl (or a retry on the API's 408) can never
+        // blow the background enrichment budget — if it overruns, we just ship the result without it.
+        using var catalogCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        catalogCts.CancelAfter(TimeSpan.FromMilliseconds(CatalogTimeoutMs + 8_000));
+
+        // Harvest catalogues concurrently (HTTP only, no DbContext) so the slow crawls overlap.
+        var catalogues = await Task.WhenAll(domains.Select(async d =>
+        {
+            var found = await SafeCatalog(ctx, d, catalogCts.Token);
+            record(EventCategory.Extract, "catalog.products", "context.dev",
+                new Dictionary<string, object?> { ["domain"] = d, ["products"] = found.Count });
+            return found;
+        }));
+
+        var pool = catalogues.SelectMany(c => c).Where(c => c.Price is not null).ToList();
+        if (pool.Count == 0)
+        {
+            return (models, 0);
+        }
+
+        var priced = 0;
+        var updated = models.Select(m =>
+        {
+            if (HasPrice(m) || BestCatalogMatch(m, pool) is not { } match)
+            {
+                return m;
+            }
+            priced++;
+            var offer = new PriceOffer
+            {
+                Source = DomainOf(match.Url) ?? "Store",
+                SourceType = ResultType.StorePage,
+                Price = match.Price,
+                Currency = match.Currency,
+                Url = match.Url,
+                IsLocal = true
+            };
+            return m with { Offers = m.Offers.Append(offer).ToList() };
+        }).ToList();
+
+        if (priced > 0)
+        {
+            progress($"Filled in live prices for {priced} item(s) from store catalogues.");
+        }
+        return (updated, priced);
+    }
+
+    private static bool HasPrice(ProductModel m) => m.Offers.Any(o => o.Price is not null);
+
+    private static async Task<IReadOnlyList<CatalogProduct>> SafeCatalog(
+        ContextDevProvider ctx, string domain, CancellationToken ct)
+    {
+        try
+        {
+            return await ctx.ExtractProductsAsync(domain, maxProducts: 12, timeoutMs: CatalogTimeoutMs, cancellationToken: ct);
+        }
+        catch
+        {
+            // Any failure (incl. the phase-cap timeout) just means "no catalogue for this store" —
+            // it must never fail the enrichment, which has already produced a usable result.
+            return Array.Empty<CatalogProduct>();
+        }
+    }
+
+    /// <summary>Best catalogue product for an item by shared significant tokens (brand/model/SKU).</summary>
+    private static CatalogProduct? BestCatalogMatch(ProductModel m, List<CatalogProduct> pool)
+    {
+        var want = Tokens($"{m.Brand} {m.Model} {m.Name}");
+        if (want.Count == 0)
+        {
+            return null;
+        }
+
+        CatalogProduct? best = null;
+        var bestScore = 0;
+        foreach (var c in pool)
+        {
+            var score = Tokens($"{c.Name} {c.Sku} {c.Category}").Count(want.Contains);
+            if (score > bestScore)
+            {
+                best = c;
+                bestScore = score;
+            }
+        }
+
+        return bestScore >= MinMatchTokens ? best : null;
+    }
+
+    private static readonly char[] TokenSeparators = " \t\r\n-_/\\|,.()[]{}،:;\"'".ToCharArray();
+
+    private static HashSet<string> Tokens(string? text)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return set;
+        }
+
+        foreach (var t in text.Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (t.Length >= 3)
+            {
+                set.Add(t);
+            }
+        }
+
+        return set;
+    }
+
+    private static string? DomainOf(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return null;
+        }
+
+        var s = url.Trim();
+        if (!s.Contains("://"))
+        {
+            s = "https://" + s;
+        }
+
+        if (!Uri.TryCreate(s, UriKind.Absolute, out var u))
+        {
+            return null;
+        }
+
+        return u.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? u.Host[4..] : u.Host;
     }
 
     /// <summary>

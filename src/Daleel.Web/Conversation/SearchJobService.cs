@@ -145,8 +145,11 @@ public sealed class SearchJobService : BackgroundService
         }
     }
 
-    /// <summary>Hard ceiling on the detached enrichment pass so a hung scrape can't leak a worker.</summary>
-    private static readonly TimeSpan EnrichTimeout = TimeSpan.FromSeconds(45);
+    /// <summary>
+    /// Hard ceiling on the detached enrichment pass so a hung scrape can't leak a worker. Generous
+    /// because the deep-dive now also harvests store catalogues for live prices (a slow site crawl).
+    /// </summary>
+    private static readonly TimeSpan EnrichTimeout = TimeSpan.FromSeconds(90);
 
     /// <summary>
     /// Runs the post-result item deep-dive OFF the worker loop, in its own DI scope and under a hard
