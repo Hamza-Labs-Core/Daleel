@@ -1,6 +1,7 @@
 @* Store directory: physical/online stores with address, phone, website, an interactive Leaflet map
    and optional "near me" distance filtering (browser geolocation + Haversine). *@
 @inject IJSRuntime JS
+@inject IStringLocalizer<SharedResource> L
 
 @{
     var anyLocated = Stores.Any(s => s.HasLocation);
@@ -12,7 +13,7 @@
     <div class="d-flex align-center flex-wrap gap-3 mb-3">
         <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                    StartIcon="@Icons.Material.Filled.MyLocation" OnClick="LocateAsync" Disabled="_locating">
-            @(_userLoc is null ? "Stores near me" : "Update my location")
+            @(_userLoc is null ? L["Stores.NearMe"] : L["Stores.UpdateLocation"])
         </MudButton>
         @if (_locating)
         {
@@ -22,7 +23,7 @@
         {
             <div style="min-width:200px;flex:1;max-width:340px;">
                 <MudText Typo="Typo.caption" Color="Color.Secondary">
-                    Within @_maxKm km · @shown.Count(s => s.HasLocation) nearby
+                    @L["Stores.WithinKm", _maxKm, shown.Count(s => s.HasLocation)]
                 </MudText>
                 <MudSlider T="int" Value="_maxKm" ValueChanged="OnRadiusChanged" Min="1" Max="50" Step="1"
                            Color="Color.Primary" />
@@ -30,7 +31,7 @@
         }
         @if (_locationDenied)
         {
-            <MudText Typo="Typo.caption" Color="Color.Error">Location unavailable — showing all stores.</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Error">@L["Stores.LocationUnavailable"]</MudText>
         }
     </div>
 
@@ -59,7 +60,7 @@
                     @if (DistanceOf(s) is { } km)
                     {
                         <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text"
-                                 Icon="@Icons.Material.Filled.Directions">@km.ToString("0.#") km away</MudChip>
+                                 Icon="@Icons.Material.Filled.Directions">@L["Stores.KmAway", km.ToString("0.#")]</MudChip>
                     }
 
                     @if (!string.IsNullOrWhiteSpace(s.Address))
@@ -79,7 +80,7 @@
 
                     @if (string.IsNullOrWhiteSpace(s.Address) && !s.HasLocation)
                     {
-                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="mt-1">Online store</MudChip>
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="mt-1">@L["Stores.Online"]</MudChip>
                     }
                 </MudCardContent>
                 <MudCardActions>

@@ -239,6 +239,14 @@
   <data name="Stores.ProductLabel" xml:space="preserve"><value>المنتج</value></data>
   <data name="Stores.Find" xml:space="preserve"><value>بحث</value></data>
   <data name="Stores.UseMyLocation" xml:space="preserve"><value>استخدم موقعي</value></data>
+  <data name="Stores.NearMe" xml:space="preserve"><value>متاجر قريبة مني</value></data>
+  <data name="Stores.UpdateLocation" xml:space="preserve"><value>تحديث موقعي</value></data>
+  <data name="Stores.WithinKm" xml:space="preserve"><value>ضمن {0} كم · {1} قريبة</value></data>
+  <data name="Stores.LocationUnavailable" xml:space="preserve"><value>تعذّر تحديد الموقع — عرض كل المتاجر.</value></data>
+  <data name="Stores.KmAway" xml:space="preserve"><value>يبعد {0} كم</value></data>
+  <data name="Stores.Directions" xml:space="preserve"><value>الاتجاهات</value></data>
+  <data name="Stores.ViewStore" xml:space="preserve"><value>زيارة المتجر</value></data>
+  <data name="Stores.Online" xml:space="preserve"><value>متجر إلكتروني</value></data>
   <data name="Stores.MapPreview" xml:space="preserve"><value>خريطة</value></data>
   <data name="Stores.StoresCount" xml:space="preserve"><value>متجر</value></data>
 

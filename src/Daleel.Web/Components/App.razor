@@ -1,7 +1,16 @@
 @* Host document. MudBlazor drives styling; Cairo gives crisp Arabic glyphs, Roboto the Latin UI. *@
+@inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
 @{
     var culture = System.Globalization.CultureInfo.CurrentUICulture;
     var dir = culture.TextInfo.IsRightToLeft ? "rtl" : "ltr";
+
+    // Establish the antiforgery cookie on EVERY full document load (this runs before any HTML flushes,
+    // and reuses an existing cookie). Without this, the cookie is first set only when the static /login
+    // page renders its token — and if the user reaches /login via Blazor enhanced navigation, that
+    // Set-Cookie rides a fetch() response Safari doesn't reliably persist, so the very first POST has no
+    // cookie and antiforgery fails ("works the second time"). Seeding it here means the login form's
+    // token always has its matching cookie already in the jar on the first submit.
+    Antiforgery.GetAndStoreTokens(HttpContext);
 }
 <!DOCTYPE html>
 <html lang="@culture.TwoLetterISOLanguageName" dir="@dir">
