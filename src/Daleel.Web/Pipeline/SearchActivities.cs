@@ -237,6 +237,8 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
                 ReviewCount = s.ReviewCount ?? saved.GoogleReviewCount,
                 Address = s.Address ?? saved.Address ?? saved.Location,
                 Phone = s.Phone ?? saved.Phone,
+                Latitude = s.Latitude ?? saved.Latitude,
+                Longitude = s.Longitude ?? saved.Longitude,
                 Url = s.Url ?? saved.Website ?? saved.GoogleMapsUrl
             });
         }

@@ -179,6 +179,13 @@ public record StoreInfo
     public string? Phone { get; init; }
     public bool IsOnline { get; init; }
 
+    /// <summary>Verified Google Places coordinates, when known — used to pin the store on the map.</summary>
+    public double? Latitude { get; init; }
+    public double? Longitude { get; init; }
+
+    /// <summary>True when the store has map coordinates (can be pinned / distance-filtered).</summary>
+    public bool HasLocation => Latitude is not null && Longitude is not null;
+
     /// <summary>Average rating 1–5, when sourced from Google Places.</summary>
     public double? Rating { get; init; }
 

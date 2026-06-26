@@ -1,6 +1,44 @@
-@* Store directory: physical/online stores with address, phone, website and a map placeholder. *@
+@* Store directory: physical/online stores with address, phone, website, an interactive Leaflet map
+   and optional "near me" distance filtering (browser geolocation + Haversine). *@
+@inject IJSRuntime JS
+
+@{
+    var anyLocated = Stores.Any(s => s.HasLocation);
+    var shown = Filtered();
+}
+
+@if (anyLocated)
+{
+    <div class="d-flex align-center flex-wrap gap-3 mb-3">
+        <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.MyLocation" OnClick="LocateAsync" Disabled="_locating">
+            @(_userLoc is null ? "Stores near me" : "Update my location")
+        </MudButton>
+        @if (_locating)
+        {
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" />
+        }
+        @if (_userLoc is not null)
+        {
+            <div style="min-width:200px;flex:1;max-width:340px;">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    Within @_maxKm km · @shown.Count(s => s.HasLocation) nearby
+                </MudText>
+                <MudSlider T="int" Value="_maxKm" ValueChanged="OnRadiusChanged" Min="1" Max="50" Step="1"
+                           Color="Color.Primary" />
+            </div>
+        }
+        @if (_locationDenied)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Error">Location unavailable — showing all stores.</MudText>
+        }
+    </div>
+
+    <div id="@_mapId" style="height:320px;border-radius:12px;overflow:hidden;" class="mb-4"></div>
+}
+
 <MudGrid Spacing="3">
-    @foreach (var s in Stores)
+    @foreach (var s in shown)
     {
         <MudItem xs="12" sm="6" md="4">
             <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
@@ -18,6 +56,12 @@
                         }
                     </div>
 
+                    @if (DistanceOf(s) is { } km)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text"
+                                 Icon="@Icons.Material.Filled.Directions">@km.ToString("0.#") km away</MudChip>
+                    }
+
                     @if (!string.IsNullOrWhiteSpace(s.Address))
                     {
                         <div class="d-flex align-start gap-1 mt-1">
@@ -33,19 +77,17 @@
                         </div>
                     }
 
-                    @if (string.IsNullOrWhiteSpace(s.Address))
+                    @if (string.IsNullOrWhiteSpace(s.Address) && !s.HasLocation)
                     {
                         <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="mt-1">Online store</MudChip>
                     }
-                    else
-                    {
-                        <div class="mt-2" style="height:80px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);">
-                            <MudIcon Icon="@Icons.Material.Filled.Map" Color="Color.Secondary" />
-                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="ml-1">Map</MudText>
-                        </div>
-                    }
                 </MudCardContent>
                 <MudCardActions>
+                    @if (s.HasLocation)
+                    {
+                        <MudButton Href="@DirectionsLink(s)" Target="_blank" Size="Size.Small" Variant="Variant.Text"
+                                   StartIcon="@Icons.Material.Filled.Directions">Directions</MudButton>
+                    }
                     @if (!string.IsNullOrWhiteSpace(s.Url))
                     {
                         <MudButton Href="@s.Url" Target="_blank" Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary"
@@ -59,4 +101,100 @@
 
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<StoreInfo> Stores { get; set; } = Array.Empty<StoreInfo>();
+
+    private readonly string _mapId = "storemap-" + Guid.NewGuid().ToString("N")[..8];
+    private (double Lat, double Lng)? _userLoc;
+    private int _maxKm = 15;
+    private bool _locating;
+    private bool _locationDenied;
+    private string? _lastSig;
+
+    private sealed class LocationDto { public double Lat { get; set; } public double Lng { get; set; } }
+
+    private List<StoreInfo> Filtered()
+    {
+        if (_userLoc is not { } u)
+        {
+            return Stores.ToList();
+        }
+
+        // Located stores within the radius (nearest first); online / un-located stores always shown, last.
+        return Stores
+            .Where(s => !s.HasLocation || DistanceKm(s, u) <= _maxKm)
+            .OrderBy(s => s.HasLocation ? DistanceKm(s, u) : double.MaxValue)
+            .ToList();
+    }
+
+    private double? DistanceOf(StoreInfo s) =>
+        _userLoc is { } u && s.HasLocation ? DistanceKm(s, u) : null;
+
+    private static double DistanceKm(StoreInfo s, (double Lat, double Lng) u)
+    {
+        const double r = 6371.0;
+        var dLat = ToRad(s.Latitude!.Value - u.Lat);
+        var dLng = ToRad(s.Longitude!.Value - u.Lng);
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2)
+                + Math.Cos(ToRad(u.Lat)) * Math.Cos(ToRad(s.Latitude!.Value)) * Math.Sin(dLng / 2) * Math.Sin(dLng / 2);
+        return r * 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+    }
+
+    private static double ToRad(double deg) => deg * Math.PI / 180.0;
+
+    private static string DirectionsLink(StoreInfo s) =>
+        $"https://www.openstreetmap.org/?mlat={s.Latitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}&mlon={s.Longitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}#map=16/{s.Latitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}/{s.Longitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+
+    private async Task LocateAsync()
+    {
+        _locating = true;
+        _locationDenied = false;
+        StateHasChanged();
+
+        var loc = await JS.InvokeAsync<LocationDto?>("daleelGetLocation");
+        _locating = false;
+        if (loc is null)
+        {
+            _locationDenied = true;
+        }
+        else
+        {
+            _userLoc = (loc.Lat, loc.Lng);
+        }
+        StateHasChanged();
+    }
+
+    private void OnRadiusChanged(int value)
+    {
+        _maxKm = value;
+        StateHasChanged();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        var located = Filtered().Where(s => s.HasLocation).ToList();
+        if (located.Count == 0 && _userLoc is null)
+        {
+            return; // nothing to map yet
+        }
+
+        // Re-render the map only when the set of pins / the user location actually changed.
+        var sig = string.Join("|", located.Select(s => $"{s.Latitude},{s.Longitude}"))
+                  + $"#{_userLoc?.Lat}:{_userLoc?.Lng}";
+        if (sig == _lastSig)
+        {
+            return;
+        }
+        _lastSig = sig;
+
+        var markers = located.Select(s => new
+        {
+            lat = s.Latitude,
+            lng = s.Longitude,
+            name = s.Name,
+            address = s.Address,
+            url = s.Url
+        });
+        object? user = _userLoc is { } u ? new { lat = u.Lat, lng = u.Lng } : null;
+
+        await JS.InvokeVoidAsync("daleelRenderMap", _mapId, markers, user);
+    }
 }
