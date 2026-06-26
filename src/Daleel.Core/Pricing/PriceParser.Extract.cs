@@ -1,21 +1,22 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 
-namespace Daleel.Web.Pipeline;
+namespace Daleel.Core.Pricing;
 
 /// <summary>One price found in scraped page text, with the line it came from for later token matching.</summary>
 public readonly record struct PriceMatch(decimal Price, string Currency, string Line);
 
 /// <summary>
-/// Extracts prices + currencies from scraped page markdown. This is the fallback path used when
-/// Context.dev's structured catalogue endpoint can't read a store (JS-heavy/anti-bot sites that only the
-/// Cloudflare Browser renderer gets through) — we render the page to markdown and pull candidate prices
-/// out of it here. Pure and deterministic so the messy matching rules are unit-tested in isolation.
+/// Multi-price extraction over scraped page markdown. This is the fallback path used when Context.dev's
+/// structured catalogue endpoint can't read a store (JS-heavy/anti-bot sites that only the Cloudflare
+/// Browser renderer gets through) — we render the page to markdown and pull candidate prices out of it
+/// here. Pure and deterministic so the messy matching rules are unit-tested in isolation. Lives on the
+/// same <see cref="PriceParser"/> type as the single-value <c>TryParse</c> so all price parsing has one home.
 /// </summary>
 public static partial class PriceParser
 {
     /// <summary>Symbol/code → ISO-ish currency code. Covers the app's MENA + Western markets.</summary>
-    private static readonly (string Token, string Code)[] CurrencyMap =
+    private static readonly (string Token, string Code)[] ExtractCurrencyMap =
     {
         ("JOD", "JOD"), ("JD", "JOD"), ("د.ا", "JOD"),
         ("SAR", "SAR"), ("ر.س", "SAR"),
@@ -25,10 +26,6 @@ public static partial class PriceParser
         ("EUR", "EUR"), ("€", "EUR"),
         ("GBP", "GBP"), ("£", "GBP")
     };
-
-    // A money number: 1+ leading digit, optional grouped digits, optional 1–2 decimal places.
-    // e.g. 1,299  1299.99  799
-    private const string Number = @"\d[\d,]*(?:\.\d{1,2})?";
 
     // Currency symbol/code immediately BEFORE the number ($1,299 / JOD 450 / د.ا ٤٥٠).
     [GeneratedRegex(@"(JOD|JD|SAR|AED|EGP|USD|EUR|GBP|\$|€|£|د\.ا|ر\.س|د\.إ)\s?(\d[\d,]*(?:\.\d{1,2})?)",
@@ -83,8 +80,8 @@ public static partial class PriceParser
 
     private static bool TryAdd(List<PriceMatch> results, string currencyToken, string number, string line)
     {
-        var code = NormalizeCurrency(currencyToken);
-        if (code is null || !TryParsePrice(number, out var price))
+        var code = NormalizeExtractedCurrency(currencyToken);
+        if (code is null || !TryParseExtractedPrice(number, out var price))
         {
             return false;
         }
@@ -94,10 +91,10 @@ public static partial class PriceParser
     }
 
     /// <summary>Maps a symbol/code as it appeared on the page to a canonical currency code, or null.</summary>
-    private static string? NormalizeCurrency(string token)
+    private static string? NormalizeExtractedCurrency(string token)
     {
         var t = token.Trim();
-        foreach (var (sym, code) in CurrencyMap)
+        foreach (var (sym, code) in ExtractCurrencyMap)
         {
             if (string.Equals(t, sym, StringComparison.OrdinalIgnoreCase))
             {
@@ -108,7 +105,7 @@ public static partial class PriceParser
         return null;
     }
 
-    private static bool TryParsePrice(string raw, out decimal price)
+    private static bool TryParseExtractedPrice(string raw, out decimal price)
     {
         // Strip grouping commas; the regex already constrained the shape to a money number.
         var cleaned = raw.Replace(",", string.Empty);

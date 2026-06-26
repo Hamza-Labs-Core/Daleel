@@ -1,4 +1,4 @@
-using Daleel.Web.Pipeline;
+using Daleel.Core.Pricing;
 using FluentAssertions;
 using Xunit;
 

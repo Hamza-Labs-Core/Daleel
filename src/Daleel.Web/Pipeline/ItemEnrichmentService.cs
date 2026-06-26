@@ -1,6 +1,7 @@
 using Daleel.Agent;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
+using Daleel.Core.Pricing;
 using Daleel.Search.Abstractions;
 using Daleel.Search.Providers;
 using Daleel.Web.Data;
@@ -48,8 +49,19 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// <summary>Per-catalogue crawl budget — kept under the background enrichment timeout.</summary>
     private const int CatalogTimeoutMs = 30_000;
 
-    /// <summary>Min shared significant tokens (brand/model/SKU) to trust a catalogue→item price match.</summary>
+    /// <summary>
+    /// Absolute floor on shared significant tokens (brand/model/SKU) before a price is attributed to an
+    /// item — paired with <see cref="MinMatchRatio"/>. Kept at 2 only to kill the degenerate single-token
+    /// (100%-of-a-1-token-name) match; the ratio below does the real tightening.
+    /// </summary>
     private const int MinMatchTokens = 2;
+
+    /// <summary>
+    /// Fraction of the SHORTER name's tokens that must be shared to trust a catalogue/scrape→item price
+    /// match. The old flat "any 2 shared tokens" ignored name length, so a long title sharing only an
+    /// incidental brand word passed; requiring 80% of the shorter side makes attribution length-aware.
+    /// </summary>
+    private const double MinMatchRatio = 0.8;
 
     private readonly IProductProfileRepository _repo;
     private readonly ProfileOptions _options;
@@ -253,7 +265,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 .Select(c => c.domain).ToList();
         }
 
-        var browserPrices = await HarvestViaBrowserAsync(agent, browserUnpriced, record, catalogCts.Token);
+        var browserPrices = await HarvestViaBrowserAsync(agent, browserUnpriced, products.Query, record, catalogCts.Token);
 
         if (pool.Count == 0 && browserPrices.Count == 0)
         {
@@ -372,13 +384,15 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     }
 
     /// <summary>
-    /// Browser-fallback price harvest: render each store page through the agent's scrape router (Context.dev
-    /// → Cloudflare Browser), then pull candidate prices out of the markdown with <see cref="PriceParser"/>.
-    /// This is the path that earns the Cloudflare integration — JS-heavy/anti-bot stores the structured
+    /// Browser-fallback price harvest: render each store's <em>on-site search page for the query</em> through
+    /// the agent's scrape router (Context.dev → Cloudflare Browser), then pull candidate prices out of the
+    /// markdown with <see cref="PriceParser"/>. Scraping the search results (not the homepage) keeps the
+    /// harvested prices product-relevant — a homepage's featured/deal prices would be mis-attributed to our
+    /// items. This is the path that earns the Cloudflare integration — JS-heavy/anti-bot stores the structured
     /// endpoint can't read still yield prices here. Best-effort: any failure just yields no prices.
     /// </summary>
     private static async Task<IReadOnlyList<BrowserPrice>> HarvestViaBrowserAsync(
-        AgentService agent, IReadOnlyList<string> domains,
+        AgentService agent, IReadOnlyList<string> domains, string query,
         Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
     {
         if (domains.Count == 0)
@@ -388,7 +402,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         var harvested = await Task.WhenAll(domains.Select(async domain =>
         {
-            var url = domain.Contains("://", StringComparison.Ordinal) ? domain : $"https://{domain}";
+            var url = ProductSearchUrl(domain, query);
             ScrapedPage? page;
             try
             {
@@ -404,11 +418,28 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                     .ToList();
 
             record(EventCategory.Extract, "catalog.browser", page?.Provider ?? "cloudflare-browser",
-                new Dictionary<string, object?> { ["domain"] = domain, ["prices"] = prices.Count });
+                new Dictionary<string, object?> { ["domain"] = domain, ["url"] = url, ["prices"] = prices.Count });
             return (IReadOnlyList<BrowserPrice>)prices;
         }));
 
         return harvested.SelectMany(h => h).ToList();
+    }
+
+    /// <summary>
+    /// A store's on-site search URL for <paramref name="query"/>, so the browser fallback renders a
+    /// product-relevant page (results for what the user searched) rather than the homepage — whose
+    /// featured/deal prices would be mis-attributed to our items. Uses the widely-supported
+    /// <c>/search?q=</c> convention; falls back to the bare domain only when there's no query.
+    /// </summary>
+    private static string ProductSearchUrl(string domain, string query)
+    {
+        var root = domain.Contains("://", StringComparison.Ordinal) ? domain : $"https://{domain}";
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return root;
+        }
+
+        return $"{root.TrimEnd('/')}/search?q={Uri.EscapeDataString(query)}";
     }
 
     /// <summary>Best browser-scraped price for a model: the line sharing the most brand/model tokens.</summary>
@@ -427,17 +458,20 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         BrowserPrice? best = null;
         var bestScore = 0;
+        var bestHave = 0;
         foreach (var p in pool)
         {
-            var score = Tokens(p.Line).Count(want.Contains);
+            var have = Tokens(p.Line);
+            var score = have.Count(want.Contains);
             if (score > bestScore)
             {
                 best = p;
                 bestScore = score;
+                bestHave = have.Count;
             }
         }
 
-        return bestScore >= MinMatchTokens ? best : null;
+        return IsStrongMatch(bestScore, want.Count, bestHave) ? best : null;
     }
 
     private async Task PersistObservations(
@@ -497,17 +531,37 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         CatalogProduct? best = null;
         var bestScore = 0;
+        var bestHave = 0;
         foreach (var c in pool)
         {
-            var score = Tokens($"{c.Name} {c.Sku} {c.Category}").Count(want.Contains);
+            var have = Tokens($"{c.Name} {c.Sku} {c.Category}");
+            var score = have.Count(want.Contains);
             if (score > bestScore)
             {
                 best = c;
                 bestScore = score;
+                bestHave = have.Count;
             }
         }
 
-        return bestScore >= MinMatchTokens ? best : null;
+        return IsStrongMatch(bestScore, want.Count, bestHave) ? best : null;
+    }
+
+    /// <summary>
+    /// True when <paramref name="shared"/> tokens cover at least <see cref="MinMatchRatio"/> of the
+    /// SMALLER of the two token sets (and clear the <see cref="MinMatchTokens"/> floor). Percentage-of-
+    /// shorter so a long catalogue title and a short query still match when the short side is fully
+    /// covered, while a lone incidental shared word never attributes a price.
+    /// </summary>
+    private static bool IsStrongMatch(int shared, int wantCount, int haveCount)
+    {
+        if (shared < MinMatchTokens || wantCount == 0 || haveCount == 0)
+        {
+            return false;
+        }
+
+        var shorter = Math.Min(wantCount, haveCount);
+        return shared >= (int)Math.Ceiling(MinMatchRatio * shorter);
     }
 
     private static readonly char[] TokenSeparators = " \t\r\n-_/\\|,.()[]{}،:;\"'".ToCharArray();
