@@ -249,6 +249,9 @@
         if (userId != _userId || jobId != _jobId) return;
         InvokeAsync(() =>
         {
+            // Never resurrect "running" once the job has completed/errored — a late or background
+            // (enrichment) progress message must not hide the result that's already on screen.
+            if (_status is "completed" or "error") return;
             _status = "running";
             _query ??= "…";
             if (_progress.Count == 0 || _progress[^1] != message) _progress.Add(message);

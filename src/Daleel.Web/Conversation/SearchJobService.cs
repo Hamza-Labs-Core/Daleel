@@ -74,8 +74,18 @@ public sealed class SearchJobService : BackgroundService
         var sw = Stopwatch.StartNew();
         try
         {
-            // Stream each agent log line to all devices (fire-and-forget; don't touch DbContext here).
-            void Progress(string message) => _ = _broadcaster.ProgressAsync(job.UserId, job.Id, message);
+            // Stream curated status to all devices (fire-and-forget; don't touch DbContext here).
+            // Internal provider diagnostics ("… failed: …") are agent-level noise — keep them in the
+            // server log, never surface raw error text in the user's status line.
+            void Progress(string message)
+            {
+                if (message.Contains("failed", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation("Search job {JobId} · {Message}", job.Id, message);
+                    return;
+                }
+                _ = _broadcaster.ProgressAsync(job.UserId, job.Id, message);
+            }
 
             var result = await runner.RunAsync(job, Progress, cts.Token);
             sw.Stop();
@@ -160,7 +170,10 @@ public sealed class SearchJobService : BackgroundService
                 return;
             }
 
-            void Progress(string message) => _ = _broadcaster.ProgressAsync(userId, jobId, message);
+            // Enrichment runs AFTER the result is on screen, so its progress must NOT be broadcast as
+            // normal progress — that would flip the UI back to "running" and hide the completed result.
+            // The UI shows a quiet "fetching specs…" hint instead; here we only log server-side.
+            void Progress(string message) => _logger.LogDebug("Enrich job {JobId}: {Message}", jobId, message);
 
             var enriched = await runner.EnrichAsync(job, baseResult, Progress, timeout.Token);
             if (enriched is null)
