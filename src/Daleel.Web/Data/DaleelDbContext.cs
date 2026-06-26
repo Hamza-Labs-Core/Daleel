@@ -36,6 +36,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<Brand> Brands => Set<Brand>();
     public DbSet<Store> Stores => Set<Store>();
     public DbSet<ProductProfile> ProductProfiles => Set<ProductProfile>();
+    public DbSet<BrandModel> BrandModels => Set<BrandModel>();
+    public DbSet<ScrapedPrice> ScrapedPrices => Set<ScrapedPrice>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -112,6 +114,50 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Details).HasMaxLength(8000);
             e.Property(x => x.SourceUrl).HasMaxLength(1000);
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+        });
+
+        builder.Entity<BrandModel>(e =>
+        {
+            // Models are unique per brand by normalized name, so re-harvesting upserts in place.
+            // The LastRefreshed index backs the staleness sweep; BrandId is indexed for the per-brand
+            // model listing the UI shows.
+            e.HasIndex(x => new { x.BrandId, x.ModelKey }).IsUnique();
+            e.HasIndex(x => x.LastRefreshed);
+            e.Property(x => x.ModelName).HasMaxLength(300);
+            e.Property(x => x.ModelKey).HasMaxLength(300);
+            e.Property(x => x.Category).HasMaxLength(120);
+            e.Property(x => x.SpecsJson).HasMaxLength(8000);
+            e.Property(x => x.ImageUrl).HasMaxLength(1000);
+            e.Property(x => x.SourceUrl).HasMaxLength(1000);
+            e.Property(x => x.Currency).HasMaxLength(16);
+            e.Property(x => x.LocalPrice).HasColumnType("decimal(18,2)");
+            e.Property(x => x.GlobalPrice).HasColumnType("decimal(18,2)");
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+
+            // A model belongs to one brand; deleting a brand removes its harvested models.
+            e.HasOne(x => x.Brand)
+                .WithMany()
+                .HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ScrapedPrice>(e =>
+        {
+            // Append-only time series. The hot read is "latest prices for this model", so index
+            // (ProductKey, ScrapedAt); the per-store and recency sweeps get their own indexes.
+            e.HasIndex(x => new { x.ProductKey, x.ScrapedAt });
+            e.HasIndex(x => x.ScrapedAt);
+            e.Property(x => x.ProductName).HasMaxLength(300);
+            e.Property(x => x.ProductKey).HasMaxLength(300);
+            e.Property(x => x.StoreName).HasMaxLength(200);
+            e.Property(x => x.Currency).HasMaxLength(16);
+            e.Property(x => x.SourceUrl).HasMaxLength(1000);
+            e.Property(x => x.Provider).HasMaxLength(64);
+            e.Property(x => x.Price).HasColumnType("decimal(18,2)");
+
+            // ScrapedAt as Unix-ms so the "since"/"latest" filters translate on SQLite (it can't
+            // compare a DateTimeOffset column). Same trick as the profiles' LastRefreshed.
+            e.Property(x => x.ScrapedAt).HasConversion(toUnixMs);
         });
 
         builder.Entity<SearchHistoryEntry>(e =>

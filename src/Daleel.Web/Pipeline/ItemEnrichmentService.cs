@@ -1,11 +1,13 @@
 using Daleel.Agent;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
+using Daleel.Search.Abstractions;
 using Daleel.Search.Providers;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
 using Daleel.Web.Profiles;
 using Daleel.Web.Services;
+using Daleel.Web.Storage;
 
 namespace Daleel.Web.Pipeline;
 
@@ -52,12 +54,23 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IProductProfileRepository _repo;
     private readonly ProfileOptions _options;
     private readonly IAgentFactory _factory;
+    private readonly IScrapedPriceRepository _scrapedPrices;
+    private readonly IR2StorageService _images;
+    private readonly IBrandCatalogService _brandCatalog;
 
-    public ItemEnrichmentService(IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory)
+    /// <summary>How many of the result's brands get their site catalogue harvested per run (slow crawls).</summary>
+    private const int MaxBrandCatalogs = 2;
+
+    public ItemEnrichmentService(
+        IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory,
+        IScrapedPriceRepository scrapedPrices, IR2StorageService images, IBrandCatalogService brandCatalog)
     {
         _repo = repo;
         _options = options;
         _factory = factory;
+        _scrapedPrices = scrapedPrices;
+        _images = images;
+        _brandCatalog = brandCatalog;
     }
 
     public async Task<ItemEnrichmentResult> EnrichAsync(
@@ -161,7 +174,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         // Phase 4 — fill PRICES into items that still lack one, from the found stores' catalogues
         // (Context.dev /v1/brand/ai/products). Runs last because the catalogue crawl is the slowest call.
-        var (pricedModels, priced) = await AttachCatalogPricesAsync(withSpecs, products, progress, Record, ct);
+        var (pricedModels, priced) = await AttachCatalogPricesAsync(agent, withSpecs, products, progress, Record, ct);
+
+        // Phase 5 — harvest each surfaced brand's own site into the BrandModel database (specs/prices/images
+        // → R2). A pure side effect: it builds the model database for later searches and does not alter the
+        // result shown now, so it runs regardless of whether the product enrichment above changed anything.
+        await HarvestBrandCatalogsAsync(products, progress, Record, ct);
 
         if (enriched.Count == 0 && priced == 0)
         {
@@ -177,17 +195,18 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     }
 
     /// <summary>
-    /// For items that still have no price, harvest the top found stores' product catalogues from their
-    /// websites (Context.dev's purpose-built <c>/v1/brand/ai/products</c>) and attach a matching priced
-    /// offer. Targeted on purpose — we only fill gaps on items already shown, so a store's full catalogue
-    /// never floods the results with unrelated products. Best-effort: any failure leaves the item as-is.
+    /// For items that still have no price, harvest the top found stores' product catalogues and attach a
+    /// matching priced offer. Two sources: Context.dev's structured <c>/v1/brand/ai/products</c> first, then
+    /// a Cloudflare-Browser-rendered page parsed by <see cref="PriceParser"/> for the stores Context.dev
+    /// can't read. Every match is also written to the <see cref="ScrapedPrice"/> history, and a matched
+    /// product image is copied into R2. Targeted on purpose — we only fill gaps on items already shown, so a
+    /// store's full catalogue never floods the results. Best-effort: any failure leaves the item as-is.
     /// </summary>
     private async Task<(List<ProductModel> Models, int Priced)> AttachCatalogPricesAsync(
-        List<ProductModel> models, ProductSearchResult products, Action<string> progress,
+        AgentService agent, List<ProductModel> models, ProductSearchResult products, Action<string> progress,
         Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
     {
-        var key = _factory.Resolve("CONTEXT_DEV_API_KEY");
-        if (string.IsNullOrWhiteSpace(key) || !models.Any(m => !HasPrice(m)))
+        if (!models.Any(m => !HasPrice(m)))
         {
             return (models, 0);
         }
@@ -203,54 +222,106 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             return (models, 0);
         }
 
-        var ctx = new ContextDevProvider(key);
-        progress($"Reading {domains.Count} store catalogue(s) for live prices…");
-
         // Hard cap on the whole catalogue phase so a slow crawl (or a retry on the API's 408) can never
         // blow the background enrichment budget — if it overruns, we just ship the result without it.
         using var catalogCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         catalogCts.CancelAfter(TimeSpan.FromMilliseconds(CatalogTimeoutMs + 8_000));
 
-        // Harvest catalogues concurrently (HTTP only, no DbContext) so the slow crawls overlap.
-        var catalogues = await Task.WhenAll(domains.Select(async d =>
-        {
-            var found = await SafeCatalog(ctx, d, catalogCts.Token);
-            record(EventCategory.Extract, "catalog.products", "context.dev",
-                new Dictionary<string, object?> { ["domain"] = d, ["products"] = found.Count });
-            return found;
-        }));
+        // Primary: Context.dev's purpose-built catalogue extraction. Secondary (for the domains it can't
+        // read — JS-heavy/anti-bot stores): render the page through the scrape router, which falls through
+        // to the Cloudflare Browser renderer, and parse prices out of the markdown ourselves.
+        var key = _factory.Resolve("CONTEXT_DEV_API_KEY");
+        var pool = new List<CatalogProduct>();
+        var browserUnpriced = domains;
 
-        var pool = catalogues.SelectMany(c => c).Where(c => c.Price is not null).ToList();
-        if (pool.Count == 0)
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            var ctx = new ContextDevProvider(key);
+            progress($"Reading {domains.Count} store catalogue(s) for live prices…");
+
+            var catalogues = await Task.WhenAll(domains.Select(async d =>
+            {
+                var found = await SafeCatalog(ctx, d, catalogCts.Token);
+                record(EventCategory.Extract, "catalog.products", "context.dev",
+                    new Dictionary<string, object?> { ["domain"] = d, ["products"] = found.Count });
+                return (domain: d, found);
+            }));
+
+            pool = catalogues.SelectMany(c => c.found).Where(c => c.Price is not null).ToList();
+            // Only the domains Context.dev returned nothing priced for fall through to the browser pass.
+            browserUnpriced = catalogues.Where(c => c.found.All(p => p.Price is null))
+                .Select(c => c.domain).ToList();
+        }
+
+        var browserPrices = await HarvestViaBrowserAsync(agent, browserUnpriced, record, catalogCts.Token);
+
+        if (pool.Count == 0 && browserPrices.Count == 0)
         {
             return (models, 0);
         }
 
+        var now = _options.Now();
+        var observations = new List<ScrapedPrice>();
         var priced = 0;
-        var updated = models.Select(m =>
+        var updated = new List<ProductModel>(models.Count);
+        foreach (var m in models)
         {
-            if (HasPrice(m) || BestCatalogMatch(m, pool) is not { } match)
+            if (HasPrice(m))
             {
-                return m;
+                updated.Add(m);
+                continue;
             }
-            priced++;
-            var offer = new PriceOffer
+
+            // Prefer the structured Context.dev match; fall back to a browser-scraped line price.
+            var match = BestCatalogMatch(m, pool);
+            var offer = match is { } c
+                ? new PriceOffer
+                {
+                    Source = DomainOf(c.Url) ?? "Store", SourceType = ResultType.StorePage,
+                    Price = c.Price, Currency = c.Currency, Url = c.Url, IsLocal = true
+                }
+                : BestBrowserMatch(m, browserPrices) is { } bp
+                    ? new PriceOffer
+                    {
+                        Source = bp.Store, SourceType = ResultType.StorePage,
+                        Price = bp.Price, Currency = bp.Currency, Url = bp.Url, IsLocal = true
+                    }
+                    : null;
+
+            if (offer is null)
             {
-                Source = DomainOf(match.Url) ?? "Store",
-                SourceType = ResultType.StorePage,
-                Price = match.Price,
-                Currency = match.Currency,
-                Url = match.Url,
-                IsLocal = true
-            };
+                updated.Add(m);
+                continue;
+            }
+
+            priced++;
+            observations.Add(new ScrapedPrice
+            {
+                ProductName = m.Name,
+                ProductKey = ProductProfile.KeyFor(m.Brand, m.Model, m.Name),
+                StoreName = offer.Source,
+                Price = offer.Price,
+                Currency = offer.Currency,
+                SourceUrl = offer.Url,
+                Provider = match is not null ? "context.dev" : "cloudflare-browser",
+                ScrapedAt = now
+            });
+
             var withOffer = m with { Offers = m.Offers.Append(offer).ToList() };
 
-            // The catalogue entry usually carries a product image too — fill it in when the model has none
-            // (most search-derived models don't), so the card actually shows a picture.
-            return string.IsNullOrWhiteSpace(withOffer.ImageUrl) && !string.IsNullOrWhiteSpace(match.ImageUrl)
-                ? withOffer with { ImageUrl = match.ImageUrl }
-                : withOffer;
-        }).ToList();
+            // The catalogue entry usually carries a product image — fill it in when the model has none, and
+            // route it through R2 so we host a stable copy instead of hot-linking the store's CDN.
+            if (string.IsNullOrWhiteSpace(withOffer.ImageUrl) && match is { ImageUrl: { Length: > 0 } img })
+            {
+                var stored = await StoreImageSafe(img, "products", ct);
+                withOffer = withOffer with { ImageUrl = stored };
+            }
+
+            updated.Add(withOffer);
+        }
+
+        // Persist the observations as a timestamped batch — the price history the comparison view reads.
+        await PersistObservations(observations, record, ct);
 
         if (priced > 0)
         {
@@ -258,6 +329,145 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         }
         return (updated, priced);
     }
+
+    /// <summary>
+    /// Triggers the per-brand catalogue "sub-workflow" for the top few brands the search surfaced: each
+    /// resolves the brand's site and upserts its models into the BrandModel database (see
+    /// <see cref="IBrandCatalogService"/>). Capped and sequential so the slow crawls and the shared scoped
+    /// DbContext stay within budget. Best-effort: a brand that fails is skipped.
+    /// </summary>
+    private async Task HarvestBrandCatalogsAsync(
+        ProductSearchResult products, Action<string> progress,
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
+    {
+        var brands = products.Brands
+            .Select(b => b.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxBrandCatalogs)
+            .ToList();
+        if (brands.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var name in brands)
+        {
+            ct.ThrowIfCancellationRequested();
+            int harvested;
+            try
+            {
+                harvested = await _brandCatalog.HarvestAsync(name, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { harvested = 0; }
+
+            if (harvested > 0)
+            {
+                progress($"Catalogued {harvested} {name} model(s) from the brand site.");
+                record(EventCategory.Extract, "brand.catalog", "context.dev",
+                    new Dictionary<string, object?> { ["brand"] = name, ["models"] = harvested });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Browser-fallback price harvest: render each store page through the agent's scrape router (Context.dev
+    /// → Cloudflare Browser), then pull candidate prices out of the markdown with <see cref="PriceParser"/>.
+    /// This is the path that earns the Cloudflare integration — JS-heavy/anti-bot stores the structured
+    /// endpoint can't read still yield prices here. Best-effort: any failure just yields no prices.
+    /// </summary>
+    private static async Task<IReadOnlyList<BrowserPrice>> HarvestViaBrowserAsync(
+        AgentService agent, IReadOnlyList<string> domains,
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
+    {
+        if (domains.Count == 0)
+        {
+            return Array.Empty<BrowserPrice>();
+        }
+
+        var harvested = await Task.WhenAll(domains.Select(async domain =>
+        {
+            var url = domain.Contains("://", StringComparison.Ordinal) ? domain : $"https://{domain}";
+            ScrapedPage? page;
+            try
+            {
+                page = await agent.ReadPageAsync(url, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { page = null; }
+
+            var prices = page is null || string.IsNullOrWhiteSpace(page.Content)
+                ? new List<BrowserPrice>()
+                : PriceParser.Extract(page.Content)
+                    .Select(p => new BrowserPrice(p.Price, p.Currency, p.Line, domain, page.Url))
+                    .ToList();
+
+            record(EventCategory.Extract, "catalog.browser", page?.Provider ?? "cloudflare-browser",
+                new Dictionary<string, object?> { ["domain"] = domain, ["prices"] = prices.Count });
+            return (IReadOnlyList<BrowserPrice>)prices;
+        }));
+
+        return harvested.SelectMany(h => h).ToList();
+    }
+
+    /// <summary>Best browser-scraped price for a model: the line sharing the most brand/model tokens.</summary>
+    private static BrowserPrice? BestBrowserMatch(ProductModel m, IReadOnlyList<BrowserPrice> pool)
+    {
+        if (pool.Count == 0)
+        {
+            return null;
+        }
+
+        var want = Tokens($"{m.Brand} {m.Model} {m.Name}");
+        if (want.Count == 0)
+        {
+            return null;
+        }
+
+        BrowserPrice? best = null;
+        var bestScore = 0;
+        foreach (var p in pool)
+        {
+            var score = Tokens(p.Line).Count(want.Contains);
+            if (score > bestScore)
+            {
+                best = p;
+                bestScore = score;
+            }
+        }
+
+        return bestScore >= MinMatchTokens ? best : null;
+    }
+
+    private async Task PersistObservations(
+        List<ScrapedPrice> observations,
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
+    {
+        if (observations.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await _scrapedPrices.AddRangeAsync(observations, ct);
+            record(EventCategory.Profile, "price.persist", "pipeline",
+                new Dictionary<string, object?> { ["count"] = observations.Count });
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { /* best-effort: persisting price history must never fail the search */ }
+    }
+
+    private async Task<string?> StoreImageSafe(string url, string prefix, CancellationToken ct)
+    {
+        try { return await _images.StoreImageAsync(url, prefix, ct); }
+        catch (OperationCanceledException) { throw; }
+        catch { return url; }
+    }
+
+    /// <summary>A price scraped off a rendered store page, with the source line for token matching.</summary>
+    private readonly record struct BrowserPrice(decimal Price, string Currency, string Line, string Store, string Url);
 
     private static bool HasPrice(ProductModel m) => m.Offers.Any(o => o.Price is not null);
 
