@@ -80,6 +80,8 @@
   <data name="Search.NoResults" xml:space="preserve"><value>No results found.</value></data>
   <data name="Search.Summary" xml:space="preserve"><value>Summary</value></data>
   <data name="Search.Cancel" xml:space="preserve"><value>Cancel</value></data>
+  <data name="Search.Cancelled" xml:space="preserve"><value>Search cancelled</value></data>
+  <data name="Search.CancelledHint" xml:space="preserve"><value>Your search was stopped. Edit the query and try again whenever you're ready.</value></data>
   <data name="Search.Recent" xml:space="preserve"><value>Recent</value></data>
   <data name="Search.ViewAll" xml:space="preserve"><value>View all</value></data>
 
