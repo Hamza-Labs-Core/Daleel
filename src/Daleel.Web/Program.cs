@@ -213,10 +213,16 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.SignalRConversationBroadca
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationBroadcaster>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
 // The search pipeline runs as an in-process Elsa 3 workflow of CodeActivity steps (plan → cache →
-// gather → extract → enrich → aggregate → moderate → cache → return). Elsa is registered core-only
-// (no Server/Studio/EF persistence), and the workflow runner replaces the old direct-AskAsync runner.
+// gather → extract → dispatch brand/store/item sub-workflows → aggregate → moderate → cache → return).
+// Elsa is registered core-only (no Server/Studio/EF persistence), and the workflow runner replaces the
+// old direct-AskAsync runner. AddActivitiesFrom scans the whole assembly, so the sub-workflow activities
+// under Pipeline/SubWorkflows are discovered automatically.
 builder.Services.AddElsa(elsa => elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>());
 builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
+// Per-entity sub-workflow states — scoped so each dispatched child (in its own DI scope) gets a fresh one.
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.BrandResearchState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
