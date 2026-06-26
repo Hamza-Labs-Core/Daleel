@@ -287,6 +287,8 @@ jobs:
             # service). Password seeds that service AND the connection string below.
             POSTGRES_PASSWORD=${{ secrets.QA_POSTGRES_PASSWORD || 'daleel-qa-events' }}
             POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=daleel_events;Username=daleel;Password=${{ secrets.QA_POSTGRES_PASSWORD || 'daleel-qa-events' }}
+            # QA-only: enables the public /diagnostics provider testbench (never set in production).
+            DIAGNOSTICS_ENABLED=true
             # QA hostname for Caddy/TLS. Point DNS for this name at the QA server IP,
             # or override via the QA_CADDY_DOMAIN secret.
             CADDY_DOMAIN=${{ secrets.QA_CADDY_DOMAIN || 'qa-daleel.hamzalabs.dev' }}

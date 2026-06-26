@@ -223,6 +223,8 @@ builder.Services.AddSingleton<MonitorService>();
 // /status page: HTTP probes against each provider's host + last-search lookup.
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<IStatusService, StatusService>();
+// QA-only raw provider diagnostics (gated by DIAGNOSTICS_ENABLED — off in production).
+builder.Services.AddScoped<IProviderDiagnostics, ProviderDiagnostics>();
 
 // Liveness probe consumed by the Docker HEALTHCHECK, deploy.sh, and Caddy upstream checks.
 builder.Services.AddHealthChecks();

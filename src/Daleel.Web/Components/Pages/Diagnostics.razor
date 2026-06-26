@@ -1,0 +1,125 @@
+@page "/diagnostics"
+@using Daleel.Web.Services
+@inject IProviderDiagnostics Diag
+
+@* QA-ONLY provider testbench. Public (no auth) but a hard no-op unless DIAGNOSTICS_ENABLED is set,
+   which only the QA deploy does — so production never exposes raw provider calls. Used to discover
+   the exact Context.dev endpoints/shapes the live key accepts before wiring them into the pipeline. *@
+
+<PageTitle>دليل · Provider diagnostics</PageTitle>
+
+@if (!Diag.Enabled)
+{
+    <MudPaper Class="pa-8 ma-4" Outlined="true" Elevation="0">
+        <MudText Typo="Typo.h6">Not available</MudText>
+        <MudText Typo="Typo.body2" Color="Color.Secondary">
+            Provider diagnostics are disabled in this environment.
+        </MudText>
+    </MudPaper>
+}
+else
+{
+    <MudText Typo="Typo.h4" Class="mb-1">Provider diagnostics</MudText>
+    <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+        QA-only. Fires a raw request at <code>api.context.dev</code> with the server's key and shows the
+        raw response — use it to find which endpoints/paths actually work.
+    </MudText>
+
+    <MudPaper Class="pa-4 mb-4" Outlined="true" Elevation="0">
+        <MudTextField @bind-Value="_testUrl" Label="Test URL or domain" Variant="Variant.Outlined"
+                      Class="mb-3" HelperText="Plugged into the presets below as {url}." />
+
+        <MudText Typo="Typo.subtitle2" Class="mb-2">Context.dev endpoint presets</MudText>
+        <div class="d-flex flex-wrap gap-2 mb-4">
+            @foreach (var p in Presets)
+            {
+                <MudButton Size="Size.Small" Variant="Variant.Outlined" OnClick="@(() => ApplyPreset(p))">
+                    @p.Label
+                </MudButton>
+            }
+        </div>
+
+        <div class="d-flex gap-2 mb-2">
+            <MudSelect T="string" @bind-Value="_method" Label="Method" Variant="Variant.Outlined" Style="max-width:140px;">
+                <MudSelectItem Value="@("GET")">GET</MudSelectItem>
+                <MudSelectItem Value="@("POST")">POST</MudSelectItem>
+            </MudSelect>
+            <MudTextField @bind-Value="_path" Label="Path (+ query)" Variant="Variant.Outlined" Class="flex-grow-1" />
+        </div>
+        <MudTextField @bind-Value="_body" Label="JSON body (POST only)" Variant="Variant.Outlined"
+                      Lines="4" Class="mb-3" />
+
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" StartIcon="@Icons.Material.Filled.PlayArrow"
+                   OnClick="RunAsync" Disabled="_running">Send</MudButton>
+        @if (_running)
+        {
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="ms-3" />
+        }
+    </MudPaper>
+
+    @if (_result is not null)
+    {
+        <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+            <div class="d-flex align-center gap-3 mb-2">
+                <MudChip T="string" Size="Size.Small" Color="@(_result.Ok ? Color.Success : Color.Error)" Variant="Variant.Filled">
+                    @(_result.Error is not null ? "ERROR" : $"HTTP {_result.Status}")
+                </MudChip>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@(_result.LatencyMs) ms</MudText>
+            </div>
+            @if (_result.Error is not null)
+            {
+                <MudAlert Severity="Severity.Error" Variant="Variant.Outlined">@_result.Error</MudAlert>
+            }
+            else
+            {
+                <pre style="white-space:pre-wrap;word-break:break-word;max-height:520px;overflow:auto;font-size:.8rem;">@_result.Body</pre>
+            }
+        </MudPaper>
+    }
+}
+
+@code {
+    private string _testUrl = "https://leaders.jo";
+    private string _method = "POST";
+    private string _path = "/v1/web/scrape-markdown";
+    private string _body = "";
+    private bool _running;
+    private DiagResult? _result;
+
+    private sealed record Preset(string Label, string Method, string Path, string Body);
+
+    // Both the documented (-dash) and the currently-used (/slash) variants, so we can see which the
+    // live key accepts, plus the purpose-built product endpoints.
+    private static readonly Preset[] PresetTemplates =
+    {
+        new("scrape-markdown (GET)", "GET", "/v1/web/scrape-markdown?url={url}", ""),
+        new("scrape/markdown (POST)", "POST", "/v1/web/scrape/markdown", "{\"url\":\"{url}\"}"),
+        new("extract-product (POST)", "POST", "/v1/web/extract-product", "{\"url\":\"{url}\"}"),
+        new("extract-products (POST)", "POST", "/v1/web/extract-products", "{\"domain\":\"{url}\"}"),
+        new("extract-structured (POST)", "POST", "/v1/web/extract-structured", "{\"url\":\"{url}\",\"schema\":{\"type\":\"object\",\"properties\":{\"products\":{\"type\":\"array\"}}}}"),
+        new("extract (POST, current)", "POST", "/v1/web/extract", "{\"url\":\"{url}\",\"schema\":{\"type\":\"object\"}}"),
+        new("crawl (POST)", "POST", "/v1/web/crawl", "{\"url\":\"{url}\",\"limit\":5}"),
+        new("brand/by-domain (GET)", "GET", "/v1/brand/by-domain?domain={url}", ""),
+        new("brand (POST, current)", "POST", "/v1/brand", "{\"domain\":\"{url}\"}"),
+        new("web/search (GET)", "GET", "/v1/web/search?query={url}", ""),
+    };
+
+    private IEnumerable<Preset> Presets => PresetTemplates;
+
+    private void ApplyPreset(Preset p)
+    {
+        var u = _testUrl?.Trim() ?? "";
+        _method = p.Method;
+        _path = p.Path.Replace("{url}", Uri.EscapeDataString(u));
+        _body = p.Body.Replace("{url}", u);
+    }
+
+    private async Task RunAsync()
+    {
+        _running = true;
+        _result = null;
+        StateHasChanged();
+        _result = await Diag.ContextDevRawAsync(_method, _path, string.IsNullOrWhiteSpace(_body) ? null : _body);
+        _running = false;
+    }
+}
