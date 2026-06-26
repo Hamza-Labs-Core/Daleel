@@ -60,11 +60,16 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
         ScrapeFormat format = ScrapeFormat.Markdown,
         CancellationToken cancellationToken = default)
     {
-        var path = format == ScrapeFormat.Html ? "/v1/web/scrape/html" : "/v1/web/scrape/markdown";
+        // Context.dev's web endpoints are GET with the url as a query param — NOT POST with a JSON
+        // body. Posting returned "API you have tried to access does not exist", which silently routed
+        // every scrape to the Cloudflare fallback. Verified against the live API: GET
+        // /v1/web/scrape/markdown?url=… → 200 { "success": true, "markdown": "…" }.
+        var kind = format == ScrapeFormat.Html ? "html" : "markdown";
+        var path = $"/v1/web/scrape/{kind}?url={Uri.EscapeDataString(url)}";
 
         try
         {
-            using var doc = await PostAsync(path, new { url }, cancellationToken).ConfigureAwait(false);
+            using var doc = await GetAsync(path, cancellationToken).ConfigureAwait(false);
             var root = doc.RootElement;
 
             var content = FirstString(root, "markdown", "html", "content", "text", "data") ?? string.Empty;
@@ -112,10 +117,11 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
         return root.Clone();
     }
 
-    /// <summary>Enriches a domain into a brand profile.</summary>
+    /// <summary>Enriches a domain into a brand profile (GET /v1/brand/retrieve?domain=…).</summary>
     public async Task<BrandProfile> GetBrandAsync(string domain, CancellationToken cancellationToken = default)
     {
-        using var doc = await PostAsync("/v1/brand", new { domain }, cancellationToken).ConfigureAwait(false);
+        using var doc = await GetAsync($"/v1/brand/retrieve?domain={Uri.EscapeDataString(domain)}", cancellationToken)
+            .ConfigureAwait(false);
         var root = doc.RootElement;
         if (root.TryGetProperty("data", out var data))
         {
@@ -185,6 +191,17 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
 
         return pages;
     }
+
+    /// <summary>GET helper — Context.dev's web/brand endpoints take query params with a Bearer token.</summary>
+    private async Task<JsonDocument> GetAsync(string pathAndQuery, CancellationToken cancellationToken) =>
+        await SendJsonAsync(
+            () =>
+            {
+                var req = new HttpRequestMessage(HttpMethod.Get, pathAndQuery);
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+                return req;
+            },
+            cancellationToken).ConfigureAwait(false);
 
     private async Task<JsonDocument> PostAsync(string path, object body, CancellationToken cancellationToken) =>
         await SendJsonAsync(
