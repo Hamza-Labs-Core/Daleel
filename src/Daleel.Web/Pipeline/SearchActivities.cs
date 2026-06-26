@@ -3,15 +3,17 @@ using Daleel.Agent;
 using Daleel.Core.Geo;
 using Daleel.Core.Models;
 using Daleel.Web.Events;
+using Daleel.Web.Pipeline.SubWorkflows;
 using Daleel.Web.Profiles;
 using Daleel.Web.Services;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Daleel.Web.Pipeline;
 
-// The nine steps of the search pipeline, each a discrete Elsa CodeActivity. They share the scoped
+// The eleven steps of the search pipeline, each a discrete Elsa CodeActivity. They share the scoped
 // SearchPipelineState (resolved from the activity's DI context) and delegate the heavy lifting to the
 // existing, well-tested AgentService stages — so the workflow owns orchestration without
 // reimplementing plan/gather/analyze/project. Every post-cache activity no-ops on a cache hit.
@@ -149,136 +151,154 @@ public sealed class ExtractProductsActivity : CodeActivity
     }
 }
 
-/// <summary>
-/// Step 5 — the brand/store enrichment loops. For each extracted brand and store (up to a per-kind
-/// cap) we join against saved Context.dev/Places profiles, researching on a miss. Each loop streams
-/// per-item progress so the user sees the work happening, and the verified store fields (Google
-/// rating, address, phone, Maps link) flow into the rendered results.
-/// </summary>
-[Activity("Daleel", "Search", "Enrich with saved Brand/Store profiles from the database")]
-public sealed class EnrichWithProfilesActivity : CodeActivity
+// ── Steps 5–7: dispatch one sub-workflow per entity, in bounded parallel ─────────────────────────
+// The flat brand/store enrichment loop became three dispatch activities. Each fans a per-entity Elsa
+// sub-workflow (BrandResearch / StoreResearch / ItemDeepDive) out across its entities — each child in
+// its OWN DI scope (hence its own DbContext, so the fan-out is concurrency-safe) with a hard per-entity
+// timeout. The enriched entities + buffered events flow back onto the shared SearchPipelineState.
+
+/// <summary>Step 5 — research every found brand in parallel (one <see cref="BrandResearchWorkflow"/> each).</summary>
+[Activity("Daleel", "Search", "Dispatch a brand-research sub-workflow per brand, in parallel")]
+public sealed class DispatchBrandWorkflowsActivity : CodeActivity
 {
-    // Per-kind caps so a brand/store-heavy query can't fan out into unbounded research cost.
+    /// <summary>Cap so a brand-heavy query can't fan out into unbounded research cost.</summary>
     private const int MaxBrands = 15;
+
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    {
+        var state = context.GetRequiredService<SearchPipelineState>();
+        if (state.FromCache || state.Products is not { Brands.Count: > 0 } products)
+        {
+            return;
+        }
+
+        var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
+        var dispatched = products.Brands.Take(MaxBrands).ToList();
+        var rest = products.Brands.Skip(MaxBrands).ToList();
+
+        // Advance the stepper to the brand-profile phase (PR #10's animation) before fanning out.
+        state.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", dispatched.Count, products.Stores.Count);
+        var results = await SubWorkflowDispatcher
+            .RunManyAsync<BrandResearchWorkflow, BrandResearchState, BrandInfo>(
+                scopeFactory, dispatched,
+                (s, brand) =>
+                {
+                    s.Agent = state.Agent;
+                    s.Geo = state.Geo;
+                    s.SearchId = state.SearchId;
+                    s.Progress = state.Progress;
+                    s.Brand = brand;
+                    s.Result = brand;
+                },
+                SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
+
+        var merged = results.Select(r => r.Result).Concat(rest).ToList();
+        foreach (var r in results)
+        {
+            state.Events.AddRange(r.Events);
+        }
+
+        state.Products = products with { Brands = merged };
+        var enriched = merged.Count(b => b.Reputation is not null);
+        if (enriched > 0)
+        {
+            state.Log($"Enriched {enriched} brand(s).");
+        }
+    }
+}
+
+/// <summary>Step 6 — research every found store in parallel (one <see cref="StoreResearchWorkflow"/> each).</summary>
+[Activity("Daleel", "Search", "Dispatch a store-research sub-workflow per store, in parallel")]
+public sealed class DispatchStoreWorkflowsActivity : CodeActivity
+{
+    /// <summary>Cap so a store-heavy query can't fan out into unbounded research cost.</summary>
     private const int MaxStores = 10;
 
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
-        if (state.FromCache || state.Products is null)
+        if (state.FromCache || state.Products is not { Stores.Count: > 0 } products)
         {
             return;
         }
 
-        var brandSvc = context.GetRequiredService<IBrandProfileService>();
-        var storeSvc = context.GetRequiredService<IStoreProfileService>();
-        var ct = context.CancellationToken;
-        var products = state.Products;
+        var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
+        var dispatched = products.Stores.Take(MaxStores).ToList();
+        var rest = products.Stores.Skip(MaxStores).ToList();
 
-        var brandsToBuild = Math.Min(products.Brands.Count, MaxBrands);
-        var storesToBuild = Math.Min(products.Stores.Count, MaxStores);
-        if (brandsToBuild + storesToBuild > 0)
+        // Advance the stepper to the store-verification phase (PR #10's animation) before fanning out.
+        state.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", dispatched.Count);
+        var results = await SubWorkflowDispatcher
+            .RunManyAsync<StoreResearchWorkflow, StoreResearchState, StoreInfo>(
+                scopeFactory, dispatched,
+                (s, store) =>
+                {
+                    s.Agent = state.Agent;
+                    s.Geo = state.Geo;
+                    s.SearchId = state.SearchId;
+                    s.Progress = state.Progress;
+                    s.Store = store;
+                    s.Result = store;
+                },
+                SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
+
+        var merged = results.Select(r => r.Result).Concat(rest).ToList();
+        foreach (var r in results)
         {
-            state.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", brandsToBuild, storesToBuild);
+            state.Events.AddRange(r.Events);
         }
 
-        // ── Brand loop ──────────────────────────────────────────────────────────
-        var brands = new List<BrandInfo>(products.Brands.Count);
-        foreach (var (b, i) in products.Brands.Select((b, i) => (b, i)))
+        state.Products = products with { Stores = merged };
+        var verified = merged.Count(s => s.Rating is not null);
+        if (verified > 0)
         {
-            Data.Brand? saved = null;
-            if (i < MaxBrands)
-            {
-                state.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingBrand", b.Name);
-                saved = await SafeGetBrand(brandSvc, b.Name, state.Geo, ct);
-                state.RecordEvent(EventCategory.Profile, "profile.brand", "profile",
-                    success: saved is not null,
-                    metadata: new Dictionary<string, object?> { ["name"] = b.Name, ["found"] = saved is not null });
-            }
-
-            brands.Add(saved is null
-                ? b
-                : b with { Reputation = b.Reputation ?? ToReputation(saved), Url = b.Url ?? saved.Website });
-        }
-
-        // ── Store loop ──────────────────────────────────────────────────────────
-        var stores = new List<StoreInfo>(products.Stores.Count);
-        var verified = 0;
-        foreach (var (s, i) in products.Stores.Select((s, i) => (s, i)))
-        {
-            Data.Store? saved = null;
-            if (i < MaxStores)
-            {
-                state.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", s.Name);
-                saved = await SafeGetStore(storeSvc, s.Name, state.Geo, ct);
-                state.RecordEvent(EventCategory.Profile, "profile.store", "profile",
-                    success: saved is not null,
-                    metadata: new Dictionary<string, object?>
-                    {
-                        ["name"] = s.Name,
-                        ["found"] = saved is not null,
-                        ["verified"] = saved?.IsVerified ?? false
-                    });
-            }
-
-            if (saved is null)
-            {
-                stores.Add(s);
-                continue;
-            }
-
-            if (saved.IsVerified)
-            {
-                verified++;
-            }
-
-            // Prefer the live result's own fields; backfill from the verified profile (Google data first).
-            stores.Add(s with
-            {
-                Rating = s.Rating ?? saved.GoogleRating ?? saved.Rating,
-                ReviewCount = s.ReviewCount ?? saved.GoogleReviewCount,
-                Address = s.Address ?? saved.Address ?? saved.Location,
-                Phone = s.Phone ?? saved.Phone,
-                Latitude = s.Latitude ?? saved.Latitude,
-                Longitude = s.Longitude ?? saved.Longitude,
-                Url = s.Url ?? saved.Website ?? saved.GoogleMapsUrl
-            });
-        }
-
-        state.Products = products with { Brands = brands, Stores = stores };
-
-        var enriched = brands.Count(b => b.Reputation is not null);
-        if (enriched > 0 || verified > 0)
-        {
-            state.Report(SearchStep.FindingStores, "Progress.Msg.Enriched", enriched, verified);
+            state.Log($"Verified {verified} store(s) on Google Maps.");
         }
     }
+}
 
-    private static async Task<Data.Brand?> SafeGetBrand(
-        IBrandProfileService svc, string name, string geo, CancellationToken ct)
+/// <summary>Step 7 — deep-dive every found product/model in parallel (one <see cref="ItemDeepDiveWorkflow"/> each).</summary>
+[Activity("Daleel", "Search", "Dispatch an item deep-dive sub-workflow per product/model, in parallel")]
+public sealed class DispatchItemWorkflowsActivity : CodeActivity
+{
+    /// <summary>Cap so a model-heavy query can't fan out into unbounded scrape cost.</summary>
+    private const int MaxItems = 20;
+
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
-        try { return await svc.GetOrCreateAsync(name, geo, ct); }
-        catch (OperationCanceledException) { throw; }
-        catch { return null; }
+        var state = context.GetRequiredService<SearchPipelineState>();
+        if (state.FromCache || !state.IsProductQuery || state.Products is not { Models.Count: > 0 } products)
+        {
+            return;
+        }
+
+        var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
+        var dispatched = products.Models.Take(MaxItems).ToList();
+        var rest = products.Models.Skip(MaxItems).ToList();
+
+        state.Log($"Deep-diving {dispatched.Count} product(s) in parallel…");
+        var results = await SubWorkflowDispatcher
+            .RunManyAsync<ItemDeepDiveWorkflow, ItemDeepDiveState, ProductModel>(
+                scopeFactory, dispatched,
+                (s, model) =>
+                {
+                    s.Agent = state.Agent;
+                    s.Geo = state.Geo;
+                    s.SearchId = state.SearchId;
+                    s.Progress = state.Progress;
+                    s.Model = model;
+                    s.Result = model;
+                },
+                SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
+
+        var merged = results.Select(r => r.Result).Concat(rest).ToList();
+        foreach (var r in results)
+        {
+            state.Events.AddRange(r.Events);
+        }
+
+        state.Products = products with { Models = merged };
     }
-
-    private static async Task<Data.Store?> SafeGetStore(
-        IStoreProfileService svc, string name, string geo, CancellationToken ct)
-    {
-        try { return await svc.GetOrCreateAsync(name, geo, ct); }
-        catch (OperationCanceledException) { throw; }
-        catch { return null; }
-    }
-
-    /// <summary>Maps a saved 0–10 brand profile onto the UI's 1–5 <see cref="BrandReputation"/> shape.</summary>
-    private static BrandReputation ToReputation(Data.Brand saved) => new()
-    {
-        Brand = saved.Name,
-        Score = saved.ReputationScore is { } r ? Math.Clamp(r / 2.0, 0, 5) : null,
-        Pros = saved.Pros,
-        Complaints = saved.Cons,
-        Summary = saved.Description
-    };
 }
 
 /// <summary>Step 6 — assemble the final answer object from the summary, bundle and (enriched) products.</summary>
