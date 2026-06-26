@@ -34,7 +34,10 @@
                     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-4">@ErrorMessage</MudAlert>
                 }
 
-                <form method="post" action="/auth/login">
+                @* data-enhance="false": real full-page POST so the antiforgery token + auth cookie
+                   round-trip correctly on the first submit (Blazor enhanced-nav would fetch it and
+                   desync the token — the "works the second time" bug). *@
+                <form method="post" action="/auth/login" data-enhance="false">
                     <AntiforgeryToken />
                     <input type="hidden" name="returnUrl" value="@ReturnUrl" />
 

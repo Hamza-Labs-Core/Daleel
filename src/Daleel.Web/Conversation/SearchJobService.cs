@@ -107,30 +107,12 @@ public sealed class SearchJobService : BackgroundService
             await _broadcaster.CompletedAsync(job.UserId, job.Id, "completed", result.ResultJson, result.ResultType, null);
 
             // Progressive enrichment: base results are already on screen — now deep-dive each item
-            // (official-brand-site specs via Context.dev, price comparison) and stream the refreshed
-            // result so the UI fills specs in place. Self-contained: its failure must never flip the
-            // already-delivered result to an error.
-            try
-            {
-                var enriched = await runner.EnrichAsync(job, result, Progress, cts.Token);
-                if (enriched is not null)
-                {
-                    job.ResultJson = enriched.ResultJson;
-                    await db.SaveChangesAsync(stoppingToken);
-                    await convos.CompleteAsync(
-                        job.UserId, "completed", enriched.ResultJson, enriched.ResultType,
-                        DateTimeOffset.UtcNow, stoppingToken);
-                    await _broadcaster.EnrichedAsync(job.UserId, job.Id, enriched.ResultJson, enriched.ResultType);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Cancelled mid-enrichment — the base result was already delivered; nothing to undo.
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Enrichment failed for job {JobId} (base result already delivered)", job.Id);
-            }
+            // (official-brand-site specs via Context.dev) and stream the refreshed result so the UI
+            // fills specs in place. DETACHED on purpose: it must never block this worker from picking
+            // up the next queued search, so a slow/hanging scrape can't make subsequent searches
+            // "stuck". Runs in its own DI scope with a hard timeout; failures are swallowed (the base
+            // result is already delivered).
+            _ = EnrichInBackgroundAsync(job.Id, job.UserId, result);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
         {
@@ -150,6 +132,55 @@ public sealed class SearchJobService : BackgroundService
         finally
         {
             _queue.Unregister(job.Id);
+        }
+    }
+
+    /// <summary>Hard ceiling on the detached enrichment pass so a hung scrape can't leak a worker.</summary>
+    private static readonly TimeSpan EnrichTimeout = TimeSpan.FromSeconds(45);
+
+    /// <summary>
+    /// Runs the post-result item deep-dive OFF the worker loop, in its own DI scope and under a hard
+    /// timeout, then streams the enriched result. Fire-and-forget: never awaited by the job processor,
+    /// so it can't block the queue; all failures are logged and swallowed.
+    /// </summary>
+    private async Task EnrichInBackgroundAsync(int jobId, string userId, SearchRunResult baseResult)
+    {
+        using var timeout = new CancellationTokenSource(EnrichTimeout);
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var runner = sp.GetRequiredService<ISearchRunner>();
+            var db = sp.GetRequiredService<DaleelDbContext>();
+            var convos = sp.GetRequiredService<IConversationStore>();
+
+            var job = await db.SearchJobs.FirstOrDefaultAsync(j => j.Id == jobId, timeout.Token);
+            if (job is null)
+            {
+                return;
+            }
+
+            void Progress(string message) => _ = _broadcaster.ProgressAsync(userId, jobId, message);
+
+            var enriched = await runner.EnrichAsync(job, baseResult, Progress, timeout.Token);
+            if (enriched is null)
+            {
+                return; // nothing changed — no UI update
+            }
+
+            job.ResultJson = enriched.ResultJson;
+            await db.SaveChangesAsync(timeout.Token);
+            await convos.CompleteAsync(
+                userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+            await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
+        }
+        catch (OperationCanceledException)
+        {
+            // Timed out or cancelled — the base result is already on screen; nothing to undo.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Background enrichment failed for job {JobId}", jobId);
         }
     }
 

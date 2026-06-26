@@ -65,18 +65,24 @@
             </MudPaper>
         }
 
-        @* While the search runs we stream a live, human-friendly log of what each step is doing
-           (analyzing → gathering → extracting → verifying stores → ranking) so the user sees real
-           progress, not just a spinner. The cancel control sits above the log. *@
+        @* A single, smoothly-animated status line that updates in place as the pipeline moves through
+           its stages (analyzing → searching → extracting → verifying → ranking) — not a scrolling log.
+           The @key re-renders the line on each new message, replaying the cross-fade animation. *@
         @if (_status == "running")
         {
-            <div class="d-flex align-center mb-2">
-                <MudText Typo="Typo.subtitle2">@L["Search.Searching"]</MudText>
-                <MudSpacer />
-                <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
-                           OnClick="CancelAsync">@L["Search.Cancel"]</MudButton>
-            </div>
-            <ProgressLog Busy="true" Lines="_progress" />
+            <MudPaper Class="pa-4 mb-3 daleel-card" Outlined="true" Elevation="0">
+                <div class="d-flex align-center gap-3">
+                    <span class="daleel-status-pulse"></span>
+                    <div style="flex:1;min-width:0;">
+                        @{ var _line = _progress.Count > 0 ? _progress[^1] : (string)L["Search.Searching"]; }
+                        <MudText Typo="Typo.subtitle2" Style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                            <span class="daleel-status-line" @key="_line">@_line</span>
+                        </MudText>
+                    </div>
+                    <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
+                               OnClick="CancelAsync">@L["Search.Cancel"]</MudButton>
+                </div>
+            </MudPaper>
         }
 
         @* No raw status/error metadata: a search that yields nothing shows a neutral empty state.
