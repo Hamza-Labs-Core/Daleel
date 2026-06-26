@@ -208,7 +208,7 @@
             "moderate" => FilterStrictness.Moderate,
             _ => FilterStrictness.Strict
         };
-        _blurImages = (await Store.GetAsync("img.blur") ?? "1") != "0";
+        _blurImages = (await Store.GetAsync("img.blur") ?? "0") != "0";
         _haramBlurPrompt = (await Store.GetAsync("img.haramblur_prompt") ?? "1") != "0";
         _trustedDomains = (await Store.GetAsync("img.trusted") ?? string.Empty)
             .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
