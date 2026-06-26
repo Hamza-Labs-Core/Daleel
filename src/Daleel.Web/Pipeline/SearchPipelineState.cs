@@ -55,7 +55,18 @@ public sealed class SearchPipelineState
 
     public bool IsProductQuery => Strategy?.QueryType == QueryType.ProductResearch;
 
+    /// <summary>Emits a plain, step-less progress line (used for non-localized/legacy text).</summary>
     public void Log(string message) => Progress?.Invoke(message);
+
+    /// <summary>
+    /// Emits a structured progress signal: advances the UI stepper to <paramref name="step"/> and
+    /// supplies a localization <paramref name="key"/> (+ optional format args) the client resolves in
+    /// the viewer's own culture. Encoded into the same string channel — see <see cref="SearchProgressSignal"/>.
+    /// An arg of the form <c>$Some.Resource.Key</c> tells the client to localize that arg before
+    /// formatting (used for the query-type noun, which is itself translatable).
+    /// </summary>
+    public void Report(SearchStep step, string key, params object?[] args) =>
+        Progress?.Invoke(SearchProgressSignal.Encode(step, key, args));
 
     /// <summary>Buffers a categorized pipeline event (cache/profile/…) for the event store.</summary>
     public void RecordEvent(

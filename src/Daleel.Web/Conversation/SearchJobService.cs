@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Daleel.Web.Data;
+using Daleel.Web.Pipeline;
 using Microsoft.EntityFrameworkCore;
 
 namespace Daleel.Web.Conversation;
@@ -67,10 +68,13 @@ public sealed class SearchJobService : BackgroundService
         var now = DateTimeOffset.UtcNow;
         job.Status = JobStatus.Running;
         job.StartedAt = now;
-        job.ProgressMessage = "🔍 Generating search strategy…";
+        job.ProgressMessage = "🔍 Generating search strategy…"; // plain English for the server-side job row
         await db.SaveChangesAsync(stoppingToken);
         await convos.SetRunningAsync(job.UserId, job.Id, job.Query, now, stoppingToken);
-        await _broadcaster.ProgressAsync(job.UserId, job.Id, job.ProgressMessage);
+        // Broadcast a structured signal so every device localizes the first line and the stepper lights
+        // up step 1 immediately (before the first activity reports in).
+        await _broadcaster.ProgressAsync(
+            job.UserId, job.Id, SearchProgressSignal.Encode(SearchStep.Analyzing, "Progress.Msg.Strategy"));
 
         var sw = Stopwatch.StartNew();
         try

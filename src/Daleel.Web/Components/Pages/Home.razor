@@ -65,24 +65,11 @@
             </MudPaper>
         }
 
-        @* A single, smoothly-animated status line that updates in place as the pipeline moves through
-           its stages (analyzing → searching → extracting → verifying → ranking) — not a scrolling log.
-           The @key re-renders the line on each new message, replaying the cross-fade animation. *@
+        @* The animated workflow stepper + live activity feed. Each streamed progress line decodes into
+           a step + localized message, so the stepper advances stage-by-stage while the feed narrates. *@
         @if (_status == "running")
         {
-            <MudPaper Class="pa-4 mb-3 daleel-card" Outlined="true" Elevation="0">
-                <div class="d-flex align-center gap-3">
-                    <span class="daleel-status-pulse"></span>
-                    <div style="flex:1;min-width:0;">
-                        @{ var _line = _progress.Count > 0 ? _progress[^1] : (string)L["Search.Searching"]; }
-                        <MudText Typo="Typo.subtitle2" Style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-                            <span class="daleel-status-line" @key="_line">@_line</span>
-                        </MudText>
-                    </div>
-                    <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
-                               OnClick="CancelAsync">@L["Search.Cancel"]</MudButton>
-                </div>
-            </MudPaper>
+            <SearchProgress Messages="_progress" Active="true" OnCancel="CancelAsync" />
         }
 
         @* No raw status/error metadata: a search that yields nothing shows a neutral empty state.
@@ -111,30 +98,34 @@
 
         @* Results render as a structured product list (with stores/brands/reviews secondary).
            No text-summary paragraph — the data speaks for itself. *@
+        @* @key on the query makes the whole block remount when a new search completes, so the
+           staggered reveal animation replays for each fresh result set rather than only the first. *@
         @if (_status == "completed" && _answer is not null)
         {
-            @if (_enriching)
-            {
-                <div class="d-flex align-center mb-2">
-                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Search.FetchingSpecs"]</MudText>
-                </div>
-            }
-            @if (_answer.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
-            {
-                <AdaptiveResults Result="products" />
-            }
-            else
-            {
-                <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
-                    <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
-                    <MudText Typo="Typo.subtitle1" Align="Align.Center">@L["Home.NoResults.Title"]</MudText>
-                    <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-1">
-                        @L["Home.NoResults.Hint"]
-                    </MudText>
-                </MudPaper>
-            }
-            <SourceChips Sources="_answer.Research.Sources" />
+            <div class="daleel-results-reveal" @key="_query">
+                @if (_enriching)
+                {
+                    <div class="d-flex align-center mb-2">
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Search.FetchingSpecs"]</MudText>
+                    </div>
+                }
+                @if (_answer.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
+                {
+                    <AdaptiveResults Result="products" />
+                }
+                else
+                {
+                    <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
+                        <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                        <MudText Typo="Typo.subtitle1" Align="Align.Center">@L["Home.NoResults.Title"]</MudText>
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-1">
+                            @L["Home.NoResults.Hint"]
+                        </MudText>
+                    </MudPaper>
+                }
+                <SourceChips Sources="_answer.Research.Sources" />
+            </div>
         }
 
         <!-- Chat input -->
@@ -305,7 +296,8 @@
         _error = null;
         _answer = null;
         _progress.Clear();
-        _progress.Add("🔍 Generating search strategy…");
+        // Encoded so SearchProgress localizes it and lights up the first stepper stage immediately.
+        _progress.Add(SearchProgressSignal.Encode(SearchStep.Analyzing, "Progress.Msg.Strategy"));
     }
 
     private async Task CancelAsync()

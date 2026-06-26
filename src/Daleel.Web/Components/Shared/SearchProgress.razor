@@ -1,0 +1,170 @@
+@* Polished, animated search-progress UI. Renders a horizontal stepper that tracks the Elsa search
+   workflow stage-by-stage, a proportional progress bar, and a live activity feed of localized
+   status lines. Driven entirely by the encoded progress strings streamed from SearchPipelineState —
+   each message decodes into a SearchProgressSignal (step + localization key + args); anything that
+   isn't an encoded signal is shown as a plain feed line. See SearchProgressSignal. *@
+@inject IStringLocalizer<SharedResource> L
+
+<MudPaper Class="pa-4 mb-3 daleel-card daleel-progress" Outlined="true" Elevation="0" aria-live="polite">
+
+    @* ── Header: pulsing dot + current stage chip + cancel ─────────────────────── *@
+    <div class="d-flex align-center gap-3 mb-3">
+        @if (Active)
+        {
+            <span class="daleel-status-pulse"></span>
+        }
+        <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
+                 Icon="@Steps[_current].Icon" Class="daleel-stage-chip">
+            @L[Steps[_current].LabelKey]
+        </MudChip>
+        <MudSpacer />
+        @if (OnCancel.HasDelegate)
+        {
+            <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
+                       OnClick="OnCancel">@L["Search.Cancel"]</MudButton>
+        }
+    </div>
+
+    @* ── Horizontal stepper ────────────────────────────────────────────────────── *@
+    <div class="daleel-stepper" role="list">
+        @for (var i = 0; i < Steps.Length; i++)
+        {
+            var state = i < _current ? "done" : i == _current ? "active" : "pending";
+            <div class="daleel-step @state" role="listitem" title="@L[Steps[i].LabelKey]">
+                <div class="daleel-step-icon">
+                    @if (i < _current)
+                    {
+                        <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="daleel-step-check" />
+                    }
+                    else
+                    {
+                        <MudIcon Icon="@Steps[i].Icon" Size="Size.Small" />
+                    }
+                </div>
+                <div class="daleel-step-label">@L[Steps[i].LabelKey]</div>
+            </div>
+        }
+    </div>
+
+    @* ── Proportional progress bar ─────────────────────────────────────────────── *@
+    <MudProgressLinear Color="Color.Primary" Rounded="true" Value="@_percent"
+                       Class="daleel-progress-bar my-3" Style="height:6px;" />
+
+    @* ── Live activity feed (newest at the bottom) ─────────────────────────────── *@
+    @if (_feed.Count > 0)
+    {
+        <MudTimeline TimelinePosition="TimelinePosition.Start" TimelineOrientation="TimelineOrientation.Vertical"
+                     Class="daleel-feed">
+            @foreach (var line in _feed)
+            {
+                @* Key by the stable stream id (not the text) so a brand-new line animates in while the
+                   existing lines keep their elements — and duplicate texts never collide on a key. *@
+                <MudTimelineItem @key="line.Id" Size="Size.Small"
+                                 Color="@(line.IsLast ? Color.Primary : Color.Default)"
+                                 Variant="@(line.IsLast ? Variant.Filled : Variant.Outlined)">
+                    <MudText Typo="Typo.body2"
+                             Color="@(line.IsLast ? Color.Default : Color.Secondary)"
+                             dir="@Catalog.Dir(line.Text)">
+                        <span class="daleel-feed-line">@line.Text</span>
+                    </MudText>
+                </MudTimelineItem>
+            }
+        </MudTimeline>
+    }
+</MudPaper>
+
+@code {
+    /// <summary>The raw progress strings streamed so far (encoded signals and/or plain lines).</summary>
+    [Parameter] public IReadOnlyList<string> Messages { get; set; } = Array.Empty<string>();
+
+    /// <summary>Whether the search is still running (controls the active-step glow vs. a settled view).</summary>
+    [Parameter] public bool Active { get; set; } = true;
+
+    /// <summary>Invoked when the user hits Cancel. When unset, the Cancel button is hidden.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    // How many recent lines to keep in the live feed — enough to show momentum, not a wall of text.
+    private const int FeedWindow = 5;
+
+    private int _current;       // index into Steps of the furthest stage reached
+    private int _percent;       // progress-bar fill (0–100)
+    private readonly List<FeedLine> _feed = new();
+
+    // Id is the line's stable position in the full message stream, used as the @key.
+    private readonly record struct FeedLine(int Id, string Text, bool IsLast);
+
+    // Stepper definition. The order matches the pipeline's real execution order, so the stepper only
+    // ever moves forward. Icons/labels follow the product spec.
+    private readonly StepDef[] Steps =
+    {
+        new(SearchStep.Analyzing,          Icons.Material.Filled.Search,        "Progress.Step.Analyzing"),
+        new(SearchStep.CheckingVault,      Icons.Material.Filled.Inventory2,    "Progress.Step.Vault"),
+        new(SearchStep.SearchingWeb,       Icons.Material.Filled.Public,        "Progress.Step.Web"),
+        new(SearchStep.ExtractingProducts, Icons.Material.Filled.Sell,          "Progress.Step.Extract"),
+        new(SearchStep.BuildingProfiles,   Icons.Material.Filled.StarBorder,    "Progress.Step.Profiles"),
+        new(SearchStep.FindingStores,      Icons.Material.Filled.Storefront,    "Progress.Step.Stores"),
+        new(SearchStep.ComparingPrices,    Icons.Material.Filled.BarChart,      "Progress.Step.Compare"),
+        new(SearchStep.Done,               Icons.Material.Filled.CheckCircle,   "Progress.Step.Done"),
+    };
+
+    private readonly record struct StepDef(SearchStep Step, string Icon, string LabelKey);
+
+    // Recompute step + feed from the message list on every render trigger. Cheap (≤ a few dozen lines)
+    // and keeps this component a pure projection of its inputs — no event wiring of its own.
+    protected override void OnParametersSet()
+    {
+        var reached = 0;
+        _feed.Clear();
+        var lines = new List<(int Id, string Text)>();
+
+        // The message index is a stable, monotonic id for each line in the stream.
+        for (var id = 0; id < Messages.Count; id++)
+        {
+            var msg = Messages[id];
+            string text;
+            if (SearchProgressSignal.TryDecode(msg, out var sig))
+            {
+                reached = Math.Max(reached, (int)sig.Step);
+                text = Localize(sig);
+            }
+            else
+            {
+                // A plain (non-encoded) line — the agent's own diagnostics. Show it as-is, no step move.
+                text = msg;
+            }
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                lines.Add((id, text));
+            }
+        }
+
+        _current = Math.Clamp(reached, 0, Steps.Length - 1);
+        // +1 so the very first stage already shows a sliver of fill; Done lands on a full bar.
+        _percent = (int)Math.Round((_current + 1) / (double)Steps.Length * 100);
+
+        var start = Math.Max(0, lines.Count - FeedWindow);
+        for (var i = start; i < lines.Count; i++)
+        {
+            _feed.Add(new FeedLine(lines[i].Id, lines[i].Text, IsLast: i == lines.Count - 1));
+        }
+    }
+
+    // Resolve a signal's text in the viewer's culture. An arg of the form "$Resource.Key" is itself a
+    // resource key (e.g. the query-type noun) and is localized before being formatted into the line.
+    private string Localize(SearchProgressSignal sig)
+    {
+        if (sig.Args.Count == 0)
+        {
+            return L[sig.Key];
+        }
+
+        var args = new object[sig.Args.Count];
+        for (var i = 0; i < sig.Args.Count; i++)
+        {
+            var a = sig.Args[i];
+            args[i] = a.Length > 0 && a[0] == '$' ? L[a[1..]].Value : a;
+        }
+        return L[sig.Key, args];
+    }
+}

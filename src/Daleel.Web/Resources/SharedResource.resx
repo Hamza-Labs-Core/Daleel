@@ -289,6 +289,45 @@
 
   <data name="Progress.Researching" xml:space="preserve"><value>Daleel is researching…</value></data>
   <data name="Progress.Complete" xml:space="preserve"><value>Research complete</value></data>
+  <!-- Search progress stepper labels (SearchProgress.razor) -->
+  <data name="Progress.Step.Analyzing" xml:space="preserve"><value>Analyzing query</value></data>
+  <data name="Progress.Step.Vault" xml:space="preserve"><value>Checking vault</value></data>
+  <data name="Progress.Step.Web" xml:space="preserve"><value>Searching web</value></data>
+  <data name="Progress.Step.Extract" xml:space="preserve"><value>Extracting products</value></data>
+  <data name="Progress.Step.Profiles" xml:space="preserve"><value>Building profiles</value></data>
+  <data name="Progress.Step.Stores" xml:space="preserve"><value>Finding stores</value></data>
+  <data name="Progress.Step.Compare" xml:space="preserve"><value>Comparing prices</value></data>
+  <data name="Progress.Step.Done" xml:space="preserve"><value>Done</value></data>
+  <!-- Query-type nouns slotted into the "Looking for {0}" line -->
+  <data name="Progress.Noun.Products" xml:space="preserve"><value>products</value></data>
+  <data name="Progress.Noun.Brand" xml:space="preserve"><value>brand info</value></data>
+  <data name="Progress.Noun.Stores" xml:space="preserve"><value>stores</value></data>
+  <data name="Progress.Noun.Deals" xml:space="preserve"><value>deals</value></data>
+  <data name="Progress.Noun.Opinions" xml:space="preserve"><value>opinions</value></data>
+  <data name="Progress.Noun.Comparison" xml:space="preserve"><value>a comparison</value></data>
+  <data name="Progress.Noun.Answers" xml:space="preserve"><value>answers</value></data>
+  <!-- Live activity-feed messages -->
+  <data name="Progress.Msg.Strategy" xml:space="preserve"><value>Generating search strategy…</value></data>
+  <data name="Progress.Msg.Analyzing" xml:space="preserve"><value>Analyzing your request…</value></data>
+  <data name="Progress.Msg.Market" xml:space="preserve"><value>Focusing on the {0} market…</value></data>
+  <data name="Progress.Msg.LookingFor" xml:space="preserve"><value>Looking for {0}: {1}</value></data>
+  <data name="Progress.Msg.Vault" xml:space="preserve"><value>Checking our answers vault…</value></data>
+  <data name="Progress.Msg.CacheHit" xml:space="preserve"><value>⚡ Loaded from cache — an identical search ran recently.</value></data>
+  <data name="Progress.Msg.Expanding" xml:space="preserve"><value>Expanding the search across providers…</value></data>
+  <data name="Progress.Msg.Gathered" xml:space="preserve"><value>Gathered {0} web, {1} shopping and {2} store sources.</value></data>
+  <data name="Progress.Msg.Reading" xml:space="preserve"><value>Found {0} sources — reading and extracting…</value></data>
+  <data name="Progress.Msg.Identifying" xml:space="preserve"><value>Identifying brands and models…</value></data>
+  <data name="Progress.Msg.Extracted" xml:space="preserve"><value>Extracted {0} product(s) from {1} brand(s).</value></data>
+  <data name="Progress.Msg.BuildingProfiles" xml:space="preserve"><value>Building profiles for {0} brand(s) and {1} store(s)…</value></data>
+  <data name="Progress.Msg.BuildingBrand" xml:space="preserve"><value>Building profile for {0}…</value></data>
+  <data name="Progress.Msg.VerifyingStore" xml:space="preserve"><value>Verifying {0} on Google Maps…</value></data>
+  <data name="Progress.Msg.Enriched" xml:space="preserve"><value>Enriched {0} brand(s); verified {1} store(s) on Google Maps.</value></data>
+  <data name="Progress.Msg.Ranking" xml:space="preserve"><value>Ranking {0} product(s) from {1} brand(s)…</value></data>
+  <data name="Progress.Msg.Reviewing" xml:space="preserve"><value>Reviewing content quality…</value></data>
+  <data name="Progress.Msg.Saving" xml:space="preserve"><value>Saving results…</value></data>
+  <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>Loaded a saved answer.</value></data>
+  <data name="Progress.Msg.DoneCount" xml:space="preserve"><value>Done! Found {0} product(s) from {1} brand(s).</value></data>
+  <data name="Progress.Msg.Done" xml:space="preserve"><value>Done!</value></data>
 
   <data name="Sources.Label" xml:space="preserve"><value>Sources</value></data>
 

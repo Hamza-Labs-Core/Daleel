@@ -30,12 +30,24 @@ public class SearchWorkflowTests
     {
         var cache = new InMemoryCache();
         using var provider = BuildProvider(cache);
-        var state = await RunAsync(provider, cache, query: "tell me about tea", resultKey: "k1");
+        var progress = new List<string>();
+        var state = await RunAsync(provider, cache, query: "tell me about tea", resultKey: "k1", progress.Add);
 
         state.FromCache.Should().BeFalse();
         state.ResultJson.Should().NotBeNullOrEmpty();
         state.ResultJson.Should().Contain("tea", "the answer echoes the question");
         (await cache.GetAsync("k1")).Should().NotBeNull("the workflow caches the completed report");
+
+        // The pipeline must stream structured progress the SearchProgress UI can decode: the run starts
+        // on the Analyzing step and ends on Done.
+        var signals = progress
+            .Select(m => SearchProgressSignal.TryDecode(m, out var s) ? s : (SearchProgressSignal?)null)
+            .Where(s => s is not null)
+            .Select(s => s!.Value)
+            .ToList();
+        signals.Should().NotBeEmpty("activities emit encoded progress signals");
+        signals.First().Step.Should().Be(SearchStep.Analyzing);
+        signals.Should().Contain(s => s.Step == SearchStep.Done, "the run reports completion");
     }
 
     [Fact]
@@ -58,7 +70,7 @@ public class SearchWorkflowTests
     // ── Harness ──────────────────────────────────────────────────────────────────
 
     private static async Task<SearchPipelineState> RunAsync(
-        ServiceProvider provider, ICacheStore cache, string query, string resultKey)
+        ServiceProvider provider, ICacheStore cache, string query, string resultKey, Action<string>? progress = null)
     {
         using var scope = provider.CreateScope();
         var state = scope.ServiceProvider.GetRequiredService<SearchPipelineState>();
@@ -67,6 +79,7 @@ public class SearchWorkflowTests
         state.Geo = "jordan";
         state.ResultKey = resultKey;
         state.Cache = cache;
+        state.Progress = progress;
 
         var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
         var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: default);
