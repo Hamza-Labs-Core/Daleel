@@ -156,7 +156,9 @@ window.daleelRenderMap = async function (elId, markers, user) {
     }
     if (bounds.length > 1) { map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 }); }
     _daleelMaps[elId] = map;
-    setTimeout(() => map.invalidateSize(), 120);
+    // The map often initializes inside a still-expanding panel; re-measure a few times so the tiles
+    // fill the container instead of leaving grey gaps (Leaflet needs invalidateSize after a resize).
+    [120, 400, 900].forEach((d) => setTimeout(() => { try { map.invalidateSize(); } catch (e) {} }, d));
   } catch (e) {
     // Never throw back into the .NET interop call — that would tear down the Blazor circuit.
   }
