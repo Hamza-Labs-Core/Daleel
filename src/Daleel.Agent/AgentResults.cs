@@ -26,6 +26,14 @@ public sealed class AgentOptions
     public int MaxUrlsToRead { get; init; } = 3;
 
     /// <summary>
+    /// Max store/marketplace pages to deep-extract priced listings from per run. Higher than
+    /// <see cref="MaxUrlsToRead"/> because Google Shopping coverage is thin in many markets, so real
+    /// prices have to be scraped from the store pages themselves — going deeper here is what turns
+    /// "Price on site" into actual prices. Cost stays bounded by the per-job API-call cap.
+    /// </summary>
+    public int MaxListingUrls { get; init; } = 12;
+
+    /// <summary>
     /// BCP-47 language the analyst summary should be written in (e.g. "ar", "en"). Product and
     /// brand names are left untranslated. Defaults to English.
     /// </summary>

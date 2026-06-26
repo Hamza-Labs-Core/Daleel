@@ -508,7 +508,7 @@ public sealed partial class AgentService
             .Where(c => c.type is ResultType.Marketplace or ResultType.StorePage && !string.IsNullOrWhiteSpace(c.r.Url))
             .Where(c => includeIntl || LocalityClassifier.IsLocal(c.r.Url, geo.CountryCode, geo.Country))
             .Select(c => (c.r.Url!, Source: SourceName(c.r), c.type))
-            .Take(_options.MaxUrlsToRead)
+            .Take(_options.MaxListingUrls)
             .ToList();
 
         if (targets.Count == 0)
