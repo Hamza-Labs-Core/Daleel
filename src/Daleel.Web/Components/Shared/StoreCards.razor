@@ -196,6 +196,16 @@
         });
         object? user = _userLoc is { } u ? new { lat = u.Lat, lng = u.Lng } : null;
 
-        await JS.InvokeVoidAsync("daleelRenderMap", _mapId, markers, user);
+        // A map render failure (CDN blocked, JS error, or interop unavailable while statically rendered)
+        // must NEVER bubble up — an unhandled JS interop exception here would tear down the whole Blazor
+        // circuit and blank the entire results page.
+        try
+        {
+            await JS.InvokeVoidAsync("daleelRenderMap", _mapId, markers, user);
+        }
+        catch
+        {
+            // Best-effort: the store list (and Directions links) still work without the map.
+        }
     }
 }

@@ -124,6 +124,7 @@ window.daleelGetLocation = function () {
 const _daleelMaps = {};
 // Render (or re-render) a store map. markers: [{lat,lng,name,address,url}]; user: {lat,lng}|null.
 window.daleelRenderMap = async function (elId, markers, user) {
+  try {
     try {
         await _ensureLeaflet();
     } catch (e) { return; }
@@ -156,4 +157,7 @@ window.daleelRenderMap = async function (elId, markers, user) {
     if (bounds.length > 1) { map.fitBounds(bounds, { padding: [30, 30], maxZoom: 14 }); }
     _daleelMaps[elId] = map;
     setTimeout(() => map.invalidateSize(), 120);
+  } catch (e) {
+    // Never throw back into the .NET interop call — that would tear down the Blazor circuit.
+  }
 };
