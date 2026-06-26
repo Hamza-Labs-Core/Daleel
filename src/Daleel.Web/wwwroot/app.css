@@ -410,3 +410,167 @@ html, body {
     font-size: 0.8rem;
     margin-top: 4px;
 }
+
+/* ───────────────────────── Search progress (SearchProgress.razor) ─────────────────────────
+   A horizontal stepper + proportional bar + live activity feed that tracks the search workflow.
+   Kept in global app.css (not a scoped .razor.css) because the rules style MudBlazor child-component
+   internals (the progress-bar fill, timeline dots), which the scoped-CSS attribute never reaches. */
+
+.daleel-progress {
+    animation: status-flip .32s cubic-bezier(.22, .61, .36, 1) both;
+}
+
+/* The current-stage chip sitting next to the pulsing dot. */
+.daleel-stage-chip {
+    font-weight: 600;
+}
+
+/* ── Stepper ── */
+.daleel-stepper {
+    display: flex;
+    align-items: flex-start;
+    gap: 0;
+}
+
+.daleel-step {
+    flex: 1 1 0;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+}
+
+/* The connector line leading into a step. Filled (brand colour) once the step is reached. */
+.daleel-step::before {
+    content: "";
+    position: absolute;
+    top: 16px;
+    inset-inline-start: -50%;
+    width: 100%;
+    height: 2px;
+    background: var(--mud-palette-lines-default, #e0e0e0);
+    transition: background-color .4s ease;
+    z-index: 0;
+}
+.daleel-step:first-child::before { display: none; }
+.daleel-step.done::before,
+.daleel-step.active::before { background: var(--mud-palette-primary, #594ae2); }
+
+.daleel-step-icon {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--mud-palette-surface, #fff);
+    border: 2px solid var(--mud-palette-lines-default, #e0e0e0);
+    color: var(--mud-palette-text-disabled, #b0b0b0);
+    z-index: 1;
+    transition: background-color .3s ease, border-color .3s ease, color .3s ease, box-shadow .3s ease;
+}
+
+.daleel-step.done .daleel-step-icon {
+    background: var(--mud-palette-primary, #594ae2);
+    border-color: var(--mud-palette-primary, #594ae2);
+    color: #fff;
+}
+
+.daleel-step.active .daleel-step-icon {
+    border-color: var(--mud-palette-primary, #594ae2);
+    color: var(--mud-palette-primary, #594ae2);
+    animation: step-glow 1.4s ease-in-out infinite;
+}
+
+/* The checkmark that swaps in when a step completes — a quick pop/slide. */
+.daleel-step-check {
+    animation: check-pop .3s cubic-bezier(.34, 1.56, .64, 1) both;
+}
+
+.daleel-step-label {
+    margin-top: 6px;
+    font-size: .68rem;
+    line-height: 1.2;
+    text-align: center;
+    color: var(--mud-palette-text-secondary, #757575);
+    max-width: 9ch;
+    transition: color .3s ease;
+}
+.daleel-step.active .daleel-step-label {
+    color: var(--mud-palette-primary, #594ae2);
+    font-weight: 600;
+}
+.daleel-step.done .daleel-step-label {
+    color: var(--mud-palette-text-primary, #424242);
+}
+
+@keyframes step-glow {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(var(--mud-palette-primary-rgb, 89, 74, 226), .35); }
+    50%      { box-shadow: 0 0 0 6px rgba(var(--mud-palette-primary-rgb, 89, 74, 226), 0); }
+}
+
+@keyframes check-pop {
+    from { opacity: 0; transform: scale(.4) rotate(-12deg); }
+    to   { opacity: 1; transform: scale(1) rotate(0); }
+}
+
+/* ── Progress bar: smooth proportional fill ── */
+.daleel-progress-bar .mud-progress-linear-bar {
+    transition: transform .5s cubic-bezier(.22, .61, .36, 1);
+}
+
+/* ── Live activity feed ── */
+.daleel-feed {
+    padding: 0;
+    max-height: 168px;
+    overflow-y: auto;
+}
+/* Tighten MudTimeline's default vertical rhythm for a compact log. */
+.daleel-feed .mud-timeline-item { padding-bottom: 4px; }
+.daleel-feed .mud-timeline-item:last-child { min-height: auto; }
+
+.daleel-feed-line {
+    display: inline-block;
+    animation: log-in .28s ease both;
+}
+
+/* ── Result reveal: staggered fade-in of the completed result blocks ── */
+.daleel-results-reveal > * {
+    opacity: 0;
+    animation: reveal-up .45s cubic-bezier(.22, .61, .36, 1) forwards;
+}
+.daleel-results-reveal > *:nth-child(1) { animation-delay: .04s; }
+.daleel-results-reveal > *:nth-child(2) { animation-delay: .14s; }
+.daleel-results-reveal > *:nth-child(3) { animation-delay: .24s; }
+.daleel-results-reveal > *:nth-child(4) { animation-delay: .34s; }
+
+@keyframes reveal-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Mobile: keep the stepper legible on narrow screens ── */
+@media (max-width: 600px) {
+    .daleel-step-icon { width: 30px; height: 30px; }
+    .daleel-step::before { top: 14px; }
+    /* Labels would collide at phone widths — show only the active stage's label. */
+    .daleel-step-label { display: none; }
+    .daleel-step.active .daleel-step-label {
+        display: block;
+        position: absolute;
+        top: 34px;
+        white-space: nowrap;
+        max-width: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .daleel-progress,
+    .daleel-step.active .daleel-step-icon,
+    .daleel-step-check,
+    .daleel-feed-line,
+    .daleel-results-reveal > * {
+        animation: none;
+        opacity: 1;
+    }
+}

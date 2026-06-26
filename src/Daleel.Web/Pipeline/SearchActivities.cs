@@ -23,29 +23,31 @@ public sealed class ParseQueryActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
-        state.Log("Analyzing your request…");
+        state.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
         // The query itself is the strongest market signal ("AC in Dubai" → UAE), so it overrides the
         // stored/auto-detected default. Fall back to the request's geo when the query names no market.
         state.GeoProfile = GeoProfiles.DetectInText(state.Query) ?? GeoProfiles.ResolveOrDefault(state.Geo);
         state.Geo = state.GeoProfile.Key;
-        state.Log($"Focusing on the {state.GeoProfile.Country} market…");
+        state.Report(SearchStep.Analyzing, "Progress.Msg.Market", state.GeoProfile.Country);
         state.Strategy = await state.Agent.PlanAsync(
             PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken);
 
         var subject = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
-        state.Log($"Looking for {Humanize(state.Strategy.QueryType)}: {subject}");
+        // The query-type noun is itself translatable: passing it as a "$"-prefixed resource key tells
+        // the UI to localize it before slotting it into the "Looking for {0}: {1}" line.
+        state.Report(SearchStep.Analyzing, "Progress.Msg.LookingFor", "$" + NounKey(state.Strategy.QueryType), subject);
     }
 
-    /// <summary>Turns the QueryType enum into a friendly noun for the status line.</summary>
-    private static string Humanize(QueryType type) => type switch
+    /// <summary>Resource key for the friendly query-type noun, localized client-side.</summary>
+    private static string NounKey(QueryType type) => type switch
     {
-        QueryType.ProductResearch => "products",
-        QueryType.BrandLookup => "brand info",
-        QueryType.StoreFinder => "stores",
-        QueryType.DealHunter => "deals",
-        QueryType.OpinionAggregation => "opinions",
-        QueryType.Comparison => "a comparison",
-        _ => "answers"
+        QueryType.ProductResearch => "Progress.Noun.Products",
+        QueryType.BrandLookup => "Progress.Noun.Brand",
+        QueryType.StoreFinder => "Progress.Noun.Stores",
+        QueryType.DealHunter => "Progress.Noun.Deals",
+        QueryType.OpinionAggregation => "Progress.Noun.Opinions",
+        QueryType.Comparison => "Progress.Noun.Comparison",
+        _ => "Progress.Noun.Answers"
     };
 }
 
@@ -61,7 +63,7 @@ public sealed class CheckCacheActivity : CodeActivity
             return;
         }
 
-        state.Log("Checking our answers vault…");
+        state.Report(SearchStep.CheckingVault, "Progress.Msg.Vault");
         try
         {
             var payload = await state.Cache.GetAsync(state.ResultKey, context.CancellationToken);
@@ -80,7 +82,7 @@ public sealed class CheckCacheActivity : CodeActivity
                 state.FilteredCount = cached.FilteredCount;
                 state.FilteredCategories = cached.FilteredCategories ?? string.Empty;
                 state.RecordEvent(EventCategory.Cache, "cache.hit", "cache");
-                state.Log("⚡ Loaded from cache — identical search run recently.");
+                state.Report(SearchStep.CheckingVault, "Progress.Msg.CacheHit");
             }
         }
         catch (OperationCanceledException)
@@ -106,12 +108,12 @@ public sealed class GatherSourcesActivity : CodeActivity
             return;
         }
 
-        state.Log("Expanding the search across providers…");
+        state.Report(SearchStep.SearchingWeb, "Progress.Msg.Expanding");
         state.Bundle = await state.Agent.GatherAsync(state.Strategy, state.GeoProfile, context.CancellationToken);
 
         var b = state.Bundle;
-        state.Log(
-            $"Gathered {b.WebResults.Count} web, {b.ShoppingResults.Count} shopping and {b.Stores.Count} store sources.");
+        state.Report(SearchStep.SearchingWeb, "Progress.Msg.Gathered",
+            b.WebResults.Count, b.ShoppingResults.Count, b.Stores.Count);
     }
 }
 
@@ -127,21 +129,21 @@ public sealed class ExtractProductsActivity : CodeActivity
             return;
         }
 
-        state.Log($"Found {state.Bundle.Sources.Count} sources — reading and extracting…");
+        state.Report(SearchStep.ExtractingProducts, "Progress.Msg.Reading", state.Bundle.Sources.Count);
         var system = state.IsProductQuery ? PromptTemplates.ProductAnalystSystem : null;
         state.Summary = await state.Agent.AnalyzeAsync(
             state.Query, state.GeoProfile, state.Bundle, context.CancellationToken, system);
 
         if (state.IsProductQuery)
         {
-            state.Log("Identifying brands and models…");
+            state.Report(SearchStep.ExtractingProducts, "Progress.Msg.Identifying");
             var subject = state.Strategy!.Subject is { Length: > 0 } s ? s : state.Query;
             state.Products = await state.Agent.BuildProductSearchResultAsync(
                 subject, state.GeoProfile, state.Bundle, state.Summary, context.CancellationToken);
 
             if (state.Products is { } p)
             {
-                state.Log($"Extracted {p.ProductCount} product(s) from {p.BrandCount} brand(s).");
+                state.Report(SearchStep.ExtractingProducts, "Progress.Msg.Extracted", p.ProductCount, p.BrandCount);
             }
         }
     }
@@ -177,7 +179,7 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
         var storesToBuild = Math.Min(products.Stores.Count, MaxStores);
         if (brandsToBuild + storesToBuild > 0)
         {
-            state.Log($"Building profiles for {brandsToBuild} brand(s) and {storesToBuild} store(s)…");
+            state.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", brandsToBuild, storesToBuild);
         }
 
         // ── Brand loop ──────────────────────────────────────────────────────────
@@ -187,7 +189,7 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
             Data.Brand? saved = null;
             if (i < MaxBrands)
             {
-                state.Log($"Building profile for {b.Name}…");
+                state.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingBrand", b.Name);
                 saved = await SafeGetBrand(brandSvc, b.Name, state.Geo, ct);
                 state.RecordEvent(EventCategory.Profile, "profile.brand", "profile",
                     success: saved is not null,
@@ -207,7 +209,7 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
             Data.Store? saved = null;
             if (i < MaxStores)
             {
-                state.Log($"Verifying {s.Name} on Google Maps…");
+                state.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", s.Name);
                 saved = await SafeGetStore(storeSvc, s.Name, state.Geo, ct);
                 state.RecordEvent(EventCategory.Profile, "profile.store", "profile",
                     success: saved is not null,
@@ -248,7 +250,7 @@ public sealed class EnrichWithProfilesActivity : CodeActivity
         var enriched = brands.Count(b => b.Reputation is not null);
         if (enriched > 0 || verified > 0)
         {
-            state.Log($"Enriched {enriched} brand(s); verified {verified} store(s) on Google Maps.");
+            state.Report(SearchStep.FindingStores, "Progress.Msg.Enriched", enriched, verified);
         }
     }
 
@@ -307,7 +309,7 @@ public sealed class AggregateResultsActivity : CodeActivity
 
         if (state.Products is { } p)
         {
-            state.Log($"Ranking {p.ProductCount} product(s) from {p.BrandCount} brand(s)…");
+            state.Report(SearchStep.ComparingPrices, "Progress.Msg.Ranking", p.ProductCount, p.BrandCount);
         }
         return ValueTask.CompletedTask;
     }
@@ -325,7 +327,7 @@ public sealed class ModerateContentActivity : CodeActivity
             return ValueTask.CompletedTask;
         }
 
-        state.Log("Reviewing content quality…");
+        state.Report(SearchStep.ComparingPrices, "Progress.Msg.Reviewing");
         var audit = state.Agent.ContentFilter.AuditLog;
         state.FilteredCount = audit.Count;
         state.FilteredCategories = string.Join(",", audit
@@ -347,7 +349,7 @@ public sealed class CacheResultsActivity : CodeActivity
             return;
         }
 
-        state.Log("Saving results…");
+        state.Report(SearchStep.ComparingPrices, "Progress.Msg.Saving");
         state.ResultJson = ResultSerialization.Serialize(state.Answer);
         state.ResultType = "ask";
         state.RecordEvent(EventCategory.Cache, "cache.write", "cache");
@@ -382,15 +384,15 @@ public sealed class ReturnResultsActivity : CodeActivity
         var state = context.GetRequiredService<SearchPipelineState>();
         if (state.FromCache)
         {
-            state.Log("Loaded a saved answer.");
+            state.Report(SearchStep.Done, "Progress.Msg.LoadedSaved");
         }
         else if (state.Products is { } p && p.ProductCount > 0)
         {
-            state.Log($"Done! Found {p.ProductCount} product(s) from {p.BrandCount} brand(s).");
+            state.Report(SearchStep.Done, "Progress.Msg.DoneCount", p.ProductCount, p.BrandCount);
         }
         else
         {
-            state.Log("Done!");
+            state.Report(SearchStep.Done, "Progress.Msg.Done");
         }
         return ValueTask.CompletedTask;
     }

@@ -289,6 +289,45 @@
 
   <data name="Progress.Researching" xml:space="preserve"><value>دليل يبحث…</value></data>
   <data name="Progress.Complete" xml:space="preserve"><value>اكتمل البحث</value></data>
+  <!-- Search progress stepper labels (SearchProgress.razor) -->
+  <data name="Progress.Step.Analyzing" xml:space="preserve"><value>تحليل الطلب</value></data>
+  <data name="Progress.Step.Vault" xml:space="preserve"><value>مراجعة الأرشيف</value></data>
+  <data name="Progress.Step.Web" xml:space="preserve"><value>البحث على الويب</value></data>
+  <data name="Progress.Step.Extract" xml:space="preserve"><value>استخراج المنتجات</value></data>
+  <data name="Progress.Step.Profiles" xml:space="preserve"><value>بناء ملفات العلامات</value></data>
+  <data name="Progress.Step.Stores" xml:space="preserve"><value>إيجاد المتاجر</value></data>
+  <data name="Progress.Step.Compare" xml:space="preserve"><value>مقارنة الأسعار</value></data>
+  <data name="Progress.Step.Done" xml:space="preserve"><value>اكتمل</value></data>
+  <!-- Query-type nouns slotted into the "Looking for {0}" line -->
+  <data name="Progress.Noun.Products" xml:space="preserve"><value>منتجات</value></data>
+  <data name="Progress.Noun.Brand" xml:space="preserve"><value>معلومات عن علامة تجارية</value></data>
+  <data name="Progress.Noun.Stores" xml:space="preserve"><value>متاجر</value></data>
+  <data name="Progress.Noun.Deals" xml:space="preserve"><value>عروض</value></data>
+  <data name="Progress.Noun.Opinions" xml:space="preserve"><value>آراء</value></data>
+  <data name="Progress.Noun.Comparison" xml:space="preserve"><value>مقارنة</value></data>
+  <data name="Progress.Noun.Answers" xml:space="preserve"><value>إجابات</value></data>
+  <!-- Live activity-feed messages -->
+  <data name="Progress.Msg.Strategy" xml:space="preserve"><value>جارٍ إعداد خطة البحث…</value></data>
+  <data name="Progress.Msg.Analyzing" xml:space="preserve"><value>جارٍ تحليل طلبك…</value></data>
+  <data name="Progress.Msg.Market" xml:space="preserve"><value>التركيز على سوق {0}…</value></data>
+  <data name="Progress.Msg.LookingFor" xml:space="preserve"><value>البحث عن {0}: {1}</value></data>
+  <data name="Progress.Msg.Vault" xml:space="preserve"><value>جارٍ البحث في أرشيف الإجابات…</value></data>
+  <data name="Progress.Msg.CacheHit" xml:space="preserve"><value>⚡ تم التحميل من الأرشيف — أُجري بحث مماثل مؤخرًا.</value></data>
+  <data name="Progress.Msg.Expanding" xml:space="preserve"><value>توسيع البحث عبر المزوّدين…</value></data>
+  <data name="Progress.Msg.Gathered" xml:space="preserve"><value>تم جمع {0} نتيجة ويب و{1} نتيجة تسوّق و{2} متجرًا.</value></data>
+  <data name="Progress.Msg.Reading" xml:space="preserve"><value>تم العثور على {0} مصدرًا — جارٍ القراءة والاستخراج…</value></data>
+  <data name="Progress.Msg.Identifying" xml:space="preserve"><value>جارٍ تحديد العلامات التجارية والموديلات…</value></data>
+  <data name="Progress.Msg.Extracted" xml:space="preserve"><value>تم استخراج {0} منتجًا من {1} علامة تجارية.</value></data>
+  <data name="Progress.Msg.BuildingProfiles" xml:space="preserve"><value>جارٍ بناء ملفات لـ {0} علامة تجارية و{1} متجرًا…</value></data>
+  <data name="Progress.Msg.BuildingBrand" xml:space="preserve"><value>جارٍ بناء ملف {0}…</value></data>
+  <data name="Progress.Msg.VerifyingStore" xml:space="preserve"><value>جارٍ التحقق من {0} على خرائط Google…</value></data>
+  <data name="Progress.Msg.Enriched" xml:space="preserve"><value>تم إثراء {0} علامة تجارية والتحقق من {1} متجرًا على خرائط Google.</value></data>
+  <data name="Progress.Msg.Ranking" xml:space="preserve"><value>جارٍ ترتيب {0} منتجًا من {1} علامة تجارية…</value></data>
+  <data name="Progress.Msg.Reviewing" xml:space="preserve"><value>جارٍ مراجعة جودة المحتوى…</value></data>
+  <data name="Progress.Msg.Saving" xml:space="preserve"><value>جارٍ حفظ النتائج…</value></data>
+  <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>تم تحميل إجابة محفوظة.</value></data>
+  <data name="Progress.Msg.DoneCount" xml:space="preserve"><value>تم! عُثر على {0} منتجًا من {1} علامة تجارية.</value></data>
+  <data name="Progress.Msg.Done" xml:space="preserve"><value>تم!</value></data>
 
   <data name="Sources.Label" xml:space="preserve"><value>المصادر</value></data>
 
