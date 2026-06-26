@@ -23,6 +23,10 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.11" />
     <PackageReference Include="MudBlazor" Version="8.15.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
+    <!-- Direct S3 client for Cloudflare R2 image storage (IR2StorageService). Pinned to the version
+         already pulled in transitively by Serilog.Sinks.AmazonS3 so there is no version skew between the
+         logging sink and the storage service sharing AWSSDK.Core. -->
+    <PackageReference Include="AWSSDK.S3" Version="3.7.415.23" />
     <!-- Structured logging: Serilog replaces the default provider. AspNetCore 9.x pins Serilog 4.x
          (matching the AmazonS3 sink) and the compact-JSON formatter. AmazonS3 1.6.0 ships the
          R2-compatible serviceUrl / payload-signing knobs used in Logging/SerilogConfiguration.cs.
@@ -34,6 +38,11 @@
     <PackageReference Include="Serilog.Sinks.AmazonS3" Version="1.6.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Expose internal helpers (e.g. R2StorageService.BuildKey) to the test project. -->
+    <InternalsVisibleTo Include="Daleel.Web.Tests" />
   </ItemGroup>
 
   <ItemGroup>

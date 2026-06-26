@@ -199,11 +199,40 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IBrandRepository, BrandRepository>();
 builder.Services.AddScoped<IStoreRepository, StoreRepository>();
 builder.Services.AddScoped<IProductProfileRepository, ProductProfileRepository>();
+builder.Services.AddScoped<IBrandModelRepository, BrandModelRepository>();
+builder.Services.AddScoped<IScrapedPriceRepository, ScrapedPriceRepository>();
+
+// Cloudflare R2 image storage. Scraped product/brand images are copied into R2 and the hosted URL is
+// stored instead of hot-linking the external source. Registered only when R2 is fully configured; the
+// no-op fallback keeps the original URLs so the rest of the pipeline is unaffected.
+var r2Options = Daleel.Web.Logging.R2LoggingOptions.FromConfiguration(builder.Configuration);
+if (r2Options is not null)
+{
+    // The S3 service URL isn't a public object host, so prefer an explicit R2_PUBLIC_URL (a bucket
+    // public dev URL or custom domain). Falling back to "{serviceUrl}/{bucket}" keeps the stored URL
+    // well-formed even if the bucket isn't publicly served yet.
+    var publicBase = builder.Configuration["R2_PUBLIC_URL"]?.Trim();
+    if (string.IsNullOrEmpty(publicBase))
+    {
+        publicBase = $"{r2Options.ServiceUrl.TrimEnd('/')}/{r2Options.BucketName}";
+    }
+
+    builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService>(sp =>
+        new Daleel.Web.Storage.R2StorageService(
+            r2Options, publicBase!,
+            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            sp.GetRequiredService<ILogger<Daleel.Web.Storage.R2StorageService>>()));
+}
+else
+{
+    builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService, Daleel.Web.Storage.NullR2StorageService>();
+}
 builder.Services.AddScoped<Daleel.Web.Pipeline.IItemEnrichmentService, Daleel.Web.Pipeline.ItemEnrichmentService>();
 builder.Services.AddSingleton(new Daleel.Web.Profiles.ProfileOptions());
 builder.Services.AddSingleton<Daleel.Web.Profiles.IProfileResearcher, Daleel.Web.Profiles.ContextDevProfileResearcher>();
 builder.Services.AddScoped<Daleel.Web.Profiles.IBrandProfileService, Daleel.Web.Profiles.BrandProfileService>();
 builder.Services.AddScoped<Daleel.Web.Profiles.IStoreProfileService, Daleel.Web.Profiles.StoreProfileService>();
+builder.Services.AddScoped<Daleel.Web.Profiles.IBrandCatalogService, Daleel.Web.Profiles.BrandCatalogService>();
 builder.Services.AddHostedService<Daleel.Web.Profiles.ProfileRefreshService>();
 
 // Async conversation backend: SignalR + a queue + a background worker run searches off the request.
