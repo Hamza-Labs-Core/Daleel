@@ -116,11 +116,11 @@ public class ConversationBackendTests : IDisposable
     [Fact]
     public async Task ConversationService_OverQuota_Returns429_AndDoesNotEnqueue()
     {
-        // Exhaust the Basic (5) quota for the user.
+        // Exhaust the Basic (500-credit) monthly allowance for the user.
         using (var scope = _provider.CreateScope())
         {
             var quota = scope.ServiceProvider.GetRequiredService<IQuotaService>();
-            for (var i = 0; i < 5; i++) { await quota.TryConsumeAsync("heavy", false); }
+            await quota.ChargeCreditsAsync("heavy", 500);
         }
 
         await using var db = NewDb();

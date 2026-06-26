@@ -307,6 +307,11 @@
   <data name="History.Cleared" xml:space="preserve"><value>Cleared {0} item(s).</value></data>
 
   <data name="Settings.Title" xml:space="preserve"><value>Settings</value></data>
+  <data name="Settings.Credits" xml:space="preserve"><value>Credits</value></data>
+  <data name="Settings.CreditsUnlimited" xml:space="preserve"><value>Unlimited credits on this account.</value></data>
+  <data name="Settings.CreditsLeft" xml:space="preserve"><value>credits left this month</value></data>
+  <data name="Settings.CreditsHelp" xml:space="preserve"><value>Each search costs credits based on the providers it uses. Resets</value></data>
+  <data name="Settings.CreditsGetMore" xml:space="preserve"><value>Get more</value></data>
   <data name="Settings.Subtitle" xml:space="preserve"><value>Everything here is stored in your browser only (localStorage) and sent straight to the agent — never written to server logs.</value></data>
   <data name="Settings.ApiKeys" xml:space="preserve"><value>API Keys</value></data>
   <data name="Settings.Show" xml:space="preserve"><value>Show</value></data>

@@ -307,6 +307,11 @@
   <data name="History.Cleared" xml:space="preserve"><value>تم مسح {0} عنصر.</value></data>
 
   <data name="Settings.Title" xml:space="preserve"><value>الإعدادات</value></data>
+  <data name="Settings.Credits" xml:space="preserve"><value>الرصيد</value></data>
+  <data name="Settings.CreditsUnlimited" xml:space="preserve"><value>رصيد غير محدود على هذا الحساب.</value></data>
+  <data name="Settings.CreditsLeft" xml:space="preserve"><value>نقطة متبقية هذا الشهر</value></data>
+  <data name="Settings.CreditsHelp" xml:space="preserve"><value>تُحتسب كل عملية بحث نقاطًا بحسب المزوّدات التي تستخدمها. يتجدّد في</value></data>
+  <data name="Settings.CreditsGetMore" xml:space="preserve"><value>احصل على المزيد</value></data>
   <data name="Settings.Subtitle" xml:space="preserve"><value>كل ما هنا يُخزَّن في متصفحك فقط (التخزين المحلي) ويُرسَل مباشرةً إلى المساعد — ولا يُكتب أبدًا في سجلّات الخادم.</value></data>
   <data name="Settings.ApiKeys" xml:space="preserve"><value>مفاتيح API</value></data>
   <data name="Settings.Show" xml:space="preserve"><value>إظهار</value></data>

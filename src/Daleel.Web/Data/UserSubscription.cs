@@ -34,9 +34,13 @@ public sealed class UserQuota
     [Required]
     public string UserId { get; set; } = string.Empty;
 
+    /// <summary>Legacy per-period search counter. Superseded by <see cref="CreditsUsed"/>.</summary>
     public int SearchesUsed { get; set; }
 
-    /// <summary>Resolved monthly limit (null = unlimited), refreshed from the plan on each period.</summary>
+    /// <summary>Credits consumed this billing period — the live gate. Resets when the period rolls over.</summary>
+    public int CreditsUsed { get; set; }
+
+    /// <summary>Resolved monthly credit limit (null = unlimited), refreshed from the plan each period.</summary>
     public int? QuotaLimit { get; set; }
 
     public DateTimeOffset PeriodStart { get; set; }

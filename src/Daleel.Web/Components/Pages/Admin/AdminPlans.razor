@@ -37,8 +37,9 @@ else
             <MudItem xs="12" md="6" lg="4" @key="e">
                 <MudPaper Class="pa-4" Outlined="true" Elevation="0">
                     <MudTextField @bind-Value="e.Plan.Name" Label="Name" Variant="Variant.Outlined" Class="mb-2" />
-                    <MudNumericField T="int?" @bind-Value="e.Plan.SearchesPerMonth" Label="Searches / month (empty = unlimited)"
-                                     Variant="Variant.Outlined" Class="mb-2" Clearable="true" />
+                    <MudNumericField T="int?" @bind-Value="e.Plan.MonthlyCredits" Label="Credits / month (empty = unlimited)"
+                                     Variant="Variant.Outlined" Class="mb-2" Clearable="true"
+                                     HelperText="Each search spends credits based on the providers it uses." />
                     <MudNumericField T="decimal" @bind-Value="e.Plan.PriceMonthly" Label="Price / month ($)" Format="F2"
                                      Variant="Variant.Outlined" Class="mb-2" />
                     <MudNumericField T="int" @bind-Value="e.Plan.SortOrder" Label="Sort order" Variant="Variant.Outlined" Class="mb-2" />
@@ -130,7 +131,7 @@ else
 
     private void AddPlan() => _editors?.Add(ToEditor(new SubscriptionPlan
     {
-        Name = "New plan", SearchesPerMonth = 50, PriceMonthly = 0m, IsActive = false,
+        Name = "New plan", MonthlyCredits = 5000, PriceMonthly = 0m, IsActive = false,
         SortOrder = (_editors.Count > 0 ? _editors.Max(e => e.Plan.SortOrder) : 0) + 1, FeaturesJson = "[]"
     }));
 

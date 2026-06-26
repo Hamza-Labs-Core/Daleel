@@ -43,3 +43,6 @@ daleel.db
 
 # Data Protection key ring (auth-cookie encryption keys) — never commit
 data/keys/
+
+# Runtime error/audit logs written by the app
+src/Daleel.Web/Data/logs/

@@ -12,26 +12,33 @@ public class QuotaServiceTests
         new(ctx.Db, () => now);
 
     [Fact]
-    public async Task BasicUser_GetsFiveSearches_SixthRejected()
+    public async Task BasicUser_GetsMonthlyCredits_BlockedWhenExhausted()
     {
         using var ctx = new SqliteTestContext();
         var svc = Make(ctx, new DateTimeOffset(2026, 6, 10, 0, 0, 0, TimeSpan.Zero));
 
         var status = await svc.GetStatusAsync(User, isAdmin: false);
         status.PlanName.Should().Be("Basic");
-        status.Limit.Should().Be(5);
+        status.Limit.Should().Be(500);
+        status.CanSearch.Should().BeTrue();
 
-        for (var i = 0; i < 5; i++)
-        {
-            (await svc.TryConsumeAsync(User, false)).Should().BeTrue($"search {i + 1} is within quota");
-        }
+        // Spend most of the allowance — still has room.
+        await svc.ChargeCreditsAsync(User, 450);
+        var mid = await svc.GetStatusAsync(User, false);
+        mid.Used.Should().Be(450);
+        mid.Remaining.Should().Be(50);
+        mid.CanSearch.Should().BeTrue();
 
-        (await svc.TryConsumeAsync(User, false)).Should().BeFalse("the 6th search exceeds the free quota");
-        (await svc.GetStatusAsync(User, false)).Remaining.Should().Be(0);
+        // Spend the rest — now blocked.
+        await svc.ChargeCreditsAsync(User, 60);
+        var done = await svc.GetStatusAsync(User, false);
+        done.Used.Should().Be(510);
+        done.Remaining.Should().Be(0);
+        done.CanSearch.Should().BeFalse("the period's credits are exhausted");
     }
 
     [Fact]
-    public async Task ProSubscriber_GetsFiftySearches()
+    public async Task ProSubscriber_GetsFiveThousandCredits()
     {
         using var ctx = new SqliteTestContext();
         ctx.Db.UserSubscriptions.Add(new UserSubscription
@@ -45,37 +52,33 @@ public class QuotaServiceTests
         var status = await svc.GetStatusAsync(User, false);
 
         status.PlanName.Should().Be("Pro");
-        status.Limit.Should().Be(50);
+        status.Limit.Should().Be(5000);
         status.CanSearch.Should().BeTrue();
     }
 
     [Fact]
-    public async Task Admin_BypassesQuota()
+    public async Task Admin_BypassesCreditLimit()
     {
         using var ctx = new SqliteTestContext();
         var svc = Make(ctx, new DateTimeOffset(2026, 6, 10, 0, 0, 0, TimeSpan.Zero));
 
-        // Far beyond Basic's 5 — admin is never blocked.
-        for (var i = 0; i < 10; i++)
-        {
-            (await svc.TryConsumeAsync(User, isAdmin: true)).Should().BeTrue();
-        }
+        // Spend far beyond Basic's 500 — admin is never blocked.
+        await svc.ChargeCreditsAsync(User, 100_000);
 
-        (await svc.GetStatusAsync(User, true)).CanSearch.Should().BeTrue();
+        var status = await svc.GetStatusAsync(User, isAdmin: true);
+        status.CanSearch.Should().BeTrue();
+        status.Remaining.Should().BeNull("admins aren't credit-limited");
     }
 
     [Fact]
-    public async Task Quota_ResetsOnNewMonth()
+    public async Task Credits_ResetOnNewMonth()
     {
         using var ctx = new SqliteTestContext();
         var june = new DateTimeOffset(2026, 6, 20, 0, 0, 0, TimeSpan.Zero);
         var juneSvc = Make(ctx, june);
 
-        for (var i = 0; i < 5; i++)
-        {
-            await juneSvc.TryConsumeAsync(User, false);
-        }
-        (await juneSvc.TryConsumeAsync(User, false)).Should().BeFalse();
+        await juneSvc.ChargeCreditsAsync(User, 500);
+        (await juneSvc.GetStatusAsync(User, false)).CanSearch.Should().BeFalse();
 
         // Roll into July — the counter resets and the user can search again.
         var july = new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero);
@@ -84,6 +87,5 @@ public class QuotaServiceTests
         var status = await julySvc.GetStatusAsync(User, false);
         status.Used.Should().Be(0);
         status.CanSearch.Should().BeTrue();
-        (await julySvc.TryConsumeAsync(User, false)).Should().BeTrue();
     }
 }

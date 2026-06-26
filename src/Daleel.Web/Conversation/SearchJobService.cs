@@ -53,6 +53,7 @@ public sealed class SearchJobService : BackgroundService
         var convos = scope.ServiceProvider.GetRequiredService<IConversationStore>();
         var analytics = scope.ServiceProvider.GetRequiredService<IAnalyticsService>();
         var history = scope.ServiceProvider.GetRequiredService<ISearchHistoryRepository>();
+        var quota = scope.ServiceProvider.GetRequiredService<IQuotaService>();
 
         var job = await db.SearchJobs.FirstOrDefaultAsync(j => j.Id == jobId, stoppingToken);
         if (job is null || job.Status is JobStatus.Cancelled or JobStatus.Completed)
@@ -95,6 +96,17 @@ public sealed class SearchJobService : BackgroundService
             job.ProgressMessage = "✅ Report ready!";
             job.CompletedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(stoppingToken);
+
+            // Charge the search's actual credit cost now that the provider calls are known. Best-effort:
+            // a billing hiccup must never fail a search the user already received.
+            try
+            {
+                await quota.ChargeCreditsAsync(job.UserId, result.Credits, stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to charge {Credits} credits for job {JobId}", result.Credits, job.Id);
+            }
 
             await convos.CompleteAsync(job.UserId, "completed", result.ResultJson, result.ResultType, job.CompletedAt.Value, stoppingToken);
             await history.AddAsync(new SearchHistoryEntry

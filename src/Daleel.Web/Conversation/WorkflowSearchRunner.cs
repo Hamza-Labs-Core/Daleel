@@ -123,7 +123,8 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 collector.Calls.Count,
                 collector.TotalCost,
                 state.ResultCount,
-                providers);
+                providers,
+                collector.TotalCredits);
         }
         finally
         {

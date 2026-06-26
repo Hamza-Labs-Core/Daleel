@@ -1,4 +1,4 @@
-@* Shows the signed-in user's monthly search usage in the app bar (e.g. "2/5"). *@
+@* Shows the signed-in user's monthly credit usage in the app bar (e.g. "120/500"). *@
 @inject ICurrentUser CurrentUser
 @inject IQuotaService Quota
 
@@ -40,9 +40,9 @@
     private string Label => _status is null ? string.Empty
         : _status.IsAdmin ? "∞ admin"
         : _status.Unlimited ? "Unlimited"
-        : $"{_status.Used}/{_status.Limit}";
+        : $"{_status.Remaining}/{_status.Limit} cr";
 
     private string Tooltip => _status is null ? string.Empty
-        : _status.IsAdmin || _status.Unlimited ? "Unlimited searches"
-        : $"{_status.Remaining} of {_status.Limit} searches remaining this month";
+        : _status.IsAdmin || _status.Unlimited ? "Unlimited credits"
+        : $"{_status.Remaining} of {_status.Limit} credits remaining this month";
 }

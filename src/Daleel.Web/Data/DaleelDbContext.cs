@@ -236,21 +236,21 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.HasData(
                 new SubscriptionPlan
                 {
-                    Id = SubscriptionPlan.BasicId, Name = "Basic", SearchesPerMonth = 5,
+                    Id = SubscriptionPlan.BasicId, Name = "Basic", SearchesPerMonth = 5, MonthlyCredits = 500,
                     PriceMonthly = 0m, IsActive = true, SortOrder = 1,
-                    FeaturesJson = "[\"5 searches per month\"," + CommonFeatures + "]"
+                    FeaturesJson = "[\"500 credits per month\"," + CommonFeatures + "]"
                 },
                 new SubscriptionPlan
                 {
-                    Id = SubscriptionPlan.ProId, Name = "Pro", SearchesPerMonth = 50,
+                    Id = SubscriptionPlan.ProId, Name = "Pro", SearchesPerMonth = 50, MonthlyCredits = 5000,
                     PriceMonthly = 9.99m, IsActive = true, SortOrder = 2,
-                    FeaturesJson = "[\"50 searches per month\"," + CommonFeatures + "]"
+                    FeaturesJson = "[\"5,000 credits per month\"," + CommonFeatures + "]"
                 },
                 new SubscriptionPlan
                 {
-                    Id = SubscriptionPlan.UnlimitedId, Name = "Unlimited", SearchesPerMonth = 250,
+                    Id = SubscriptionPlan.UnlimitedId, Name = "Unlimited", SearchesPerMonth = 250, MonthlyCredits = 50000,
                     PriceMonthly = 100m, IsActive = true, SortOrder = 3,
-                    FeaturesJson = "[\"250 searches per month\"," + CommonFeatures + "]"
+                    FeaturesJson = "[\"50,000 credits per month\"," + CommonFeatures + "]"
                 });
         });
     }
