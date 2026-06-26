@@ -243,7 +243,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 Url = match.Url,
                 IsLocal = true
             };
-            return m with { Offers = m.Offers.Append(offer).ToList() };
+            var withOffer = m with { Offers = m.Offers.Append(offer).ToList() };
+
+            // The catalogue entry usually carries a product image too — fill it in when the model has none
+            // (most search-derived models don't), so the card actually shows a picture.
+            return string.IsNullOrWhiteSpace(withOffer.ImageUrl) && !string.IsNullOrWhiteSpace(match.ImageUrl)
+                ? withOffer with { ImageUrl = match.ImageUrl }
+                : withOffer;
         }).ToList();
 
         if (priced > 0)

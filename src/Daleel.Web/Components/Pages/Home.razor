@@ -143,6 +143,9 @@
 @code {
     [SupplyParameterFromQuery] private string? Q { get; set; }
 
+    // When set, open a saved history entry's results read-only (no re-run). See LoadHistoryResultAsync.
+    [SupplyParameterFromQuery(Name = "historyId")] private int? HistoryId { get; set; }
+
     private string? _userId;
     private string _input = string.Empty;
     private string? _query;
@@ -173,9 +176,40 @@
         {
             await LoadStateAsync();
             await EnsureMarketAsync();
+
+            // Opening a saved search from History: show its stored results instead of the live convo.
+            if (HistoryId is int hid)
+            {
+                await LoadHistoryResultAsync(hid);
+            }
         }
 
         StateHasChanged();
+    }
+
+    // Re-display a saved history entry's results (no network). Falls back to prefilling the query for
+    // older entries saved before results were persisted.
+    private async Task LoadHistoryResultAsync(int id)
+    {
+        var entry = await History.GetAsync(_userId!, id);
+        if (entry is null)
+        {
+            return;
+        }
+
+        if (entry.ResultJson is { Length: > 0 } resultJson)
+        {
+            _query = entry.Query;
+            _status = "completed";
+            _jobId = null;
+            _enriching = false;
+            _progress.Clear();
+            _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson);
+        }
+        else
+        {
+            _input = entry.Query; // pre-results entry — let the user re-run it
+        }
     }
 
     /// <summary>

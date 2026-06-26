@@ -299,6 +299,7 @@
   <data name="History.Col.Summary" xml:space="preserve"><value>الملخص</value></data>
   <data name="History.Col.Actions" xml:space="preserve"><value>إجراءات</value></data>
   <data name="History.Rerun" xml:space="preserve"><value>إعادة التشغيل</value></data>
+  <data name="History.Open" xml:space="preserve"><value>فتح النتائج المحفوظة</value></data>
   <data name="History.Delete" xml:space="preserve"><value>حذف</value></data>
   <data name="History.Empty" xml:space="preserve"><value>لا يوجد سجل بعد — أجرِ عملية بحث للبدء.</value></data>
   <data name="History.Deleted" xml:space="preserve"><value>تم الحذف.</value></data>

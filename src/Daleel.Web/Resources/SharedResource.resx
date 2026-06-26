@@ -299,6 +299,7 @@
   <data name="History.Col.Summary" xml:space="preserve"><value>Summary</value></data>
   <data name="History.Col.Actions" xml:space="preserve"><value>Actions</value></data>
   <data name="History.Rerun" xml:space="preserve"><value>Re-run</value></data>
+  <data name="History.Open" xml:space="preserve"><value>Open saved results</value></data>
   <data name="History.Delete" xml:space="preserve"><value>Delete</value></data>
   <data name="History.Empty" xml:space="preserve"><value>No history yet — run a search to get started.</value></data>
   <data name="History.Deleted" xml:space="preserve"><value>Deleted.</value></data>

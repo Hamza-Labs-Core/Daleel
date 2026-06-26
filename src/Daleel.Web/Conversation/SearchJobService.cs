@@ -112,7 +112,10 @@ public sealed class SearchJobService : BackgroundService
             await history.AddAsync(new SearchHistoryEntry
             {
                 UserId = job.UserId, Query = job.Query, QueryType = job.QueryType,
-                Geo = job.Geo, Model = job.Model, ResultSummary = null, CreatedAt = job.CompletedAt.Value
+                Geo = job.Geo, Model = job.Model, ResultSummary = null,
+                // Persist the full result so opening this entry later re-displays it without re-running.
+                ResultJson = result.ResultJson,
+                CreatedAt = job.CompletedAt.Value
             }, stoppingToken);
             // Record the search for analytics / cost optimisation — providers called, api-call
             // count, result count and timing. This is server-side telemetry, never shown to the user.
