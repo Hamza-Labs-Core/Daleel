@@ -51,6 +51,9 @@ public record SearchResult
     /// <summary>Seller/store, for shopping/maps results.</summary>
     public string? Seller { get; init; }
 
+    /// <summary>Thumbnail / product image URL, when the provider returns one (Google Shopping always does).</summary>
+    public string? ImageUrl { get; init; }
+
     /// <summary>Rating 1–5, for shopping/maps results.</summary>
     public double? Rating { get; init; }
 

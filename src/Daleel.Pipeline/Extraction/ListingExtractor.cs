@@ -154,6 +154,7 @@ public static class ListingExtractor
                 Url = r.Url,
                 Source = r.Seller ?? r.Source,
                 Seller = r.Seller,
+                ImageUrl = r.ImageUrl,
                 SourceType = sourceType
             });
         }

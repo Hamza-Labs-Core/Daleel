@@ -188,6 +188,7 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
                     Snippet = Str(item, "snippet"),
                     Source = Name,
                     Kind = SearchKind.Web,
+                    ImageUrl = StrOrNull(item, "thumbnail"),
                     Position = IntOrNull(item, "position")
                 });
                 if (list.Count >= max) break;
@@ -221,6 +222,7 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
                     Price = price,
                     Seller = StrOrNull(item, "source") ?? StrOrNull(item, "store"),
                     Rating = DblOrNull(item, "rating"),
+                    ImageUrl = StrOrNull(item, "thumbnail"),
                     Position = IntOrNull(item, "position")
                 });
                 if (list.Count >= max) break;
