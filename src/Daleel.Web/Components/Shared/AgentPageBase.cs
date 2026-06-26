@@ -266,7 +266,7 @@ public abstract class AgentPageBase : ComponentBase
     {
         var result = await Dialogs.ShowMessageBox(
             "Sign in to search",
-            "Create a free account to run searches — you get 5 free searches every month.",
+            "Create a free account to run searches — you get 500 free credits every month.",
             yesText: "Sign in", cancelText: "Cancel");
 
         if (result == true)

@@ -136,7 +136,7 @@
   <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>دليل مساعدك الشخصي للتسوّق. اسأل بالعربية أو الإنجليزية لمقارنة الأسعار بين المتاجر، والتحقّق من سمعة العلامات التجارية، واكتشاف أفضل العروض — دون عناء فتح عشرات الصفحات.</value></data>
   <data name="Landing.Hero.GetStarted" xml:space="preserve"><value>ابدأ مجانًا</value></data>
   <data name="Landing.Hero.SignIn" xml:space="preserve"><value>تسجيل الدخول</value></data>
-  <data name="Landing.Hero.NoCard" xml:space="preserve"><value>بدون بطاقة ائتمان · ٥ عمليات بحث مجانية شهريًا</value></data>
+  <data name="Landing.Hero.NoCard" xml:space="preserve"><value>بدون بطاقة ائتمان · ٥٠٠ نقطة مجانية شهريًا</value></data>
   <data name="Landing.Features.Title" xml:space="preserve"><value>كل ما تحتاجه لتتسوّق بذكاء</value></data>
   <data name="Landing.Features.Subtitle" xml:space="preserve"><value>مساعد واحد للعثور على المنتجات ومقارنة الأسعار ومتابعة أفضل العروض.</value></data>
   <data name="Landing.Feature.Search.Title" xml:space="preserve"><value>بحث عربي ذكي</value></data>
@@ -163,11 +163,11 @@
   <data name="Landing.Pricing.Feature.History" xml:space="preserve"><value>سجل البحث والنتائج المحفوظة</value></data>
   <data name="Landing.Pricing.Feature.Bilingual" xml:space="preserve"><value>واجهة بالعربية والإنجليزية</value></data>
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>للبداية</value></data>
-  <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>٥ عمليات بحث شهريًا</value></data>
+  <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>٥٠٠ نقطة شهريًا</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>للمتسوّقين بانتظام</value></data>
-  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>٥٠ عملية بحث شهريًا</value></data>
+  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>٥٬٠٠٠ نقطة شهريًا</value></data>
   <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>للمحترفين والفرق</value></data>
-  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>٢٥٠ عملية بحث شهريًا</value></data>
+  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>٥٠٬٠٠٠ نقطة شهريًا</value></data>
   <data name="Landing.Cta.Title" xml:space="preserve"><value>هل أنت مستعد لتتسوّق بذكاء؟</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>أنشئ حسابًا مجانيًا وابدأ أول عملية بحث خلال ثوانٍ.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>أنشئ حسابًا مجانيًا</value></data>
@@ -201,7 +201,7 @@
   <data name="Faq.Q3" xml:space="preserve"><value>كيف يُصفّي دليل النتائج؟</value></data>
   <data name="Faq.A3" xml:space="preserve"><value>يطبّق دليل فلترًا للمحتوى وفق الشريعة افتراضيًا: تُزال النتائج والصور التي تتضمّن الكحول أو لحم الخنزير أو القمار أو محتوى البالغين أو غيره من المحتوى غير الحلال لتبقى المخرجات مناسبة للعائلة. ويمكنك ضبط مستوى الصرامة — أو إيقافه لحسابات المشرفين — من قسم «فلتر المحتوى» في الإعدادات.</value></data>
   <data name="Faq.Q4" xml:space="preserve"><value>هل دليل مجاني؟</value></data>
-  <data name="Faq.A4" xml:space="preserve"><value>نعم — يبدأ كل حساب بخمس عمليات بحث مجانية شهريًا دون الحاجة إلى بطاقة ائتمان. وإذا احتجت المزيد، تتيح الباقات المدفوعة حدودًا شهرية أعلى ومتابعة للعروض وحفظًا للنتائج. راجع صفحة الأسعار للتفاصيل.</value></data>
+  <data name="Faq.A4" xml:space="preserve"><value>نعم — يبدأ كل حساب بـ٥٠٠ نقطة مجانية شهريًا دون الحاجة إلى بطاقة ائتمان. تُحتسب كل عملية بحث نقاطًا بحسب المزوّدات التي تستخدمها، فالبحث السريع يكلّف القليل والبحث المعمّق يكلّف أكثر. وإذا احتجت المزيد، تتيح الباقات المدفوعة أرصدة شهرية أكبر ومتابعة للعروض وحفظًا للنتائج. راجع صفحة الأسعار للتفاصيل.</value></data>
   <data name="Faq.Q5" xml:space="preserve"><value>هل أحتاج إلى مفاتيح API خاصة بي؟</value></data>
   <data name="Faq.A5" xml:space="preserve"><value>لا. يعمل دليل مباشرةً دون إعداد. ويمكن للمستخدمين المتقدّمين إضافة مفاتيح النماذج ومزوّدي البحث الخاصة بهم من الإعدادات — وتبقى هذه المفاتيح في متصفحك ولا تُسجَّل أبدًا في سجلّات خوادمنا.</value></data>
   <data name="Faq.Q6" xml:space="preserve"><value>كيف تُستخدم بيانات بحثي؟</value></data>
@@ -215,7 +215,7 @@
   <data name="Home.NoResults.Title" xml:space="preserve"><value>لم نجد نتائج</value></data>
   <data name="Home.NoResults.Hint" xml:space="preserve"><value>جرّب صياغة أخرى أو أعد البحث.</value></data>
   <data name="Home.SignInDialog.Title" xml:space="preserve"><value>سجّل الدخول للبحث</value></data>
-  <data name="Home.SignInDialog.Body" xml:space="preserve"><value>أنشئ حسابًا مجانيًا لتشغيل عمليات البحث — تحصل على ٥ عمليات بحث مجانية كل شهر.</value></data>
+  <data name="Home.SignInDialog.Body" xml:space="preserve"><value>أنشئ حسابًا مجانيًا لتشغيل عمليات البحث — تحصل على ٥٠٠ نقطة مجانية كل شهر.</value></data>
 
   <data name="Deals.Title" xml:space="preserve"><value>باحث العروض</value></data>
   <data name="Deals.Subtitle" xml:space="preserve"><value>الأسعار الحالية والعروض وأين تشتري — مرتّبة.</value></data>
@@ -367,7 +367,7 @@
   <data name="Auth.ForgotPassword" xml:space="preserve"><value>هل نسيت كلمة المرور؟</value></data>
   <data name="Auth.NewToDaleel" xml:space="preserve"><value>جديد على دليل؟</value></data>
   <data name="Auth.CreateFreeAccount" xml:space="preserve"><value>أنشئ حسابًا مجانيًا</value></data>
-  <data name="Auth.Register.Subtitle" xml:space="preserve"><value>أنشئ حسابك المجاني — تحصل على 5 عمليات بحث مجانية كل شهر.</value></data>
+  <data name="Auth.Register.Subtitle" xml:space="preserve"><value>أنشئ حسابك المجاني — تحصل على ٥٠٠ نقطة مجانية كل شهر.</value></data>
   <data name="Auth.ConfirmPassword" xml:space="preserve"><value>تأكيد كلمة المرور</value></data>
   <data name="Auth.RegPasswordPlaceholder" xml:space="preserve"><value>8 أحرف على الأقل</value></data>
   <data name="Auth.ConfirmPasswordPlaceholder" xml:space="preserve"><value>أعد إدخال كلمة المرور</value></data>

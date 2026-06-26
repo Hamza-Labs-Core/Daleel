@@ -136,7 +136,7 @@
   <data name="Landing.Hero.Subtitle" xml:space="preserve"><value>Daleel is your personal shopping assistant. Ask in plain English or Arabic to compare prices across stores, check brand reputation and catch the best deals — without the endless browser tabs.</value></data>
   <data name="Landing.Hero.GetStarted" xml:space="preserve"><value>Get started free</value></data>
   <data name="Landing.Hero.SignIn" xml:space="preserve"><value>Sign in</value></data>
-  <data name="Landing.Hero.NoCard" xml:space="preserve"><value>No credit card needed · 5 free searches every month</value></data>
+  <data name="Landing.Hero.NoCard" xml:space="preserve"><value>No credit card needed · 500 free credits every month</value></data>
   <data name="Landing.Features.Title" xml:space="preserve"><value>Everything you need to shop smarter</value></data>
   <data name="Landing.Features.Subtitle" xml:space="preserve"><value>One assistant for finding products, comparing prices and tracking the best deals.</value></data>
   <data name="Landing.Feature.Search.Title" xml:space="preserve"><value>Smart Arabic search</value></data>
@@ -163,11 +163,11 @@
   <data name="Landing.Pricing.Feature.History" xml:space="preserve"><value>Search history &amp; saved results</value></data>
   <data name="Landing.Pricing.Feature.Bilingual" xml:space="preserve"><value>English &amp; Arabic interface</value></data>
   <data name="Landing.Plan.Basic.Tag" xml:space="preserve"><value>For getting started</value></data>
-  <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>5 searches per month</value></data>
+  <data name="Landing.Plan.Basic.Searches" xml:space="preserve"><value>500 credits per month</value></data>
   <data name="Landing.Plan.Pro.Tag" xml:space="preserve"><value>For regular shoppers</value></data>
-  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>50 searches per month</value></data>
+  <data name="Landing.Plan.Pro.Searches" xml:space="preserve"><value>5,000 credits per month</value></data>
   <data name="Landing.Plan.Unlimited.Tag" xml:space="preserve"><value>For power users &amp; teams</value></data>
-  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>250 searches per month</value></data>
+  <data name="Landing.Plan.Unlimited.Searches" xml:space="preserve"><value>50,000 credits per month</value></data>
   <data name="Landing.Cta.Title" xml:space="preserve"><value>Ready to shop smarter?</value></data>
   <data name="Landing.Cta.Subtitle" xml:space="preserve"><value>Create a free account and run your first search in seconds.</value></data>
   <data name="Landing.Cta.Register" xml:space="preserve"><value>Create free account</value></data>
@@ -201,7 +201,7 @@
   <data name="Faq.Q3" xml:space="preserve"><value>How does Daleel filter results?</value></data>
   <data name="Faq.A3" xml:space="preserve"><value>Daleel applies a halal content filter by default: results and images that include alcohol, pork, gambling, adult or other non-halal content are removed so what you see stays family-friendly. You can adjust the strictness — or, for admin accounts, turn it off — under Content Filter in Settings.</value></data>
   <data name="Faq.Q4" xml:space="preserve"><value>Is Daleel free?</value></data>
-  <data name="Faq.A4" xml:space="preserve"><value>Yes — every account starts with 5 free searches each month, no credit card required. If you need more, paid plans add higher monthly limits, deal monitoring and saved results. See the Pricing page for details.</value></data>
+  <data name="Faq.A4" xml:space="preserve"><value>Yes — every account starts with 500 free credits each month, no credit card required. Each search spends credits based on the providers it uses, so a quick lookup costs little and a deep search costs more. If you need more, paid plans add larger monthly credit allowances, deal monitoring and saved results. See the Pricing page for details.</value></data>
   <data name="Faq.Q5" xml:space="preserve"><value>Do I need my own API keys?</value></data>
   <data name="Faq.A5" xml:space="preserve"><value>No. Daleel works out of the box. Power users can optionally add their own model and search provider keys under Settings — they stay in your browser and are never written to our server logs.</value></data>
   <data name="Faq.Q6" xml:space="preserve"><value>How is my search data used?</value></data>
@@ -215,7 +215,7 @@
   <data name="Home.NoResults.Title" xml:space="preserve"><value>No results just yet</value></data>
   <data name="Home.NoResults.Hint" xml:space="preserve"><value>Try rephrasing your search or searching again.</value></data>
   <data name="Home.SignInDialog.Title" xml:space="preserve"><value>Sign in to search</value></data>
-  <data name="Home.SignInDialog.Body" xml:space="preserve"><value>Create a free account to run searches — you get 5 free searches every month.</value></data>
+  <data name="Home.SignInDialog.Body" xml:space="preserve"><value>Create a free account to run searches — you get 500 free credits every month.</value></data>
 
   <data name="Deals.Title" xml:space="preserve"><value>Deal Finder</value></data>
   <data name="Deals.Subtitle" xml:space="preserve"><value>Current prices, promotions and where to buy — ranked.</value></data>
@@ -367,7 +367,7 @@
   <data name="Auth.ForgotPassword" xml:space="preserve"><value>Forgot password?</value></data>
   <data name="Auth.NewToDaleel" xml:space="preserve"><value>New to Daleel?</value></data>
   <data name="Auth.CreateFreeAccount" xml:space="preserve"><value>Create a free account</value></data>
-  <data name="Auth.Register.Subtitle" xml:space="preserve"><value>Create your free account — you get 5 free searches every month.</value></data>
+  <data name="Auth.Register.Subtitle" xml:space="preserve"><value>Create your free account — you get 500 free credits every month.</value></data>
   <data name="Auth.ConfirmPassword" xml:space="preserve"><value>Confirm password</value></data>
   <data name="Auth.RegPasswordPlaceholder" xml:space="preserve"><value>At least 8 characters</value></data>
   <data name="Auth.ConfirmPasswordPlaceholder" xml:space="preserve"><value>Re-enter your password</value></data>
