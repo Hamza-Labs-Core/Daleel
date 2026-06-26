@@ -1,4 +1,4 @@
-@* Store directory: physical/online stores with address, phone, website, an interactive Leaflet map
+@* Store directory: physical/online stores with address, phone, website, an interactive Google map
    and optional "near me" distance filtering (browser geolocation + Haversine). *@
 @inject IJSRuntime JS
 @inject IStringLocalizer<SharedResource> L
@@ -141,8 +141,12 @@
 
     private static double ToRad(double deg) => deg * Math.PI / 180.0;
 
-    private static string DirectionsLink(StoreInfo s) =>
-        $"https://www.openstreetmap.org/?mlat={s.Latitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}&mlon={s.Longitude!.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}#map=16/{s.Latitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}/{s.Longitude.Value.ToString(System.Globalization.CultureInfo.InvariantCulture)}";
+    private static string DirectionsLink(StoreInfo s)
+    {
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        var dest = $"{s.Latitude!.Value.ToString(ci)},{s.Longitude!.Value.ToString(ci)}";
+        return $"https://www.google.com/maps/dir/?api=1&destination={dest}";
+    }
 
     private async Task LocateAsync()
     {

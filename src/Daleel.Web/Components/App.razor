@@ -1,5 +1,6 @@
 @* Host document. MudBlazor drives styling; Cairo gives crisp Arabic glyphs, Roboto the Latin UI. *@
 @inject Microsoft.AspNetCore.Antiforgery.IAntiforgery Antiforgery
+@inject Daleel.Web.Services.IAgentFactory AgentFactory
 @{
     var culture = System.Globalization.CultureInfo.CurrentUICulture;
     var dir = culture.TextInfo.IsRightToLeft ? "rtl" : "ltr";
@@ -59,6 +60,14 @@
     </div>
 
     <script src="_content/MudBlazor/MudBlazor.min.js"></script>
+    @* Browser key for the Google Maps JavaScript API (store map). The same key powers server-side
+       Google Places; it must reach the client to render maps, so restrict it by HTTP referrer in the
+       Google Cloud console. JSON-encoded so it lands as a safe JS string literal (empty when unset —
+       daleel.js then simply skips the map). *@
+    @if (MapsApiKey is { Length: > 0 })
+    {
+        <script>window.__daleelMapsApiKey = @((MarkupString)System.Text.Json.JsonSerializer.Serialize(MapsApiKey));</script>
+    }
     <script src="daleel.js?v=@AssetVersion"></script>
     @* autostart=false lets boot.js call Blazor.start() with our silent reconnection handler. *@
     <script src="_framework/blazor.web.js" autostart="false"></script>
@@ -75,6 +84,11 @@
     // posts work; the posts target raw /auth/* endpoints (see AuthEndpoints) where the cookie write
     // happens in a real HTTP request, never a streaming circuit.
     [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    // The Google Maps browser key, resolved server-side from configuration/environment. Reuses the
+    // same GOOGLE_PLACES_API_KEY that drives server-side Places enrichment (one Google Cloud project,
+    // Maps JavaScript API + Places API enabled). Null/empty when unconfigured — the map degrades away.
+    private string? MapsApiKey => AgentFactory.Resolve("GOOGLE_PLACES_API_KEY");
 
     // Cache-buster for our OWN static assets (daleel.js/boot.js/app.css), which Cloudflare/the browser
     // cache for hours. The module version id changes on every build, so a deploy invalidates the cached
