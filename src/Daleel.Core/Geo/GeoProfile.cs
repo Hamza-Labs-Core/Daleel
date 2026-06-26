@@ -159,4 +159,70 @@ public static class GeoProfiles
     /// <summary>Resolves a profile, falling back to <see cref="Usa"/> when unknown.</summary>
     public static GeoProfile ResolveOrDefault(string? keyOrCodeOrName) =>
         Resolve(keyOrCodeOrName) ?? Usa;
+
+    // Distinctive country/city indicators (English + Arabic) for detecting the market straight from a
+    // query like "best AC in Dubai" or "غسالة في عمان". 2-letter ISO codes (jo/sa/ae/eg/us) are
+    // deliberately NOT here — too short, they'd false-match ordinary words ("us", "use", "sale").
+    private static readonly (GeoProfile Profile, string[] Terms)[] QueryIndicators =
+    {
+        (Jordan, new[] { "jordan", "jordanian", "amman", "irbid", "zarqa", "aqaba",
+            "الأردن", "الاردن", "عمان", "عمّان", "اربد", "إربد", "الزرقاء", "العقبة", "أردني" }),
+        (SaudiArabia, new[] { "saudi", "saudi arabia", "ksa", "riyadh", "jeddah", "jiddah", "mecca",
+            "makkah", "medina", "dammam", "khobar",
+            "السعودية", "السعوديه", "الرياض", "جدة", "مكة", "المدينة", "الدمام", "الخبر", "المملكة" }),
+        (Uae, new[] { "uae", "u.a.e", "united arab emirates", "emirates", "emirati", "dubai", "abu dhabi",
+            "abudhabi", "sharjah", "ajman",
+            "الإمارات", "الامارات", "دبي", "أبوظبي", "ابوظبي", "الشارقة", "عجمان", "إماراتي" }),
+        (Egypt, new[] { "egypt", "egyptian", "cairo", "alexandria", "giza",
+            "مصر", "مصري", "القاهرة", "الإسكندرية", "الاسكندرية", "الجيزة" }),
+        (Usa, new[] { "usa", "u.s.a", "united states", "america", "american", "new york",
+            "los angeles", "chicago", "أمريكا", "امريكا", "الولايات المتحدة" }),
+    };
+
+    /// <summary>
+    /// Detects the intended market straight from free-text (typically the search query) — the
+    /// strongest signal of where the user is shopping ("best AC in Dubai" → UAE), overriding any
+    /// stored/auto-detected default. Returns the market mentioned earliest in the text, or null when
+    /// none of the supported markets is named.
+    /// </summary>
+    public static GeoProfile? DetectInText(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var t = text.ToLowerInvariant();
+        GeoProfile? best = null;
+        var bestIndex = int.MaxValue;
+
+        foreach (var (profile, terms) in QueryIndicators)
+        {
+            foreach (var term in terms)
+            {
+                var idx = IndexOfTerm(t, term);
+                if (idx >= 0 && idx < bestIndex)
+                {
+                    best = profile;
+                    bestIndex = idx;
+                }
+            }
+        }
+
+        return best;
+    }
+
+    /// <summary>Word-boundary match for ASCII terms (so "usa" ≠ "usable"); plain contains for Arabic.</summary>
+    private static int IndexOfTerm(string text, string term)
+    {
+        var ascii = term.All(c => c < 128);
+        if (!ascii)
+        {
+            return text.IndexOf(term, StringComparison.Ordinal);
+        }
+
+        var m = System.Text.RegularExpressions.Regex.Match(
+            text, $@"\b{System.Text.RegularExpressions.Regex.Escape(term)}\b");
+        return m.Success ? m.Index : -1;
+    }
 }

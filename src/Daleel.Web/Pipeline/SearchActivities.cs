@@ -24,7 +24,10 @@ public sealed class ParseQueryActivity : CodeActivity
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         state.Log("Analyzing your request…");
-        state.GeoProfile = GeoProfiles.ResolveOrDefault(state.Geo);
+        // The query itself is the strongest market signal ("AC in Dubai" → UAE), so it overrides the
+        // stored/auto-detected default. Fall back to the request's geo when the query names no market.
+        state.GeoProfile = GeoProfiles.DetectInText(state.Query) ?? GeoProfiles.ResolveOrDefault(state.Geo);
+        state.Geo = state.GeoProfile.Key;
         state.Log($"Focusing on the {state.GeoProfile.Country} market…");
         state.Strategy = await state.Agent.PlanAsync(
             PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken);
