@@ -65,3 +65,26 @@ window.daleel = {
         URL.revokeObjectURL(url);
     }
 };
+
+// Best-guess the visitor's market (2-letter country code) for first-visit defaulting:
+//   1) the region subtag of the browser's preferred languages ("ar-JO" -> "JO"), then
+//   2) a small timezone -> country fallback for the markets we support.
+// Returns "" when nothing usable is found, so the app knows to ask the user instead of guessing.
+window.daleelDetectMarket = function () {
+    try {
+        const langs = (navigator.languages && navigator.languages.length)
+            ? navigator.languages
+            : [navigator.language];
+        for (const l of langs) {
+            const m = /[-_]([A-Za-z]{2})$/.exec(l || "");
+            if (m) return m[1].toUpperCase();
+        }
+        const tz = (Intl.DateTimeFormat().resolvedOptions().timeZone) || "";
+        const tzMap = {
+            "Asia/Amman": "JO", "Asia/Riyadh": "SA", "Asia/Dubai": "AE",
+            "Asia/Abu_Dhabi": "AE", "Africa/Cairo": "EG"
+        };
+        if (tzMap[tz]) return tzMap[tz];
+    } catch (e) { /* ignore */ }
+    return "";
+};

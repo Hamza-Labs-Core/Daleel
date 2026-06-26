@@ -172,9 +172,37 @@
         if (_userId is not null)
         {
             await LoadStateAsync();
+            await EnsureMarketAsync();
         }
 
         StateHasChanged();
+    }
+
+    /// <summary>
+    /// On a visitor's first search session we don't silently assume a market. Try to auto-detect it
+    /// from the browser (locale/timezone) and persist it; if we can't determine a supported market,
+    /// ask the user to pick one rather than defaulting to a fixed country.
+    /// </summary>
+    private async Task EnsureMarketAsync()
+    {
+        if (await Store.GetAsync("geo") is not null)
+        {
+            return; // already detected or chosen previously
+        }
+
+        var detected = GeoProfiles.Resolve(await Store.DetectMarketCodeAsync())?.Key;
+        if (detected is not null)
+        {
+            await Store.SetAsync("geo", detected);
+            return;
+        }
+
+        // Couldn't detect — ask the user.
+        var dialog = await Dialogs.ShowAsync<MarketPickerDialog>(
+            L["Common.Market"], new DialogParameters(), new DialogOptions { BackdropClick = false });
+        var result = await dialog.Result;
+        var chosen = result is { Canceled: false, Data: string key } ? key : "jordan";
+        await Store.SetAsync("geo", chosen);
     }
 
     private async Task LoadStateAsync()

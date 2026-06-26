@@ -71,6 +71,23 @@ public sealed class BrowserStore
         ("APIFY_TOKEN", "Apify", "Social monitoring"),
     };
 
+    /// <summary>
+    /// Best-guess the visitor's market as a 2-letter country code (from the browser locale/timezone),
+    /// for first-visit defaulting. Returns "" / null when nothing usable is found, so the caller can
+    /// ask the user instead of silently assuming a market.
+    /// </summary>
+    public async Task<string?> DetectMarketCodeAsync()
+    {
+        try
+        {
+            return await _js.InvokeAsync<string?>("daleelDetectMarket");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or JSException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>Reads all stored API keys into a dictionary for handing to the agent factory.</summary>
     public async Task<Dictionary<string, string>> GetKeysAsync()
     {
