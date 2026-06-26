@@ -301,7 +301,7 @@ public sealed class DispatchItemWorkflowsActivity : CodeActivity
     }
 }
 
-/// <summary>Step 6 — assemble the final answer object from the summary, bundle and (enriched) products.</summary>
+/// <summary>Step 8 — assemble the final answer object from the summary, bundle and (enriched) products.</summary>
 [Activity("Daleel", "Search", "Aggregate: assemble the final ranked answer + result count")]
 public sealed class AggregateResultsActivity : CodeActivity
 {
@@ -335,7 +335,7 @@ public sealed class AggregateResultsActivity : CodeActivity
     }
 }
 
-/// <summary>Step 7 — record the halal-filter outcome (filtering itself happens at the gather chokepoint).</summary>
+/// <summary>Step 9 — record the halal-filter outcome (filtering itself happens at the gather chokepoint).</summary>
 [Activity("Daleel", "Search", "Moderate: record the halal content-filter audit outcome")]
 public sealed class ModerateContentActivity : CodeActivity
 {
@@ -357,7 +357,7 @@ public sealed class ModerateContentActivity : CodeActivity
     }
 }
 
-/// <summary>Step 8 — serialize the report and store it under the result key for the next identical search.</summary>
+/// <summary>Step 10 — serialize the report and store it under the result key for the next identical search.</summary>
 [Activity("Daleel", "Search", "Cache: serialize + persist the completed report")]
 public sealed class CacheResultsActivity : CodeActivity
 {
@@ -395,7 +395,7 @@ public sealed class CacheResultsActivity : CodeActivity
     }
 }
 
-/// <summary>Step 9 — terminal marker; outputs are already on the state (cache hit or fresh run).</summary>
+/// <summary>Step 11 — terminal marker; outputs are already on the state (cache hit or fresh run).</summary>
 [Activity("Daleel", "Search", "Return: finalize and surface the result")]
 public sealed class ReturnResultsActivity : CodeActivity
 {

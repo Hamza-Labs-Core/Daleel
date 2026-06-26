@@ -207,9 +207,10 @@ public sealed class ScrapePricesActivity : CodeActivity
         {
             return await provider.ExtractProductsAsync(domain, maxProducts: MaxProducts, cancellationToken: ct);
         }
+        catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
         catch
         {
-            return Array.Empty<CatalogProduct>(); // including the per-store timeout
+            return Array.Empty<CatalogProduct>(); // any other failure → no live prices for this store
         }
     }
 
