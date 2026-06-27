@@ -1,3 +1,5 @@
+using Daleel.Core.Intelligence;
+
 namespace Daleel.Core.Models;
 
 /// <summary>
@@ -78,6 +80,13 @@ public record ProductComparison
 
     /// <summary>The product the analysis recommends overall, if any.</summary>
     public string? Winner { get; init; }
+
+    /// <summary>
+    /// The product-type-aware schema (BTU/energy for ACs, RAM/storage for phones…) the LLM
+    /// determined for the compared products, so the compare page can surface the dimensions that
+    /// actually decide this category. Empty for unclassifiable comparisons.
+    /// </summary>
+    public ProductSchema Schema { get; init; } = ProductSchema.General;
 
     public IReadOnlyList<string> Sources { get; init; } = Array.Empty<string>();
     public DateTimeOffset? GeneratedAt { get; init; }

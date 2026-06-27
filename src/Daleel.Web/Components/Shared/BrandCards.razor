@@ -59,6 +59,8 @@
                                    StartIcon="@Icons.Material.Filled.ShoppingBag"
                                    OnClick="@(() => OnViewProducts.InvokeAsync(b.Name))">View products</MudButton>
                     }
+                    <MudButton Href="@($"/brand/{Uri.EscapeDataString(b.Name)}")" Size="Size.Small" Variant="Variant.Text"
+                               StartIcon="@Icons.Material.Filled.Article">Brand page</MudButton>
                     @if (!string.IsNullOrWhiteSpace(b.Url))
                     {
                         <MudButton Href="@b.Url" Target="_blank" Size="Size.Small" Variant="Variant.Text"

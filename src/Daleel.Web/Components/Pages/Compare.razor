@@ -52,6 +52,28 @@
         <MudSpacer />
         <SaveResultButton Result="_result" ResultType="compare" DefaultTitle="@_compareTitle" SearchHistoryId="LastHistoryId" />
     </div>
+
+    @if (!_result.Schema.IsEmpty)
+    {
+        @* Product-type-aware comparison dimensions: the specs that actually decide this category,
+           as determined by the up-front intelligence pass. *@
+        <MudPaper Class="pa-3 mt-2" Outlined="true" Elevation="0">
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Comparing as <strong>@_result.Schema.ProductType</strong> — key dimensions:
+            </MudText>
+            <div class="d-flex flex-wrap gap-1 mt-1">
+                @foreach (var f in _result.Schema.Fields)
+                {
+                    <MudChip T="string" Size="Size.Small"
+                             Variant="@(f.Importance == Daleel.Core.Intelligence.SpecImportance.Key ? Variant.Filled : Variant.Outlined)"
+                             Color="@(f.Importance == Daleel.Core.Intelligence.SpecImportance.Key ? Color.Primary : Color.Default)">
+                        @f.Label@(string.IsNullOrWhiteSpace(f.Unit) ? "" : $" ({f.Unit})")
+                    </MudChip>
+                }
+            </div>
+        </MudPaper>
+    }
+
     <MudGrid Spacing="3" Class="mt-2">
         @foreach (var (product, index) in _result.Products.Select((p, i) => (p, i)))
         {

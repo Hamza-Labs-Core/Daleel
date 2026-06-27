@@ -1,0 +1,144 @@
+@page "/store/{Name}"
+@inject IStoreRepository Stores
+@inject NavigationManager Nav
+
+@* Dedicated full page for a store: name, type, Google-verified rating, address, phone, opening
+   hours, the brands it carries and a map link. Loads the persisted profile saved during search
+   enrichment; the store card links here via "View Store Page". *@
+
+<PageTitle>دليل · @DecodedName</PageTitle>
+
+<MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Class="mb-2"
+           OnClick="@(() => Nav.NavigateTo("/"))">Back to search</MudButton>
+
+@if (_loading)
+{
+    <div class="d-flex justify-center pa-8"><MudProgressCircular Indeterminate="true" /></div>
+}
+else if (_store is null)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        No saved profile for “@DecodedName” yet. Run a store search that surfaces it and we'll build one.
+    </MudAlert>
+}
+else
+{
+    <div class="d-flex align-center gap-2 mb-1">
+        <MudIcon Icon="@Icons.Material.Filled.Storefront" Color="Color.Primary" Style="font-size:2.4rem;" />
+        <MudText Typo="Typo.h4">@_store.Name</MudText>
+        @if (_store.IsVerified)
+        {
+            <MudTooltip Text="Verified on Google Maps">
+                <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Info" />
+            </MudTooltip>
+        }
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 mb-3 align-center">
+        @if (!string.IsNullOrWhiteSpace(_store.Type))
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@_store.Type</MudChip>
+        }
+        @if ((_store.GoogleRating ?? _store.Rating) is { } rating)
+        {
+            <MudRating ReadOnly="true" SelectedValue="@((int)Math.Round(rating))" />
+            <MudText Typo="Typo.body2" Color="Color.Secondary">
+                @rating.ToString("0.0")@(_store.GoogleReviewCount is { } rc ? $" ({rc} reviews)" : "")
+            </MudText>
+        }
+    </div>
+
+    <MudPaper Class="pa-4 mb-3" Outlined="true" Elevation="0">
+        <MudList T="string" Dense="true">
+            @if (!string.IsNullOrWhiteSpace(_store.Address) || !string.IsNullOrWhiteSpace(_store.Location))
+            {
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Place">
+                    <MudText Typo="Typo.body2">@(_store.Address ?? _store.Location)</MudText>
+                </MudListItem>
+            }
+            @if (!string.IsNullOrWhiteSpace(_store.Phone))
+            {
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Phone">
+                    <MudLink Href="@($"tel:{_store.Phone}")">@_store.Phone</MudLink>
+                </MudListItem>
+            }
+            @if (!string.IsNullOrWhiteSpace(_store.Email))
+            {
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Email">
+                    <MudLink Href="@($"mailto:{_store.Email}")">@_store.Email</MudLink>
+                </MudListItem>
+            }
+            @if (_store.OpeningHours.Count > 0)
+            {
+                <MudListItem T="string" Icon="@Icons.Material.Filled.Schedule">
+                    <MudText Typo="Typo.body2">@string.Join(" · ", _store.OpeningHours)</MudText>
+                </MudListItem>
+            }
+        </MudList>
+    </MudPaper>
+
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        @if (!string.IsNullOrWhiteSpace(_store.Website))
+        {
+            <MudButton Href="@_store.Website" Target="_blank" Variant="Variant.Filled" Color="Color.Primary"
+                       StartIcon="@Icons.Material.Filled.OpenInNew">Website</MudButton>
+        }
+        @if (MapUrl is { } map)
+        {
+            <MudButton Href="@map" Target="_blank" Variant="Variant.Outlined"
+                       StartIcon="@Icons.Material.Filled.Map">Open in Maps</MudButton>
+        }
+    </div>
+
+    @if (_store.BrandsCarried.Count > 0)
+    {
+        <MudDivider Class="my-3" />
+        <MudText Typo="Typo.h6" Class="mb-2">Brands carried</MudText>
+        <div class="d-flex flex-wrap gap-1">
+            @foreach (var brand in _store.BrandsCarried)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                         OnClick="@(() => Nav.NavigateTo($"/brand/{Uri.EscapeDataString(brand)}"))">@brand</MudChip>
+            }
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public string Name { get; set; } = string.Empty;
+
+    private Store? _store;
+    private bool _loading = true;
+
+    private string DecodedName => Uri.UnescapeDataString(Name ?? string.Empty);
+
+    private string? MapUrl =>
+        !string.IsNullOrWhiteSpace(_store?.GoogleMapsUrl) ? _store!.GoogleMapsUrl
+        : _store is { Latitude: { } lat, Longitude: { } lng }
+            ? $"https://www.google.com/maps/search/?api=1&query={lat},{lng}"
+            : _store is not null
+                ? $"https://www.google.com/maps/search/?api=1&query={Uri.EscapeDataString(_store.Name)}"
+                : null;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        try
+        {
+            _store = await Stores.GetByNameAsync(DecodedName);
+        }
+        catch
+        {
+            _store = null;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+}

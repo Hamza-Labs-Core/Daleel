@@ -100,4 +100,29 @@ public class CategoryIntelligenceTests
         intel.IsEmpty.Should().BeTrue();
         intel.Schema.IsEmpty.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task CompareAsync_PopulatesSchemaFromCategoryIntelligence()
+    {
+        const string strategy = """
+            {"queryType":"Comparison","subject":"smartphone","webQueries":["x"],"shoppingQueries":[],
+             "socialQueries":[],"placesQueries":[],"urlsToRead":[],"reasoning":"compare"}
+            """;
+        const string schema = """
+            {"productType":"smartphone","relevantStoreTypes":["electronics store"],
+             "expectedBrands":["Apple","Samsung"],"imagesMatter":true,
+             "specs":[{"key":"ram_gb","label":"RAM","unit":"GB","higherIsBetter":true,"importance":"key"}],
+             "reasoning":"phones compare on RAM, storage, camera"}
+            """;
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.PlannerSystem ? strategy
+            : system == PromptTemplates.CategoryIntelligenceSystem ? schema
+            : "comparison summary");
+        var agent = new AgentService(llm);
+
+        var result = await agent.CompareAsync(new[] { "iPhone 15", "Galaxy S24" }, "jordan");
+
+        result.Schema.ProductType.Should().Be("smartphone");
+        result.Schema.Fields.Should().ContainSingle(f => f.Key == "ram_gb" && f.Label == "RAM");
+    }
 }

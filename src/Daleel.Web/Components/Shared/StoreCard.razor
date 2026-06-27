@@ -32,6 +32,8 @@
         }
     </MudCardContent>
     <MudCardActions>
+        <MudButton Href="@($"/store/{Uri.EscapeDataString(Store.Name)}")" Size="Size.Small"
+                   StartIcon="@Icons.Material.Filled.Article">Store page</MudButton>
         @if (!string.IsNullOrWhiteSpace(Store.Website))
         {
             <MudButton Href="@Store.Website" Target="_blank" Size="Size.Small"
