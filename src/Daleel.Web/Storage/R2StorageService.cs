@@ -12,6 +12,26 @@ namespace Daleel.Web.Storage;
 /// original URL when R2 isn't configured or a transfer fails, so the caller can always just persist what
 /// it gets back.
 /// </summary>
+/// <summary>One stored object: its full key, byte size, and last-modified time.</summary>
+public sealed record R2Object(string Key, long Size, DateTimeOffset LastModified);
+
+/// <summary>
+/// One delimited page of a bucket listing: the sub-"folders" (<paramref name="Prefixes"/>) and the files
+/// (<paramref name="Objects"/>) directly under a prefix, plus a <paramref name="NextContinuationToken"/>
+/// to fetch the following page (null when the listing is complete).
+/// </summary>
+public sealed record R2Listing(
+    IReadOnlyList<string> Prefixes,
+    IReadOnlyList<R2Object> Objects,
+    string? NextContinuationToken)
+{
+    public static R2Listing Empty { get; } =
+        new(Array.Empty<string>(), Array.Empty<R2Object>(), null);
+}
+
+/// <summary>Small text/JSON object content pulled inline for preview, flagged when it was truncated.</summary>
+public sealed record R2ObjectText(string Text, string ContentType, bool Truncated);
+
 public interface IR2StorageService
 {
     /// <summary>True when R2 credentials are present and uploads will be attempted.</summary>
@@ -23,6 +43,26 @@ public interface IR2StorageService
     /// not configured, the URL is empty/already R2-hosted, or anything goes wrong — never throws.
     /// </summary>
     Task<string?> StoreImageAsync(string? sourceUrl, string keyPrefix, CancellationToken ct = default);
+
+    /// <summary>
+    /// Lists the bucket one "folder" deep under <paramref name="prefix"/> (delimiter <c>/</c>): immediate
+    /// sub-prefixes and the objects directly beneath it. Pass <paramref name="continuationToken"/> from a
+    /// previous page to continue. Returns <see cref="R2Listing.Empty"/> when unconfigured or on error.
+    /// </summary>
+    Task<R2Listing> ListObjectsAsync(
+        string? prefix, string? continuationToken = null, int maxKeys = 200, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads up to <paramref name="maxBytes"/> of a text/JSON object for inline preview. Returns null when
+    /// unconfigured, the object is missing, or it's larger-than-cap binary; sets Truncated when clipped.
+    /// </summary>
+    Task<R2ObjectText?> ReadTextAsync(string key, long maxBytes = 256 * 1024, CancellationToken ct = default);
+
+    /// <summary>
+    /// A time-limited presigned GET URL for <paramref name="key"/>, usable as an <c>&lt;img&gt;</c> src or a
+    /// download link without the bucket being public. Returns null when unconfigured.
+    /// </summary>
+    string? DownloadUrl(string key, TimeSpan? expiry = null);
 }
 
 /// <summary>No-op storage used when R2 is unconfigured: keeps the original URL so images still render.</summary>
@@ -32,6 +72,15 @@ public sealed class NullR2StorageService : IR2StorageService
 
     public Task<string?> StoreImageAsync(string? sourceUrl, string keyPrefix, CancellationToken ct = default) =>
         Task.FromResult(sourceUrl);
+
+    public Task<R2Listing> ListObjectsAsync(
+        string? prefix, string? continuationToken = null, int maxKeys = 200, CancellationToken ct = default) =>
+        Task.FromResult(R2Listing.Empty);
+
+    public Task<R2ObjectText?> ReadTextAsync(string key, long maxBytes = 256 * 1024, CancellationToken ct = default) =>
+        Task.FromResult<R2ObjectText?>(null);
+
+    public string? DownloadUrl(string key, TimeSpan? expiry = null) => null;
 }
 
 public sealed class R2StorageService : IR2StorageService, IDisposable
@@ -44,6 +93,14 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
 
     /// <summary>Cap on a single image we'll pull into memory before uploading (8 MB covers product shots).</summary>
     private const long MaxImageBytes = 8 * 1024 * 1024;
+
+    static R2StorageService()
+    {
+        // Cloudflare R2 only accepts SigV4. For a custom ServiceURL the SDK otherwise presigns with SigV2
+        // (AWSAccessKeyId/Signature query params), which R2 rejects with 403 — so download/preview URLs
+        // would silently break. This process-global toggle makes GetPreSignedURL emit SigV4 (X-Amz-*).
+        Amazon.AWSConfigsS3.UseSignatureVersion4 = true;
+    }
 
     public bool IsConfigured => true;
 
@@ -139,6 +196,129 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             // Best-effort: a failed upload must never break enrichment — fall back to the original URL.
             _logger.LogDebug(ex, "R2 image store failed for {Url}; keeping original", sourceUrl);
             return sourceUrl;
+        }
+    }
+
+    /// <summary>Default lifetime for a presigned download/preview URL — long enough to view, short enough to not leak.</summary>
+    private static readonly TimeSpan DefaultUrlLifetime = TimeSpan.FromMinutes(15);
+
+    public async Task<R2Listing> ListObjectsAsync(
+        string? prefix, string? continuationToken = null, int maxKeys = 200, CancellationToken ct = default)
+    {
+        try
+        {
+            var response = await _s3.ListObjectsV2Async(new ListObjectsV2Request
+            {
+                BucketName = _bucket,
+                // Delimiter "/" makes R2 fold deeper keys into CommonPrefixes, giving a one-level "folder"
+                // view instead of every object in the bucket at once.
+                Delimiter = "/",
+                Prefix = string.IsNullOrEmpty(prefix) ? null : prefix,
+                ContinuationToken = string.IsNullOrEmpty(continuationToken) ? null : continuationToken,
+                MaxKeys = Math.Clamp(maxKeys, 1, 1000)
+            }, ct).ConfigureAwait(false);
+
+            return MapListing(response, prefix);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "R2 list failed for prefix {Prefix}", prefix);
+            return R2Listing.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Pure mapper from the S3 listing response to our <see cref="R2Listing"/>: keeps the AWS shape out of
+    /// the UI and stays unit-testable. The object whose key equals the prefix itself (the "folder marker")
+    /// is dropped so it doesn't show as a zero-byte file.
+    /// </summary>
+    internal static R2Listing MapListing(ListObjectsV2Response response, string? prefix)
+    {
+        var objects = (response.S3Objects ?? new List<S3Object>())
+            .Where(o => o.Key != prefix)
+            // S3 reports LastModified in UTC; pin the kind so the DateTimeOffset doesn't shift by the host TZ.
+            .Select(o => new R2Object(
+                o.Key, o.Size, new DateTimeOffset(DateTime.SpecifyKind(o.LastModified, DateTimeKind.Utc))))
+            .ToList();
+
+        var prefixes = (response.CommonPrefixes ?? new List<string>())
+            .Where(p => !string.IsNullOrEmpty(p))
+            .ToList();
+
+        return new R2Listing(prefixes, objects, response.IsTruncated ? response.NextContinuationToken : null);
+    }
+
+    public async Task<R2ObjectText?> ReadTextAsync(string key, long maxBytes = 256 * 1024, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var response = await _s3.GetObjectAsync(new GetObjectRequest
+            {
+                BucketName = _bucket,
+                Key = key
+            }, ct).ConfigureAwait(false);
+
+            await using var stream = response.ResponseStream;
+            using var memory = new MemoryStream();
+            // Read one byte past the cap so we can tell "exactly at cap" from "more remains".
+            var buffer = new byte[8192];
+            int read;
+            var truncated = false;
+            while ((read = await stream.ReadAsync(buffer, ct).ConfigureAwait(false)) > 0)
+            {
+                if (memory.Length + read > maxBytes)
+                {
+                    memory.Write(buffer, 0, (int)(maxBytes - memory.Length));
+                    truncated = true;
+                    break;
+                }
+                memory.Write(buffer, 0, read);
+            }
+
+            var text = Encoding.UTF8.GetString(memory.GetBuffer(), 0, (int)memory.Length);
+            return new R2ObjectText(text, response.Headers.ContentType ?? ContentTypeFor(key), truncated);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "R2 read failed for key {Key}", key);
+            return null;
+        }
+    }
+
+    public string? DownloadUrl(string key, TimeSpan? expiry = null)
+    {
+        if (string.IsNullOrEmpty(key))
+        {
+            return null;
+        }
+
+        try
+        {
+            return _s3.GetPreSignedURL(new GetPreSignedUrlRequest
+            {
+                BucketName = _bucket,
+                Key = key,
+                Verb = HttpVerb.GET,
+                Expires = DateTime.UtcNow.Add(expiry ?? DefaultUrlLifetime)
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "R2 presign failed for key {Key}", key);
+            return null;
         }
     }
 

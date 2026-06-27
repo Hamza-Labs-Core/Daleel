@@ -77,4 +77,52 @@ public sealed class PostgresEventStore : IEventStore
             return Array.Empty<PipelineEvent>();
         }
     }
+
+    public async Task<IReadOnlyList<PipelineEvent>> ForSearchAsync(string searchId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(searchId))
+        {
+            return Array.Empty<PipelineEvent>();
+        }
+
+        try
+        {
+            await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+            // The (SearchId) index keeps this cheap; oldest-first is the natural timeline order.
+            return await db.Events.AsNoTracking()
+                .Where(e => e.SearchId == searchId)
+                .OrderBy(e => e.Timestamp)
+                .ToListAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to load events for search {SearchId}", searchId);
+            return Array.Empty<PipelineEvent>();
+        }
+    }
+
+    public async Task<IReadOnlyDictionary<string, SearchEventSummary>> SummarizeBySearchAsync(
+        IReadOnlyCollection<string> searchIds, CancellationToken ct = default)
+    {
+        if (searchIds.Count == 0)
+        {
+            return new Dictionary<string, SearchEventSummary>();
+        }
+
+        try
+        {
+            await using var db = await _factory.CreateDbContextAsync(ct).ConfigureAwait(false);
+            // Pull just this page of searches' events (bounded by the displayed list) and roll them up
+            // with the pure grouping function — same shape as GetUsageAsync, kept unit-testable.
+            var rows = await db.Events.AsNoTracking()
+                .Where(e => e.SearchId != null && searchIds.Contains(e.SearchId))
+                .ToListAsync(ct).ConfigureAwait(false);
+            return SearchEventSummary.GroupBySearch(rows);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Failed to summarize events for {Count} search(es)", searchIds.Count);
+            return new Dictionary<string, SearchEventSummary>();
+        }
+    }
 }

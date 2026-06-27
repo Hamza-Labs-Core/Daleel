@@ -1,0 +1,404 @@
+@page "/admin/data"
+@using System.Globalization
+@using System.Text.Json
+@using Daleel.Web.Storage
+@attribute [Authorize(Roles = "Admin")]
+@inject IR2StorageService R2
+@inject IStringLocalizer<SharedResource> L
+
+<PageTitle>دليل · Admin · Data</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">@L["Admin.Data.Title"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Admin.Data.Subtitle"]</MudText>
+
+@if (!R2.IsConfigured)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        @L["Admin.Data.NotConfiguredBefore"] <code>R2_ACCESS_KEY</code>, <code>R2_SECRET_KEY</code>
+        @L["Admin.Data.NotConfiguredOr"] <code>R2_BUCKET_NAME</code>@L["Admin.Data.NotConfiguredAfter"]
+    </MudAlert>
+}
+else
+{
+    @* ── Section quick-jumps ─────────────────────────────────────────── *@
+    <div class="d-flex flex-wrap gap-2 mb-3">
+        @foreach (var s in Sections)
+        {
+            <MudButton Size="Size.Small" StartIcon="@s.Icon"
+                       Variant="@(CurrentSection == s.Prefix ? Variant.Filled : Variant.Outlined)"
+                       Color="@(CurrentSection == s.Prefix ? Color.Primary : Color.Default)"
+                       OnClick="@(() => NavigateAsync(s.Prefix))">
+                @L[s.LabelKey]
+            </MudButton>
+        }
+    </div>
+
+    @* ── Breadcrumb path ─────────────────────────────────────────────── *@
+    <MudPaper Outlined="true" Elevation="0" Class="pa-2 mb-3 d-flex align-center flex-wrap gap-1">
+        <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Home"
+                   OnClick="@(() => NavigateAsync(""))">@L["Admin.Data.Root"]</MudButton>
+        @foreach (var crumb in Breadcrumbs())
+        {
+            <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Color="Color.Secondary" />
+            <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => NavigateAsync(crumb.Prefix))">@crumb.Label</MudButton>
+        }
+    </MudPaper>
+
+    @if (_error is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+            @L["Admin.Data.LoadError"] @_error
+            <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="ReloadAsync">@L["Admin.Data.Retry"]</MudButton>
+        </MudAlert>
+    }
+
+    @if (_loading && _objects.Count == 0 && _prefixes.Count == 0)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_error is null && _objects.Count == 0 && _prefixes.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">@L["Admin.Data.Empty"]</MudAlert>
+    }
+    else
+    {
+        <MudPaper Outlined="true" Elevation="0" Class="pa-0">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead>
+                    <tr>
+                        <th>@L["Admin.Data.Col.Name"]</th>
+                        <th>@L["Admin.Data.Col.Type"]</th>
+                        <th style="text-align:right;">@L["Admin.Data.Col.Size"]</th>
+                        <th>@L["Admin.Data.Col.Modified"]</th>
+                        <th style="text-align:right;">@L["Admin.Data.Col.Actions"]</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @* Folders first *@
+                    @foreach (var p in _prefixes)
+                    {
+                        <tr style="cursor:pointer;" @onclick="@(() => NavigateAsync(p))">
+                            <td>
+                                <div class="d-flex align-center gap-2">
+                                    <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Warning" Size="Size.Small" />
+                                    <span>@SegmentName(p)</span>
+                                </div>
+                            </td>
+                            <td><MudText Typo="Typo.caption" Color="Color.Secondary">@L["Admin.Data.Folder"]</MudText></td>
+                            <td style="text-align:right;">—</td>
+                            <td>—</td>
+                            <td style="text-align:right;"></td>
+                        </tr>
+                    }
+                    @* Then files *@
+                    @foreach (var o in _objects)
+                    {
+                        <tr>
+                            <td>
+                                <div class="d-flex align-center gap-2">
+                                    <MudIcon Icon="@FileIcon(o.Key)" Color="Color.Default" Size="Size.Small" />
+                                    <span>@SegmentName(o.Key)</span>
+                                </div>
+                            </td>
+                            <td><MudText Typo="Typo.caption" Color="Color.Secondary">@ContentType(o.Key)</MudText></td>
+                            <td style="text-align:right; white-space:nowrap;">@HumanSize(o.Size)</td>
+                            <td style="white-space:nowrap;">@o.LastModified.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</td>
+                            <td style="text-align:right; white-space:nowrap;">
+                                @if (IsImage(o.Key) || IsText(o.Key))
+                                {
+                                    <MudTooltip Text="@L["Admin.Data.Preview"]">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                       OnClick="@(() => PreviewAsync(o))" />
+                                    </MudTooltip>
+                                }
+                                @{
+                                    var url = R2.DownloadUrl(o.Key);
+                                }
+                                @if (url is not null)
+                                {
+                                    <MudTooltip Text="@L["Admin.Data.Download"]">
+                                        <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                                       Href="@url" Target="_blank" />
+                                    </MudTooltip>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+
+        @if (_nextToken is not null)
+        {
+            <div class="d-flex justify-center mt-3">
+                <MudButton Variant="Variant.Outlined" Size="Size.Small" Disabled="_loading"
+                           StartIcon="@Icons.Material.Filled.ExpandMore" OnClick="LoadMoreAsync">
+                    @L["Admin.Data.LoadMore"]
+                </MudButton>
+            </div>
+        }
+    }
+}
+
+@* ── Preview dialog ──────────────────────────────────────────────────── *@
+<MudDialog @bind-Visible="_previewOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">@(_previewKey is null ? "" : SegmentName(_previewKey))</MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_previewLoading)
+        {
+            <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+        }
+        else if (_previewImageUrl is not null)
+        {
+            <div class="d-flex justify-center">
+                <MudImage Src="@_previewImageUrl" Alt="@_previewKey" Fluid="true" Style="max-height:60vh;" ObjectFit="ObjectFit.Contain" />
+            </div>
+        }
+        else if (_previewText is not null)
+        {
+            @if (_previewTruncated)
+            {
+                <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Outlined" Class="mb-2">@L["Admin.Data.PreviewTruncated"]</MudAlert>
+            }
+            <pre style="white-space:pre-wrap; word-break:break-word; max-height:60vh; overflow:auto; font-size:0.8rem; margin:0;">@_previewText</pre>
+        }
+        else
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Admin.Data.PreviewUnavailable"]</MudText>
+        }
+    </DialogContent>
+    <DialogActions>
+        @if (_previewKey is not null)
+        {
+            var dl = R2.DownloadUrl(_previewKey);
+            @if (dl is not null)
+            {
+                <MudButton StartIcon="@Icons.Material.Filled.Download" Href="@dl" Target="_blank">@L["Admin.Data.Download"]</MudButton>
+            }
+        }
+        <MudButton OnClick="@(() => _previewOpen = false)">@L["Admin.Data.Close"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private sealed record Section(string Prefix, string LabelKey, string Icon);
+
+    // The four data domains the bucket is organized into (each a top-level key prefix).
+    private static readonly Section[] Sections =
+    {
+        new("site-data/", "Admin.Data.Section.Site", Icons.Material.Filled.Description),
+        new("brand-data/", "Admin.Data.Section.Brand", Icons.Material.Filled.BrandingWatermark),
+        new("store-data/", "Admin.Data.Section.Store", Icons.Material.Filled.Store),
+        new("final-specs/", "Admin.Data.Section.Final", Icons.Material.Filled.FactCheck),
+    };
+
+    private const int PageSize = 200;
+
+    private string _prefix = "site-data/";
+    private bool _loading;
+    private string? _error;
+
+    private readonly List<string> _prefixes = new();
+    private readonly List<R2Object> _objects = new();
+    private string? _nextToken;
+
+    // Preview dialog state.
+    private bool _previewOpen;
+    private bool _previewLoading;
+    private string? _previewKey;
+    private string? _previewImageUrl;
+    private string? _previewText;
+    private bool _previewTruncated;
+
+    // The section whose prefix the current path sits under (drives the quick-jump highlight).
+    private string CurrentSection => Sections.FirstOrDefault(s => _prefix.StartsWith(s.Prefix, StringComparison.Ordinal))?.Prefix ?? "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && R2.IsConfigured)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task NavigateAsync(string prefix)
+    {
+        _prefix = prefix;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _error = null;
+        _loading = true;
+        _prefixes.Clear();
+        _objects.Clear();
+        _nextToken = null;
+        StateHasChanged();
+
+        await FetchPageAsync(continuationToken: null);
+
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        if (_nextToken is null)
+        {
+            return;
+        }
+        _loading = true;
+        StateHasChanged();
+        await FetchPageAsync(_nextToken);
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private async Task FetchPageAsync(string? continuationToken)
+    {
+        try
+        {
+            var listing = await R2.ListObjectsAsync(_prefix, continuationToken, PageSize);
+            // Sub-prefixes only come back on the first page of a listing; accumulate distinctly anyway.
+            foreach (var p in listing.Prefixes)
+            {
+                if (!_prefixes.Contains(p))
+                {
+                    _prefixes.Add(p);
+                }
+            }
+            _objects.AddRange(listing.Objects);
+            _nextToken = listing.NextContinuationToken;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task PreviewAsync(R2Object o)
+    {
+        _previewKey = o.Key;
+        _previewImageUrl = null;
+        _previewText = null;
+        _previewTruncated = false;
+        _previewOpen = true;
+
+        if (IsImage(o.Key))
+        {
+            // Images render straight from a presigned URL — no need to pull bytes through the server.
+            _previewImageUrl = R2.DownloadUrl(o.Key);
+            _previewLoading = false;
+            StateHasChanged();
+            return;
+        }
+
+        _previewLoading = true;
+        StateHasChanged();
+        try
+        {
+            var content = await R2.ReadTextAsync(o.Key);
+            if (content is not null)
+            {
+                _previewText = TryPrettyJson(content.Text, o.Key);
+                _previewTruncated = content.Truncated;
+            }
+        }
+        catch (Exception ex)
+        {
+            _previewText = ex.Message;
+        }
+        _previewLoading = false;
+        StateHasChanged();
+    }
+
+    // Pretty-print JSON for readability; leave other text as-is. Best-effort — malformed JSON shows raw.
+    private static string TryPrettyJson(string text, string key)
+    {
+        if (!key.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            return text;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return text;
+        }
+    }
+
+    private IEnumerable<(string Label, string Prefix)> Breadcrumbs()
+    {
+        if (string.IsNullOrEmpty(_prefix))
+        {
+            yield break;
+        }
+        var segments = _prefix.TrimEnd('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+        var cumulative = "";
+        foreach (var seg in segments)
+        {
+            cumulative += seg + "/";
+            yield return (seg, cumulative);
+        }
+    }
+
+    // Last path segment, e.g. "site-data/lg/specs.json" → "specs.json"; "site-data/lg/" → "lg/".
+    private static string SegmentName(string key)
+    {
+        var trimmed = key.TrimEnd('/');
+        var idx = trimmed.LastIndexOf('/');
+        var name = idx >= 0 ? trimmed[(idx + 1)..] : trimmed;
+        return key.EndsWith('/') ? name + "/" : name;
+    }
+
+    private static string Ext(string key)
+    {
+        var name = key.TrimEnd('/');
+        var dot = name.LastIndexOf('.');
+        return dot >= 0 ? name[(dot + 1)..].ToLowerInvariant() : "";
+    }
+
+    private static bool IsImage(string key) => Ext(key) is "png" or "jpg" or "jpeg" or "webp" or "gif" or "svg" or "bmp";
+
+    private static bool IsText(string key) => Ext(key) is "json" or "txt" or "csv" or "xml" or "html" or "htm" or "md" or "log";
+
+    private static string FileIcon(string key) =>
+        IsImage(key) ? Icons.Material.Filled.Image
+        : Ext(key) == "json" ? Icons.Material.Filled.DataObject
+        : IsText(key) ? Icons.Material.Filled.Article
+        : Icons.Material.Filled.InsertDriveFile;
+
+    private static string ContentType(string key) => Ext(key) switch
+    {
+        "" => "—",
+        "json" => "application/json",
+        "png" => "image/png",
+        "jpg" or "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        var e => e
+    };
+
+    private static string HumanSize(long bytes)
+    {
+        string[] units = { "B", "KB", "MB", "GB" };
+        double size = bytes;
+        var unit = 0;
+        while (size >= 1024 && unit < units.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+        return unit == 0
+            ? $"{bytes} {units[unit]}"
+            : $"{size.ToString("0.#", CultureInfo.InvariantCulture)} {units[unit]}";
+    }
+}

@@ -473,4 +473,62 @@
   <data name="Admin.Usage.Retry" xml:space="preserve"><value>إعادة المحاولة</value></data>
   <data name="Admin.Usage.StatusOk" xml:space="preserve"><value>ناجح</value></data>
   <data name="Admin.Usage.StatusFail" xml:space="preserve"><value>فشل</value></data>
+  <data name="Admin.Workflows.Title" xml:space="preserve"><value>سير عمليات البحث</value></data>
+  <data name="Admin.Workflows.Subtitle" xml:space="preserve"><value>عمليات البحث الجارية والأخيرة، مُعاد بناؤها من طابور مهام البحث ومخزن أحداث المعالجة. انقر على عملية لعرض مخطّط خطواتها الزمني.</value></data>
+  <data name="Admin.Workflows.Period.Today" xml:space="preserve"><value>اليوم</value></data>
+  <data name="Admin.Workflows.Period.Week" xml:space="preserve"><value>٧ أيام</value></data>
+  <data name="Admin.Workflows.Period.Month" xml:space="preserve"><value>٣٠ يومًا</value></data>
+  <data name="Admin.Workflows.Refresh" xml:space="preserve"><value>تحديث</value></data>
+  <data name="Admin.Workflows.LoadError" xml:space="preserve"><value>تعذّر تحميل سير العمليات:</value></data>
+  <data name="Admin.Workflows.Retry" xml:space="preserve"><value>إعادة المحاولة</value></data>
+  <data name="Admin.Workflows.NoEventStore" xml:space="preserve"><value>مخزن أحداث المعالجة غير مُهيّأ، لذا تكلفة كل خطوة والمخطّط الزمني للخطوات غير متاحة. ما تزال العمليات الجارية والمكتملة معروضة من طابور المهام.</value></data>
+  <data name="Admin.Workflows.RunningTitle" xml:space="preserve"><value>قيد التشغيل والانتظار</value></data>
+  <data name="Admin.Workflows.AutoRefresh" xml:space="preserve"><value>تحديث تلقائي</value></data>
+  <data name="Admin.Workflows.RunningEmpty" xml:space="preserve"><value>لا توجد عمليات بحث قيد التشغيل الآن.</value></data>
+  <data name="Admin.Workflows.CompletedTitle" xml:space="preserve"><value>المكتملة</value></data>
+  <data name="Admin.Workflows.CompletedEmpty" xml:space="preserve"><value>لا توجد عمليات بحث مكتملة في هذه الفترة.</value></data>
+  <data name="Admin.Workflows.View" xml:space="preserve"><value>عرض</value></data>
+  <data name="Admin.Workflows.Close" xml:space="preserve"><value>إغلاق</value></data>
+  <data name="Admin.Workflows.StepUnknown" xml:space="preserve"><value>جارٍ البدء…</value></data>
+  <data name="Admin.Workflows.DetailTitle" xml:space="preserve"><value>المخطّط الزمني للخطوات</value></data>
+  <data name="Admin.Workflows.DetailEmpty" xml:space="preserve"><value>لا توجد خطوات مُسجّلة لهذه العملية. تظهر الخطوات بعد اكتمال العملية وحفظ أحداثها في المخزن.</value></data>
+  <data name="Admin.Workflows.Col.Query" xml:space="preserve"><value>الاستعلام</value></data>
+  <data name="Admin.Workflows.Col.User" xml:space="preserve"><value>المستخدم</value></data>
+  <data name="Admin.Workflows.Col.Started" xml:space="preserve"><value>البداية</value></data>
+  <data name="Admin.Workflows.Col.Elapsed" xml:space="preserve"><value>المُنقضي</value></data>
+  <data name="Admin.Workflows.Col.Step" xml:space="preserve"><value>الخطوة الحالية</value></data>
+  <data name="Admin.Workflows.Col.Status" xml:space="preserve"><value>الحالة</value></data>
+  <data name="Admin.Workflows.Col.Finished" xml:space="preserve"><value>الانتهاء</value></data>
+  <data name="Admin.Workflows.Col.Duration" xml:space="preserve"><value>المدة</value></data>
+  <data name="Admin.Workflows.Col.Results" xml:space="preserve"><value>النتائج</value></data>
+  <data name="Admin.Workflows.Col.Cost" xml:space="preserve"><value>التكلفة التقديرية</value></data>
+  <data name="Admin.Workflows.Col.Steps" xml:space="preserve"><value>الخطوات</value></data>
+  <data name="Admin.Workflows.Status.Completed" xml:space="preserve"><value>مكتمل</value></data>
+  <data name="Admin.Workflows.Status.Failed" xml:space="preserve"><value>فشل</value></data>
+  <data name="Admin.Workflows.Status.Cancelled" xml:space="preserve"><value>مُلغى</value></data>
+  <data name="Admin.Data.Title" xml:space="preserve"><value>عارض بيانات R2</value></data>
+  <data name="Admin.Data.Subtitle" xml:space="preserve"><value>تصفّح حاوية R2 حسب نوع البيانات — المواصفات المُستخرَجة، وصور العلامات التجارية والمتاجر، وأوراق المواصفات المعتمدة. عاين الصور وملفّات JSON مباشرةً أو نزّل أي ملف.</value></data>
+  <data name="Admin.Data.NotConfiguredBefore" xml:space="preserve"><value>تخزين R2 غير مُهيّأ. اضبط</value></data>
+  <data name="Admin.Data.NotConfiguredOr" xml:space="preserve"><value>و</value></data>
+  <data name="Admin.Data.NotConfiguredAfter" xml:space="preserve"><value> لتصفّح البيانات المخزّنة هنا.</value></data>
+  <data name="Admin.Data.Root" xml:space="preserve"><value>جذر الحاوية</value></data>
+  <data name="Admin.Data.LoadError" xml:space="preserve"><value>تعذّر سرد الملفّات:</value></data>
+  <data name="Admin.Data.Retry" xml:space="preserve"><value>إعادة المحاولة</value></data>
+  <data name="Admin.Data.Empty" xml:space="preserve"><value>لا شيء هنا.</value></data>
+  <data name="Admin.Data.Folder" xml:space="preserve"><value>مجلّد</value></data>
+  <data name="Admin.Data.Preview" xml:space="preserve"><value>معاينة</value></data>
+  <data name="Admin.Data.Download" xml:space="preserve"><value>تنزيل</value></data>
+  <data name="Admin.Data.LoadMore" xml:space="preserve"><value>تحميل المزيد</value></data>
+  <data name="Admin.Data.PreviewTruncated" xml:space="preserve"><value>تم اقتطاع المعاينة — نزّل الملف لعرضه كاملًا.</value></data>
+  <data name="Admin.Data.PreviewUnavailable" xml:space="preserve"><value>المعاينة غير متاحة لهذا الملف.</value></data>
+  <data name="Admin.Data.Close" xml:space="preserve"><value>إغلاق</value></data>
+  <data name="Admin.Data.Col.Name" xml:space="preserve"><value>الاسم</value></data>
+  <data name="Admin.Data.Col.Type" xml:space="preserve"><value>النوع</value></data>
+  <data name="Admin.Data.Col.Size" xml:space="preserve"><value>الحجم</value></data>
+  <data name="Admin.Data.Col.Modified" xml:space="preserve"><value>آخر تعديل</value></data>
+  <data name="Admin.Data.Col.Actions" xml:space="preserve"><value>إجراءات</value></data>
+  <data name="Admin.Data.Section.Site" xml:space="preserve"><value>بيانات المواقع</value></data>
+  <data name="Admin.Data.Section.Brand" xml:space="preserve"><value>بيانات العلامات</value></data>
+  <data name="Admin.Data.Section.Store" xml:space="preserve"><value>بيانات المتاجر</value></data>
+  <data name="Admin.Data.Section.Final" xml:space="preserve"><value>المواصفات النهائية</value></data>
 </root>

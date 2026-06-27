@@ -1,0 +1,461 @@
+@page "/admin/workflows"
+@using System.Globalization
+@using Microsoft.EntityFrameworkCore
+@using Daleel.Web.Admin
+@using Daleel.Web.Events
+@attribute [Authorize(Roles = "Admin")]
+@inject DaleelDbContext Db
+@inject IEventStore Events
+@inject IStringLocalizer<SharedResource> L
+@implements IAsyncDisposable
+
+<PageTitle>دليل · Admin · Workflows</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">@L["Admin.Workflows.Title"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Admin.Workflows.Subtitle"]</MudText>
+
+<div class="d-flex align-center flex-wrap gap-3 mb-4">
+    <MudToggleGroup T="string" Value="_period" ValueChanged="SetPeriodAsync" Color="Color.Primary"
+                    Size="Size.Small" Outlined="true" CheckMark="false" Disabled="_loading">
+        <MudToggleItem Value="@("today")">@L["Admin.Workflows.Period.Today"]</MudToggleItem>
+        <MudToggleItem Value="@("7d")">@L["Admin.Workflows.Period.Week"]</MudToggleItem>
+        <MudToggleItem Value="@("30d")">@L["Admin.Workflows.Period.Month"]</MudToggleItem>
+    </MudToggleGroup>
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+    }
+    <MudSpacer />
+    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Refresh"
+               OnClick="ReloadAsync" Disabled="_loading">@L["Admin.Workflows.Refresh"]</MudButton>
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        @L["Admin.Workflows.LoadError"] @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="ReloadAsync">@L["Admin.Workflows.Retry"]</MudButton>
+    </MudAlert>
+}
+
+@if (!Events.IsEnabled)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mb-4">
+        @L["Admin.Workflows.NoEventStore"]
+    </MudAlert>
+}
+
+@* ── Running / queued workflows ──────────────────────────────────────── *@
+<div class="d-flex align-center mb-2 gap-3">
+    <MudText Typo="Typo.h6">@L["Admin.Workflows.RunningTitle"]</MudText>
+    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="ma-0">@_running.Count</MudChip>
+    <MudSpacer />
+    <MudSwitch T="bool" Value="_autoRefresh" ValueChanged="ToggleAutoRefreshAsync" Color="Color.Primary"
+               Label="@L["Admin.Workflows.AutoRefresh"]" Size="Size.Small" />
+</div>
+
+<MudPaper Outlined="true" Elevation="0" Class="pa-2 mb-6">
+    @if (_running.Count == 0)
+    {
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-2">@L["Admin.Workflows.RunningEmpty"]</MudText>
+    }
+    else
+    {
+        <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+            <thead>
+                <tr>
+                    <th>@L["Admin.Workflows.Col.Query"]</th>
+                    <th>@L["Admin.Workflows.Col.User"]</th>
+                    <th>@L["Admin.Workflows.Col.Started"]</th>
+                    <th style="text-align:right;">@L["Admin.Workflows.Col.Elapsed"]</th>
+                    <th>@L["Admin.Workflows.Col.Step"]</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _running)
+                {
+                    <tr>
+                        <td style="max-width:280px;"><strong>@Truncate(r.Query, 80)</strong></td>
+                        <td><MudText Typo="Typo.caption" Style="font-family:monospace;">@AnonUser(r.UserId)</MudText></td>
+                        <td style="white-space:nowrap;">@LocalTime(r.StartedAt ?? r.CreatedAt)</td>
+                        <td style="text-align:right; white-space:nowrap;">@HumanDuration(WorkflowMetrics.Duration(r, _now))</td>
+                        <td>
+                            <div class="d-flex align-center gap-2">
+                                <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+                                <span>@StepLabel(r)</span>
+                            </div>
+                        </td>
+                        <td style="text-align:right;">
+                            <MudButton Size="Size.Small" Variant="Variant.Text"
+                                       OnClick="@(() => OpenDetailAsync(r))">@L["Admin.Workflows.View"]</MudButton>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+</MudPaper>
+
+@* ── Completed workflows ─────────────────────────────────────────────── *@
+<MudText Typo="Typo.h6" Class="mb-2">@L["Admin.Workflows.CompletedTitle"]</MudText>
+<MudDataGrid T="CompletedRow" Items="_completed" Dense="true" Hover="true"
+             SortMode="SortMode.Single" Filterable="false" Groupable="false" Elevation="0"
+             RowClick="@(args => OpenDetailAsync(args.Item.Job))"
+             Class="border-solid border mud-border-lines-default rounded">
+    <Columns>
+        <PropertyColumn Property="x => x.Job.Query" Title="@(L["Admin.Workflows.Col.Query"])">
+            <CellTemplate>
+                <MudText Typo="Typo.body2" Style="max-width:320px;" Class="text-truncate">@context.Item.Job.Query</MudText>
+            </CellTemplate>
+        </PropertyColumn>
+        <TemplateColumn Title="@(L["Admin.Workflows.Col.Status"])" SortBy="x => x.Job.Status">
+            <CellTemplate>
+                <MudTooltip Text="@StatusLabel(context.Item.Job.Status)">
+                    <MudIcon Icon="@StatusIcon(context.Item.Job.Status)" Color="@StatusColor(context.Item.Job.Status)" Size="Size.Small" />
+                </MudTooltip>
+            </CellTemplate>
+        </TemplateColumn>
+        <PropertyColumn Property="x => x.Job.CompletedAt" Title="@(L["Admin.Workflows.Col.Finished"])">
+            <CellTemplate>@LocalTime(context.Item.Job.CompletedAt ?? context.Item.Job.CreatedAt)</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.DurationMs" Title="@(L["Admin.Workflows.Col.Duration"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+            <CellTemplate>@HumanDuration(context.Item.Duration)</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.ResultCount" Title="@(L["Admin.Workflows.Col.Results"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+            <CellTemplate>@(context.Item.ResultCount?.ToString("N0", CultureInfo.InvariantCulture) ?? "—")</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.Cost" Title="@(L["Admin.Workflows.Col.Cost"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+            <CellTemplate>@(context.Item.HasEvents ? Usd(context.Item.Cost) : "—")</CellTemplate>
+        </PropertyColumn>
+        <PropertyColumn Property="x => x.Steps" Title="@(L["Admin.Workflows.Col.Steps"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
+            <CellTemplate>@(context.Item.HasEvents ? context.Item.Steps.ToString("N0", CultureInfo.InvariantCulture) : "—")</CellTemplate>
+        </PropertyColumn>
+    </Columns>
+    <NoRecordsContent>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-3">@L["Admin.Workflows.CompletedEmpty"]</MudText>
+    </NoRecordsContent>
+</MudDataGrid>
+
+@* ── Step-timeline drill-down ────────────────────────────────────────── *@
+<MudDialog @bind-Visible="_detailOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true })">
+    <TitleContent>
+        <MudText Typo="Typo.h6">
+            @L["Admin.Workflows.DetailTitle"]
+            @if (_detailJob is not null)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">@Truncate(_detailJob.Query, 120)</MudText>
+            }
+        </MudText>
+    </TitleContent>
+    <DialogContent>
+        @if (_detailLoading)
+        {
+            <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>
+        }
+        else if (!Events.IsEnabled)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">@L["Admin.Workflows.NoEventStore"]</MudAlert>
+        }
+        else if (_detailEvents.Count == 0)
+        {
+            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Admin.Workflows.DetailEmpty"]</MudText>
+        }
+        else
+        {
+            <MudTimeline TimelinePosition="TimelinePosition.Start" Class="pl-2">
+                @foreach (var ev in _detailEvents)
+                {
+                    <MudTimelineItem Color="@(ev.Success ? Color.Success : Color.Error)" Size="Size.Small"
+                                     Icon="@(ev.Success ? Icons.Material.Filled.Check : Icons.Material.Filled.Close)">
+                        <ItemContent>
+                            <div class="d-flex align-center gap-2 flex-wrap">
+                                <MudText Typo="Typo.body2"><b>@ev.EventType</b></MudText>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="ma-0">@ev.Provider</MudChip>
+                            </div>
+                            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                @LocalTime(ev.Timestamp)
+                                · @ev.DurationMs.ToString("N0", CultureInfo.InvariantCulture) ms
+                                · @Usd(ev.EstimatedCost)
+                            </MudText>
+                        </ItemContent>
+                    </MudTimelineItem>
+                }
+            </MudTimeline>
+        }
+    </DialogContent>
+    <DialogActions>
+        <MudButton OnClick="@(() => _detailOpen = false)">@L["Admin.Workflows.Close"]</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    // The completed list shows this many most-recent runs (bounded so the in-memory window filter and the
+    // per-search cost rollup stay cheap regardless of how many searches the system has ever run).
+    private const int CompletedCap = 200;
+
+    private string _period = "7d";
+    private bool _loading;
+    private string? _error;
+    private DateTimeOffset _now = DateTimeOffset.UtcNow;
+
+    private IReadOnlyList<SearchJob> _running = Array.Empty<SearchJob>();
+    private IReadOnlyList<CompletedRow> _completed = Array.Empty<CompletedRow>();
+
+    // Auto-refresh of just the running section.
+    private bool _autoRefresh;
+    private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(5);
+    private PeriodicTimer? _timer;
+    private Task? _timerLoop;
+    // The scoped DaleelDbContext is not thread-safe; serialize every DB access so a manual reload and an
+    // auto-refresh tick can never run two operations on it at once.
+    private readonly SemaphoreSlim _dbGate = new(1, 1);
+
+    // Drill-down dialog state.
+    private bool _detailOpen;
+    private bool _detailLoading;
+    private SearchJob? _detailJob;
+    private IReadOnlyList<PipelineEvent> _detailEvents = Array.Empty<PipelineEvent>();
+
+    private sealed record CompletedRow(SearchJob Job, decimal Cost, int Steps, int? ResultCount, bool HasEvents)
+    {
+        public long DurationMs => (long)(Duration?.TotalMilliseconds ?? 0);
+        public TimeSpan? Duration => WorkflowMetrics.Duration(Job, Job.CompletedAt ?? Job.CreatedAt);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task SetPeriodAsync(string period)
+    {
+        _period = period;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            await LoadAsync(includeCompleted: true);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Loads the running list (and, unless this is an auto-refresh tick, the completed list). All DB work
+    /// is funnelled through <see cref="_dbGate"/> so concurrent callers serialize on the shared context.
+    /// </summary>
+    private async Task LoadAsync(bool includeCompleted)
+    {
+        await _dbGate.WaitAsync();
+        try
+        {
+            _now = DateTimeOffset.UtcNow;
+
+            // Running/queued: small set, no date predicate — order by the int PK (newest first) which SQLite
+            // can translate (the DateTimeOffset columns are TEXT and can't be ordered in SQL).
+            var running = await Db.SearchJobs.AsNoTracking()
+                .Where(j => j.Status == JobStatus.Running || j.Status == JobStatus.Queued)
+                .OrderByDescending(j => j.Id)
+                .ToListAsync();
+            _running = running;
+
+            if (!includeCompleted)
+            {
+                return;
+            }
+
+            // Completed/failed/cancelled: bound to the newest CompletedCap by PK in SQL, then window-filter
+            // and order by the actual finish time in memory (SQLite can't compare/order the TEXT timestamp).
+            var since = Since(_period);
+            var candidates = await Db.SearchJobs.AsNoTracking()
+                .Where(j => j.Status == JobStatus.Completed
+                            || j.Status == JobStatus.Failed
+                            || j.Status == JobStatus.Cancelled)
+                .OrderByDescending(j => j.Id)
+                .Take(CompletedCap)
+                .ToListAsync();
+
+            var inWindow = candidates
+                .Where(j => (j.CompletedAt ?? j.CreatedAt) >= since)
+                .OrderByDescending(j => j.CompletedAt ?? j.CreatedAt)
+                .ToList();
+
+            // Cost/step rollup per run — one event-store query for the whole page (empty when Postgres
+            // isn't configured, in which case the cost/steps columns show "—").
+            var ids = inWindow.Select(j => j.Id.ToString(CultureInfo.InvariantCulture)).ToList();
+            var summaries = await Events.SummarizeBySearchAsync(ids);
+
+            _completed = inWindow.Select(j =>
+            {
+                var hasEvents = summaries.TryGetValue(j.Id.ToString(CultureInfo.InvariantCulture), out var s);
+                return new CompletedRow(
+                    j,
+                    s?.Cost ?? 0m,
+                    s?.Count ?? 0,
+                    WorkflowMetrics.ResultCount(j.ResultJson),
+                    hasEvents);
+            }).ToList();
+        }
+        finally
+        {
+            _dbGate.Release();
+        }
+    }
+
+    private async Task ToggleAutoRefreshAsync(bool on)
+    {
+        _autoRefresh = on;
+        if (on)
+        {
+            _timer = new PeriodicTimer(RefreshInterval);
+            _timerLoop = RunAutoRefreshLoopAsync(_timer);
+        }
+        else
+        {
+            await StopTimerAsync();
+        }
+    }
+
+    private async Task RunAutoRefreshLoopAsync(PeriodicTimer timer)
+    {
+        try
+        {
+            while (await timer.WaitForNextTickAsync())
+            {
+                // Refresh only the running section — it's the live part; the completed list is historical.
+                try
+                {
+                    await LoadAsync(includeCompleted: false);
+                    await InvokeAsync(StateHasChanged);
+                }
+                catch
+                {
+                    // A transient read failure shouldn't kill the auto-refresh loop; the next tick retries.
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Timer disposed — normal shutdown of the loop.
+        }
+    }
+
+    private async Task StopTimerAsync()
+    {
+        _timer?.Dispose();
+        _timer = null;
+        if (_timerLoop is not null)
+        {
+            try { await _timerLoop; } catch { /* loop already unwound */ }
+            _timerLoop = null;
+        }
+    }
+
+    private async Task OpenDetailAsync(SearchJob job)
+    {
+        _detailJob = job;
+        _detailEvents = Array.Empty<PipelineEvent>();
+        _detailOpen = true;
+        _detailLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            _detailEvents = await Events.ForSearchAsync(job.Id.ToString(CultureInfo.InvariantCulture));
+        }
+        catch
+        {
+            _detailEvents = Array.Empty<PipelineEvent>();
+        }
+        _detailLoading = false;
+        StateHasChanged();
+    }
+
+    // Window start for each period (UTC).
+    private static DateTimeOffset Since(string period) => period switch
+    {
+        "today" => new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero),
+        "30d" => DateTimeOffset.UtcNow.AddDays(-30),
+        _ => DateTimeOffset.UtcNow.AddDays(-7)
+    };
+
+    private string StepLabel(SearchJob job) =>
+        string.IsNullOrWhiteSpace(job.ProgressMessage) ? L["Admin.Workflows.StepUnknown"] : job.ProgressMessage!;
+
+    private string StatusLabel(string status) => status switch
+    {
+        JobStatus.Completed => L["Admin.Workflows.Status.Completed"],
+        JobStatus.Failed => L["Admin.Workflows.Status.Failed"],
+        JobStatus.Cancelled => L["Admin.Workflows.Status.Cancelled"],
+        _ => status
+    };
+
+    private static string StatusIcon(string status) => status switch
+    {
+        JobStatus.Completed => Icons.Material.Filled.CheckCircle,
+        JobStatus.Failed => Icons.Material.Filled.Error,
+        JobStatus.Cancelled => Icons.Material.Filled.Cancel,
+        _ => Icons.Material.Filled.HelpOutline
+    };
+
+    private static Color StatusColor(string status) => status switch
+    {
+        JobStatus.Completed => Color.Success,
+        JobStatus.Failed => Color.Error,
+        JobStatus.Cancelled => Color.Warning,
+        _ => Color.Default
+    };
+
+    private string AnonUser(string? userId)
+    {
+        var hash = Anonymizer.HashUserId(userId);
+        return string.IsNullOrEmpty(hash) ? "—" : hash[..Math.Min(10, hash.Length)];
+    }
+
+    private static string LocalTime(DateTimeOffset t) =>
+        t.ToLocalTime().ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+
+    private static string Usd(decimal cost) => "$" + cost.ToString("0.0000", CultureInfo.InvariantCulture);
+
+    private static string Truncate(string? s, int max) =>
+        string.IsNullOrEmpty(s) ? "" : (s.Length <= max ? s : s[..max] + "…");
+
+    // Compact "1.2s" / "3m 04s" / "45ms" rendering — null when the run never started.
+    private static string HumanDuration(TimeSpan? span)
+    {
+        if (span is not { } d)
+        {
+            return "—";
+        }
+        if (d.TotalSeconds < 1)
+        {
+            return $"{d.TotalMilliseconds:N0}ms";
+        }
+        if (d.TotalMinutes < 1)
+        {
+            return $"{d.TotalSeconds:0.0}s";
+        }
+        return $"{(int)d.TotalMinutes}m {d.Seconds:00}s";
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await StopTimerAsync();
+        _dbGate.Dispose();
+    }
+}
