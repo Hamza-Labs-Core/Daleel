@@ -5,17 +5,35 @@ Playwright end-to-end browser tests for the Daleel Blazor Server web app
 instance of the app and verify the critical user journeys documented in
 [`docs/UI_TEST_CASES.md`](../../docs/UI_TEST_CASES.md).
 
-## How it runs (and why it's safe in CI)
+## Target environment
 
-These tests need a live server. The suite reads the target from the
-`E2E_BASE_URL` environment variable:
+By default the suite runs against the **QA deployment** (tag `qa-v1.0`):
 
-- **`E2E_BASE_URL` unset** → every test `Assert.Ignore`s. The project still
-  **compiles and the test run stays green** (skipped), so CI that only does
-  `dotnet build` / `dotnet test` without a server never goes red.
-- **`E2E_BASE_URL` set** → tests execute against that URL.
+```
+https://qa-daleel.hamzalabs.dev
+```
 
-## Running locally
+Override with `E2E_BASE_URL` to point at any other environment (a local dev
+instance, staging, etc.). Set `E2E_OFFLINE=1` to force every test to
+`Assert.Ignore` — useful for build-only CI with no network access to QA, so the
+project still **compiles and the run stays green**.
+
+## Running against QA
+
+1. Install the Playwright browsers once (after the first `dotnet build`):
+
+   ```bash
+   pwsh tests/Daleel.E2E.Tests/bin/Debug/net8.0/playwright.ps1 install chromium
+   # or:  dotnet tool install --global Microsoft.Playwright.CLI && playwright install chromium
+   ```
+
+2. Run the suite (no env var needed — QA is the default target):
+
+   ```bash
+   dotnet test tests/Daleel.E2E.Tests
+   ```
+
+## Running against a local dev instance
 
 1. Start the app (uses local SQLite, no external services required):
 
@@ -24,34 +42,30 @@ These tests need a live server. The suite reads the target from the
    # note the printed HTTPS URL, e.g. https://localhost:7120
    ```
 
-2. Install the Playwright browsers once (after the first `dotnet build`):
-
-   ```bash
-   pwsh tests/Daleel.E2E.Tests/bin/Debug/net8.0/playwright.ps1 install chromium
-   # or:  dotnet tool install --global Microsoft.Playwright.CLI && playwright install chromium
-   ```
-
-3. Point the tests at the running app and run them:
+2. Point the tests at it:
 
    ```bash
    E2E_BASE_URL=https://localhost:7120 dotnet test tests/Daleel.E2E.Tests
    ```
 
-   For a brand-new (empty) SQLite DB, the **first** account the suite registers
-   becomes the **admin** — that's what the admin tests rely on. To run against a
-   DB that already has users, supply explicit admin credentials instead:
+### Admin credentials
 
-   ```bash
-   E2E_BASE_URL=https://localhost:7120 \
-   E2E_ADMIN_EMAIL=admin@example.com E2E_ADMIN_PASSWORD='…' \
-   dotnet test tests/Daleel.E2E.Tests
-   ```
+The admin tests need an admin account. On a brand-new (empty) DB the **first**
+account the suite registers is promoted to **admin** automatically. Against a
+shared environment like QA — where users already exist — supply explicit admin
+credentials instead, and the admin tests will sign in with them (otherwise they
+self-skip):
+
+```bash
+E2E_ADMIN_EMAIL=admin@example.com E2E_ADMIN_PASSWORD='…' dotnet test tests/Daleel.E2E.Tests
+```
 
 ### Configuration knobs (environment variables)
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `E2E_BASE_URL` | _unset_ (tests skip) | Base URL of the running app |
+| `E2E_BASE_URL` | `https://qa-daleel.hamzalabs.dev` | Base URL of the app under test |
+| `E2E_OFFLINE` | `0` | `1` to skip all tests (build-only CI, no network) |
 | `E2E_HEADED` | `0` | `1` to watch the browser |
 | `E2E_SLOWMO` | `0` | ms delay between actions (debugging) |
 | `E2E_TIMEOUT_MS` | `30000` | default action/navigation timeout |

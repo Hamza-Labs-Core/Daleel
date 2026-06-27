@@ -8,21 +8,21 @@ namespace Daleel.E2E.Tests.Support;
 public static class TestConfig
 {
     /// <summary>
-    /// Base URL of the running Daleel.Web app. Defaults to the HTTPS dev profile printed by
-    /// <c>dotnet run --project src/Daleel.Web</c> (see <c>launchSettings.json</c>). Override with
-    /// the <c>E2E_BASE_URL</c> environment variable, e.g. <c>https://localhost:5001</c>.
+    /// Base URL of the Daleel app under test. Defaults to the <strong>QA deployment</strong>
+    /// (<c>qa-v1.0</c> tag). Override with the <c>E2E_BASE_URL</c> environment variable to target a
+    /// different environment, e.g. a local <c>https://localhost:7120</c> dev instance.
     /// </summary>
     public static string BaseUrl =>
         Environment.GetEnvironmentVariable("E2E_BASE_URL")?.TrimEnd('/')
-        ?? "https://localhost:7120";
+        ?? "https://qa-daleel.hamzalabs.dev";
 
     /// <summary>
-    /// When unset, the suite has no app to talk to. Tests use this to <c>Assert.Ignore</c> instead
-    /// of failing, so the project still builds and runs (green-skipped) in environments without a
-    /// live server — exactly the CI "compiles but doesn't run" requirement.
+    /// Whether there is a live app to drive. The suite targets the QA deployment by default, so this
+    /// is normally <c>true</c>. Set <c>E2E_OFFLINE=1</c> to force every test to <c>Assert.Ignore</c>
+    /// — useful for build-only CI that has no network access to QA, keeping the run green.
     /// </summary>
     public static bool HasLiveServer =>
-        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("E2E_BASE_URL"));
+        Environment.GetEnvironmentVariable("E2E_OFFLINE") is not ("1" or "true");
 
     /// <summary>Run headed (visible browser) by setting <c>E2E_HEADED=1</c>. Default headless.</summary>
     public static bool Headed =>
