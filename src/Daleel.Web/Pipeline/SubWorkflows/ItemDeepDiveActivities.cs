@@ -282,12 +282,8 @@ public sealed class SaveRawSpecsActivity : CodeActivity
             await ItemSpecPipeline.SaveJsonBlob(r2, state, $"{dataPrefix}/scraped-detail.json", blob, R2Bucket.Data, ct);
         }
 
-        // 4. The store product image → the images bucket (no hot-linking; the DB keeps the hosted URL only).
-        var hosted = await ItemSpecPipeline.SafeStoreImage(r2, state.Model.ImageUrl, $"products/{modelPath}", ct);
-        if (!string.IsNullOrWhiteSpace(hosted) && hosted != state.Model.ImageUrl)
-        {
-            state.Result = state.Result with { ImageUrl = hosted };
-        }
+        // 4. The store product image is kept as its original source URL (no download, no R2 upload).
+        //    Result already carries Model.ImageUrl; the UI renders the external URL directly.
 
         if (state.RawSpecsR2Urls.Count > 0)
         {
@@ -423,13 +419,6 @@ internal static class ItemSpecPipeline
         try { return await r2.StoreJsonAsync(json, objectKey, bucket, ct); }
         catch (OperationCanceledException) { throw; }
         catch { return null; }
-    }
-
-    public static async Task<string?> SafeStoreImage(IR2StorageService r2, string? url, string prefix, CancellationToken ct)
-    {
-        try { return await r2.StoreImageAsync(url, prefix, ct); }
-        catch (OperationCanceledException) { throw; }
-        catch { return url; }
     }
 
     public static async Task<BrandModel?> SafeGetModel(IBrandModelRepository models, int id, CancellationToken ct)

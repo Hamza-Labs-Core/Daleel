@@ -68,7 +68,6 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly ProfileOptions _options;
     private readonly IAgentFactory _factory;
     private readonly IScrapedPriceRepository _scrapedPrices;
-    private readonly IR2StorageService _images;
     private readonly IBrandCatalogService _brandCatalog;
     private readonly ILogger<ItemEnrichmentService> _logger;
 
@@ -77,14 +76,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
     public ItemEnrichmentService(
         IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory,
-        IScrapedPriceRepository scrapedPrices, IR2StorageService images, IBrandCatalogService brandCatalog,
+        IScrapedPriceRepository scrapedPrices, IBrandCatalogService brandCatalog,
         ILogger<ItemEnrichmentService> logger)
     {
         _repo = repo;
         _options = options;
         _factory = factory;
         _scrapedPrices = scrapedPrices;
-        _images = images;
         _brandCatalog = brandCatalog;
         _logger = logger;
     }
@@ -325,12 +323,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
             var withOffer = m with { Offers = m.Offers.Append(offer).ToList() };
 
-            // The catalogue entry usually carries a product image — fill it in when the model has none, and
-            // route it through R2 so we host a stable copy instead of hot-linking the store's CDN.
+            // The catalogue entry usually carries a product image — fill it in when the model has none,
+            // keeping the original source URL (the UI renders external image URLs directly).
             if (string.IsNullOrWhiteSpace(withOffer.ImageUrl) && match is { ImageUrl: { Length: > 0 } img })
             {
-                var stored = await StoreImageSafe(img, "products", ct);
-                withOffer = withOffer with { ImageUrl = stored };
+                withOffer = withOffer with { ImageUrl = img };
             }
 
             updated.Add(withOffer);
@@ -499,17 +496,6 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             // Best-effort: persisting price history must never fail the search — but log so a systematically
             // failing price store (a schema/IO problem) is observable instead of silently losing all prices.
             _logger.LogWarning(ex, "Persisting {Count} scraped price(s) failed", observations.Count);
-        }
-    }
-
-    private async Task<string?> StoreImageSafe(string url, string prefix, CancellationToken ct)
-    {
-        try { return await _images.StoreImageAsync(url, prefix, ct); }
-        catch (OperationCanceledException) { throw; }
-        catch (Exception ex)
-        {
-            _logger.LogDebug(ex, "Storing image {Url} failed; keeping original", url);
-            return url;
         }
     }
 

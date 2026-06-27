@@ -31,7 +31,6 @@ public class ItemEnrichmentServiceTests
             new ProfileOptions { Now = () => Now, Ttl = TimeSpan.FromDays(30) },
             new StubAgentFactory(),
             new ScrapedPriceRepository(ctx.Db),
-            new NullR2StorageService(),
             catalog ?? new StubBrandCatalog(),
             NullLogger<ItemEnrichmentService>.Instance);
 
