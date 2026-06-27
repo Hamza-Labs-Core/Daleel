@@ -150,6 +150,30 @@
         </MudText>
     </TitleContent>
     <DialogContent>
+        @* For a failed/cancelled run, surface WHY it failed and the last step it reached. The runner stores
+           the real exception message on the job row (server-only until now); the timeline below may be empty
+           when the fault happened before any provider call was recorded, so this is often the only clue. *@
+        @if (_detailJob is { } dj && (dj.Status == JobStatus.Failed || dj.Status == JobStatus.Cancelled))
+        {
+            <MudAlert Severity="@(dj.Status == JobStatus.Failed ? Severity.Error : Severity.Warning)"
+                      Variant="Variant.Outlined" Dense="true" Class="mb-3">
+                <div class="d-flex align-center gap-2 mb-1">
+                    <MudIcon Icon="@StatusIcon(dj.Status)" Size="Size.Small" />
+                    <b>@StatusLabel(dj.Status)</b>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(dj.Error))
+                {
+                    <MudText Typo="Typo.body2"><b>@L["Admin.Workflows.Detail.Error"]:</b> @dj.Error</MudText>
+                }
+                @if (!string.IsNullOrWhiteSpace(dj.ProgressMessage))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">
+                        @L["Admin.Workflows.Detail.LastStep"]: @dj.ProgressMessage
+                    </MudText>
+                }
+            </MudAlert>
+        }
+
         @if (_detailLoading)
         {
             <div class="d-flex justify-center pa-6"><MudProgressCircular Indeterminate="true" Color="Color.Primary" /></div>

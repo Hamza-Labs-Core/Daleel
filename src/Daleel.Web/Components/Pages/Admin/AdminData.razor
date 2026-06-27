@@ -200,9 +200,13 @@ else
 
     private const int PageSize = 200;
 
-    // The bucket + prefix the browser is currently viewing (defaults to the images bucket root).
-    private R2Bucket _bucket = R2Bucket.Images;
-    private string _prefix = "";
+    // The bucket + prefix the browser is currently viewing. Land on the Logs bucket's errors/ folder: it's
+    // the one bucket guaranteed to hold objects whenever R2 is configured (Serilog streams Warning+ there
+    // continuously), so the browser opens on real content instead of a blank page. The Images bucket — the
+    // old default — no longer receives uploads (product images now keep their source URLs), so defaulting to
+    // it made the page look empty even when R2 was healthy. The section buttons jump to the other buckets.
+    private R2Bucket _bucket = R2Bucket.Logs;
+    private string _prefix = "errors/";
     private bool _loading;
     private string? _error;
 

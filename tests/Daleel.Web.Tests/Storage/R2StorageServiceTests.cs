@@ -76,7 +76,8 @@ public class R2StorageServiceTests
 
         var source = "https://cdn.store.com/img/galaxy-s24.png";
         (await svc.StoreImageAsync(source, "products")).Should().Be(source);
-        (await svc.StoreJsonAsync("{}", "site-data/x.json")).Should().BeNull();
+        // (StoreJson on a private bucket now uploads and returns null — covered in R2StoreJsonTests; it is
+        // not asserted here because that would require a live PutObject against the fake endpoint.)
     }
 
     [Fact]

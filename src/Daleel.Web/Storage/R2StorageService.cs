@@ -264,13 +264,12 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             return null;
         }
 
-        // Without a public host on the target bucket there is no servable URL to hand back (the DB copy
-        // stays canonical). The object is still useless to a browser, so skip the upload entirely.
+        // The object is always worth storing even when the bucket has no public host: the admin data viewer
+        // reads it back through a presigned GET (which works on a private bucket), so skipping the upload
+        // here is what left the specs/data browser empty. We still only RETURN a hosted "{host}/{key}" URL
+        // when a public host exists — callers persist that for hot-linking; a null just means "stored, but
+        // not publicly hot-linkable" (the DB copy stays canonical), not "not stored".
         var publicBaseUrl = PublicBaseUrl(bucket);
-        if (string.IsNullOrEmpty(publicBaseUrl))
-        {
-            return null;
-        }
 
         var bytes = Encoding.UTF8.GetBytes(json);
         if (bytes.Length > MaxJsonBytes)
@@ -293,7 +292,8 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
                 DisablePayloadSigning = true
             }, ct).ConfigureAwait(false);
 
-            return $"{publicBaseUrl}/{key}";
+            // Hosted URL only when the bucket is public; otherwise it's stored-but-not-hot-linkable → null.
+            return string.IsNullOrEmpty(publicBaseUrl) ? null : $"{publicBaseUrl}/{key}";
         }
         catch (OperationCanceledException)
         {

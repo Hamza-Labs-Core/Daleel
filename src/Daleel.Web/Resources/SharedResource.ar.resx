@@ -495,6 +495,8 @@
   <data name="Admin.Workflows.StepUnknown" xml:space="preserve"><value>جارٍ البدء…</value></data>
   <data name="Admin.Workflows.DetailTitle" xml:space="preserve"><value>المخطّط الزمني للخطوات</value></data>
   <data name="Admin.Workflows.DetailEmpty" xml:space="preserve"><value>لا توجد خطوات مُسجّلة لهذه العملية. تظهر الخطوات بعد اكتمال العملية وحفظ أحداثها في المخزن.</value></data>
+  <data name="Admin.Workflows.Detail.Error" xml:space="preserve"><value>سبب الفشل</value></data>
+  <data name="Admin.Workflows.Detail.LastStep" xml:space="preserve"><value>آخر خطوة وصلت إليها</value></data>
   <data name="Admin.Workflows.Col.Query" xml:space="preserve"><value>الاستعلام</value></data>
   <data name="Admin.Workflows.Col.User" xml:space="preserve"><value>المستخدم</value></data>
   <data name="Admin.Workflows.Col.Started" xml:space="preserve"><value>البداية</value></data>
