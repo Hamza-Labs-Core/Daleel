@@ -56,7 +56,7 @@ public sealed partial class AgentService
             .Where(s => !string.IsNullOrWhiteSpace(s.Key) && !string.IsNullOrWhiteSpace(s.Label))
             .Select(s => new SpecField
             {
-                Key = s.Key!.Trim().ToLowerInvariant().Replace(' ', '_'),
+                Key = NormalizeSpecKey(s.Key!),
                 Label = s.Label!.Trim(),
                 Unit = string.IsNullOrWhiteSpace(s.Unit) ? null : s.Unit!.Trim(),
                 HigherIsBetter = s.HigherIsBetter,
@@ -83,6 +83,21 @@ public sealed partial class AgentService
             ImagesMatter = dto.ImagesMatter ?? true,
             Reasoning = string.IsNullOrWhiteSpace(dto.Reasoning) ? null : dto.Reasoning!.Trim()
         };
+    }
+
+    /// <summary>
+    /// Normalises an LLM-supplied spec key to the documented lower_snake_case shape: lowercased,
+    /// with every run of non-alphanumeric characters (spaces, hyphens, slashes, punctuation) collapsed
+    /// to a single underscore and surrounding underscores trimmed. Keeps schema-aware extraction and
+    /// compare keys consistent regardless of how the model formats them (e.g. "Screen-Size", "screen size"
+    /// and "screen/size" all map to "screen_size").
+    /// </summary>
+    private static string NormalizeSpecKey(string key)
+    {
+        var sanitized = key.Trim().ToLowerInvariant()
+            .Select(c => char.IsLetterOrDigit(c) ? c : '_')
+            .ToArray();
+        return string.Join('_', new string(sanitized).Split('_', StringSplitOptions.RemoveEmptyEntries));
     }
 
     /// <summary>Wire shape for the category-intelligence LLM output.</summary>

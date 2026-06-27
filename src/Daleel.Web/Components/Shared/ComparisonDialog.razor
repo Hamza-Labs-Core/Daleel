@@ -158,10 +158,32 @@
             return null;
         }
 
-        var digits = new string(value.SkipWhile(c => !char.IsDigit(c)).TakeWhile(c => char.IsDigit(c) || c is '.' or ',').ToArray())
-            .Replace(",", string.Empty);
-        return decimal.TryParse(digits, System.Globalization.NumberStyles.Any,
-            System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null;
+        var start = 0;
+        while (start < value.Length && !char.IsDigit(value[start]))
+        {
+            start++;
+        }
+        if (start == value.Length)
+        {
+            return null;
+        }
+
+        // Preserve a sign attached to the number so negatives stay negative (e.g. "-10", "−5 °C").
+        var negative = start > 0 && value[start - 1] is '-' or '−';
+
+        var end = start;
+        while (end < value.Length && (char.IsDigit(value[end]) || value[end] is '.' or ','))
+        {
+            end++;
+        }
+
+        var digits = value[start..end].Replace(",", string.Empty);
+        if (!decimal.TryParse(digits, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var n))
+        {
+            return null;
+        }
+        return negative ? -n : n;
     }
 
     private static string Humanize(string key) =>

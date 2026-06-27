@@ -90,6 +90,29 @@ public class CategoryIntelligenceTests
     }
 
     [Fact]
+    public async Task AnalyzeCategoryAsync_NormalizesSpecKeysToSnakeCase()
+    {
+        // The model may format keys with hyphens, slashes, casing or spaces; they must all collapse to
+        // the documented lower_snake_case so schema-aware extraction and compare use consistent keys.
+        const string json = """
+            {
+              "productType": "tv",
+              "specs": [
+                {"key": "Screen-Size", "label": "Screen size", "unit": "in"},
+                {"key": "refresh/rate", "label": "Refresh rate", "unit": "Hz"},
+                {"key": "  HDR  Format ", "label": "HDR format"}
+              ]
+            }
+            """;
+        var agent = new AgentService(new FakeLlmClient(_ => json));
+
+        var intel = await agent.AnalyzeCategoryAsync("TV", GeoProfiles.Jordan);
+
+        intel.Schema.Fields.Select(f => f.Key)
+            .Should().Equal("screen_size", "refresh_rate", "hdr_format");
+    }
+
+    [Fact]
     public async Task AnalyzeCategoryAsync_FallsBackToNeutralOnUnparseableJson()
     {
         var agent = new AgentService(new FakeLlmClient(_ => "not json at all"));
