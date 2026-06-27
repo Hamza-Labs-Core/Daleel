@@ -63,6 +63,13 @@ public record ProductSearchResult
     /// <summary>Listings pre-grouped into budget/mid/premium tiers for comparison.</summary>
     public IReadOnlyList<ComparisonGroup> Comparisons { get; init; } = Array.Empty<ComparisonGroup>();
 
+    /// <summary>
+    /// The product-type-aware comparison schema the LLM determined for this search (BTU/energy
+    /// for ACs, RAM/storage for phones…). Drives the schema columns of the compare table. Empty
+    /// (<see cref="ProductSchema.General"/>) for non-product or unclassifiable queries.
+    /// </summary>
+    public ProductSchema Schema { get; init; } = ProductSchema.General;
+
     public DateTimeOffset? GeneratedAt { get; init; }
 
     /// <summary>True when at least one aggregated product model was found.</summary>

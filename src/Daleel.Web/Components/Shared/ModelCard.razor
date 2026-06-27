@@ -3,12 +3,18 @@
 @inject IStringLocalizer<SharedResource> L
 
 <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;display:flex;flex-direction:column;">
-    @if (!string.IsNullOrWhiteSpace(Model.ImageUrl))
-    {
-        <div style="height:150px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);">
+    <div style="height:150px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);">
+        @if (!string.IsNullOrWhiteSpace(Model.ImageUrl))
+        {
             <SafeImage Src="@Model.ImageUrl" Alt="@Model.Name" Style="max-height:150px;max-width:100%;object-fit:contain;" />
-        </div>
-    }
+        }
+        else
+        {
+            @* No image available for this model — show a neutral placeholder so the grid stays even
+               and the card doesn't collapse to a ragged height. *@
+            <MudIcon Icon="@Icons.Material.Filled.Image" Size="Size.Large" Style="opacity:0.35;" />
+        }
+    </div>
 
     <MudCardContent Class="flex-grow-1">
         <div class="d-flex align-center justify-space-between mb-1" style="gap:8px;">

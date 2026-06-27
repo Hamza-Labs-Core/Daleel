@@ -1,5 +1,6 @@
 using System.Text;
 using Daleel.Core.Geo;
+using Daleel.Core.Intelligence;
 
 namespace Daleel.Agent;
 
@@ -298,7 +299,7 @@ public static class PromptTemplates
     /// the gathered context. The JSON shape feeds straight into the listing aggregator, so a model's
     /// <c>offers</c> become its <see cref="Daleel.Core.Models.PriceOffer"/>s in the product grid.
     /// </summary>
-    public static string ExtractProducts(string query, GeoProfile geo, string gatheredContext)
+    public static string ExtractProducts(string query, GeoProfile geo, string gatheredContext, ProductSchema? schema = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine(MarketContext(geo));
@@ -308,6 +309,20 @@ public static class PromptTemplates
         sb.AppendLine("Be COMPREHENSIVE: extract EVERY distinct model the context evidences — span MULTIPLE brands and " +
             "MULTIPLE models per brand (budget through premium), not just the few most prominent. A model mentioned " +
             "with a name but no price still counts: include it with an empty offers array so the shopper sees it exists.");
+        // Schema-aware extraction: when the up-front category analysis identified the specs that matter for
+        // this product type, tell the extractor to fill those exact keys (so the compare table and detail
+        // views line up across products) instead of returning arbitrary free-form spec keys.
+        if (schema is { IsEmpty: false })
+        {
+            sb.Append("This is a \"").Append(schema.ProductType).AppendLine("\" search. In each product's \"specs\" object, " +
+                "PRIORITISE these fields when the context provides a value (use these EXACT keys; omit a field rather than guessing):");
+            foreach (var f in schema.Fields)
+            {
+                sb.Append("  - ").Append(f.Key).Append(" (").Append(f.Label).Append(')');
+                if (!string.IsNullOrWhiteSpace(f.Unit)) sb.Append(" in ").Append(f.Unit);
+                sb.AppendLine();
+            }
+        }
         sb.AppendLine("Gathered research context (search results, shopping hits, store data, social posts):");
         sb.AppendLine("----------------------------------------");
         sb.AppendLine(gatheredContext);
@@ -343,6 +358,64 @@ public static class PromptTemplates
             url when the context provides one. Fill pros/cons/summary ONLY from opinions or specs actually in the
             context (empty arrays / null when there's nothing to say) — never invent products, prices, models, links,
             or opinions. Use an empty products array if the context has no concrete products. Respond ONLY with valid JSON.
+            """);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// System prompt for the category-"thinking" pass that runs BEFORE source gathering. The LLM
+    /// reasons about the product category up-front — what kind of product it is, which stores sell
+    /// it, which brands compete, which specs decide a purchase — so every later pipeline step knows
+    /// what it is looking for instead of extracting blindly.
+    /// </summary>
+    public const string CategoryIntelligenceSystem =
+        "You are Daleel, a market-research strategist. Before any searching happens, you analyse a " +
+        "product category for a specific market and decide what matters: the precise product TYPE, the " +
+        "kinds of STORE that actually sell it (electronics shops for a TV, not grocery stores), the BRANDS " +
+        "that compete across budget-to-premium tiers, the SPEC fields a buyer compares on (BTU and energy " +
+        "rating for an AC; RAM, storage and camera for a phone; CPU and GPU for a laptop), and a realistic " +
+        "local PRICE expectation. You ground brands and prices in the named market. You ALWAYS reply with a " +
+        "single JSON object only." +
+        HalalGuard;
+
+    /// <summary>
+    /// Builds the category-intelligence prompt. The returned JSON deserializes into a
+    /// <see cref="Daleel.Core.Intelligence.SearchIntelligence"/> (including its
+    /// <see cref="Daleel.Core.Intelligence.ProductSchema"/>), which is threaded through the rest of the
+    /// pipeline to focus extraction, profile relevance, and the compare table.
+    /// </summary>
+    public static string CategoryIntelligence(string category, GeoProfile geo)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(MarketContext(geo));
+        sb.Append("Analyse the product category the shopper is researching: \"").Append(category).AppendLine("\".");
+        sb.Append("Decide, for ").Append(geo.Country).AppendLine(" specifically:");
+        sb.AppendLine("- the precise product TYPE (e.g. \"air conditioner\", \"smartphone\", \"laptop\", \"refrigerator\");");
+        sb.AppendLine("- the kinds of STORE that sell it here (electronics/HVAC/appliance retailers — not unrelated shops);");
+        sb.AppendLine("- the BRANDS that actually compete in this market, spanning budget, mid-range and premium;");
+        sb.AppendLine("- the 4–8 SPEC fields a buyer compares this product type on, with units and which direction is better;");
+        sb.AppendLine("- a realistic local price expectation, and whether product images matter for this category.");
+        sb.AppendLine("""
+            Reply with exactly this JSON object:
+            {
+              "productType": "lower-case product type, e.g. air conditioner",
+              "relevantStoreTypes": ["electronics store", "HVAC retailer", "..."],
+              "expectedBrands": ["Gree", "Samsung", "LG", "..."],
+              "priceExpectation": "short market-aware range, e.g. 'typically 250–1,200 JOD for split units'",
+              "imagesMatter": true,
+              "specs": [
+                {
+                  "key": "lower_snake_case_key, e.g. btu",
+                  "label": "Human label, e.g. Cooling capacity",
+                  "unit": "unit suffix like BTU / GB / inch / dB, else null",
+                  "higherIsBetter": true,
+                  "importance": "key|normal"
+                }
+              ],
+              "reasoning": "one sentence on what decides this purchase"
+            }
+            Choose 4–8 specs that genuinely differentiate this product type (mark the 2–3 defining ones "key").
+            higherIsBetter is true/false/null (null when not orderable, e.g. operating system). No prose outside the JSON.
             """);
         return sb.ToString();
     }

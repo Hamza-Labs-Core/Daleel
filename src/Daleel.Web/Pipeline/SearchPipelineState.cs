@@ -1,6 +1,7 @@
 using Daleel.Agent;
 using Daleel.Core.Caching;
 using Daleel.Core.Geo;
+using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
 using Daleel.Web.Events;
 
@@ -38,6 +39,15 @@ public sealed class SearchPipelineState
     // ── Intermediate results (filled by activities) ──────────────────────────────
     public GeoProfile? GeoProfile { get; set; }
     public SearchStrategy? Strategy { get; set; }
+
+    /// <summary>
+    /// The up-front category "thinking" produced by <c>AnalyzeMarketActivity</c> before sources are
+    /// gathered: product type, relevant store types, expected brands, the comparison schema and a
+    /// price expectation. Threaded into extraction (schema-aware) and the final result. Null for
+    /// non-product queries or when the analysis is skipped/fails.
+    /// </summary>
+    public SearchIntelligence? Intelligence { get; set; }
+
     public ResearchBundle? Bundle { get; set; }
     public string Summary { get; set; } = string.Empty;
     public ProductSearchResult? Products { get; set; }
