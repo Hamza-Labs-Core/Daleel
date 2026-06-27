@@ -483,6 +483,7 @@
   <data name="Admin.Workflows.Subtitle" xml:space="preserve"><value>أحدث عمليات تشغيل خط البحث، متتبَّعة عبر مخزن مثيلات Elsa.</value></data>
   <data name="Admin.Workflows.Refresh" xml:space="preserve"><value>تحديث</value></data>
   <data name="Admin.Workflows.Empty" xml:space="preserve"><value>لم تُسجَّل أي عمليات سير عمل بعد.</value></data>
+  <data name="Admin.Workflows.NotConfigured" xml:space="preserve"><value>تخزين مثيلات سير العمل غير مُهيّأ. اضبط</value></data>
   <data name="Admin.Workflows.CacheHit" xml:space="preserve"><value>مخبأ</value></data>
   <data name="Admin.Workflows.Count" xml:space="preserve"><value>عرض {0} عملية.</value></data>
   <data name="Admin.Workflows.Col.Status" xml:space="preserve"><value>الحالة</value></data>

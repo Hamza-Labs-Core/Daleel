@@ -20,10 +20,11 @@ namespace Daleel.Web.Tests.Pipeline;
 
 /// <summary>
 /// Proves the durable-persistence wiring the admin workflows page depends on: with Elsa's
-/// workflow-management feature on the EF Core SQLite provider, a completed <see cref="SearchWorkflow"/> run
-/// is persisted as a queryable instance (after the provider migrations create the schema), and the run
-/// summary we stamp into <c>WorkflowState.Properties</c> survives the round-trip. The production app uses
-/// the same EF path — Postgres when configured, this SQLite provider otherwise.
+/// workflow-management feature on Elsa's EF Core store, a completed <see cref="SearchWorkflow"/> run is
+/// persisted as a queryable instance (after the provider migrations create the schema), and the run summary
+/// we stamp into <c>WorkflowState.Properties</c> survives the round-trip. The production app persists to
+/// Postgres ONLY; this test drives the same provider-agnostic EF store against a throwaway SQLite file so it
+/// needs no Postgres in CI.
 /// </summary>
 public class WorkflowInstancePersistenceTests : IDisposable
 {

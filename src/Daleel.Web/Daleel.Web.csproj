@@ -12,13 +12,12 @@
          NOTE: the v2 packages named in the original brief (Elsa.Core, Elsa.Activities) no longer
          exist in v3 — the `Elsa` meta-package supplies the Core engine, the Runtime (IWorkflowRunner,
          AddElsa) and the built-in activities (Sequence, Parallel) we use. We run workflows in-process,
-         with EF Core persistence for workflow instances (admin workflows page) — Postgres when
-         POSTGRES_CONNECTION_STRING/DATABASE_URL is set, else SQLite. Elsa ships the provider migrations,
-         applied automatically at startup. -->
+         with OPTIONAL EF Core persistence for workflow instances (admin workflows page) — Postgres ONLY,
+         enabled when POSTGRES_CONNECTION_STRING/DATABASE_URL is set (no SQLite/in-memory fallback). Elsa
+         ships the provider migrations, applied automatically at startup. -->
     <PackageReference Include="Elsa" Version="3.3.3" />
     <PackageReference Include="Elsa.EntityFrameworkCore" Version="3.3.3" />
     <PackageReference Include="Elsa.EntityFrameworkCore.PostgreSql" Version="3.3.3" />
-    <PackageReference Include="Elsa.EntityFrameworkCore.Sqlite" Version="3.3.3" />
     <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.Server" Version="8.0.22" />
     <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.12" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.12">

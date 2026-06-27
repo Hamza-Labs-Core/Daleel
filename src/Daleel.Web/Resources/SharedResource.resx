@@ -483,6 +483,7 @@
   <data name="Admin.Workflows.Subtitle" xml:space="preserve"><value>Recent search-pipeline runs, tracked via Elsa's workflow-instance store.</value></data>
   <data name="Admin.Workflows.Refresh" xml:space="preserve"><value>Refresh</value></data>
   <data name="Admin.Workflows.Empty" xml:space="preserve"><value>No workflow runs have been recorded yet.</value></data>
+  <data name="Admin.Workflows.NotConfigured" xml:space="preserve"><value>Workflow-instance persistence isn't configured. Set</value></data>
   <data name="Admin.Workflows.CacheHit" xml:space="preserve"><value>cache</value></data>
   <data name="Admin.Workflows.Count" xml:space="preserve"><value>Showing {0} run(s).</value></data>
   <data name="Admin.Workflows.Col.Status" xml:space="preserve"><value>Status</value></data>

@@ -102,20 +102,25 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: capTrip.Token).ConfigureAwait(false);
 
             // Persist the run as an Elsa workflow instance so the admin workflows page can list/replay it.
-            // We stamp a compact, serializable run summary (query/outcome/timing) into the workflow state
-            // first — the live agent/cache/progress live in SearchPipelineServices and never reach here, so
-            // the state is safe to persist. Saved before the sub-status check so faulted runs are tracked
-            // too. Best-effort: instance tracking must never affect the search outcome.
-            try
+            // Persistence is optional and Postgres-only: when it isn't configured, IWorkflowInstanceManager
+            // isn't registered and we simply skip — not an error. When it is, stamp a compact, serializable
+            // run summary (query/outcome/timing) into the workflow state first (the live agent/cache/progress
+            // live in SearchPipelineServices and never reach here, so the state is safe to persist) and save
+            // before the sub-status check so faulted runs are tracked too. Best-effort: instance tracking
+            // must never affect the search outcome.
+            var instanceManager = scope.ServiceProvider.GetService<IWorkflowInstanceManager>();
+            if (instanceManager is not null)
             {
-                run.WorkflowState.Properties[WorkflowRunSummary.PropertyKey] =
-                    JsonSerializer.Serialize(WorkflowRunSummary.From(state));
-                var instanceManager = scope.ServiceProvider.GetRequiredService<IWorkflowInstanceManager>();
-                await instanceManager.SaveAsync(run.WorkflowState, CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to persist workflow instance for search job {JobId}", job.Id);
+                try
+                {
+                    run.WorkflowState.Properties[WorkflowRunSummary.PropertyKey] =
+                        JsonSerializer.Serialize(WorkflowRunSummary.From(state));
+                    await instanceManager.SaveAsync(run.WorkflowState, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to persist workflow instance for search job {JobId}", job.Id);
+                }
             }
 
             // A faulted/cancelled run reports Status == Finished but a non-Finished SubStatus, leaving

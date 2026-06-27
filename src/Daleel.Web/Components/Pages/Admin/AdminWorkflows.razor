@@ -7,8 +7,9 @@
 @using Elsa.Workflows
 @using Elsa.Workflows.Management
 @using Elsa.Workflows.Management.Filters
+@using Microsoft.Extensions.DependencyInjection
 @attribute [Authorize(Roles = "Admin")]
-@inject IWorkflowInstanceStore Instances
+@inject IServiceProvider Sp
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Admin · Workflows</PageTitle>
@@ -17,6 +18,14 @@
 <MudText Typo="Typo.h4" Class="mb-1">@L["Admin.Workflows.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Admin.Workflows.Subtitle"]</MudText>
 
+@if (!_configured)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        @L["Admin.Workflows.NotConfigured"] <code>POSTGRES_CONNECTION_STRING</code>
+    </MudAlert>
+}
+else
+{
 <div class="d-flex align-center gap-3 mb-3">
     <MudButton StartIcon="@Icons.Material.Filled.Refresh" Variant="Variant.Outlined" Size="Size.Small"
                OnClick="ReloadAsync" Disabled="_loading">@L["Admin.Workflows.Refresh"]</MudButton>
@@ -80,6 +89,7 @@ else
         @string.Format(CultureInfo.InvariantCulture, L["Admin.Workflows.Count"], _rows.Count)
     </MudText>
 }
+}
 
 @code {
     /// <summary>Most-recent runs surfaced; the durable store accumulates over time so we cap the view.</summary>
@@ -89,11 +99,19 @@ else
     private string? _error;
     private List<Row> _rows = new();
 
+    // Instance persistence is optional + Postgres-only: when it isn't configured the management feature
+    // (and IWorkflowInstanceStore) isn't registered, so resolve it optionally and show a notice instead.
+    private IWorkflowInstanceStore? _store;
+    private bool _configured;
+
+    protected override void OnInitialized() =>
+        _configured = (_store = Sp.GetService<IWorkflowInstanceStore>()) is not null;
+
     // Deferred to OnAfterRenderAsync like the other admin pages: the store read can't be awaited safely
     // during the prerender pass.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (firstRender && _configured)
         {
             await ReloadAsync();
         }
@@ -101,15 +119,20 @@ else
 
     private async Task ReloadAsync()
     {
+        if (_store is null)
+        {
+            return;
+        }
+
         _error = null;
         _loading = true;
         StateHasChanged();
         try
         {
-            // Push the newest-first ordering and the row cap to the store (a real query against Postgres/
-            // SQLite) rather than loading every instance into memory and sorting here.
+            // Push the newest-first ordering and the row cap to the store (a real query against Postgres)
+            // rather than loading every instance into memory and sorting here.
             var order = new WorkflowInstanceOrder<DateTimeOffset>(i => i.CreatedAt, OrderDirection.Descending);
-            var page = await Instances.FindManyAsync(
+            var page = await _store.FindManyAsync(
                 new WorkflowInstanceFilter(), new PageArgs { Limit = MaxRows }, order, CancellationToken.None);
             _rows = page.Items.Select(Row.From).ToList();
         }
