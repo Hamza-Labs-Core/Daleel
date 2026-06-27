@@ -539,6 +539,10 @@
   <data name="Admin.Data.Section.Store" xml:space="preserve"><value>Store data</value></data>
   <data name="Admin.Data.Section.Final" xml:space="preserve"><value>Final specs</value></data>
   <data name="Admin.Data.Section.Logs" xml:space="preserve"><value>Logs</value></data>
+  <data name="Admin.Data.Bucket.Logs" xml:space="preserve"><value>Logs</value></data>
+  <data name="Admin.Data.Bucket.Images" xml:space="preserve"><value>Images</value></data>
+  <data name="Admin.Data.Bucket.Specs" xml:space="preserve"><value>Specs</value></data>
+  <data name="Admin.Data.Bucket.Data" xml:space="preserve"><value>Data</value></data>
   <data name="Admin.Nav.Dashboard" xml:space="preserve"><value>Dashboard</value></data>
   <data name="Admin.Nav.Users" xml:space="preserve"><value>Users</value></data>
   <data name="Admin.Nav.Plans" xml:space="preserve"><value>Plans</value></data>

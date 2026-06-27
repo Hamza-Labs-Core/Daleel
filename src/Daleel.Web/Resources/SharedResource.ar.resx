@@ -539,6 +539,10 @@
   <data name="Admin.Data.Section.Store" xml:space="preserve"><value>بيانات المتاجر</value></data>
   <data name="Admin.Data.Section.Final" xml:space="preserve"><value>المواصفات النهائية</value></data>
   <data name="Admin.Data.Section.Logs" xml:space="preserve"><value>السجلات</value></data>
+  <data name="Admin.Data.Bucket.Logs" xml:space="preserve"><value>السجلات</value></data>
+  <data name="Admin.Data.Bucket.Images" xml:space="preserve"><value>الصور</value></data>
+  <data name="Admin.Data.Bucket.Specs" xml:space="preserve"><value>المواصفات</value></data>
+  <data name="Admin.Data.Bucket.Data" xml:space="preserve"><value>البيانات</value></data>
   <data name="Admin.Nav.Dashboard" xml:space="preserve"><value>لوحة التحكم</value></data>
   <data name="Admin.Nav.Users" xml:space="preserve"><value>المستخدمون</value></data>
   <data name="Admin.Nav.Plans" xml:space="preserve"><value>الباقات</value></data>

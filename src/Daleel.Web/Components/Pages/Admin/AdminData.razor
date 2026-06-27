@@ -21,15 +21,18 @@
 }
 else
 {
-    @* ── Section quick-jumps ─────────────────────────────────────────── *@
+    @* ── Bucket selector ─────────────────────────────────────────────────
+       One button per R2 bucket; each browses that bucket from its ROOT so nothing is hidden behind an
+       assumed key prefix. Sub-"folders" (raw/, final-specs/, site-data/, errors/…) are then reachable by
+       clicking into them or via the breadcrumb below. *@
     <div class="d-flex flex-wrap gap-2 mb-3">
-        @foreach (var s in Sections)
+        @foreach (var b in Buckets)
         {
-            <MudButton Size="Size.Small" StartIcon="@s.Icon"
-                       Variant="@(IsActiveSection(s) ? Variant.Filled : Variant.Outlined)"
-                       Color="@(IsActiveSection(s) ? Color.Primary : Color.Default)"
-                       OnClick="@(() => NavigateToSectionAsync(s))">
-                @L[s.LabelKey]
+            <MudButton Size="Size.Small" StartIcon="@BucketIcon(b)"
+                       Variant="@(_bucket == b ? Variant.Filled : Variant.Outlined)"
+                       Color="@(_bucket == b ? Color.Primary : Color.Default)"
+                       OnClick="@(() => NavigateToBucketAsync(b))">
+                @L[$"Admin.Data.Bucket.{b}"]
             </MudButton>
         }
     </div>
@@ -184,29 +187,24 @@ else
 </MudDialog>
 
 @code {
-    private sealed record Section(R2Bucket Bucket, string Prefix, string LabelKey, string Icon);
+    // The four R2 buckets, in selector order. Each is browsed from its root (prefix "").
+    private static readonly R2Bucket[] Buckets =
+        { R2Bucket.Data, R2Bucket.Specs, R2Bucket.Images, R2Bucket.Logs };
 
-    // Each concern now has its own bucket; a section names the bucket plus the key prefix it lands on.
-    private static readonly Section[] Sections =
+    private static string BucketIcon(R2Bucket b) => b switch
     {
-        new(R2Bucket.Images, "", "Admin.Data.Section.Images", Icons.Material.Filled.Image),
-        new(R2Bucket.Specs, "raw/", "Admin.Data.Section.RawSpecs", Icons.Material.Filled.Description),
-        new(R2Bucket.Specs, "final-specs/", "Admin.Data.Section.Final", Icons.Material.Filled.FactCheck),
-        new(R2Bucket.Data, "site-data/", "Admin.Data.Section.Site", Icons.Material.Filled.Dataset),
-        new(R2Bucket.Data, "brand-data/", "Admin.Data.Section.Brand", Icons.Material.Filled.BrandingWatermark),
-        new(R2Bucket.Data, "store-data/", "Admin.Data.Section.Store", Icons.Material.Filled.Store),
-        new(R2Bucket.Logs, "errors/", "Admin.Data.Section.Logs", Icons.Material.Filled.BugReport),
+        R2Bucket.Logs => Icons.Material.Filled.BugReport,
+        R2Bucket.Images => Icons.Material.Filled.Image,
+        R2Bucket.Specs => Icons.Material.Filled.FactCheck,
+        _ => Icons.Material.Filled.Dataset
     };
 
     private const int PageSize = 200;
 
-    // The bucket + prefix the browser is currently viewing. Land on the Logs bucket's errors/ folder: it's
-    // the one bucket guaranteed to hold objects whenever R2 is configured (Serilog streams Warning+ there
-    // continuously), so the browser opens on real content instead of a blank page. The Images bucket — the
-    // old default — no longer receives uploads (product images now keep their source URLs), so defaulting to
-    // it made the page look empty even when R2 was healthy. The section buttons jump to the other buckets.
-    private R2Bucket _bucket = R2Bucket.Logs;
-    private string _prefix = "errors/";
+    // The bucket + prefix currently in view. Start at the Data bucket root — the most relevant for an admin
+    // data viewer — and let the selector switch buckets; the breadcrumb/folder drill-down handles prefixes.
+    private R2Bucket _bucket = R2Bucket.Data;
+    private string _prefix = "";
     private bool _loading;
     private string? _error;
 
@@ -222,11 +220,6 @@ else
     private string? _previewText;
     private bool _previewTruncated;
 
-    // True when the current bucket + path sits under this section (drives the quick-jump highlight). A
-    // section with an empty prefix (the images-bucket root) is active for the whole bucket.
-    private bool IsActiveSection(Section s) =>
-        _bucket == s.Bucket && (s.Prefix.Length == 0 || _prefix.StartsWith(s.Prefix, StringComparison.Ordinal));
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && R2.IsConfigured)
@@ -235,11 +228,11 @@ else
         }
     }
 
-    // Jump to a section: switch bucket and land on its prefix.
-    private async Task NavigateToSectionAsync(Section s)
+    // Switch the active bucket and browse it from the root.
+    private async Task NavigateToBucketAsync(R2Bucket bucket)
     {
-        _bucket = s.Bucket;
-        _prefix = s.Prefix;
+        _bucket = bucket;
+        _prefix = "";
         await ReloadAsync();
     }
 
