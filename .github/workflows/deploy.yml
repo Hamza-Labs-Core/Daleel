@@ -106,11 +106,11 @@ jobs:
           CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-          # Postgres event-store credentials. POSTGRES_PASSWORD is now sourced
-          # from this secret (was previously generated on the box); the connection
-          # string embeds the same password and must be kept in sync with it.
+          # Postgres event-store credentials. POSTGRES_PASSWORD is the single source
+          # of truth: the connection string is derived from it at .env render time
+          # (see below), so there is no separate POSTGRES_CONNECTION_STRING secret to
+          # keep in sync.
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          POSTGRES_CONNECTION_STRING: ${{ secrets.POSTGRES_CONNECTION_STRING }}
           # Host secret is named DEPLOY_SSH_HOST in the repo (the "VPS IP").
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
@@ -128,7 +128,7 @@ jobs:
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
         run: |
           set -euo pipefail
-          required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN POSTGRES_PASSWORD POSTGRES_CONNECTION_STRING DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
+          required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN POSTGRES_PASSWORD DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
           missing=""
           for var in $required; do
             val="${!var:-}"
@@ -356,13 +356,21 @@ jobs:
             R2_PUBLIC_URL_DATA=${{ secrets.R2_PUBLIC_URL_DATA }}
             R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}
             # Postgres event store. POSTGRES_PASSWORD now comes from a GitHub secret
-            # (was previously generated once on the box). The connection string
-            # embeds the same password — keep the two secrets in sync. Because
-            # Postgres bakes the password into postgres_data on first init, rotating
-            # the secret requires wiping that volume; the deploy step below does this
-            # one time so Postgres reinitializes with the secret value.
+            # (was previously generated once on the box). Because Postgres bakes the
+            # password into postgres_data on first init, rotating the secret requires
+            # wiping that volume (see the reset-postgres workflow).
+            #
+            # The connection string is DERIVED here from POSTGRES_PASSWORD rather than
+            # read from a separate secret: the docker-compose postgres service is always
+            # initialized with user `daleel` (POSTGRES_USER: daleel) and database
+            # `daleel_events`, reachable on the compose network at host `postgres`. A
+            # hand-maintained POSTGRES_CONNECTION_STRING secret drifted out of sync —
+            # it embedded `Username=postgres`, which the container never creates, so
+            # Elsa/the event store failed with `28P01: password authentication failed
+            # for user "postgres"`. Synthesizing the string guarantees the username,
+            # host, db, and password always match the actual container.
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
-            POSTGRES_CONNECTION_STRING=${{ secrets.POSTGRES_CONNECTION_STRING }}
+            POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=daleel_events;Username=daleel;Password=${{ secrets.POSTGRES_PASSWORD }}
             CADDY_DOMAIN=daleel.hamzalabs.dev
             CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
             EOF
