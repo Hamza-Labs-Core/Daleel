@@ -266,7 +266,9 @@ builder.Services.AddHostedService<Daleel.Web.Services.CacheCleanupService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IIpRateLimiter, IpRateLimiter>();
 builder.Services.AddSingleton<IAgentFactory, AgentFactory>();
-builder.Services.AddScoped<IModelDetailService, ModelDetailService>();
+// Product/brand/store detail pages read from the saved database (specs, R2 images, scraped prices)
+// rather than re-scraping live; this assembles the product view from those tables.
+builder.Services.AddScoped<IProductDetailDbService, ProductDetailDbService>();
 builder.Services.AddSingleton<MonitorService>();
 
 // /status page: HTTP probes against each provider's host + last-search lookup.
