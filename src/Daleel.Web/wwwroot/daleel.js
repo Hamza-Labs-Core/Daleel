@@ -102,8 +102,9 @@ function _ensureGoogleMaps() {
             const cb = "__daleelGmapsReady";
             window[cb] = () => resolve();
             const js = document.createElement("script");
+            // The marker library brings in google.maps.marker.AdvancedMarkerElement.
             js.src = "https://maps.googleapis.com/maps/api/js?key=" +
-                encodeURIComponent(key) + "&loading=async&callback=" + cb;
+                encodeURIComponent(key) + "&loading=async&libraries=marker&callback=" + cb;
             js.async = true;
             js.onerror = reject;
             document.head.appendChild(js);
@@ -143,6 +144,9 @@ window.daleelRenderMap = async function (elId, markers, user) {
     const map = new google.maps.Map(el, {
         center,
         zoom: pts.length ? 11 : 6,
+        // AdvancedMarkerElement requires a Map ID; the host may inject a cloud-styled one,
+        // otherwise we fall back to Google's DEMO_MAP_ID so markers still render.
+        mapId: window.__daleelMapsMapId || "DEMO_MAP_ID",
         scrollwheel: false,
         mapTypeControl: false,
         streetViewControl: false,
@@ -154,29 +158,34 @@ window.daleelRenderMap = async function (elId, markers, user) {
     const esc = (s) => (s || "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
     const info = new google.maps.InfoWindow();
     pts.forEach((m) => {
-        const marker = new google.maps.Marker({ position: { lat: m.lat, lng: m.lng }, map, title: m.name || "" });
+        const position = { lat: m.lat, lng: m.lng };
+        const marker = new google.maps.marker.AdvancedMarkerElement({
+            position,
+            map,
+            title: m.name || "",
+            gmpClickable: true,
+        });
         const html = "<b>" + esc(m.name) + "</b>" +
             (m.address ? "<br>" + esc(m.address) : "") +
             (m.url ? '<br><a href="' + esc(m.url) + '" target="_blank" rel="noopener">View store</a>' : "");
-        marker.addListener("click", () => { info.setContent(html); info.open(map, marker); });
-        bounds.extend(marker.getPosition());
+        marker.addEventListener("gmp-click", () => { info.setContent(html); info.open({ anchor: marker, map }); });
+        bounds.extend(position);
         count++;
     });
     if (user) {
-        const here = new google.maps.Marker({
-            position: { lat: user.lat, lng: user.lng },
+        const userPos = { lat: user.lat, lng: user.lng };
+        // The legacy SymbolPath.CIRCLE glyph becomes a styled DOM element for the advanced marker.
+        const dot = document.createElement("div");
+        dot.style.cssText =
+            "width:14px;height:14px;border-radius:50%;background:#1976d2;" +
+            "opacity:0.9;border:2px solid #ffffff;box-sizing:border-box;";
+        const here = new google.maps.marker.AdvancedMarkerElement({
+            position: userPos,
             map,
             title: "You are here",
-            icon: {
-                path: google.maps.SymbolPath.CIRCLE,
-                scale: 7,
-                fillColor: "#1976d2",
-                fillOpacity: 0.9,
-                strokeColor: "#ffffff",
-                strokeWeight: 2,
-            },
+            content: dot,
         });
-        bounds.extend(here.getPosition());
+        bounds.extend(userPos);
         count++;
     }
     if (count > 1) {
