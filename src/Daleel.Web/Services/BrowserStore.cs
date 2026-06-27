@@ -1,3 +1,4 @@
+using Daleel.Core.Geo;
 using Microsoft.JSInterop;
 
 namespace Daleel.Web.Services;
@@ -87,6 +88,28 @@ public sealed class BrowserStore
             return null;
         }
     }
+
+    /// <summary>
+    /// Asks the browser for the visitor's GPS location (prompting for permission) and maps it to the
+    /// nearest supported market's key. Returns null when geolocation is denied, unavailable, or times
+    /// out — the caller then asks the user to pick. This is the geolocation step that sits between
+    /// query-text market detection and prompting.
+    /// </summary>
+    public async Task<string?> DetectMarketFromLocationAsync()
+    {
+        try
+        {
+            var location = await _js.InvokeAsync<BrowserLocation?>("daleelGetLocation");
+            return location is { } loc ? GeoProfiles.NearestTo(loc.Lat, loc.Lng)?.Key : null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or JSException or TaskCanceledException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Shape of the <c>{lat,lng}</c> object returned by the <c>daleelGetLocation</c> JS helper.</summary>
+    private readonly record struct BrowserLocation(double Lat, double Lng);
 
     /// <summary>Reads all stored API keys into a dictionary for handing to the agent factory.</summary>
     public async Task<Dictionary<string, string>> GetKeysAsync()

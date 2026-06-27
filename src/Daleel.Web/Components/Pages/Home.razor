@@ -178,10 +178,15 @@
 
     private string? _userId;
     private string _input = string.Empty;
-    // Set while we're asking the user which market to search (the query named none). Holds the query the
-    // user submitted so we can run it once they pick a market.
+    // Set while we're asking the user which market to search (the query named none, and geolocation
+    // couldn't place them). Holds the query the user submitted so we can run it once they pick a market.
     private bool _awaitingMarket;
     private string? _pendingQuery;
+    // Browser-geolocation result, resolved lazily on the first market-less query and reused afterwards so
+    // we don't re-trigger the location permission prompt on every search. _geoTried guards the JS call;
+    // _geoMarket is the nearest supported market key, or null when geolocation was denied/unavailable.
+    private bool _geoTried;
+    private string? _geoMarket;
     private string? _query;
     private string? _status; // idle | running | completed | error
     private string? _error;
@@ -290,9 +295,11 @@
 
         var query = _input.Trim();
 
-        // The market comes solely from the query text. If the user named one ("AC in Dubai"), run with it;
-        // otherwise stop and ask which market — we never silently assume a default.
-        var detected = GeoProfiles.DetectInText(query)?.Key;
+        // Market detection, in priority order — we never silently assume a default:
+        //   1) the query text itself ("AC in Dubai" → UAE),
+        //   2) the browser's geolocation, mapped to the nearest supported market,
+        //   3) otherwise stop and ask the user inline.
+        var detected = GeoProfiles.DetectInText(query)?.Key ?? await DetectFromLocationAsync();
         if (detected is null)
         {
             _pendingQuery = query;
@@ -302,6 +309,20 @@
 
         _awaitingMarket = false;
         await RunSearchAsync(query, detected);
+    }
+
+    // Step 2 of market detection: the browser's geolocation, mapped to the nearest supported market.
+    // Resolved once per session and cached — a denial/timeout (null) makes the caller fall through to
+    // asking, and we won't badger the user with the location prompt again on the next search.
+    private async Task<string?> DetectFromLocationAsync()
+    {
+        if (!_geoTried)
+        {
+            _geoMarket = await Store.DetectMarketFromLocationAsync();
+            _geoTried = true;
+        }
+
+        return _geoMarket;
     }
 
     // Runs the query the user submitted before we knew the market, now that they've picked one inline.

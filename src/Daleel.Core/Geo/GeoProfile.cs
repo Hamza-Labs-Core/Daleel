@@ -160,6 +160,44 @@ public static class GeoProfiles
     public static GeoProfile ResolveOrDefault(string? keyOrCodeOrName) =>
         Resolve(keyOrCodeOrName) ?? Usa;
 
+    /// <summary>
+    /// Maps a raw coordinate (typically from the browser's geolocation API) to the supported market
+    /// whose <see cref="GeoProfile.Center"/> is closest by great-circle distance. This is the second
+    /// market-detection step, after <see cref="DetectInText"/> and before asking the user. There is
+    /// deliberately no max-distance cutoff: a successful location fix always resolves to a market — a
+    /// visitor far from every supported market is expected to name it in the query text instead.
+    /// Returns null only when no profiles are registered.
+    /// </summary>
+    public static GeoProfile? NearestTo(double latitude, double longitude)
+    {
+        GeoProfile? nearest = null;
+        var bestKm = double.MaxValue;
+        foreach (var profile in ByKey.Values)
+        {
+            var km = HaversineKm(latitude, longitude, profile.Center.Latitude, profile.Center.Longitude);
+            if (km < bestKm)
+            {
+                bestKm = km;
+                nearest = profile;
+            }
+        }
+
+        return nearest;
+    }
+
+    /// <summary>Great-circle distance in kilometres between two lat/lng coordinates (Haversine).</summary>
+    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
+    {
+        const double earthRadiusKm = 6371.0;
+        static double ToRad(double deg) => deg * Math.PI / 180.0;
+
+        var dLat = ToRad(lat2 - lat1);
+        var dLon = ToRad(lon2 - lon1);
+        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(ToRad(lat1)) * Math.Cos(ToRad(lat2)) * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
+        return 2 * earthRadiusKm * Math.Asin(Math.Min(1.0, Math.Sqrt(a)));
+    }
+
     // Distinctive country/city indicators (English + Arabic) for detecting the market straight from a
     // query like "best AC in Dubai" or "غسالة في عمان". 2-letter ISO codes (jo/sa/ae/eg/us) are
     // deliberately NOT here — too short, they'd false-match ordinary words ("us", "use", "sale"). The
