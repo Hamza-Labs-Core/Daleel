@@ -473,6 +473,18 @@
   <data name="Admin.Usage.Retry" xml:space="preserve"><value>إعادة المحاولة</value></data>
   <data name="Admin.Usage.StatusOk" xml:space="preserve"><value>ناجح</value></data>
   <data name="Admin.Usage.StatusFail" xml:space="preserve"><value>فشل</value></data>
+  <data name="Admin.Nav.Dashboard" xml:space="preserve"><value>لوحة التحكم</value></data>
+  <data name="Admin.Nav.Users" xml:space="preserve"><value>المستخدمون</value></data>
+  <data name="Admin.Nav.Plans" xml:space="preserve"><value>الباقات</value></data>
+  <data name="Admin.Nav.Analytics" xml:space="preserve"><value>التحليلات</value></data>
+  <data name="Admin.Nav.Usage" xml:space="preserve"><value>الاستخدام</value></data>
+  <data name="Admin.Nav.Moderation" xml:space="preserve"><value>الإشراف</value></data>
+  <data name="Admin.Nav.Filtered" xml:space="preserve"><value>المحتوى المحجوب</value></data>
+  <data name="Admin.Nav.Brands" xml:space="preserve"><value>العلامات التجارية</value></data>
+  <data name="Admin.Nav.Stores" xml:space="preserve"><value>المتاجر</value></data>
+  <data name="Admin.Nav.Settings" xml:space="preserve"><value>الإعدادات</value></data>
+  <data name="Detail.Specifications" xml:space="preserve"><value>المواصفات</value></data>
+  <data name="Detail.SpecsUnavailable" xml:space="preserve"><value>لا تتوفر مواصفات تفصيلية لهذا المنتج بعد.</value></data>
 
   <data name="Search.EmailNotice" xml:space="preserve"><value>سنرسل إليك النتائج عبر البريد الإلكتروني عند جاهزيتها.</value></data>
   <data name="Settings.EmailResults" xml:space="preserve"><value>أرسل نتائج البحث إلى بريدي الإلكتروني</value></data>

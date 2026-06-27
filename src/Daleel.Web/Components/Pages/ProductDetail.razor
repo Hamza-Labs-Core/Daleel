@@ -1,6 +1,8 @@
 @page "/product/{Id}"
 @inject IModelDetailService Details
 @inject NavigationManager Nav
+@inject ILogger<ProductDetail> Logger
+@inject IStringLocalizer<SharedResource> L
 
 @* Dedicated full page for a single product model — "everything": large image, identity, the full
    price-comparison table across every seller, brand reputation, pros/cons and the spec sheet. The
@@ -150,18 +152,24 @@ else
         </MudGrid>
     }
 
-    @if (_model.Specs.Count > 0)
+    @* ONLY clean structured key/value pairs — the raw scraped "details" blob must never render here. *@
+    @if (ProductSpecs.ForDisplay(_model.Specs) is { Count: > 0 } cleanSpecs)
     {
         <MudDivider Class="my-4" />
-        <MudText Typo="Typo.h6" Class="mb-2">Specifications</MudText>
+        <MudText Typo="Typo.h6" Class="mb-2">@L["Detail.Specifications"]</MudText>
         <MudSimpleTable Dense="true" Bordered="true" Style="max-width:560px;">
             <tbody>
-                @foreach (var (key, value) in _model.Specs)
+                @foreach (var (key, value) in cleanSpecs)
                 {
-                    <tr><td><strong>@Humanize(key)</strong></td><td>@value</td></tr>
+                    <tr><td><strong>@Humanize(key)</strong></td><td dir="@Catalog.Dir(value)">@value</td></tr>
                 }
             </tbody>
         </MudSimpleTable>
+    }
+    else
+    {
+        <MudDivider Class="my-4" />
+        <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Detail.SpecsUnavailable"]</MudText>
     }
 }
 
@@ -189,9 +197,12 @@ else
             // works cold from a bookmark/share link, not just from an in-memory result.
             _model = await Details.GetAsync(DecodedName, string.IsNullOrWhiteSpace(Geo) ? "jordan" : Geo!);
         }
-        catch
+        catch (Exception ex)
         {
-            _model = null; // the not-found panel covers this; never surface internal detail.
+            // Log so a real load error is distinguishable from a genuine "not found"; the not-found panel
+            // covers this for the user and never surfaces internal detail.
+            Logger.LogWarning(ex, "Loading product detail for {Name} failed", DecodedName);
+            _model = null;
         }
         finally
         {

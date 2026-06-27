@@ -9,6 +9,7 @@ using Daleel.Web.Events;
 using Daleel.Web.Profiles;
 using Daleel.Web.Services;
 using Daleel.Web.Storage;
+using Microsoft.Extensions.Logging;
 
 namespace Daleel.Web.Pipeline;
 
@@ -69,13 +70,15 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IScrapedPriceRepository _scrapedPrices;
     private readonly IR2StorageService _images;
     private readonly IBrandCatalogService _brandCatalog;
+    private readonly ILogger<ItemEnrichmentService> _logger;
 
     /// <summary>How many of the result's brands get their site catalogue harvested per run (slow crawls).</summary>
     private const int MaxBrandCatalogs = 2;
 
     public ItemEnrichmentService(
         IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory,
-        IScrapedPriceRepository scrapedPrices, IR2StorageService images, IBrandCatalogService brandCatalog)
+        IScrapedPriceRepository scrapedPrices, IR2StorageService images, IBrandCatalogService brandCatalog,
+        ILogger<ItemEnrichmentService> logger)
     {
         _repo = repo;
         _options = options;
@@ -83,6 +86,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         _scrapedPrices = scrapedPrices;
         _images = images;
         _brandCatalog = brandCatalog;
+        _logger = logger;
     }
 
     public async Task<ItemEnrichmentResult> EnrichAsync(
@@ -253,7 +257,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
             var catalogues = await Task.WhenAll(domains.Select(async d =>
             {
-                var found = await SafeCatalog(ctx, d, catalogCts.Token);
+                var found = await SafeCatalog(ctx, d, _logger, catalogCts.Token);
                 record(EventCategory.Extract, "catalog.products", "context.dev",
                     new Dictionary<string, object?> { ["domain"] = d, ["products"] = found.Count });
                 return (domain: d, found);
@@ -490,14 +494,23 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 new Dictionary<string, object?> { ["count"] = observations.Count });
         }
         catch (OperationCanceledException) { throw; }
-        catch { /* best-effort: persisting price history must never fail the search */ }
+        catch (Exception ex)
+        {
+            // Best-effort: persisting price history must never fail the search — but log so a systematically
+            // failing price store (a schema/IO problem) is observable instead of silently losing all prices.
+            _logger.LogWarning(ex, "Persisting {Count} scraped price(s) failed", observations.Count);
+        }
     }
 
     private async Task<string?> StoreImageSafe(string url, string prefix, CancellationToken ct)
     {
         try { return await _images.StoreImageAsync(url, prefix, ct); }
         catch (OperationCanceledException) { throw; }
-        catch { return url; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Storing image {Url} failed; keeping original", url);
+            return url;
+        }
     }
 
     /// <summary>A price scraped off a rendered store page, with the source line for token matching.</summary>
@@ -506,17 +519,19 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private static bool HasPrice(ProductModel m) => m.Offers.Any(o => o.Price is not null);
 
     private static async Task<IReadOnlyList<CatalogProduct>> SafeCatalog(
-        ContextDevProvider ctx, string domain, CancellationToken ct)
+        ContextDevProvider ctx, string domain, ILogger logger, CancellationToken ct)
     {
         try
         {
             return await ctx.ExtractProductsAsync(domain, maxProducts: 12, timeoutMs: CatalogTimeoutMs, cancellationToken: ct);
         }
         catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
-        catch
+        catch (Exception ex)
         {
-            // Any failure (incl. the phase-cap timeout) just means "no catalogue for this store" —
-            // it must never fail the enrichment, which has already produced a usable result.
+            // Any failure (incl. the phase-cap timeout) just means "no catalogue for this store" — it must
+            // never fail the enrichment, which has already produced a usable result. Log so a consistently
+            // failing catalogue provider (e.g. Context.dev 401) doesn't look like "stores have no catalogue".
+            logger.LogDebug(ex, "Catalogue extraction failed for {Domain}", domain);
             return Array.Empty<CatalogProduct>();
         }
     }
@@ -620,13 +635,22 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     {
         try { return await _repo.GetByKeyAsync(key, ct); }
         catch (OperationCanceledException) { throw; }
-        catch { return null; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Reading product profile {Key} failed; treating as a miss", key);
+            return null;
+        }
     }
 
     private async Task SafeUpsert(ProductProfile profile, CancellationToken ct)
     {
         try { await _repo.UpsertAsync(profile, ct); }
         catch (OperationCanceledException) { throw; }
-        catch { /* best-effort: saving a deep-dive must never fail the search */ }
+        catch (Exception ex)
+        {
+            // Best-effort: saving a deep-dive must never fail the search — but a consistently failing upsert
+            // means deep-dives are never cached, so log at Warning rather than swallowing silently.
+            _logger.LogWarning(ex, "Saving product deep-dive {Key} failed", profile.NameKey);
+        }
     }
 }

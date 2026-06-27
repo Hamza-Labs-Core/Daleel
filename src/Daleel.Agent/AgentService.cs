@@ -338,12 +338,23 @@ public sealed partial class AgentService
     private int _lastFilteredCount;
     private void LogFilteredCount()
     {
+        // This AgentService instance is shared by reference across parallel sub-workflows, so the
+        // running total is advanced atomically — otherwise two threads could log the same delta twice
+        // or miss a delta entirely. Only the thread that wins the bump logs its slice.
         var total = _filter.AuditLog.Count;
-        if (total > _lastFilteredCount)
+        int previous, updated;
+        do
         {
-            Log($"🧹 Halal filter removed {total - _lastFilteredCount} non-compliant item(s).");
-            _lastFilteredCount = total;
+            previous = Volatile.Read(ref _lastFilteredCount);
+            if (total <= previous)
+            {
+                return;
+            }
+            updated = total;
         }
+        while (Interlocked.CompareExchange(ref _lastFilteredCount, updated, previous) != previous);
+
+        Log($"🧹 Halal filter removed {total - previous} non-compliant item(s).");
     }
 
     /// <summary>Wire shape for the planner's JSON output.</summary>

@@ -1,6 +1,7 @@
 using System.Text;
 using Daleel.Core.Geo;
 using Daleel.Search.Abstractions;
+using Daleel.Search.Http;
 using Daleel.Search.Providers;
 using Daleel.Web.Data;
 using Daleel.Web.Services;
@@ -185,6 +186,14 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
     private async Task AppendScrapeAsync(
         ContextDevProvider contextDev, string url, StringBuilder sb, CancellationToken ct)
     {
+        // url is built from a guessed/LLM-derived domain — refuse internal targets (SSRF) before scraping.
+        // The scrape runs on the Context.dev edge, so the DNS-free literal/localhost check is the right layer.
+        if (!SsrfGuard.IsSafePublicUrl(url))
+        {
+            _logger.LogDebug("Skipped scrape for unsafe url {Url}", url);
+            return;
+        }
+
         try
         {
             var page = await contextDev.ScrapeAsync(url, ScrapeFormat.Markdown, ct).ConfigureAwait(false);

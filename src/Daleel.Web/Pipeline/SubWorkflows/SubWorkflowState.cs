@@ -13,6 +13,13 @@ namespace Daleel.Web.Pipeline.SubWorkflows;
 /// buffers <see cref="PipelineEvent"/>s the parent run flushes to the event store; the dispatcher reads
 /// the finished <c>Result</c> + <c>Events</c> back off the instance after the child workflow completes.
 /// </summary>
+/// <remarks>
+/// ⚠️ INVARIANT — NEVER PERSIST OR SUSPEND THESE SUB-WORKFLOWS. Like <see cref="SearchPipelineState"/>,
+/// <see cref="Agent"/> is a live service and <see cref="Progress"/> is a delegate — non-serializable and
+/// shared by reference. Safe only because Elsa is core-only with no persistence; a suspend/resume would
+/// resume with a null Agent/Progress and silently produce empty enrichment. Program.cs fails fast if an
+/// Elsa persistence module is registered.
+/// </remarks>
 public abstract class SubWorkflowState
 {
     /// <summary>The request-scoped agent (page scraping for item deep-dives); shared from the parent run.</summary>

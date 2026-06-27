@@ -141,7 +141,8 @@ else
 
     private async Task LoadLogAsync(int jobId)
     {
-        _jobLogs[jobId] = await ApiLog.ListByJobAsync(jobId);
+        if (_userId is null) return;
+        _jobLogs[jobId] = await ApiLog.ListByJobAsync(jobId, _userId);
         StateHasChanged();
     }
 

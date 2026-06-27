@@ -46,6 +46,12 @@
 }
 <ProgressLog Busy="Busy" Lines="LogLines" />
 
+@if (_result is null && !Busy && Error is null && LogLines.Count > 0)
+{
+    @* A comparison ran but produced no result: show a clear empty state instead of blank space. *@
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Class="my-3">@L["Search.NoResults"]</MudAlert>
+}
+
 @if (_result is not null && !Busy)
 {
     <div class="d-flex my-3">

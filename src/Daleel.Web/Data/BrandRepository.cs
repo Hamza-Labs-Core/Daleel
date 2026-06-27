@@ -62,9 +62,11 @@ public sealed class BrandRepository : IBrandRepository
         }
         catch (DbUpdateException)
         {
-            // A concurrent insert for the same NameKey won the unique-index race. Drop our pending
-            // insert, reload the row the other writer committed, and merge our values onto it.
-            _db.Entry(brand).State = EntityState.Detached;
+            // A concurrent insert for the same NameKey won the unique-index race. Reset the WHOLE change
+            // tracker (not just our failed entity) so a poisoned tracker from this failed SaveChanges can't
+            // cascade into a later upsert on the same shared request-scoped context and silently drop rows;
+            // then reload the row the other writer committed and merge our values onto it.
+            _db.ChangeTracker.Clear();
             var winner = await _db.Brands.FirstOrDefaultAsync(b => b.NameKey == key, ct);
             if (winner is null)
             {
@@ -79,15 +81,23 @@ public sealed class BrandRepository : IBrandRepository
 
     private static void ApplyUpdates(Brand existing, Brand brand)
     {
-        existing.Name = brand.Name;
-        existing.CountryOfOrigin = brand.CountryOfOrigin;
-        existing.ReputationScore = brand.ReputationScore;
-        existing.Description = brand.Description;
-        existing.Pros = brand.Pros;
-        existing.Cons = brand.Cons;
-        existing.PopularModels = brand.PopularModels;
-        existing.PriceRange = brand.PriceRange;
-        existing.Website = brand.Website;
+        // Null-coalesce optional fields so a partial re-research (the LLM/Context.dev momentarily returning
+        // less) doesn't blank out previously-good profile data. "Absent this harvest" means "unknown", not
+        // "deleted" — only overwrite a field when the fresh research actually carries a value. The list
+        // columns are kept unless the harvest brought a non-empty replacement.
+        if (!string.IsNullOrWhiteSpace(brand.Name))
+        {
+            existing.Name = brand.Name;
+        }
+
+        existing.CountryOfOrigin = brand.CountryOfOrigin ?? existing.CountryOfOrigin;
+        existing.ReputationScore = brand.ReputationScore ?? existing.ReputationScore;
+        existing.Description = brand.Description ?? existing.Description;
+        existing.Pros = brand.Pros.Count > 0 ? brand.Pros : existing.Pros;
+        existing.Cons = brand.Cons.Count > 0 ? brand.Cons : existing.Cons;
+        existing.PopularModels = brand.PopularModels.Count > 0 ? brand.PopularModels : existing.PopularModels;
+        existing.PriceRange = brand.PriceRange ?? existing.PriceRange;
+        existing.Website = brand.Website ?? existing.Website;
         existing.LastRefreshed = brand.LastRefreshed;
     }
 

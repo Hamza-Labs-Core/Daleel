@@ -14,6 +14,18 @@ namespace Daleel.Web.Pipeline;
 /// methods, so behaviour is unchanged — Elsa supplies the orchestration, sequencing and observability,
 /// not new business logic. Enrichment is no longer a flat loop: the three Dispatch* steps fan a
 /// per-entity sub-workflow (brand / store / item) out in bounded parallel, each in its own DI scope.
+/// <para>
+/// DELIBERATE TRADEOFF (don't "fix" without intent): this is a flat <see cref="Sequence"/> of
+/// unconditional <c>CodeActivity</c> nodes that self-skip via the shared <c>state.FromCache</c> flag,
+/// rather than modelling the cache-hit as an Elsa <c>If</c> edge or the fan-out as a declarative
+/// <c>ForEach</c>/parallel activity. The pipeline is intentionally linear, and keeping the control flow
+/// in plain C# (the <c>if (state.FromCache) return;</c> guards and the <c>Task.WhenAll</c> inside the
+/// dispatch activities) keeps each stage readable and unit-testable in isolation. Elsa here earns its
+/// keep as the activity-registration + sequencing + per-step telemetry seam, NOT as a
+/// declarative-control-flow engine. If the pipeline ever grows real branching, revisit this: either lean
+/// into Elsa's <c>If</c>/<c>Flowchart</c>/<c>ForEach</c>, or drop Elsa for a plain orchestrator — but do
+/// it as a conscious migration, not a piecemeal mix.
+/// </para>
 /// </remarks>
 public sealed class SearchWorkflow : WorkflowBase
 {
