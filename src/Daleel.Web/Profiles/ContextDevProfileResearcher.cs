@@ -164,7 +164,7 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
             if (!string.IsNullOrWhiteSpace(profile.Description)) sb.AppendLine(profile.Description);
             if (!string.IsNullOrWhiteSpace(profile.Industry)) sb.AppendLine($"Industry: {profile.Industry}");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogDebug(ex, "Context.dev brand lookup failed for {Domain}", domain);
         }
@@ -193,7 +193,7 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
                 sb.AppendLine(page.Content.Length <= 4000 ? page.Content : page.Content[..4000]);
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogDebug(ex, "Context.dev scrape failed for {Url}", url);
         }

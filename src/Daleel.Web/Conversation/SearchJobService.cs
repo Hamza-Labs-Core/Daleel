@@ -38,6 +38,10 @@ public sealed class SearchJobService : BackgroundService
             {
                 await ProcessAsync(jobId, stoppingToken);
             }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                throw; // host shutdown — let the worker loop exit, don't mislabel it as a crash
+            }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Search job {JobId} crashed the processor", jobId);

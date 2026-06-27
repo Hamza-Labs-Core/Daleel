@@ -77,6 +77,10 @@ public sealed class ProviderDiagnostics : IProviderDiagnostics
             sw.Stop();
             return new DiagResult((int)resp.StatusCode, sw.ElapsedMilliseconds, Truncate(body, 24_000), null);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw; // caller cancelled (e.g. page closed) — propagate; the local 40s timeout is still reported below
+        }
         catch (Exception ex)
         {
             sw.Stop();

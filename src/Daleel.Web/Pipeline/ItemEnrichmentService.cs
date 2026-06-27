@@ -512,6 +512,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         {
             return await ctx.ExtractProductsAsync(domain, maxProducts: 12, timeoutMs: CatalogTimeoutMs, cancellationToken: ct);
         }
+        catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
         catch
         {
             // Any failure (incl. the phase-cap timeout) just means "no catalogue for this store" —
