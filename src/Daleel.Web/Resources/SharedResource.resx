@@ -473,4 +473,23 @@
   <data name="Admin.Usage.Retry" xml:space="preserve"><value>Retry</value></data>
   <data name="Admin.Usage.StatusOk" xml:space="preserve"><value>OK</value></data>
   <data name="Admin.Usage.StatusFail" xml:space="preserve"><value>Failed</value></data>
+
+  <data name="Search.EmailNotice" xml:space="preserve"><value>We'll email you the results when they're ready.</value></data>
+  <data name="Settings.EmailResults" xml:space="preserve"><value>Email me search results</value></data>
+  <data name="Settings.EmailResultsHelp" xml:space="preserve"><value>Get a summary email when your search finishes.</value></data>
+  <data name="Settings.Snack.EmailResultsOn" xml:space="preserve"><value>We'll email you when searches finish.</value></data>
+  <data name="Settings.Snack.EmailResultsOff" xml:space="preserve"><value>Search result emails turned off.</value></data>
+  <data name="Email.Search.Subject" xml:space="preserve"><value>Your Daleel search results are ready</value></data>
+  <data name="Email.Search.Preheader" xml:space="preserve"><value>Your search summary — the products, brands, and stores we found.</value></data>
+  <data name="Email.Search.Heading" xml:space="preserve"><value>Your search results are ready</value></data>
+  <data name="Email.Search.Intro" xml:space="preserve"><value>Here's a summary of what we found for:</value></data>
+  <data name="Email.Search.Products" xml:space="preserve"><value>Products</value></data>
+  <data name="Email.Search.Brands" xml:space="preserve"><value>Brands</value></data>
+  <data name="Email.Search.Stores" xml:space="preserve"><value>Stores</value></data>
+  <data name="Email.Search.TopProducts" xml:space="preserve"><value>Top products</value></data>
+  <data name="Email.Search.TopStores" xml:space="preserve"><value>Top stores</value></data>
+  <data name="Email.Search.PriceNa" xml:space="preserve"><value>Price on request</value></data>
+  <data name="Email.Search.ViewReport" xml:space="preserve"><value>View Full Report</value></data>
+  <data name="Email.Search.FooterReason" xml:space="preserve"><value>You're receiving this because email notifications are on for your Daleel account.</value></data>
+  <data name="Email.Search.FooterManage" xml:space="preserve"><value>Manage email preferences in your account settings.</value></data>
 </root>

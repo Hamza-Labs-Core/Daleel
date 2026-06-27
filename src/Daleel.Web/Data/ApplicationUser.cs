@@ -26,4 +26,11 @@ public sealed class ApplicationUser : IdentityUser
 
     /// <summary>UTC time of the user's most recent sign-in.</summary>
     public DateTime? LastActiveAt { get; set; }
+
+    /// <summary>
+    /// Whether the user wants an email when one of their searches finishes. Defaults to true (opt-out):
+    /// the toggle lives in account settings. Read by the background search worker on completion, so it
+    /// must be server-side state — a browser/localStorage preference would be invisible to the worker.
+    /// </summary>
+    public bool EmailSearchResults { get; set; } = true;
 }
