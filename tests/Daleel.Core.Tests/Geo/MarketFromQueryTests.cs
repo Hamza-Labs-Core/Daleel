@@ -25,9 +25,21 @@ public class MarketFromQueryTests
     }
 
     [Theory]
+    [InlineData("best wireless earbuds under 100 JOD", "jordan")]
+    [InlineData("phones below 2000 SAR", "saudi")]
+    [InlineData("laptop deals around 3000 AED", "uae")]
+    [InlineData("fridge for 15000 EGP", "egypt")]
+    [InlineData("headphones under 50 USD", "usa")]
+    public void DetectInText_FindsMarketFromCurrencyCode(string query, string expectedKey)
+    {
+        GeoProfiles.DetectInText(query)!.Key.Should().Be(expectedKey);
+    }
+
+    [Theory]
     [InlineData("best air conditioner")]            // no location
     [InlineData("please tell us the price")]        // "us" must NOT match USA
     [InlineData("a usable fridge")]                 // "usa" inside a word must NOT match
+    [InlineData("jodhpur travel guide")]            // "jod" inside a word must NOT match Jordan
     [InlineData("")]
     [InlineData(null)]
     public void DetectInText_ReturnsNull_WhenNoMarketNamed(string? query)

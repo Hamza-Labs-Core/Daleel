@@ -138,11 +138,17 @@
             </div>
         }
 
-        <!-- Chat input -->
+        <!-- Chat input. The market is a per-search choice, not a buried global setting: it rides on each
+             query (the server still lets an explicit market named in the query text — "AC in Dubai" —
+             override it). Seeded from the last-used / detected market; changing it sticks as the seed for
+             next time but is freely changed per search. -->
         <MudPaper Class="pa-3 mt-4" Outlined="true" Elevation="0" Style="position:sticky;bottom:12px;border-radius:14px;">
-            <div class="d-flex align-center gap-2">
+            <div class="d-flex align-center gap-2" style="flex-wrap:wrap;">
                 <MudTextField @bind-Value="_input" Placeholder="@(L["Search.Placeholder"])" Variant="Variant.Text"
-                              Immediate="true" OnKeyDown="OnKey" Class="mt-0" Disabled="_running" />
+                              Immediate="true" OnKeyDown="OnKey" Class="mt-0" Style="flex:1 1 200px;" Disabled="_running" />
+                <div style="flex:0 0 auto;max-width:200px;">
+                    <GeoSelect Value="@_market" ValueChanged="OnMarketChanged" />
+                </div>
                 <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
                                OnClick="SubmitAsync" Disabled="@(_running || string.IsNullOrWhiteSpace(_input))" />
             </div>
@@ -160,6 +166,9 @@
 
     private string? _userId;
     private string _input = string.Empty;
+    // The market this search runs against — a per-query choice surfaced in the search bar, seeded from the
+    // last-used / detected market. The server still lets a market named in the query text override it.
+    private string _market = "jordan";
     private string? _query;
     private string? _status; // idle | running | completed | error
     private string? _error;
@@ -196,6 +205,8 @@
 
             await LoadStateAsync();
             await EnsureMarketAsync();
+            // Seed the per-search market selector from the resolved default/detected market.
+            _market = await Store.GetAsync("geo") ?? "jordan";
 
             // Opening a saved search from History: show its stored results instead of the live convo.
             if (HistoryId is int hid)
@@ -284,6 +295,15 @@
         }
     }
 
+    // The market for the next search. Persisted as the seed so the selector remembers the last choice —
+    // but it's a per-search control, freely changed before each query (and overridden when the query text
+    // itself names a market).
+    private async Task OnMarketChanged(string market)
+    {
+        _market = string.IsNullOrWhiteSpace(market) ? "jordan" : market;
+        await Store.SetAsync("geo", _market);
+    }
+
     private async Task SubmitAsync()
     {
         if (string.IsNullOrWhiteSpace(_input) || _status == "running") return;
@@ -294,7 +314,8 @@
             return;
         }
 
-        var geo = await Store.GetAsync("geo") ?? "jordan";
+        // Use the market chosen for THIS search (the per-search selector), not a single global setting.
+        var geo = string.IsNullOrWhiteSpace(_market) ? "jordan" : _market;
         var model = await Store.GetAsync("model");
         var isAdmin = await CurrentUser.IsAdminAsync();
 

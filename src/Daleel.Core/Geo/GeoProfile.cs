@@ -162,21 +162,23 @@ public static class GeoProfiles
 
     // Distinctive country/city indicators (English + Arabic) for detecting the market straight from a
     // query like "best AC in Dubai" or "غسالة في عمان". 2-letter ISO codes (jo/sa/ae/eg/us) are
-    // deliberately NOT here — too short, they'd false-match ordinary words ("us", "use", "sale").
+    // deliberately NOT here — too short, they'd false-match ordinary words ("us", "use", "sale"). The
+    // 3-letter ISO-4217 currency codes (jod/sar/aed/egp/usd) ARE included: they're unambiguous market
+    // signals ("earbuds under 100 JOD" → Jordan) that don't collide with common words.
     private static readonly (GeoProfile Profile, string[] Terms)[] QueryIndicators =
     {
-        (Jordan, new[] { "jordan", "jordanian", "amman", "irbid", "zarqa", "aqaba",
-            "الأردن", "الاردن", "عمان", "عمّان", "اربد", "إربد", "الزرقاء", "العقبة", "أردني" }),
+        (Jordan, new[] { "jordan", "jordanian", "amman", "irbid", "zarqa", "aqaba", "jod",
+            "الأردن", "الاردن", "عمان", "عمّان", "اربد", "إربد", "الزرقاء", "العقبة", "أردني", "دينار أردني" }),
         (SaudiArabia, new[] { "saudi", "saudi arabia", "ksa", "riyadh", "jeddah", "jiddah", "mecca",
-            "makkah", "medina", "dammam", "khobar",
-            "السعودية", "السعوديه", "الرياض", "جدة", "مكة", "المدينة", "الدمام", "الخبر", "المملكة" }),
+            "makkah", "medina", "dammam", "khobar", "sar",
+            "السعودية", "السعوديه", "الرياض", "جدة", "مكة", "المدينة", "الدمام", "الخبر", "المملكة", "ريال سعودي" }),
         (Uae, new[] { "uae", "u.a.e", "united arab emirates", "emirates", "emirati", "dubai", "abu dhabi",
-            "abudhabi", "sharjah", "ajman",
-            "الإمارات", "الامارات", "دبي", "أبوظبي", "ابوظبي", "الشارقة", "عجمان", "إماراتي" }),
-        (Egypt, new[] { "egypt", "egyptian", "cairo", "alexandria", "giza",
-            "مصر", "مصري", "القاهرة", "الإسكندرية", "الاسكندرية", "الجيزة" }),
+            "abudhabi", "sharjah", "ajman", "aed",
+            "الإمارات", "الامارات", "دبي", "أبوظبي", "ابوظبي", "الشارقة", "عجمان", "إماراتي", "درهم إماراتي" }),
+        (Egypt, new[] { "egypt", "egyptian", "cairo", "alexandria", "giza", "egp",
+            "مصر", "مصري", "القاهرة", "الإسكندرية", "الاسكندرية", "الجيزة", "جنيه مصري" }),
         (Usa, new[] { "usa", "u.s.a", "united states", "america", "american", "new york",
-            "los angeles", "chicago", "أمريكا", "امريكا", "الولايات المتحدة" }),
+            "los angeles", "chicago", "usd", "أمريكا", "امريكا", "الولايات المتحدة" }),
     };
 
     /// <summary>

@@ -115,6 +115,13 @@ jobs:
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          # Optional R2 object storage (error logs + product-image hosting). Not in the unconditional
+          # required set — the app runs without it (logs to file, hot-links images). But it has an
+          # INTERNAL invariant validated below: if storage is configured, the public host must be too.
+          R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
+          R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+          R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
         run: |
           set -euo pipefail
           required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN POSTGRES_PASSWORD POSTGRES_CONNECTION_STRING DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
@@ -130,6 +137,19 @@ jobs:
             echo "ERROR: the following required secrets are missing, empty, or still the CHANGE_ME placeholder:" >&2
             for m in $missing; do echo "  - $m" >&2; done
             echo "Set each with: gh secret set <NAME> --body '<real-value>' --repo Hamza-Labs-Core/Daleel" >&2
+            exit 1
+          fi
+          # Conditional invariant: R2 image hosting needs a public host. If the storage creds are set
+          # but R2_PUBLIC_URL is not, every R2-hosted product image 404/403s for the browser (the S3 API
+          # endpoint rejects a plain <img> GET). Fail fast rather than ship visibly-broken images. Leave
+          # ALL four blank to disable R2 (images hot-link from source) — that path is allowed.
+          if { [ -n "${R2_ACCESS_KEY:-}" ] || [ -n "${R2_SECRET_KEY:-}" ] || [ -n "${R2_BUCKET_NAME:-}" ]; } \
+             && [ -z "${R2_PUBLIC_URL:-}" ]; then
+            echo "::error::Deploy aborted — R2 storage is configured but R2_PUBLIC_URL is unset."
+            echo "ERROR: R2_ACCESS_KEY/R2_SECRET_KEY/R2_BUCKET_NAME are set, so R2 image hosting is on, but" >&2
+            echo "R2_PUBLIC_URL is empty — hosted images would 403 for the browser. Set the bucket's public" >&2
+            echo "URL (r2.dev or a custom domain): gh secret set R2_PUBLIC_URL --body 'https://...' --repo Hamza-Labs-Core/Daleel" >&2
+            echo "(Or leave all R2_* secrets blank to disable R2 and hot-link images from their source.)" >&2
             exit 1
           fi
           echo "All required secrets are present and non-placeholder."
