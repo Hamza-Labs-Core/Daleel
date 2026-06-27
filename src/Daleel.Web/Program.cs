@@ -235,6 +235,29 @@ builder.Services.AddScoped<Daleel.Web.Profiles.IStoreProfileService, Daleel.Web.
 builder.Services.AddScoped<Daleel.Web.Profiles.IBrandCatalogService, Daleel.Web.Profiles.BrandCatalogService>();
 builder.Services.AddHostedService<Daleel.Web.Profiles.ProfileRefreshService>();
 
+// Smart product identification: matches a (often vaguely-named) Jordanian store listing to the canonical
+// brand model — text match → cross-region catalogue discovery → cached vision match — then runs the spec
+// pipeline (raw → merge/clean → canonical sheet). The vision matcher uses the server's OpenRouter key
+// (identification runs server-side during background enrichment); without a key the no-op matcher makes
+// every comparison a non-match, so the pipeline degrades to text-only identification.
+builder.Services.AddScoped<Daleel.Web.Data.IVisionMatchCacheRepository, Daleel.Web.Data.VisionMatchCacheRepository>();
+builder.Services.AddSingleton<Daleel.Web.Identification.ISpecMerger, Daleel.Web.Identification.SpecMerger>();
+builder.Services.AddScoped<Daleel.Web.Identification.IBrandCatalogSearcher, Daleel.Web.Identification.BrandCatalogSearcher>();
+builder.Services.AddScoped<Daleel.Web.Identification.IProductIdentifier, Daleel.Web.Identification.SmartProductIdentifier>();
+builder.Services.AddSingleton<Daleel.Web.Identification.IVisionMatcher>(sp =>
+{
+    var factory = sp.GetRequiredService<IAgentFactory>();
+    var key = factory.Resolve("OPENROUTER_API_KEY");
+    if (string.IsNullOrWhiteSpace(key))
+    {
+        return new Daleel.Web.Identification.NullVisionMatcher();
+    }
+
+    var model = factory.Resolve("OPENROUTER_VISION_MODEL");
+    return new Daleel.Web.Identification.VisionMatcher(
+        key, model, sp.GetRequiredService<ILogger<Daleel.Web.Identification.VisionMatcher>>());
+});
+
 // Async conversation backend: SignalR + a queue + a background worker run searches off the request.
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<Daleel.Web.Conversation.ISearchJobQueue, Daleel.Web.Conversation.SearchJobQueue>();

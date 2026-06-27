@@ -54,6 +54,42 @@ public sealed class BrandModel
 
     public DateTimeOffset LastRefreshed { get; set; }
 
+    // ── Smart product identification (vision pipeline) ───────────────────────────
+
+    /// <summary>
+    /// The canonical, merged-and-cleaned spec sheet for this model, serialized as a JSON object
+    /// (key → value). This is what the UI reads — never the raw scraped data. Produced by the spec
+    /// merger from every source (brand site, store listings, reviews) and normalized against the
+    /// category schema. Null until the merge step has run.
+    /// </summary>
+    public string? FinalSpecsJson { get; set; }
+
+    /// <summary>R2 URL of the canonical spec sheet (<c>final-specs/{brand}/{model}.json</c>), when stored.</summary>
+    public string? FinalSpecsR2Url { get; set; }
+
+    /// <summary>
+    /// Every R2-hosted image discovered for this model (current + discontinued shots), so vision
+    /// matching compares a store photo against the full catalogue, not just the primary
+    /// <see cref="ImageUrl"/>. Stored as a JSON string array; unioned across regional crawls.
+    /// </summary>
+    public List<string> ImageR2Urls { get; set; } = new();
+
+    /// <summary>
+    /// Regional model numbers/aliases this canonical model is also sold under (e.g. a Jordan SKU vs
+    /// the global model number). Unioned across regional crawls so a store's region-specific name
+    /// still resolves to this one row. Stored as a JSON string array.
+    /// </summary>
+    public List<string> RegionalAliases { get; set; } = new();
+
+    /// <summary>When this model was first discovered by the catalogue searcher (set once, never overwritten).</summary>
+    public DateTimeOffset DiscoveredAt { get; set; }
+
+    /// <summary>
+    /// True when the model is no longer listed in the brand's live catalogue but is retained for
+    /// historical matching (a store may still sell old stock under a discontinued model name).
+    /// </summary>
+    public bool IsDiscontinued { get; set; }
+
     /// <summary>Normalizes a model name into its per-brand lookup key (case/whitespace-insensitive).</summary>
     public static string Normalize(string name) => (name ?? string.Empty).Trim().ToLowerInvariant();
 
