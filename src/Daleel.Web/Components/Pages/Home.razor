@@ -260,6 +260,8 @@
 
     private async Task LoadStateAsync()
     {
+        _recent = (await History.ListAsync(_userId!, page: 1, pageSize: 15)).Items.ToList();
+
         var convo = await ConvoStore.GetAsync(_userId!);
         if (convo is not null)
         {
@@ -270,9 +272,36 @@
             {
                 _answer = ResultSerialization.Deserialize<AgentAnswer>(convo.CurrentResultJson);
             }
+            else if (convo.CurrentStatus == "running" && convo.CurrentJobId is int runningJob)
+            {
+                // Reconnecting to a search still running on the server (reload, or a second tab): seed the
+                // stepper with the job's current stage so we show real progress immediately instead of a
+                // blank/step-1 view. The broadcaster caches the latest signal in memory; live OnProgress
+                // updates carry on from here. If the cache was lost (server restarted since the job
+                // started) we fall back to the first stage rather than showing nothing.
+                var latest = Notifier.LatestProgress(_userId!, runningJob)
+                    ?? SearchProgressSignal.Encode(SearchStep.Analyzing, "Progress.Msg.Strategy");
+                _progress.Clear();
+                _progress.Add(latest);
+            }
         }
 
-        _recent = (await History.ListAsync(_userId!, page: 1, pageSize: 15)).Items.ToList();
+        // Nothing live or freshly-completed to show, but the user has saved results: re-display their
+        // most recent search instead of a blank hero / empty state. A running search is left untouched
+        // (the guard above), and an idle/errored/cancelled conversation no longer hides good prior
+        // results — those live in history and are the "last search" the user expects to see on load.
+        if (_status is not "running" && _answer is null)
+        {
+            var lastWithResult = _recent.FirstOrDefault(h => !string.IsNullOrEmpty(h.ResultJson));
+            if (lastWithResult is not null)
+            {
+                _query = lastWithResult.Query;
+                _status = "completed";
+                _jobId = null;
+                _enriching = false;
+                _answer = ResultSerialization.Deserialize<AgentAnswer>(lastWithResult.ResultJson!);
+            }
+        }
     }
 
     private async Task OnKey(KeyboardEventArgs e)
