@@ -158,6 +158,15 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             return sourceUrl;
         }
 
+        // No public host configured (R2_PUBLIC_URL unset): we cannot mint a browser-loadable URL, so don't
+        // rewrite. Hot-link the original instead — uploading and returning "{serviceUrl}/{bucket}/{key}"
+        // would point an <img> at the S3 API endpoint, which 403s every unauthenticated GET, so every
+        // hosted image would silently break. Hot-linking the source is the correct graceful degradation.
+        if (string.IsNullOrEmpty(_publicBaseUrl))
+        {
+            return sourceUrl;
+        }
+
         // Already hosted by us — nothing to copy, and re-uploading would loop.
         if (sourceUrl.StartsWith(_publicBaseUrl, StringComparison.OrdinalIgnoreCase))
         {
@@ -231,6 +240,12 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
     public async Task<string?> StoreJsonAsync(string json, string objectKey, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(json) || string.IsNullOrWhiteSpace(objectKey))
+        {
+            return null;
+        }
+
+        // Without a public host there is no servable URL to hand back (the DB copy stays canonical).
+        if (string.IsNullOrEmpty(_publicBaseUrl))
         {
             return null;
         }

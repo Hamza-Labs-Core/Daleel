@@ -59,6 +59,24 @@ public class R2StorageServiceTests
     }
 
     [Fact]
+    public async Task StoreImage_WithoutPublicHost_HotLinksOriginal_NeverRewritesToS3Endpoint()
+    {
+        // No R2_PUBLIC_URL: rewriting to "{serviceUrl}/{bucket}/{key}" would 403 a plain <img> GET, so the
+        // service must hand back the original URL unchanged (and never touch the network) instead.
+        var s3 = new AmazonS3Client("ak", "sk", new AmazonS3Config
+        {
+            ServiceURL = "https://acc.r2.cloudflarestorage.com",
+            ForcePathStyle = true
+        });
+        using var svc = new R2StorageService(s3, new HttpClient(), "bucket", publicBaseUrl: "",
+            NullLogger<R2StorageService>.Instance);
+
+        var source = "https://cdn.store.com/img/galaxy-s24.png";
+        (await svc.StoreImageAsync(source, "products")).Should().Be(source);
+        (await svc.StoreJsonAsync("{}", "site-data/x.json")).Should().BeNull();
+    }
+
+    [Fact]
     public void BuildKey_IsDeterministicAndPreservesExtension()
     {
         var uri = new Uri("https://cdn.store.com/img/galaxy-s24.png?v=2");

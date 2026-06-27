@@ -37,7 +37,12 @@ else
     [Parameter] public string? Class { get; set; }
     [Parameter] public string? Style { get; set; }
 
-    private bool _revealed;
+    // Visible from the very first render — the image must show without depending on a later client round-trip.
+    // OnAfterRenderAsync only ever moves us the *other* way (visible → blurred) for users who opted into
+    // app-side blur. Starting hidden and revealing in OnAfterRenderAsync would fail closed: that callback
+    // never runs during prerender/static SSR and not at all without JS interop, so every image would be
+    // stuck behind the "Image hidden" overlay. Defaulting to shown fails open, matching "images by default".
+    private bool _revealed = true;
     private string? _domain;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -47,15 +52,20 @@ else
             return;
         }
 
-        _domain = ExtractDomain(Src);
-
-        // Images show by default (the HaramBlur extension handles hiding); app-side blur is opt-in.
+        // App-side blur is opt-in (img.blur = "1"); when it's off — the default — the image already shows
+        // and there is nothing to do. Reading localStorage needs JS interop, so this only runs client-side.
         var blurOn = (await Store.GetAsync("img.blur") ?? "0") != "0";
-        var trusted = await TrustedDomainsAsync();
-        var reveal = !blurOn || (_domain is not null && trusted.Contains(_domain));
-        if (reveal && !_revealed)
+        if (!blurOn)
         {
-            _revealed = true;
+            return;
+        }
+
+        _domain = ExtractDomain(Src);
+        var trusted = await TrustedDomainsAsync();
+        var hide = _domain is null || !trusted.Contains(_domain);
+        if (hide && _revealed)
+        {
+            _revealed = false;
             StateHasChanged();
         }
     }

@@ -54,6 +54,27 @@ public class SafeImageTests : TestContext
     }
 
     [Fact]
+    public void Shows_Image_EvenWhenJsInteropUnavailable()
+    {
+        // Simulate prerender: JS interop throws "calls cannot be issued at this time" (an
+        // InvalidOperationException), exactly as during static SSR. BrowserStore swallows it and the image
+        // must still render — the reveal must never hinge on a client round-trip succeeding. That fail-closed
+        // default was the "every image stuck behind Image hidden" bug.
+        JSInterop.Setup<string?>("localStorage.getItem", _ => true)
+            .SetException(new InvalidOperationException("JavaScript interop calls cannot be issued at this time."));
+
+        var cut = RenderComponent<SafeImage>(p => p
+            .Add(x => x.Src, "https://images.example.com/photo.jpg"));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("https://images.example.com/photo.jpg");
+            cut.Markup.Should().NotContain("safe-image-overlay");
+            cut.Markup.Should().NotContain("safe-image-blur");
+        });
+    }
+
+    [Fact]
     public void RendersNothing_ForEmptySrc()
     {
         var cut = RenderComponent<SafeImage>(p => p.Add(x => x.Src, ""));

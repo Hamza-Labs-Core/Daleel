@@ -281,6 +281,9 @@ jobs:
             R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
             R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
             R2_ENDPOINT=${{ secrets.R2_ENDPOINT }}
+            # Public host for R2-stored product images; without it images are hot-linked
+            # from source (the S3 API endpoint 403s a plain <img> GET). Unset = empty.
+            R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}
             # QA runs the PR-scoped image tag (not production's latest).
             DALEEL_IMAGE=ghcr.io/hamza-labs-core/daleel:${{ env.QA_TAG }}
             # QA exercises the PostgreSQL event store (the bundled `postgres` compose

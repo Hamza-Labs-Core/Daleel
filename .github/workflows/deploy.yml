@@ -317,6 +317,11 @@ jobs:
             R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
             R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
             R2_ENDPOINT=${{ secrets.R2_ENDPOINT }}
+            # Public host for R2-stored product images (bucket public dev URL or a
+            # custom domain bound to the bucket). REQUIRED to serve images from R2:
+            # without it the app hot-links images from their source instead, because
+            # the S3 API endpoint 403s a plain <img> GET. Unset resolves to empty.
+            R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}
             # Postgres event store. POSTGRES_PASSWORD now comes from a GitHub secret
             # (was previously generated once on the box). The connection string
             # embeds the same password — keep the two secrets in sync. Because
