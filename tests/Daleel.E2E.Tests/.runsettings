@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  E2E run settings. The Daleel app uses a single shared SQLite database and a
+  "first registered account becomes admin" rule, so the browser tests MUST run
+  serially — concurrent registration/login would race on shared state.
+
+  Usage:  dotnet test tests/Daleel.E2E.Tests --settings tests/Daleel.E2E.Tests/.runsettings
+-->
+<RunSettings>
+  <RunConfiguration>
+    <!-- One worker process / no in-assembly parallelism. -->
+    <MaxCpuCount>1</MaxCpuCount>
+  </RunConfiguration>
+  <NUnit>
+    <!-- Belt-and-braces: disable NUnit's parallel execution too. -->
+    <NumberOfTestWorkers>1</NumberOfTestWorkers>
+  </NUnit>
+</RunSettings>

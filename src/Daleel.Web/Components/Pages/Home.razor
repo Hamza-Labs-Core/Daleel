@@ -9,6 +9,9 @@
 @inject IDialogService Dialogs
 @inject NavigationManager Nav
 @inject IStringLocalizer<SharedResource> L
+@inject IEmailService Email
+@inject IUserEmailPreferences EmailPrefs
+@using Daleel.Web.Email
 
 <PageTitle>دليل · Daleel</PageTitle>
 
@@ -70,6 +73,13 @@
         @if (_status == "running")
         {
             <SearchProgress Messages="_progress" Active="true" OnCancel="CancelAsync" />
+            @if (_emailNotice)
+            {
+                <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-2"
+                          Icon="@Icons.Material.Filled.MarkEmailRead">
+                    @L["Search.EmailNotice"]
+                </MudAlert>
+            }
         }
 
         @* No raw status/error metadata: a search that yields nothing shows a neutral empty state.
@@ -160,6 +170,10 @@
     private AgentAnswer? _answer;
     private List<SearchHistoryEntry> _recent = new();
 
+    // True when we'll actually email this user their results: email is configured AND they're opted in.
+    // Drives the "we'll email you" banner so it never promises an email that won't be sent.
+    private bool _emailNotice;
+
     protected override void OnInitialized()
     {
         Notifier.Progress += OnProgress;
@@ -176,6 +190,10 @@
 
         if (_userId is not null)
         {
+            // Only promise an email when one will actually be sent (provider configured + user opted in).
+            var recipient = await EmailPrefs.GetRecipientAsync(_userId);
+            _emailNotice = Email.IsEnabled && recipient is { WantsSearchEmails: true };
+
             await LoadStateAsync();
             await EnsureMarketAsync();
 

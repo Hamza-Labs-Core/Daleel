@@ -25,6 +25,7 @@ public sealed class ScrapeProductPagesActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         var repo = context.GetRequiredService<IProductProfileRepository>();
         var options = context.GetRequiredService<ProfileOptions>();
         var ct = context.CancellationToken;
@@ -53,8 +54,8 @@ public sealed class ScrapeProductPagesActivity : CodeActivity
             return;
         }
 
-        state.Log($"Fetching official specs for {state.Model.Name}…");
-        var page = await state.Agent.ReadPageAsync(url, ct);
+        services.Log($"Fetching official specs for {state.Model.Name}…");
+        var page = await services.Agent.ReadPageAsync(url, ct);
         if (page is not null && !string.IsNullOrWhiteSpace(page.Content))
         {
             state.Details = page.Content.Length <= MaxDetailChars ? page.Content : page.Content[..MaxDetailChars];
@@ -97,6 +98,7 @@ public sealed class ComparePricesActivity : CodeActivity
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         var offers = state.Result.Offers;
         var stores = offers
             .Select(o => o.Source)
@@ -104,7 +106,7 @@ public sealed class ComparePricesActivity : CodeActivity
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
 
-        state.Log($"Comparing {stores} store price(s) for {state.Model.Name}…");
+        services.Log($"Comparing {stores} store price(s) for {state.Model.Name}…");
         state.RecordEvent(EventCategory.Extract, "item.compare", "pipeline",
             metadata: new Dictionary<string, object?>
             {
@@ -145,6 +147,7 @@ public sealed class SaveItemProfileActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         if (state.ReusedFromCache || string.IsNullOrWhiteSpace(state.Details) || state.Key.Length == 0)
         {
             return; // reused from cache or nothing fresh to persist
@@ -162,7 +165,7 @@ public sealed class SaveItemProfileActivity : CodeActivity
             SourceUrl = state.SourceUrl,
             LastRefreshed = options.Now()
         }, context.CancellationToken);
-        state.Log($"Saved deep-dive for {state.Model.Name}.");
+        services.Log($"Saved deep-dive for {state.Model.Name}.");
     }
 
     private static async Task SafeUpsert(IProductProfileRepository repo, ProductProfile profile, CancellationToken ct)

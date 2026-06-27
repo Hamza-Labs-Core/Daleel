@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Daleel.Search.Http;
 using Daleel.Web.Logging;
 
 namespace Daleel.Web.Storage;
@@ -148,6 +149,16 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             return sourceUrl;
         }
 
+        // SSRF guard: sourceUrl comes from scraped pages / LLM-extracted image fields, and the fetch
+        // below runs from our own host. Refuse private/internal targets pre-flight (the injected client
+        // is also connect-time guarded, so a DNS rebind after this check is still blocked). Best-effort:
+        // a blocked URL degrades to the original rather than throwing.
+        if (!await SsrfGuard.IsSafePublicUrlAsync(sourceUrl, ct).ConfigureAwait(false))
+        {
+            _logger.LogDebug("R2 image store skipped {Url}: blocked by SSRF guard", sourceUrl);
+            return sourceUrl;
+        }
+
         // Deterministic key: same source image always maps to the same object, so re-running enrichment
         // overwrites in place rather than piling up duplicates, and the stored URL is stable.
         var key = BuildKey(keyPrefix, sourceUrl, uri);
@@ -166,10 +177,13 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
                 return sourceUrl;
             }
 
-            var bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-            if (bytes.Length == 0 || bytes.Length > MaxImageBytes)
+            // Cap the read at the stream level: ContentLength can be absent (chunked transfer) or lie, and
+            // ReadAsByteArrayAsync would otherwise buffer the entire body of this attacker-influenced fetch
+            // into memory before any size check.
+            var bytes = await ReadCappedAsync(response.Content, MaxImageBytes, ct).ConfigureAwait(false);
+            if (bytes is not { Length: > 0 })
             {
-                return sourceUrl;
+                return sourceUrl; // empty body, or exceeded the size cap mid-stream
             }
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? ContentTypeFor(key);
@@ -320,6 +334,31 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             _logger.LogWarning(ex, "R2 presign failed for key {Key}", key);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Reads an HTTP body into memory but never buffers more than <paramref name="maxBytes"/>. Guards the
+    /// image-fetch path against a missing/lying Content-Length (e.g. chunked transfer) — returns null as
+    /// soon as the cap is crossed rather than reading the rest. Memory use is bounded to maxBytes + one
+    /// read buffer.
+    /// </summary>
+    private static async Task<byte[]?> ReadCappedAsync(HttpContent content, long maxBytes, CancellationToken ct)
+    {
+        await using var stream = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > maxBytes)
+            {
+                return null; // over the cap — stop without buffering the remainder
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
     }
 
     /// <summary>Builds a collision-resistant, extension-preserving object key from the source URL.</summary>

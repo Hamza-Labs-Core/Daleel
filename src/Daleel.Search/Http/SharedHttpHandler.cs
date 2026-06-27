@@ -19,7 +19,11 @@ public static class SharedHttpHandler
     {
         PooledConnectionLifetime = TimeSpan.FromMinutes(5),
         PooledConnectionIdleTimeout = TimeSpan.FromMinutes(2),
-        MaxConnectionsPerServer = 32
+        MaxConnectionsPerServer = 32,
+        // SSRF backstop: every provider/LLM call goes through here, so validating the target IP at
+        // connect time (and on each redirect hop) blocks any private/internal address process-wide.
+        // Cloud endpoints resolve to public IPs and pass unaffected; see SsrfGuard.
+        ConnectCallback = SsrfGuard.ConnectAsync
     };
 
     /// <summary>

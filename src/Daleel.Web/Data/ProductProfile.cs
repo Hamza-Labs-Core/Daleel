@@ -45,15 +45,9 @@ public sealed class ProductProfile
         return Normalize(basis);
     }
 
-    public static string Normalize(string value)
-    {
-        // Keep letters/digits/spaces, then collapse runs of whitespace so "Samsung  AR24" and
-        // "Samsung AR24" key identically regardless of stray spacing in brand/model.
-        var filtered = new string((value ?? string.Empty)
-            .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c)).ToArray());
-        return string.Join(' ', filtered.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
-            .ToLowerInvariant();
-    }
+    // Delegates to the shared product-identity normalization so the persisted ProductKey and the
+    // StableId.ForProduct routing id are always derived from the exact same basis (see L-7 / StableId).
+    public static string Normalize(string value) => Daleel.Core.Models.StableId.NormalizeIdentity(value);
 
     public bool IsStale(DateTimeOffset now, TimeSpan ttl) => now - LastRefreshed > ttl;
 }

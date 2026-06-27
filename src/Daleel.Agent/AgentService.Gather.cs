@@ -2,6 +2,7 @@ using Daleel.Core.Geo;
 using Daleel.Core.Models;
 using Daleel.Core.Pipeline;
 using Daleel.Search.Abstractions;
+using Daleel.Search.Http;
 using Daleel.Search.Moderation;
 
 namespace Daleel.Agent;
@@ -193,6 +194,15 @@ public sealed partial class AgentService
             return null;
         }
 
+        // url originates from LLM-planner output / search results — refuse internal targets (SSRF). The
+        // scrape itself runs on the Context.dev edge, not this host, so the DNS-free literal/localhost
+        // check is the right layer here.
+        if (!SsrfGuard.IsSafePublicUrl(url))
+        {
+            Log($"skipped scrape for unsafe url '{url}'");
+            return null;
+        }
+
         try
         {
             var page = await _scraper.ScrapeAsync(url, ScrapeFormat.Markdown, cancellationToken).ConfigureAwait(false);
@@ -216,6 +226,14 @@ public sealed partial class AgentService
         var selected = urls.Take(_options.MaxUrlsToRead).ToList();
         var tasks = selected.Select(async url =>
         {
+            // strategy.UrlsToRead is pure LLM output — refuse internal targets (SSRF) before scraping (the
+            // fetch runs on the Context.dev edge, so the DNS-free literal/localhost check is the right layer).
+            if (!SsrfGuard.IsSafePublicUrl(url))
+            {
+                Log($"skipped scrape for unsafe url '{url}'");
+                return new ScrapedPage { Url = url, Success = false, Error = "blocked: unsafe url" };
+            }
+
             try
             {
                 return await _scraper.ScrapeAsync(url, ScrapeFormat.Markdown, cancellationToken).ConfigureAwait(false);

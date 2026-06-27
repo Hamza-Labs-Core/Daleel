@@ -1,15 +1,16 @@
-@* Tab strip shared across the admin pages. *@
+@* Tab strip shared across the admin pages. Labels are localized (English / Arabic) via the catalogue. *@
+@inject IStringLocalizer<SharedResource> L
 <MudPaper Elevation="0" Outlined="true" Class="pa-2 mb-4 d-flex flex-wrap gap-1">
-    <MudButton Href="/admin" StartIcon="@Icons.Material.Filled.Dashboard" Size="Size.Small">Dashboard</MudButton>
-    <MudButton Href="/admin/users" StartIcon="@Icons.Material.Filled.People" Size="Size.Small">Users</MudButton>
-    <MudButton Href="/admin/plans" StartIcon="@Icons.Material.Filled.WorkspacePremium" Size="Size.Small">Plans</MudButton>
-    <MudButton Href="/admin/analytics" StartIcon="@Icons.Material.Filled.QueryStats" Size="Size.Small">Analytics</MudButton>
-    <MudButton Href="/admin/usage" StartIcon="@Icons.Material.Filled.Insights" Size="Size.Small">Usage</MudButton>
-    <MudButton Href="/admin/workflows" StartIcon="@Icons.Material.Filled.AccountTree" Size="Size.Small">Workflows</MudButton>
-    <MudButton Href="/admin/data" StartIcon="@Icons.Material.Filled.Storage" Size="Size.Small">Data</MudButton>
-    <MudButton Href="/admin/moderation" StartIcon="@Icons.Material.Filled.Shield" Size="Size.Small">Moderation</MudButton>
-    <MudButton Href="/admin/filtered" StartIcon="@Icons.Material.Filled.FilterAlt" Size="Size.Small">Filtered</MudButton>
-    <MudButton Href="/admin/brands" StartIcon="@Icons.Material.Filled.BrandingWatermark" Size="Size.Small">Brands</MudButton>
-    <MudButton Href="/admin/stores" StartIcon="@Icons.Material.Filled.Store" Size="Size.Small">Stores</MudButton>
-    <MudButton Href="/admin/settings" StartIcon="@Icons.Material.Filled.Settings" Size="Size.Small">Settings</MudButton>
+    <MudButton Href="/admin" StartIcon="@Icons.Material.Filled.Dashboard" Size="Size.Small">@L["Admin.Nav.Dashboard"]</MudButton>
+    <MudButton Href="/admin/users" StartIcon="@Icons.Material.Filled.People" Size="Size.Small">@L["Admin.Nav.Users"]</MudButton>
+    <MudButton Href="/admin/plans" StartIcon="@Icons.Material.Filled.WorkspacePremium" Size="Size.Small">@L["Admin.Nav.Plans"]</MudButton>
+    <MudButton Href="/admin/analytics" StartIcon="@Icons.Material.Filled.QueryStats" Size="Size.Small">@L["Admin.Nav.Analytics"]</MudButton>
+    <MudButton Href="/admin/usage" StartIcon="@Icons.Material.Filled.Insights" Size="Size.Small">@L["Admin.Nav.Usage"]</MudButton>
+    <MudButton Href="/admin/workflows" StartIcon="@Icons.Material.Filled.AccountTree" Size="Size.Small">@L["Admin.Nav.Workflows"]</MudButton>
+    <MudButton Href="/admin/data" StartIcon="@Icons.Material.Filled.Storage" Size="Size.Small">@L["Admin.Nav.Data"]</MudButton>
+    <MudButton Href="/admin/moderation" StartIcon="@Icons.Material.Filled.Shield" Size="Size.Small">@L["Admin.Nav.Moderation"]</MudButton>
+    <MudButton Href="/admin/filtered" StartIcon="@Icons.Material.Filled.FilterAlt" Size="Size.Small">@L["Admin.Nav.Filtered"]</MudButton>
+    <MudButton Href="/admin/brands" StartIcon="@Icons.Material.Filled.BrandingWatermark" Size="Size.Small">@L["Admin.Nav.Brands"]</MudButton>
+    <MudButton Href="/admin/stores" StartIcon="@Icons.Material.Filled.Store" Size="Size.Small">@L["Admin.Nav.Stores"]</MudButton>
+    <MudButton Href="/admin/settings" StartIcon="@Icons.Material.Filled.Settings" Size="Size.Small">@L["Admin.Nav.Settings"]</MudButton>
 </MudPaper>

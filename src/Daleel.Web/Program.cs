@@ -5,6 +5,8 @@ using Daleel.Web.Data;
 using Daleel.Web.Logging;
 using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
+using Elsa.EntityFrameworkCore.Extensions;
+using Elsa.EntityFrameworkCore.Modules.Management;
 using Elsa.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -55,7 +57,10 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptio
 });
 
 // ── Persistence ────────────────────────────────────────────────────────────
-// SQLite locally (data/daleel.db); swap UseSqlite → UseNpgsql for Postgres without model changes.
+// SQLite only (data/daleel.db). The migrations under Data/Migrations are SQLite-specific (INTEGER
+// autoincrement keys, INTEGER booleans/timestamps baked in at scaffold time), so this context cannot
+// simply be repointed at Postgres via UseNpgsql — that would need a separate provider-specific
+// migrations assembly. The Postgres event store below is a SEPARATE context with its own migrations.
 var connection = builder.Configuration.GetConnectionString("DefaultConnection")
                  ?? "Data Source=data/daleel.db";
 builder.Services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(connection));
@@ -220,13 +225,48 @@ if (r2Options is not null)
     builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService>(sp =>
         new Daleel.Web.Storage.R2StorageService(
             r2Options, publicBase!,
-            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            // Dedicated SSRF-guarded client (connect-time IP pinning, redirects disabled): this fetch
+            // pulls attacker-influenced image URLs onto our own host, so it gets the hardened client.
+            Daleel.Search.Http.SsrfGuard.CreateGuardedClient(),
             sp.GetRequiredService<ILogger<Daleel.Web.Storage.R2StorageService>>()));
 }
 else
 {
     builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService, Daleel.Web.Storage.NullR2StorageService>();
 }
+
+// Transactional email (Resend). When RESEND_API_KEY is set, search-completion emails are sent via the
+// Resend HTTP API; otherwise a no-op service drops them — the same optional-capability pattern as the
+// event store and R2. EMAIL_FROM sets the sender (default noreply@daleel.hamzalabs.dev) and APP_BASE_URL
+// is the public site URL the "View Full Report" button links back to.
+var resendApiKey = builder.Configuration["RESEND_API_KEY"]?.Trim();
+var emailFrom = builder.Configuration["EMAIL_FROM"]?.Trim();
+if (string.IsNullOrEmpty(emailFrom))
+{
+    emailFrom = "noreply@daleel.hamzalabs.dev";
+}
+var appBaseUrl = builder.Configuration["APP_BASE_URL"]?.Trim();
+if (string.IsNullOrEmpty(appBaseUrl))
+{
+    appBaseUrl = "https://daleel.hamzalabs.dev";
+}
+builder.Services.AddSingleton(new Daleel.Web.Email.EmailNotificationOptions(appBaseUrl));
+if (!string.IsNullOrEmpty(resendApiKey))
+{
+    builder.Services.AddSingleton<Daleel.Web.Email.IEmailService>(sp =>
+        new Daleel.Web.Email.ResendEmailService(
+            resendApiKey, emailFrom!,
+            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            sp.GetRequiredService<ILogger<Daleel.Web.Email.ResendEmailService>>()));
+}
+else
+{
+    builder.Services.AddSingleton<Daleel.Web.Email.IEmailService, Daleel.Web.Email.NullEmailService>();
+}
+builder.Services.AddScoped<Daleel.Web.Email.IUserEmailPreferences, Daleel.Web.Email.UserEmailPreferences>();
+builder.Services.AddScoped<Daleel.Web.Email.SearchResultEmailTemplate>();
+builder.Services.AddScoped<Daleel.Web.Email.ISearchEmailNotifier, Daleel.Web.Email.SearchEmailNotifier>();
+
 builder.Services.AddScoped<Daleel.Web.Pipeline.IItemEnrichmentService, Daleel.Web.Pipeline.ItemEnrichmentService>();
 builder.Services.AddSingleton(new Daleel.Web.Profiles.ProfileOptions());
 builder.Services.AddSingleton<Daleel.Web.Profiles.IProfileResearcher, Daleel.Web.Profiles.ContextDevProfileResearcher>();
@@ -243,15 +283,44 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationBroadcaster>(
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
 // The search pipeline runs as an in-process Elsa 3 workflow of CodeActivity steps (plan → cache →
 // gather → extract → dispatch brand/store/item sub-workflows → aggregate → moderate → cache → return).
-// Elsa is registered core-only (no Server/Studio/EF persistence), and the workflow runner replaces the
-// old direct-AskAsync runner. AddActivitiesFrom scans the whole assembly, so the sub-workflow activities
-// under Pipeline/SubWorkflows are discovered automatically.
-builder.Services.AddElsa(elsa => elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>());
+// AddActivitiesFrom scans the whole assembly, so the sub-workflow activities under Pipeline/SubWorkflows
+// are discovered automatically.
+//
+// Workflow-instance persistence is OPTIONAL and Postgres-only, mirroring the event store: when
+// POSTGRES_CONNECTION_STRING/DATABASE_URL is set, the workflow-management feature is registered on Elsa's
+// EF Core Postgres provider (the same connection the event store uses — see PostgresConnection.Resolve),
+// which gives IWorkflowInstanceStore + IWorkflowInstanceManager and ships+applies its own migrations at
+// startup. When Postgres is NOT configured, persistence is simply unavailable — no in-memory or SQLite
+// fallback — and the management feature is not registered; the search workflow still runs in-process via
+// IWorkflowRunner, the runner skips its (best-effort) instance save, and the admin workflows page shows a
+// "not configured" notice. If you want instance tracking, configure Postgres.
+//
+// Registering the instance store is safe now (it used to be blocked by a startup assertion): the pipeline no
+// longer shares a live AgentService + progress delegate through SearchPipelineState — those moved to the
+// separate scoped SearchPipelineServices/SubWorkflowServices and never touch the persisted WorkflowState.
+// NOTE: this enables persisting *completed-run summaries* for the admin page, NOT mid-run suspend/resume. The
+// working run state lives in the DI scope (not WorkflowState), so the workflow must run to completion in one
+// pass — do not add Delay/bookmarks/suspend activities (a resume would see blank state).
+var elsaInstanceConn = Daleel.Web.Events.PostgresConnection.Resolve(builder.Configuration);
+builder.Services.AddElsa(elsa =>
+{
+    elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>();
+    if (elsaInstanceConn is not null)
+    {
+        elsa.UseWorkflowManagement(management =>
+            management.UseEntityFrameworkCore(ef => ef.UsePostgreSql(elsaInstanceConn)));
+    }
+});
+
+// The serializable run state + the live (non-serializable) services half are both scoped, so each run's
+// DI scope gets its own pair: the runner seeds them, the Elsa activities resolve them from their context.
 builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineServices>();
 // Per-entity sub-workflow states — scoped so each dispatched child (in its own DI scope) gets a fresh one.
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.BrandResearchState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
@@ -266,7 +335,9 @@ builder.Services.AddHostedService<Daleel.Web.Services.CacheCleanupService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IIpRateLimiter, IpRateLimiter>();
 builder.Services.AddSingleton<IAgentFactory, AgentFactory>();
-builder.Services.AddScoped<IModelDetailService, ModelDetailService>();
+// Product/brand/store detail pages read from the saved database (specs, R2 images, scraped prices)
+// rather than re-scraping live; this assembles the product view from those tables.
+builder.Services.AddScoped<IProductDetailDbService, ProductDetailDbService>();
 builder.Services.AddSingleton<MonitorService>();
 
 // /status page: HTTP probes against each provider's host + last-search lookup.

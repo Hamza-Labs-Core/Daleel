@@ -2,6 +2,7 @@
    highlighting, N/A for missing specs) lives in the shared <ComparisonTable>, so this dialog and the
    full-page /compare view render identical numbers. *@
 @using Daleel.Core.Intelligence
+@inject NavigationManager Nav
 
 <MudDialog>
     <TitleContent>
@@ -18,6 +19,10 @@
         <ComparisonTable Items="Items" Schema="Schema" />
     </DialogContent>
     <DialogActions>
+        @* Discovery path to the full-page /compare (otherwise reachable only by URL): prefill it with the
+           two items being compared so the dedicated page isn't orphaned behind a deep link. *@
+        <MudButton StartIcon="@Icons.Material.Filled.OpenInFull" OnClick="OpenFullComparison">Open full comparison</MudButton>
+        <MudSpacer />
         <MudButton OnClick="Close">Close</MudButton>
     </DialogActions>
 </MudDialog>
@@ -30,4 +35,16 @@
     [Parameter] public ProductSchema Schema { get; set; } = ProductSchema.General;
 
     private void Close() => MudDialog.Close();
+
+    private void OpenFullComparison()
+    {
+        var names = Items.Select(i => i.Name).Where(n => !string.IsNullOrWhiteSpace(n)).Take(2).ToList();
+        // /compare reads the "A vs B" form via its Q query param (same shape History deep-links use).
+        var url = names.Count == 2
+            ? $"/compare?q={Uri.EscapeDataString($"{names[0]} vs {names[1]}")}"
+            : "/compare";
+
+        MudDialog.Close();
+        Nav.NavigateTo(url);
+    }
 }

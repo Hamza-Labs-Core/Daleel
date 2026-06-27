@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace Daleel.Web.Auth;
 
@@ -88,7 +89,8 @@ public static class AuthEndpoints
             IAntiforgery antiforgery,
             UserManager<ApplicationUser> userManager,
             SignInManager<ApplicationUser> signInManager,
-            IAnalyticsService analytics) =>
+            IAnalyticsService analytics,
+            IConfiguration config) =>
         {
             var safeReturn = SafeLocalPath(returnUrl);
 
@@ -107,9 +109,17 @@ public static class AuthEndpoints
                 return RedirectWithError("/register", "mismatch", safeReturn);
             }
 
-            // The very first account to register owns the instance — promote it to admin. Checked before
-            // creation so a race can't mint two admins; AnyAsync short-circuits on the first row.
-            var isFirstUser = !await userManager.Users.AsNoTracking().AnyAsync();
+            // Admin bootstrap. The secure path is an explicit DALEEL_ADMIN_EMAILS allowlist
+            // (comma-separated): only those addresses become admin, and the implicit "first user wins"
+            // promotion is switched off — so on a fresh internet-facing deploy a random first registrant
+            // cannot seize the instance. With no allowlist configured we keep the single-tenant
+            // convenience: the very first account to register is promoted (checked before creation so a
+            // race can't mint two admins; AnyAsync short-circuits on the first row).
+            var adminEmails = (config["DALEEL_ADMIN_EMAILS"] ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            var isAdmin = adminEmails.Length > 0
+                ? adminEmails.Any(e => string.Equals(e, email, StringComparison.OrdinalIgnoreCase))
+                : !await userManager.Users.AsNoTracking().AnyAsync();
 
             var user = new ApplicationUser
             {
@@ -119,7 +129,7 @@ public static class AuthEndpoints
                 DisplayName = email.Split('@')[0],
                 CreatedAt = DateTime.UtcNow,
                 LastActiveAt = DateTime.UtcNow,
-                IsAdmin = isFirstUser,
+                IsAdmin = isAdmin,
             };
 
             var result = await userManager.CreateAsync(user, password);
