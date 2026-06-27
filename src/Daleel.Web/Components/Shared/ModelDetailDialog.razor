@@ -2,7 +2,6 @@
    panel listing every source sorted cheapest-first with deal tags + buy links. Can deep-scrape
    on demand to fill in full specs and an LLM pros/cons verdict. *@
 @inject IModelDetailService Details
-@inject NavigationManager Nav
 
 <MudDialog>
     <TitleContent>
@@ -150,8 +149,6 @@
             }
         }
         <MudSpacer />
-        <MudButton OnClick="ViewFullDetails" Variant="Variant.Filled" Color="Color.Primary"
-                   StartIcon="@Icons.Material.Filled.OpenInFull">View Full Details</MudButton>
         <MudButton OnClick="Close">Close</MudButton>
     </DialogActions>
 </MudDialog>
@@ -209,15 +206,6 @@
     private static string Humanize(string key) =>
         string.Join(' ', key.Replace('_', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)
             .Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
-
-    // Close the compact dialog and open the dedicated full page for this model. Routing is by the
-    // model's stable id; the human name (what the page re-scans on) and geo travel as query params.
-    private void ViewFullDetails()
-    {
-        var query = string.IsNullOrWhiteSpace(_model.Model) ? _model.Name : $"{_model.Brand} {_model.Model}".Trim();
-        MudDialog.Close();
-        Nav.NavigateTo($"/product/{_model.Id}?name={Uri.EscapeDataString(query)}&geo={Uri.EscapeDataString(Geo)}");
-    }
 
     private void Close() => MudDialog.Close();
 }

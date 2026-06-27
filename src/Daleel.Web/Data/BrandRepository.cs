@@ -12,9 +12,6 @@ public interface IBrandRepository
     /// <summary>The saved profile for a brand (case/whitespace-insensitive), or null if not researched yet.</summary>
     Task<Brand?> GetByNameAsync(string name, CancellationToken ct = default);
 
-    /// <summary>The saved profile with this database id, or null if no such row exists.</summary>
-    Task<Brand?> GetByIdAsync(int id, CancellationToken ct = default);
-
     /// <summary>Inserts a new profile or overwrites the existing one for the same normalized name.</summary>
     Task<Brand> UpsertAsync(Brand brand, CancellationToken ct = default);
 
@@ -38,9 +35,6 @@ public sealed class BrandRepository : IBrandRepository
         var key = Brand.Normalize(name);
         return _db.Brands.AsNoTracking().FirstOrDefaultAsync(b => b.NameKey == key, ct);
     }
-
-    public Task<Brand?> GetByIdAsync(int id, CancellationToken ct = default) =>
-        _db.Brands.AsNoTracking().FirstOrDefaultAsync(b => b.Id == id, ct);
 
     public async Task<Brand> UpsertAsync(Brand brand, CancellationToken ct = default)
     {

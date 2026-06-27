@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Daleel.Agent;
 using Daleel.Core.Geo;
-using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
 using Daleel.Web.Events;
 using Daleel.Web.Pipeline.SubWorkflows;
@@ -99,69 +98,6 @@ public sealed class CheckCacheActivity : CodeActivity
     }
 }
 
-/// <summary>
-/// Step 2b — the "thinking" step: for a product query, ask the LLM to analyse the category BEFORE any
-/// sources are gathered (product type, relevant store types, expected brands, the comparison specs, a
-/// price expectation). The resulting <see cref="SearchIntelligence"/> is threaded into extraction
-/// (schema-aware) and onto the final result. No-ops on a cache hit or a non-product query.
-/// </summary>
-[Activity("Daleel", "Search", "Analyze the category: product type, relevant stores, expected brands, comparison specs")]
-public sealed class AnalyzeMarketActivity : CodeActivity
-{
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
-    {
-        var state = context.GetRequiredService<SearchPipelineState>();
-        if (state.FromCache || !state.IsProductQuery || state.GeoProfile is null || state.Strategy is null)
-        {
-            return;
-        }
-
-        var category = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
-        // "Analyzing AC market requirements…" — surface the up-front reasoning to the user.
-        state.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
-        state.Log($"Analyzing {category} market requirements…");
-
-        var intel = await state.Agent.AnalyzeCategoryAsync(category, state.GeoProfile, context.CancellationToken);
-        state.Intelligence = intel;
-
-        if (intel is { IsEmpty: false })
-        {
-            // "Looking for electronics and HVAC stores…"
-            if (intel.RelevantStoreTypes.Count > 0)
-            {
-                state.Log($"Looking for {string.Join(", ", intel.RelevantStoreTypes.Take(3))}…");
-            }
-
-            // "Extracting BTU, energy rating, cooling specs…"
-            if (!intel.Schema.IsEmpty)
-            {
-                var keySpecs = intel.Schema.Fields
-                    .Where(f => f.Importance == SpecImportance.Key)
-                    .Select(f => f.Label)
-                    .ToList();
-                if (keySpecs.Count == 0)
-                {
-                    keySpecs = intel.Schema.Fields.Select(f => f.Label).ToList();
-                }
-
-                if (keySpecs.Count > 0)
-                {
-                    state.Log($"Extracting {string.Join(", ", keySpecs.Take(4))}…");
-                }
-            }
-
-            state.RecordEvent(
-                "intelligence", "category.analyzed", "llm",
-                metadata: new Dictionary<string, object?>
-                {
-                    ["productType"] = intel.ProductType,
-                    ["brands"] = intel.ExpectedBrands.Count,
-                    ["specs"] = intel.Schema.Fields.Count
-                });
-        }
-    }
-}
-
 /// <summary>Step 3 — fan out to every configured provider in parallel (web/shopping/places/social/scrape).</summary>
 [Activity("Daleel", "Search", "Gather sources: run the strategy across all providers in parallel")]
 public sealed class GatherSourcesActivity : CodeActivity
@@ -204,11 +140,8 @@ public sealed class ExtractProductsActivity : CodeActivity
         {
             state.Report(SearchStep.ExtractingProducts, "Progress.Msg.Identifying");
             var subject = state.Strategy!.Subject is { Length: > 0 } s ? s : state.Query;
-            // Pass the up-front category intelligence so extraction is schema-aware (fills the spec
-            // keys that matter for this product type) and the schema rides along onto the result.
             state.Products = await state.Agent.BuildProductSearchResultAsync(
-                subject, state.GeoProfile, state.Bundle, state.Summary, context.CancellationToken,
-                intelligence: state.Intelligence);
+                subject, state.GeoProfile, state.Bundle, state.Summary, context.CancellationToken);
 
             if (state.Products is { } p)
             {

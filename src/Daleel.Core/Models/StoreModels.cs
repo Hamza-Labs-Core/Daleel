@@ -24,13 +24,6 @@ public record StoreLocation
 {
     public string PlaceId { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
-
-    /// <summary>
-    /// Stable, URL-safe identifier used to route to the store page. Keyed on the store name
-    /// (<see cref="StableId.ForStore"/>) so it matches the id a persisted <c>Store</c> profile resolves
-    /// to by name; <see cref="Name"/> travels alongside as the display/lookup fallback.
-    /// </summary>
-    public string Id => StableId.ForStore(Name);
     public string? Address { get; init; }
     public string? Phone { get; init; }
     public string? Website { get; init; }

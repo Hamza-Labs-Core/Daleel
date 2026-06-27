@@ -133,13 +133,7 @@ public sealed class SaveStoreProfileActivity : CodeActivity
         if (state.Saved is { } saved)
         {
             var s = state.Result;
-            state.Result = s with
-            {
-                Url = s.Url ?? saved.Website ?? saved.GoogleMapsUrl,
-                // Carry the real database id (from a cache hit) so the store page routes by it; the
-                // freshly-researched path backfills it below once the profile is persisted.
-                DbId = saved.Id > 0 ? saved.Id : s.DbId
-            };
+            state.Result = s with { Url = s.Url ?? saved.Website ?? saved.GoogleMapsUrl };
         }
 
         if (state.Researched is null)
@@ -153,10 +147,6 @@ public sealed class SaveStoreProfileActivity : CodeActivity
         var persisted = await SafeUpsert(repo, state.Researched, context.CancellationToken);
         if (persisted is not null)
         {
-            if (persisted.Id > 0)
-            {
-                state.Result = state.Result with { DbId = persisted.Id };
-            }
             state.Log($"Saved {state.Store.Name}'s profile.");
         }
     }

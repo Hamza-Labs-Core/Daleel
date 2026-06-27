@@ -25,7 +25,6 @@ public sealed class SearchWorkflow : WorkflowBase
             {
                 new ParseQueryActivity(),                // 1. normalize + plan
                 new CheckCacheActivity(),                // 2. replay cached report (short-circuits the rest)
-                new AnalyzeMarketActivity(),             // 2b. think: category type, stores, brands, comparison specs
                 new GatherSourcesActivity(),             // 3. fan out to providers
                 new ExtractProductsActivity(),           // 4. LLM analyst + product extraction
                 new DispatchBrandWorkflowsActivity(),    // 5. one BrandResearchWorkflow per brand (parallel)

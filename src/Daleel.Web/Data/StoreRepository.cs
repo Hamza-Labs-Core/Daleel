@@ -6,10 +6,6 @@ namespace Daleel.Web.Data;
 public interface IStoreRepository
 {
     Task<Store?> GetByNameAsync(string name, CancellationToken ct = default);
-
-    /// <summary>The saved profile with this database id, or null if no such row exists.</summary>
-    Task<Store?> GetByIdAsync(int id, CancellationToken ct = default);
-
     Task<Store> UpsertAsync(Store store, CancellationToken ct = default);
     Task<IReadOnlyList<Store>> ListAsync(CancellationToken ct = default);
     Task<IReadOnlyList<Store>> ListStaleAsync(DateTimeOffset olderThan, int max, CancellationToken ct = default);
@@ -27,9 +23,6 @@ public sealed class StoreRepository : IStoreRepository
         var key = Store.Normalize(name);
         return _db.Stores.AsNoTracking().FirstOrDefaultAsync(s => s.NameKey == key, ct);
     }
-
-    public Task<Store?> GetByIdAsync(int id, CancellationToken ct = default) =>
-        _db.Stores.AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
 
     public async Task<Store> UpsertAsync(Store store, CancellationToken ct = default)
     {

@@ -3,190 +3,119 @@
 @using System.Globalization
 @attribute [Authorize(Roles = "Admin")]
 @inject IEventStore Events
-@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Admin · Provider usage</PageTitle>
 
 <AdminNav />
-<MudText Typo="Typo.h4" Class="mb-1">@L["Admin.Usage.Title"]</MudText>
-<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Admin.Usage.Subtitle"]</MudText>
+<MudText Typo="Typo.h4" Class="mb-1">Provider usage &amp; cost</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Every external action the search pipeline took — provider calls, scrapes, LLM completions, cache
+    and profile lookups — with an estimated cost per provider. Sourced from the PostgreSQL event store.
+</MudText>
 
 @if (!Events.IsEnabled)
 {
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-        @L["Admin.Usage.NotConfiguredBefore"] <code>POSTGRES_CONNECTION_STRING</code>
-        @L["Admin.Usage.NotConfiguredOr"] <code>DATABASE_URL</code>@L["Admin.Usage.NotConfiguredAfter"]
+        The event store isn't configured. Set <code>POSTGRES_CONNECTION_STRING</code> (or
+        <code>DATABASE_URL</code>) to start recording provider usage and cost here.
     </MudAlert>
 }
 else
 {
-    <div class="d-flex align-center gap-3 mb-4">
-        <MudToggleGroup T="string" Value="_period" ValueChanged="SetPeriodAsync" Color="Color.Primary"
-                        Size="Size.Small" Outlined="true" CheckMark="false" Disabled="_loading">
-            <MudToggleItem Value="@("today")">@L["Admin.Usage.Period.Today"]</MudToggleItem>
-            <MudToggleItem Value="@("week")">@L["Admin.Usage.Period.Week"]</MudToggleItem>
-            <MudToggleItem Value="@("month")">@L["Admin.Usage.Period.Month"]</MudToggleItem>
-            <MudToggleItem Value="@("all")">@L["Admin.Usage.Period.All"]</MudToggleItem>
-        </MudToggleGroup>
+    <div class="d-flex align-center gap-2 mb-4">
+        <MudButtonGroup OverrideStyles="false" Variant="Variant.Outlined" Size="Size.Small">
+            <MudButton Color="@PeriodColor("today")" OnClick="@(() => SetPeriodAsync("today"))">Today</MudButton>
+            <MudButton Color="@PeriodColor("week")" OnClick="@(() => SetPeriodAsync("week"))">7 days</MudButton>
+            <MudButton Color="@PeriodColor("month")" OnClick="@(() => SetPeriodAsync("month"))">30 days</MudButton>
+        </MudButtonGroup>
         @if (_loading)
         {
-            <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+            <MudProgressCircular Indeterminate="true" Size="Size.Small" />
         }
     </div>
 
     @if (_error is not null)
     {
         <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
-            @L["Admin.Usage.LoadError"] @_error
-            <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="ReloadAsync">@L["Admin.Usage.Retry"]</MudButton>
+            Couldn't load usage: @_error
+            <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="ReloadAsync">Retry</MudButton>
         </MudAlert>
     }
 
-    @* ── KPI summary cards ───────────────────────────────────────────── *@
-    <MudGrid Class="mb-2" Spacing="3">
+    <MudGrid Class="mb-2">
         <MudItem xs="12" sm="4">
-            <MudCard Outlined="true" Elevation="0">
-                <MudCardContent>
-                    <div class="d-flex align-center gap-2 mb-1">
-                        <MudIcon Icon="@Icons.Material.Filled.AttachMoney" Color="Color.Success" Size="Size.Small" />
-                        <MudText Typo="Typo.overline" Color="Color.Secondary">@L["Admin.Usage.Kpi.Cost"]</MudText>
-                    </div>
-                    <MudText Typo="Typo.h4">@Usd(_report.TotalCost)</MudText>
-                </MudCardContent>
-            </MudCard>
+            <MudPaper Outlined="true" Elevation="0" Class="pa-4">
+                <MudText Typo="Typo.overline" Color="Color.Secondary">Estimated cost</MudText>
+                <MudText Typo="Typo.h4">@Usd(_report.TotalCost)</MudText>
+            </MudPaper>
         </MudItem>
         <MudItem xs="12" sm="4">
-            <MudCard Outlined="true" Elevation="0">
-                <MudCardContent>
-                    <div class="d-flex align-center gap-2 mb-1">
-                        <MudIcon Icon="@Icons.Material.Filled.Bolt" Color="Color.Primary" Size="Size.Small" />
-                        <MudText Typo="Typo.overline" Color="Color.Secondary">@L["Admin.Usage.Kpi.Actions"]</MudText>
-                    </div>
-                    <MudText Typo="Typo.h4">@_report.TotalEvents.ToString("N0", CultureInfo.InvariantCulture)</MudText>
-                </MudCardContent>
-            </MudCard>
+            <MudPaper Outlined="true" Elevation="0" Class="pa-4">
+                <MudText Typo="Typo.overline" Color="Color.Secondary">Recorded actions</MudText>
+                <MudText Typo="Typo.h4">@_report.TotalEvents.ToString("N0")</MudText>
+            </MudPaper>
         </MudItem>
         <MudItem xs="12" sm="4">
-            <MudCard Outlined="true" Elevation="0">
-                <MudCardContent>
-                    <div class="d-flex align-center gap-2 mb-1">
-                        <MudIcon Icon="@Icons.Material.Filled.Hub" Color="Color.Info" Size="Size.Small" />
-                        <MudText Typo="Typo.overline" Color="Color.Secondary">@L["Admin.Usage.Kpi.Providers"]</MudText>
-                    </div>
-                    <MudText Typo="Typo.h4">@_report.Providers.Count</MudText>
-                </MudCardContent>
-            </MudCard>
+            <MudPaper Outlined="true" Elevation="0" Class="pa-4">
+                <MudText Typo="Typo.overline" Color="Color.Secondary">Providers</MudText>
+                <MudText Typo="Typo.h4">@_report.Providers.Count</MudText>
+            </MudPaper>
         </MudItem>
     </MudGrid>
 
-    @* ── Per-provider breakdown (sortable) ───────────────────────────── *@
-    <MudText Typo="Typo.h6" Class="mt-5 mb-2">@L["Admin.Usage.ByProvider"]</MudText>
-    <MudDataGrid T="ProviderUsageRow" Items="_report.Providers" Dense="true" Hover="true"
-                 SortMode="SortMode.Single" Filterable="false" Groupable="false" Elevation="0"
-                 Class="mb-5 border-solid border mud-border-lines-default rounded">
-        <Columns>
-            <PropertyColumn Property="x => x.Provider" Title="@(L["Admin.Usage.Col.Provider"])" />
-            <PropertyColumn Property="x => x.Count" Title="@(L["Admin.Usage.Col.Calls"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
-                <CellTemplate>@context.Item.Count.ToString("N0", CultureInfo.InvariantCulture)</CellTemplate>
-            </PropertyColumn>
-            <PropertyColumn Property="x => x.Errors" Title="@(L["Admin.Usage.Col.Errors"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
-                <CellTemplate>@(context.Item.Errors > 0 ? context.Item.Errors.ToString("N0", CultureInfo.InvariantCulture) : "—")</CellTemplate>
-            </PropertyColumn>
-            <TemplateColumn Title="@(L["Admin.Usage.Col.ErrorRate"])" SortBy="x => ErrorRate(x)" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
-                <CellTemplate>
-                    @if (context.Item.Count == 0 || context.Item.Errors == 0)
-                    {
-                        <span>—</span>
-                    }
-                    else
-                    {
-                        <MudText Typo="Typo.body2" Color="@(ErrorRate(context.Item) >= 10 ? Color.Error : Color.Default)">
-                            @ErrorRate(context.Item).ToString("0.#", CultureInfo.InvariantCulture)%
-                        </MudText>
-                    }
-                </CellTemplate>
-            </TemplateColumn>
-            <PropertyColumn Property="x => x.AvgMs" Title="@(L["Admin.Usage.Col.AvgMs"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
-                <CellTemplate>@context.Item.AvgMs.ToString("N0", CultureInfo.InvariantCulture)</CellTemplate>
-            </PropertyColumn>
-            <PropertyColumn Property="x => x.Cost" Title="@(L["Admin.Usage.Col.Cost"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
-                <CellTemplate>@Usd(context.Item.Cost)</CellTemplate>
-            </PropertyColumn>
-        </Columns>
-        <NoRecordsContent>
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-3">@L["Admin.Usage.Empty"]</MudText>
-        </NoRecordsContent>
-    </MudDataGrid>
-
-    @* ── Per-category breakdown (chips) ──────────────────────────────── *@
-    <MudText Typo="Typo.h6" Class="mb-2">@L["Admin.Usage.ByCategory"]</MudText>
-    <MudPaper Outlined="true" Elevation="0" Class="pa-3 mb-5">
-        @if (_report.Categories.Count == 0)
-        {
-            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Admin.Usage.Empty"]</MudText>
-        }
-        else
-        {
-            <div class="d-flex flex-wrap gap-2">
-                @foreach (var c in _report.Categories)
+    <MudText Typo="Typo.h6" Class="mt-4 mb-2">By provider</MudText>
+    <MudPaper Outlined="true" Elevation="0" Class="pa-2 mb-4">
+        <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+            <thead>
+                <tr>
+                    <th>Provider</th>
+                    <th style="text-align:right;">Calls</th>
+                    <th style="text-align:right;">Errors</th>
+                    <th style="text-align:right;">Avg ms</th>
+                    <th style="text-align:right;">Est. cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (_report.Providers.Count == 0)
                 {
-                    <MudChip T="string" Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Medium" Label="true" Class="ma-0">
-                        <span class="mr-1 text-capitalize"><b>@c.Category</b></span>
-                        <span>· @c.Count.ToString("N0", CultureInfo.InvariantCulture) · @Usd(c.Cost)</span>
-                    </MudChip>
+                    <tr><td colspan="5"><MudText Typo="Typo.body2" Color="Color.Secondary">No activity in this period.</MudText></td></tr>
                 }
-            </div>
-        }
+                @foreach (var p in _report.Providers)
+                {
+                    <tr>
+                        <td>@p.Provider</td>
+                        <td style="text-align:right;">@p.Count.ToString("N0")</td>
+                        <td style="text-align:right;">@(p.Errors > 0 ? p.Errors.ToString("N0") : "—")</td>
+                        <td style="text-align:right;">@p.AvgMs.ToString("N0")</td>
+                        <td style="text-align:right;">@Usd(p.Cost)</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
     </MudPaper>
 
-    @* ── Recent activity (last 50, period-independent live tail) ─────── *@
-    <MudText Typo="Typo.h6" Class="mb-1">@L["Admin.Usage.Recent"]</MudText>
-    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mb-2">@L["Admin.Usage.RecentHint"]</MudText>
-    <MudDataGrid T="PipelineEvent" Items="_recent" Dense="true" Hover="true"
-                 SortMode="SortMode.Single" Filterable="false" Groupable="false" Elevation="0"
-                 Class="border-solid border mud-border-lines-default rounded">
-        <Columns>
-            <PropertyColumn Property="x => x.Timestamp" Title="@(L["Admin.Usage.Col.Time"])">
-                <CellTemplate>@context.Item.Timestamp.ToLocalTime().ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</CellTemplate>
-            </PropertyColumn>
-            <TemplateColumn Title="@(L["Admin.Usage.Col.Status"])" Sortable="false">
-                <CellTemplate>
-                    @if (context.Item.Success)
-                    {
-                        <MudTooltip Text="@(L["Admin.Usage.StatusOk"])">
-                            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
-                        </MudTooltip>
-                    }
-                    else
-                    {
-                        <MudTooltip Text="@(L["Admin.Usage.StatusFail"])">
-                            <MudIcon Icon="@Icons.Material.Filled.Error" Color="Color.Error" Size="Size.Small" />
-                        </MudTooltip>
-                    }
-                </CellTemplate>
-            </TemplateColumn>
-            <PropertyColumn Property="x => x.Provider" Title="@(L["Admin.Usage.Col.Provider"])" />
-            <PropertyColumn Property="x => x.EventType" Title="@(L["Admin.Usage.Col.Type"])">
-                <CellTemplate>
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default" Class="ma-0">@context.Item.EventType</MudChip>
-                </CellTemplate>
-            </PropertyColumn>
-            <PropertyColumn Property="x => x.SearchId" Title="@(L["Admin.Usage.Col.Search"])">
-                <CellTemplate>
-                    <MudText Typo="Typo.caption" Style="font-family:monospace;">@ShortId(context.Item.SearchId)</MudText>
-                </CellTemplate>
-            </PropertyColumn>
-            <PropertyColumn Property="x => x.DurationMs" Title="@(L["Admin.Usage.Col.AvgMs"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
-                <CellTemplate>@(context.Item.DurationMs > 0 ? context.Item.DurationMs.ToString("N0", CultureInfo.InvariantCulture) : "—")</CellTemplate>
-            </PropertyColumn>
-            <PropertyColumn Property="x => x.EstimatedCost" Title="@(L["Admin.Usage.Col.Cost"])" CellStyle="text-align:right;" HeaderStyle="text-align:right;">
-                <CellTemplate>@Usd(context.Item.EstimatedCost)</CellTemplate>
-            </PropertyColumn>
-        </Columns>
-        <NoRecordsContent>
-            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-3">@L["Admin.Usage.RecentEmpty"]</MudText>
-        </NoRecordsContent>
-    </MudDataGrid>
+    <MudText Typo="Typo.h6" Class="mb-2">By category</MudText>
+    <MudPaper Outlined="true" Elevation="0" Class="pa-2">
+        <MudSimpleTable Dense="true" Hover="true">
+            <thead>
+                <tr>
+                    <th>Category</th>
+                    <th style="text-align:right;">Actions</th>
+                    <th style="text-align:right;">Est. cost</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in _report.Categories)
+                {
+                    <tr>
+                        <td><MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Primary">@c.Category</MudChip></td>
+                        <td style="text-align:right;">@c.Count.ToString("N0")</td>
+                        <td style="text-align:right;">@Usd(c.Cost)</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </MudPaper>
 }
 
 @code {
@@ -194,10 +123,7 @@ else
     private bool _loading;
     private string? _error;
     private UsageReport _report = UsageReport.Empty;
-    private IReadOnlyList<PipelineEvent> _recent = Array.Empty<PipelineEvent>();
 
-    // Defer the first load to OnAfterRenderAsync: GetUsageAsync/RecentAsync hit Postgres, which the
-    // prerender pass can't await safely — the same pattern the other admin pages follow.
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && Events.IsEnabled)
@@ -219,9 +145,7 @@ else
         StateHasChanged();
         try
         {
-            // Load the windowed rollup and the live tail together; both are best-effort reads.
             _report = await Events.GetUsageAsync(Since(_period));
-            _recent = await Events.RecentAsync(50);
         }
         catch (Exception ex)
         {
@@ -231,20 +155,15 @@ else
         StateHasChanged();
     }
 
-    // Window start for each period (UTC). "today" is midnight UTC; "all" reaches back to the epoch.
+    // Window start for each period (UTC). "today" is midnight UTC; the rest are rolling windows.
     private static DateTimeOffset Since(string period) => period switch
     {
         "today" => new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero),
         "month" => DateTimeOffset.UtcNow.AddDays(-30),
-        "all" => DateTimeOffset.UnixEpoch,
         _ => DateTimeOffset.UtcNow.AddDays(-7)
     };
 
-    private static double ErrorRate(ProviderUsageRow r) => r.Count == 0 ? 0 : (double)r.Errors / r.Count * 100;
-
-    // The SearchId is a GUID; show only the leading segment so the column stays scannable.
-    private static string ShortId(string? id) =>
-        string.IsNullOrEmpty(id) ? "—" : (id.Length > 8 ? id[..8] : id);
+    private Color PeriodColor(string period) => _period == period ? Color.Primary : Color.Default;
 
     private static string Usd(decimal cost) => "$" + cost.ToString("0.0000", CultureInfo.InvariantCulture);
 }
