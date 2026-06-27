@@ -9,14 +9,14 @@ namespace Daleel.Web.Tests.Data;
 /// case-insensitive upsert (so the same brand researched twice updates rather than duplicates),
 /// round-tripping of the string-list columns (pros/cons/models/brands), and the staleness query
 /// that backs the periodic refresh. The staleness test in particular exercises the Unix-ms value
-/// conversion — SQLite cannot compare <see cref="DateTimeOffset"/> in a WHERE clause.
+/// conversion used for provider-agnostic timestamp comparison in a WHERE clause.
 /// </summary>
 public class BrandStoreRepositoryTests
 {
     [Fact]
     public async Task Brand_Upsert_RoundTripsAllFieldsIncludingLists()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
 
         await repo.UpsertAsync(new Brand
@@ -46,7 +46,7 @@ public class BrandStoreRepositoryTests
     [Fact]
     public async Task Brand_Upsert_IsCaseInsensitiveAndDoesNotDuplicate()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
 
         await repo.UpsertAsync(new Brand { Name = "LG", Description = "first", LastRefreshed = DateTimeOffset.UtcNow });
@@ -59,7 +59,7 @@ public class BrandStoreRepositoryTests
     [Fact]
     public async Task Brand_ListStale_ReturnsOnlyProfilesOlderThanCutoff()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
         var now = DateTimeOffset.UtcNow;
 
@@ -75,7 +75,7 @@ public class BrandStoreRepositoryTests
     [Fact]
     public async Task Store_Upsert_RoundTripsBrandsCarried()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new StoreRepository(ctx.Db);
 
         await repo.UpsertAsync(new Store
@@ -100,7 +100,7 @@ public class BrandStoreRepositoryTests
     [Fact]
     public async Task Store_Upsert_RoundTripsContactAndPlacesFields_OnInsertAndUpdate()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new StoreRepository(ctx.Db);
 
         // Insert with full Google-Places verification + contact details.

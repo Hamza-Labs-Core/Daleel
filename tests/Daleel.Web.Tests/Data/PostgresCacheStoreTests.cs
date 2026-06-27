@@ -1,6 +1,5 @@
 using Daleel.Web.Data;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -8,30 +7,22 @@ using Xunit;
 namespace Daleel.Web.Tests.Data;
 
 /// <summary>
-/// Exercises <see cref="SqliteCacheStore"/> against real in-memory SQLite via a DI container, so the
+/// Exercises <see cref="PostgresCacheStore"/> against real PostgreSQL via a DI container, so the
 /// DateTimeOffset expiry comparison and the <c>ExecuteDelete</c> purge run through real SQL translation.
 /// </summary>
-public sealed class SqliteCacheStoreTests : IDisposable
+public sealed class PostgresCacheStoreTests : IDisposable
 {
-    private readonly SqliteConnection _connection;
+    private readonly PostgresTestContext _ctx = new();
     private readonly ServiceProvider _services;
-    private readonly SqliteCacheStore _store;
+    private readonly PostgresCacheStore _store;
 
-    public SqliteCacheStoreTests()
+    public PostgresCacheStoreTests()
     {
-        _connection = new SqliteConnection("Data Source=:memory:");
-        _connection.Open();
-
-        var bootstrap = new DbContextOptionsBuilder<DaleelDbContext>().UseSqlite(_connection).Options;
-        using (var db = new DaleelDbContext(bootstrap))
-        {
-            db.Database.EnsureCreated();
-        }
-
+        // _ctx created the database and its schema (EnsureCreated); the DI context shares the same DB.
         var sc = new ServiceCollection();
-        sc.AddDbContext<DaleelDbContext>(o => o.UseSqlite(_connection));
+        sc.AddDbContext<DaleelDbContext>(o => o.UseNpgsql(_ctx.ConnectionString));
         _services = sc.BuildServiceProvider();
-        _store = new SqliteCacheStore(_services.GetRequiredService<IServiceScopeFactory>());
+        _store = new PostgresCacheStore(_services.GetRequiredService<IServiceScopeFactory>());
     }
 
     [Fact]
@@ -94,6 +85,6 @@ public sealed class SqliteCacheStoreTests : IDisposable
     public void Dispose()
     {
         _services.Dispose();
-        _connection.Dispose();
+        _ctx.Dispose();
     }
 }

@@ -12,9 +12,10 @@
          NOTE: the v2 packages named in the original brief (Elsa.Core, Elsa.Activities) no longer
          exist in v3 — the `Elsa` meta-package supplies the Core engine, the Runtime (IWorkflowRunner,
          AddElsa) and the built-in activities (Sequence, Parallel) we use. We run workflows in-process,
-         with OPTIONAL EF Core persistence for workflow instances (admin workflows page) — Postgres ONLY,
-         enabled when POSTGRES_CONNECTION_STRING/DATABASE_URL is set (no SQLite/in-memory fallback). Elsa
-         ships the provider migrations, applied automatically at startup. -->
+         with OPTIONAL EF Core persistence for workflow instances (admin workflows page) on the same
+         Postgres server the rest of the app uses (POSTGRES_CONNECTION_STRING/DATABASE_URL). Elsa ships
+         the provider migrations, applied automatically at startup. The whole app is Postgres-only — the
+         Npgsql provider below backs DaleelDbContext, the event store, and Elsa's workflow store. -->
     <PackageReference Include="Elsa" Version="3.3.3" />
     <PackageReference Include="Elsa.EntityFrameworkCore" Version="3.3.3" />
     <PackageReference Include="Elsa.EntityFrameworkCore.PostgreSql" Version="3.3.3" />
@@ -24,7 +25,6 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.12" />
     <PackageReference Include="MudBlazor" Version="8.15.0" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="8.0.11" />
     <!-- Direct S3 client for Cloudflare R2 image storage (IR2StorageService). Pinned to the version

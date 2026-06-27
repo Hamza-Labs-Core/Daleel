@@ -8,13 +8,13 @@ public class QuotaServiceTests
 {
     private const string User = "quota-user";
 
-    private static QuotaService Make(SqliteTestContext ctx, DateTimeOffset now) =>
+    private static QuotaService Make(PostgresTestContext ctx, DateTimeOffset now) =>
         new(ctx.Db, () => now);
 
     [Fact]
     public async Task BasicUser_GetsMonthlyCredits_BlockedWhenExhausted()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var svc = Make(ctx, new DateTimeOffset(2026, 6, 10, 0, 0, 0, TimeSpan.Zero));
 
         var status = await svc.GetStatusAsync(User, isAdmin: false);
@@ -40,7 +40,7 @@ public class QuotaServiceTests
     [Fact]
     public async Task ProSubscriber_GetsFiveThousandCredits()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         ctx.Db.UserSubscriptions.Add(new UserSubscription
         {
             UserId = User, PlanId = SubscriptionPlan.ProId, Status = "active",
@@ -59,7 +59,7 @@ public class QuotaServiceTests
     [Fact]
     public async Task Admin_BypassesCreditLimit()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var svc = Make(ctx, new DateTimeOffset(2026, 6, 10, 0, 0, 0, TimeSpan.Zero));
 
         // Spend far beyond Basic's 500 — admin is never blocked.
@@ -73,7 +73,7 @@ public class QuotaServiceTests
     [Fact]
     public async Task Credits_ResetOnNewMonth()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var june = new DateTimeOffset(2026, 6, 20, 0, 0, 0, TimeSpan.Zero);
         var juneSvc = Make(ctx, june);
 

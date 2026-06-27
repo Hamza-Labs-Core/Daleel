@@ -10,7 +10,7 @@ namespace Daleel.Web.Data;
 /// Upsert-keyed by (<see cref="BrandId"/>, <see cref="ModelKey"/>) so re-harvesting a brand updates its
 /// models in place rather than duplicating them. <see cref="ImageUrl"/> holds the R2-hosted copy when
 /// image storage is configured, falling back to the original source URL otherwise.
-/// <see cref="LastRefreshed"/> persists as Unix-ms for SQLite-translatable staleness filtering.
+/// <see cref="LastRefreshed"/> persists as Unix-ms bigint for provider-agnostic staleness filtering.
 /// </remarks>
 public sealed class BrandModel
 {

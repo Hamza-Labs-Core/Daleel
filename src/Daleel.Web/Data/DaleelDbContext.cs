@@ -12,15 +12,12 @@ namespace Daleel.Web.Data;
 /// <see cref="IdentityDbContext{TUser}"/> and adds the two app-owned tables.
 /// </summary>
 /// <remarks>
-/// This context is <b>SQLite-only</b> (data/daleel.db). Its migrations under
-/// <c>Data/Migrations</c> bake in SQLite-specific decisions at scaffold time — INTEGER autoincrement
-/// primary keys (<c>Sqlite:Autoincrement</c>), and INTEGER columns for booleans and Unix-ms timestamps.
-/// EF emits those for the <i>active</i> provider, so they will not apply against Postgres (which wants
-/// <c>bigint</c>/<c>boolean</c>/identity). Moving the main DB to Postgres is therefore not a one-line
-/// <c>UseNpgsql</c> swap: it needs a separate provider-specific migrations assembly and a parallel
-/// scaffolded migration set. (The optional pipeline event store is a <i>separate</i>
-/// <c>EventStoreDbContext</c> pinned to Postgres with its own migrations — that part is already
-/// provider-split correctly.)
+/// This context runs on <b>PostgreSQL</b> — the <c>daleel</c> database on the same server the pipeline
+/// event store and Elsa's workflow store use (see <c>PostgresConnection.ResolveAppDatabase</c>). The
+/// migrations under <c>Data/Migrations</c> are scaffolded against Npgsql. A few <c>DateTimeOffset</c>
+/// columns are still persisted as Unix-ms <c>bigint</c> via value converters: that encoding is
+/// provider-agnostic and keeps the range/order filters in the repositories translating identically — it
+/// is not a hard requirement, just a stable, provider-agnostic storage choice we kept across the migration.
 /// </remarks>
 public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
 {
@@ -64,9 +61,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             c => c == null ? 0 : c.Aggregate(0, (h, s) => HashCode.Combine(h, s == null ? 0 : s.GetHashCode())),
             c => c.ToList());
 
-        // Profiles persist LastRefreshed as Unix-ms: SQLite can't translate DateTimeOffset ordering
-        // (<, <=) in a WHERE clause, and the staleness sweep filters on exactly that. Same trick as
-        // SearchCache.ExpiresAt below.
+        // Profiles persist LastRefreshed as Unix-ms bigint — a provider-agnostic encoding the staleness
+        // sweep's range filters (<, <=) translate cleanly against. Same trick as SearchCache.ExpiresAt below.
         var toUnixMs = new ValueConverter<DateTimeOffset, long>(
             v => v.ToUnixTimeMilliseconds(),
             v => DateTimeOffset.FromUnixTimeMilliseconds(v));
@@ -194,8 +190,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Provider).HasMaxLength(64);
             e.Property(x => x.Price).HasColumnType("decimal(18,2)");
 
-            // ScrapedAt as Unix-ms so the "since"/"latest" filters translate on SQLite (it can't
-            // compare a DateTimeOffset column). Same trick as the profiles' LastRefreshed.
+            // ScrapedAt as Unix-ms bigint so the "since"/"latest" range filters translate cleanly.
+            // Same trick as the profiles' LastRefreshed.
             e.Property(x => x.ScrapedAt).HasConversion(toUnixMs);
         });
 
@@ -259,9 +255,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Model).HasMaxLength(128);
             e.Property(x => x.EstimatedCost).HasColumnType("decimal(12,6)");
 
-            // Persist CreatedAt as Unix-ms. SQLite can't translate DateTimeOffset comparisons in a
-            // WHERE clause (>= since), which every usage/cost aggregate does — so a long, which
-            // translates on any provider. Same trick as SearchCache.ExpiresAt / ProductProfile.
+            // Persist CreatedAt as Unix-ms bigint: every usage/cost aggregate filters on (>= since),
+            // and a long range filter translates cleanly on any provider. Same trick as
+            // SearchCache.ExpiresAt / ProductProfile.
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 
@@ -274,9 +270,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.CacheKey).HasMaxLength(80);
             e.Property(x => x.Layer).HasMaxLength(16);
 
-            // Store the timestamps as Unix-ms integers. SQLite can't translate DateTimeOffset
-            // ordering comparisons (>, <=) in a WHERE clause, but the cache's whole job is to filter
-            // and purge by ExpiresAt — so persist these as longs, which translate on any provider.
+            // Store the timestamps as Unix-ms bigint. The cache's whole job is to filter and purge by
+            // ExpiresAt, and a long range comparison translates cleanly on any provider.
             var toUnixMs = new ValueConverter<DateTimeOffset, long>(
                 v => v.ToUnixTimeMilliseconds(),
                 v => DateTimeOffset.FromUnixTimeMilliseconds(v));
@@ -296,8 +291,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Kind).HasMaxLength(64);
             e.Property(x => x.Content).HasMaxLength(300);
 
-            // CreatedAt as Unix-ms so CountSinceAsync(>= since) and the newest-first browse translate
-            // on SQLite (it can't compare/order a DateTimeOffset column). Same trick as SearchCache.
+            // CreatedAt as Unix-ms bigint so CountSinceAsync(>= since) and the newest-first browse
+            // translate cleanly as range/order comparisons. Same trick as SearchCache.
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 

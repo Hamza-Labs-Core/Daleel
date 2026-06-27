@@ -10,7 +10,7 @@ public class PlansAndConfigTests
     [Fact]
     public async Task ThreeActivePlans_AreSeeded_ForPricingPage()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
 
         var plans = await ctx.Db.SubscriptionPlans
             .Where(p => p.IsActive)
@@ -29,7 +29,7 @@ public class PlansAndConfigTests
     [Fact]
     public async Task ChangingUserToPro_RaisesTheirQuotaLimit()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var now = new DateTimeOffset(2026, 6, 10, 0, 0, 0, TimeSpan.Zero);
         var quota = new QuotaService(ctx.Db, () => now);
 
@@ -72,7 +72,7 @@ public class PlansAndConfigTests
     [Fact]
     public async Task SystemConfig_SeedsDefaults_AndRoundTripsTypedValues()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var cfg = new SystemConfigService(ctx.Db);
 
         await cfg.SeedDefaultsAsync();

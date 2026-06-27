@@ -9,7 +9,7 @@ namespace Daleel.Web.Data;
 /// <remarks>
 /// Same persistence shape as <see cref="Store"/>: upsert-keyed by <see cref="NameKey"/> (normalized
 /// brand+model), and <see cref="LastRefreshed"/> stored as Unix-ms so the staleness sweep can filter
-/// on it in SQLite.
+/// on it provider-agnostically.
 /// </remarks>
 public sealed class ProductProfile
 {

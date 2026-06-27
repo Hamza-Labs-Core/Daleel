@@ -4,7 +4,7 @@ namespace Daleel.Web.Data;
 
 /// <summary>
 /// One cached search payload, keyed by a normalized hash (see <see cref="Daleel.Core.Caching.CacheKey"/>).
-/// Backs <see cref="SqliteCacheStore"/> for both cache layers — the provider layer (one external
+/// Backs <see cref="PostgresCacheStore"/> for both cache layers — the provider layer (one external
 /// provider's response) and the result layer (a whole query+geo report) — distinguished by
 /// <see cref="Layer"/>. Entries are read until <see cref="ExpiresAt"/>, then swept by the weekly
 /// <see cref="Daleel.Web.Services.CacheCleanupService"/>.

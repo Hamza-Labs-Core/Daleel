@@ -9,8 +9,8 @@ namespace Daleel.Web.Data;
 /// <remarks>
 /// Keyed for upsert by <see cref="NameKey"/> (the normalized brand name) so researching the same
 /// brand twice updates the row rather than duplicating it. The list columns (pros/cons/models) are
-/// stored as JSON; <see cref="LastRefreshed"/> persists as Unix-ms because SQLite cannot compare
-/// <see cref="DateTimeOffset"/> in a WHERE clause and the staleness sweep filters on it.
+/// stored as JSON; <see cref="LastRefreshed"/> persists as Unix-ms — a stable, provider-agnostic
+/// encoding the WHERE clause can still compare — and the staleness sweep filters on it.
 /// </remarks>
 public sealed class Brand
 {

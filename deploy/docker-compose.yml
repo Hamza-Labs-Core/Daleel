@@ -15,11 +15,14 @@ services:
     expose:
       - "8080"
     volumes:
-      - daleel_data:/app/data   # persisted SQLite database — survives redeploys
+      # Persisted app data — Data-Protection key ring + local-fallback logs. The database itself lives
+      # in Postgres now, not here.
+      - daleel_data:/app/data
     depends_on:
-      # Start Postgres first when the optional event store is in use. Not a hard
-      # health gate: the app degrades to dropping events if Postgres is unavailable.
-      - postgres
+      # PostgreSQL is REQUIRED: the app creates/migrates its `daleel` database at startup, so wait for
+      # Postgres to be healthy before booting (otherwise the first boot crash-loops until it is).
+      postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/health"]
       interval: 30s
@@ -34,9 +37,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Optional PostgreSQL for the pipeline event store (admin /admin/usage dashboard).
-  # The app only uses it when POSTGRES_CONNECTION_STRING / DATABASE_URL is set; this
-  # service can be left running harmlessly even when the event store is disabled.
+  # PostgreSQL — REQUIRED. Backs the whole app: the main `daleel` database (Identity + app tables,
+  # created on first boot), the pipeline event store (`daleel_events`), and Elsa's workflow store.
+  # The app reads POSTGRES_CONNECTION_STRING / DATABASE_URL from .env to reach this service.
   postgres:
     image: postgres:16-alpine
     container_name: daleel-postgres
@@ -46,6 +49,8 @@ services:
       # No insecure default: a missing/empty POSTGRES_PASSWORD fails the deploy rather than silently
       # booting Postgres with a well-known password.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # Seeds the event-store database. The app's own `daleel` database is created at startup by EF
+      # (the `daleel` superuser has rights to CREATE DATABASE), so it needs no seeding here.
       POSTGRES_DB: daleel_events
     volumes:
       - postgres_data:/var/lib/postgresql/data

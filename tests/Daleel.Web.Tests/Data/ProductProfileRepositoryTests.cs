@@ -32,7 +32,7 @@ public class ProductProfileRepositoryTests
     [Fact]
     public async Task Upsert_RoundTripsAndReusesByKey_WithoutDuplicating()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new ProductProfileRepository(ctx.Db);
 
         await repo.UpsertAsync(new ProductProfile

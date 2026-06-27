@@ -8,11 +8,11 @@ namespace Daleel.Web.Tests.Data;
 /// Persistence behaviour for the two new tables. <see cref="ScrapedPrice"/> is an append-only time series,
 /// so the test that matters is "latest price per store" collapsing a history of observations.
 /// <see cref="BrandModel"/> is upsert-keyed per brand (re-harvesting updates in place) and carries a real FK
-/// to <see cref="Brand"/>. Both exercise the Unix-ms value conversion SQLite needs to order timestamps.
+/// to <see cref="Brand"/>. Both exercise the Unix-ms value conversion used to order timestamps provider-agnostically.
 /// </summary>
 public class ScrapedPriceAndBrandModelRepositoryTests
 {
-    private static async Task<Brand> SeedBrandAsync(SqliteTestContext ctx, string name = "Samsung")
+    private static async Task<Brand> SeedBrandAsync(PostgresTestContext ctx, string name = "Samsung")
     {
         var brand = new Brand { Name = name, LastRefreshed = DateTimeOffset.UtcNow };
         return await new BrandRepository(ctx.Db).UpsertAsync(brand);
@@ -21,7 +21,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task ScrapedPrice_LatestForProduct_KeepsNewestObservationPerStore()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new ScrapedPriceRepository(ctx.Db);
         var key = ProductProfile.KeyFor("Samsung", "S24", "Galaxy S24");
         var t0 = DateTimeOffset.UtcNow.AddDays(-2);
@@ -46,7 +46,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task ScrapedPrice_LatestForProduct_IsScopedToTheProductKey()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new ScrapedPriceRepository(ctx.Db);
         await repo.AddAsync(new ScrapedPrice { ProductName = "A", ProductKey = "a", StoreName = "S",
             Price = 1m, Provider = "context.dev", ScrapedAt = DateTimeOffset.UtcNow });
@@ -59,7 +59,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task BrandModel_Upsert_IsKeyedPerBrandAndDoesNotDuplicate()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brand = await SeedBrandAsync(ctx);
         var repo = new BrandModelRepository(ctx.Db);
         var now = DateTimeOffset.UtcNow;
@@ -76,7 +76,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task BrandModel_Upsert_KeepsExistingImageWhenRefreshHasNone()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brand = await SeedBrandAsync(ctx);
         var repo = new BrandModelRepository(ctx.Db);
         var now = DateTimeOffset.UtcNow;
@@ -94,7 +94,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task BrandModel_DistinctModelsForOneBrandAllPersist()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brand = await SeedBrandAsync(ctx);
         var repo = new BrandModelRepository(ctx.Db);
         var now = DateTimeOffset.UtcNow;
@@ -109,7 +109,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task BrandModel_GetById_LoadsTheOwningBrand()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brand = await SeedBrandAsync(ctx);
         var repo = new BrandModelRepository(ctx.Db);
         var saved = await repo.UpsertAsync(new BrandModel
@@ -129,7 +129,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task BrandModel_FindByProductKey_MatchesTheNormalizedBrandModelKey()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brand = await SeedBrandAsync(ctx);
         var repo = new BrandModelRepository(ctx.Db);
         await repo.UpsertAsync(new BrandModel
@@ -150,7 +150,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task ScrapedPrice_LatestForStore_KeepsNewestPerProductCaseInsensitively()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new ScrapedPriceRepository(ctx.Db);
         var t0 = DateTimeOffset.UtcNow.AddDays(-3);
 
@@ -178,7 +178,7 @@ public class ScrapedPriceAndBrandModelRepositoryTests
     [Fact]
     public async Task ScrapedPrice_HistoryForProduct_ReturnsObservationsNewestFirst()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new ScrapedPriceRepository(ctx.Db);
         const string key = "samsung galaxy s24";
         var t0 = DateTimeOffset.UtcNow.AddDays(-5);

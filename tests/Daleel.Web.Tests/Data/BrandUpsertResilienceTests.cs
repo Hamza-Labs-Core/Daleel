@@ -1,6 +1,5 @@
 using Daleel.Web.Data;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Xunit;
 
@@ -20,7 +19,7 @@ public class BrandUpsertResilienceTests
     [Fact]
     public async Task BrandModel_PartialReharvest_DoesNotBlankExistingFields()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brand = await new BrandRepository(ctx.Db).UpsertAsync(
             new Brand { Name = "Samsung", LastRefreshed = DateTimeOffset.UtcNow });
         var repo = new BrandModelRepository(ctx.Db);
@@ -56,7 +55,7 @@ public class BrandUpsertResilienceTests
     [Fact]
     public async Task BrandModel_Reharvest_OverwritesFieldsThatHaveNewValues()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brand = await new BrandRepository(ctx.Db).UpsertAsync(
             new Brand { Name = "Samsung", LastRefreshed = DateTimeOffset.UtcNow });
         var repo = new BrandModelRepository(ctx.Db);
@@ -71,7 +70,7 @@ public class BrandUpsertResilienceTests
     [Fact]
     public async Task Brand_PartialReResearch_KeepsListsAndOptionalFields()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
         var now = DateTimeOffset.UtcNow;
 
@@ -106,22 +105,19 @@ public class BrandUpsertResilienceTests
     [Fact]
     public async Task BrandModel_ConcurrentUpsertsForSameKey_ConvergeToOneRow()
     {
-        // Shared-cache in-memory db so each context gets its OWN connection (its own change tracker), the
-        // way two request scopes would — genuine contention on the (BrandId, ModelKey) unique index.
-        var dbName = "BrandModelConcurrency_" + System.Guid.NewGuid().ToString("N");
-        var connStr = $"Data Source={dbName};Mode=Memory;Cache=Shared";
-        using var keepAlive = Open(connStr); // holds the shared db alive for the test
+        // A dedicated Postgres database so each context gets its OWN connection (its own change tracker),
+        // the way two request scopes would — genuine contention on the (BrandId, ModelKey) unique index.
+        var connStr = PostgresTestServer.CreateFreshDatabase();
 
-        using (var seed = NewContext(connStr, out var seedConn))
+        using (var seed = NewContext(connStr))
         {
             seed.Database.EnsureCreated();
             seed.Brands.Add(new Brand { Id = 1, Name = "Samsung", NameKey = "samsung", LastRefreshed = DateTimeOffset.UtcNow });
             await seed.SaveChangesAsync();
-            seedConn.Dispose();
         }
 
-        using var ctxA = NewContext(connStr, out var connA);
-        using var ctxB = NewContext(connStr, out var connB);
+        using var ctxA = NewContext(connStr);
+        using var ctxB = NewContext(connStr);
         var now = DateTimeOffset.UtcNow;
 
         var upsertA = new BrandModelRepository(ctxA).UpsertAsync(new BrandModel
@@ -133,31 +129,13 @@ public class BrandUpsertResilienceTests
         var act = async () => await Task.WhenAll(upsertA, upsertB);
         await act.Should().NotThrowAsync();
 
-        connA.Dispose();
-        connB.Dispose();
-
         // Exactly one row survives regardless of which writer won, holding one of the two prices.
-        using var verify = NewContext(connStr, out var verifyConn);
+        using var verify = NewContext(connStr);
         var rows = await verify.BrandModels.Where(m => m.BrandId == 1).ToListAsync();
         rows.Should().ContainSingle("the unique (BrandId, ModelKey) index plus the recovery collapse the race to one row");
         rows[0].LocalPrice.Should().BeOneOf(900m, 850m);
-        verifyConn.Dispose();
     }
 
-    private static SqliteConnection Open(string connStr)
-    {
-        var c = new SqliteConnection(connStr);
-        c.Open();
-        using var pragma = c.CreateCommand();
-        pragma.CommandText = "PRAGMA busy_timeout=5000;";
-        pragma.ExecuteNonQuery();
-        return c;
-    }
-
-    private static DaleelDbContext NewContext(string connStr, out SqliteConnection connection)
-    {
-        connection = Open(connStr);
-        var options = new DbContextOptionsBuilder<DaleelDbContext>().UseSqlite(connection).Options;
-        return new DaleelDbContext(options);
-    }
+    private static DaleelDbContext NewContext(string connStr) =>
+        new(new DbContextOptionsBuilder<DaleelDbContext>().UseNpgsql(connStr).Options);
 }

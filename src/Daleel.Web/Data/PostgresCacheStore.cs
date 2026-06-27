@@ -4,15 +4,15 @@ using Microsoft.EntityFrameworkCore;
 namespace Daleel.Web.Data;
 
 /// <summary>
-/// <see cref="ICacheStore"/> backed by the <see cref="SearchCache"/> table (SQLite). Registered as a
-/// singleton and opens a fresh DbContext scope per call, because the agent runs providers in parallel
+/// <see cref="ICacheStore"/> backed by the <see cref="SearchCache"/> table (PostgreSQL). Registered as
+/// a singleton and opens a fresh DbContext scope per call, because the agent runs providers in parallel
 /// and a scoped <see cref="DaleelDbContext"/> is not safe for concurrent use.
 /// </summary>
-public sealed class SqliteCacheStore : ICacheStore
+public sealed class PostgresCacheStore : ICacheStore
 {
     private readonly IServiceScopeFactory _scopeFactory;
 
-    public SqliteCacheStore(IServiceScopeFactory scopeFactory) => _scopeFactory = scopeFactory;
+    public PostgresCacheStore(IServiceScopeFactory scopeFactory) => _scopeFactory = scopeFactory;
 
     public async Task<string?> GetAsync(string key, CancellationToken cancellationToken = default)
     {

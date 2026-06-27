@@ -6,12 +6,12 @@ namespace Daleel.Web.Tests.Data;
 
 public class AnalyticsServiceTests
 {
-    private static AnalyticsService Make(SqliteTestContext ctx, DateTime now) => new(ctx.Db, () => now);
+    private static AnalyticsService Make(PostgresTestContext ctx, DateTime now) => new(ctx.Db, () => now);
 
     [Fact]
     public async Task RecordSearch_ShowsUpInDashboardAndByType()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var now = new DateTime(2026, 6, 22, 10, 0, 0, DateTimeKind.Utc);
         var svc = Make(ctx, now);
 
@@ -30,7 +30,7 @@ public class AnalyticsServiceTests
     [Fact]
     public async Task ModerationStats_AggregatesFilteredCountsAndCategories()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var now = new DateTime(2026, 6, 22, 10, 0, 0, DateTimeKind.Utc);
         var svc = Make(ctx, now);
 

@@ -171,7 +171,7 @@ you want — the agent wires up whatever is available and skips the rest.
 | `CONTEXT_DEV_API_KEY` | Context.dev — scrape→markdown, brand data, AI extract | deep-reading pages, brand enrichment |
 | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_TOKEN` | Cloudflare Browser Rendering (scrape fallback) | rendering JS-heavy / anti-bot pages |
 | `APIFY_TOKEN` | Apify actors | social monitoring (`search`, `monitor`), social fetch in agent |
-| `POSTGRES_CONNECTION_STRING` _or_ `DATABASE_URL` | PostgreSQL pipeline **event store** (optional) | `/admin/usage` cost dashboard; unset ⇒ SQLite-only, store is a no-op |
+| `POSTGRES_CONNECTION_STRING` _or_ `DATABASE_URL` | PostgreSQL — **required** (whole app runs on it) | main `daleel` DB (Identity + app tables), event store + `/admin/usage` dashboard (`daleel_events`), Elsa workflow store |
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
@@ -337,7 +337,9 @@ real values under **Settings → Secrets and variables → Actions**.
 > provided at the GitHub org level. The app still reads them at runtime from `/opt/daleel/.env`
 > (documented in [`deploy/.env.example`](deploy/.env.example)).
 >
-> The PostgreSQL **event store** (`POSTGRES_PASSWORD`, `POSTGRES_CONNECTION_STRING` / `DATABASE_URL`)
-> is optional and configured via `/opt/daleel/.env`; the bundled `postgres` service in
-> [`deploy/docker-compose.yml`](deploy/docker-compose.yml) provides it. Unset ⇒ the app runs
-> SQLite-only and the `/admin/usage` dashboard shows a "not configured" hint.
+> **PostgreSQL is required** (`POSTGRES_PASSWORD`, `POSTGRES_CONNECTION_STRING` / `DATABASE_URL`),
+> configured via `/opt/daleel/.env`; the bundled `postgres` service in
+> [`deploy/docker-compose.yml`](deploy/docker-compose.yml) provides it. One server hosts the main
+> `daleel` app database (created on first boot), the `daleel_events` pipeline event store powering the
+> `/admin/usage` dashboard, and Elsa's workflow-instance store. The app fails fast at startup if no
+> Postgres connection is configured.

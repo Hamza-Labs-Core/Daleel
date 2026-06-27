@@ -3,9 +3,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Daleel.Web.Events;
 
 /// <summary>
-/// The PostgreSQL-backed event store context — deliberately separate from <c>DaleelDbContext</c>
-/// (which stays on SQLite). Holding a single append-only table keeps the event firehose off the
-/// transactional app database and lets it scale/retain independently.
+/// The PostgreSQL-backed event store context — deliberately separate from <c>DaleelDbContext</c> and
+/// hosted in its own <c>daleel_events</c> database (the app DB uses <c>daleel</c> on the same server).
+/// Holding a single append-only table keeps the event firehose off the transactional app database and
+/// lets it scale/retain independently.
 /// </summary>
 public sealed class EventStoreDbContext : DbContext
 {

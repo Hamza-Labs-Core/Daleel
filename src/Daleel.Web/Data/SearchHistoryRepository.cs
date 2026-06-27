@@ -63,8 +63,8 @@ public sealed class SearchHistoryRepository : ISearchHistoryRepository
         }
 
         var total = await query.CountAsync(ct);
-        // Order by the identity key (monotonic with insertion) rather than CreatedAt: SQLite cannot
-        // ORDER BY a DateTimeOffset column, and for append-only history Id desc == newest first.
+        // Order by the identity key (monotonic with insertion) rather than CreatedAt: for append-only
+        // history Id desc == newest first, a stable provider-agnostic ordering.
         var items = await query
             .OrderByDescending(x => x.Id)
             .Skip((page - 1) * pageSize)

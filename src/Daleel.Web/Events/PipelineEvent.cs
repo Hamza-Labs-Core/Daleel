@@ -2,7 +2,7 @@ namespace Daleel.Web.Events;
 
 /// <summary>
 /// One recorded action in a search pipeline run — a provider call, scrape, LLM completion, cache
-/// hit/miss, or profile lookup. Persisted to the PostgreSQL event store (separate from the SQLite
+/// hit/miss, or profile lookup. Persisted to the PostgreSQL event store (separate from the
 /// app DB) so operators get a durable, queryable audit of every external action and its cost.
 /// </summary>
 /// <remarks>

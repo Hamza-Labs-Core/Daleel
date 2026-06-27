@@ -10,7 +10,7 @@ public class SystemConfigCacheTests
     [Fact]
     public async Task Get_IsCached_AndInvalidatedOnSet()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         using var cache = new MemoryCache(new MemoryCacheOptions());
         var cfg = new SystemConfigService(ctx.Db, cache);
         await cfg.SeedDefaultsAsync();

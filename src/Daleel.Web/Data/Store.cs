@@ -8,7 +8,7 @@ namespace Daleel.Web.Data;
 /// <remarks>
 /// Same persistence shape as <see cref="Brand"/>: upsert-keyed by <see cref="NameKey"/>,
 /// <see cref="BrandsCarried"/> stored as JSON, and <see cref="LastRefreshed"/> as Unix-ms so the
-/// staleness sweep can filter on it in SQLite.
+/// staleness sweep can filter on it provider-agnostically.
 /// </remarks>
 public sealed class Store
 {

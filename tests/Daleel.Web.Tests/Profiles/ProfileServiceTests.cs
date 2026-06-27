@@ -89,7 +89,7 @@ public class ProfileServiceTests
     [Fact]
     public async Task GetOrCreate_ResearchesAndPersists_WhenMissing()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
         var researcher = new SpyResearcher(brand: new Brand { Name = "Samsung", Description = "fresh" });
         var svc = new BrandProfileService(repo, researcher, Options());
@@ -106,7 +106,7 @@ public class ProfileServiceTests
     [Fact]
     public async Task GetOrCreate_ReturnsCached_WithoutResearching_WhenFresh()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
         await repo.UpsertAsync(new Brand { Name = "LG", Description = "cached", LastRefreshed = Now.AddDays(-5) });
         var researcher = new SpyResearcher(brand: new Brand { Name = "LG", Description = "should-not-be-used" });
@@ -121,7 +121,7 @@ public class ProfileServiceTests
     [Fact]
     public async Task GetOrCreate_Refreshes_WhenStale()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
         await repo.UpsertAsync(new Brand { Name = "Sony", Description = "old", LastRefreshed = Now.AddDays(-40) });
         var researcher = new SpyResearcher(brand: new Brand { Name = "Sony", Description = "updated" });
@@ -136,7 +136,7 @@ public class ProfileServiceTests
     [Fact]
     public async Task GetOrCreate_FallsBackToStaleProfile_WhenResearchUnavailable()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
         await repo.UpsertAsync(new Brand { Name = "Bosch", Description = "stale-but-real", LastRefreshed = Now.AddDays(-99) });
         var researcher = new SpyResearcher(brand: null); // no keys → research returns null
@@ -150,7 +150,7 @@ public class ProfileServiceTests
     [Fact]
     public async Task RefreshStale_RefreshesEveryStaleProfile()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new BrandRepository(ctx.Db);
         await repo.UpsertAsync(new Brand { Name = "A", LastRefreshed = Now.AddDays(-40) });
         await repo.UpsertAsync(new Brand { Name = "B", LastRefreshed = Now.AddDays(-50) });

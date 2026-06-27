@@ -70,8 +70,9 @@ public sealed class ScrapedPriceRepository : IScrapedPriceRepository
         string productKey, CancellationToken ct = default)
     {
         // Pull the model's history newest-first (a translatable WHERE + ORDER BY on the Unix-ms column),
-        // then keep the first row per store. The collapse is in memory because SQLite can't translate a
-        // GROUP BY + "row with max timestamp" into a single query without window functions EF won't emit.
+        // then keep the first row per store. The collapse is done in memory (the windows are small) so the
+        // GROUP BY + "row with max timestamp" stays a pure, tested function rather than relying on window
+        // functions EF won't emit.
         var rows = await _db.ScrapedPrices.AsNoTracking()
             .Where(p => p.ProductKey == productKey)
             .OrderByDescending(p => p.ScrapedAt)
@@ -93,7 +94,7 @@ public sealed class ScrapedPriceRepository : IScrapedPriceRepository
         }
 
         // Scraped store names and a saved Store's name can differ in casing, so match case-insensitively
-        // (lower() is SQLite-translatable). Then collapse the store's history to the current price per
+        // (lower() is provider-translatable). Then collapse the store's history to the current price per
         // product, newest observation winning — the same per-key collapse LatestForProductAsync does.
         var lowered = storeName.Trim().ToLowerInvariant();
         var rows = await _db.ScrapedPrices.AsNoTracking()

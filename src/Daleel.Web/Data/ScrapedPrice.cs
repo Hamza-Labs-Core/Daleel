@@ -10,8 +10,8 @@ namespace Daleel.Web.Data;
 /// <remarks>
 /// Keyed for reads by <see cref="ProductKey"/> (the normalized brand+model, shared with
 /// <see cref="ProductProfile.KeyFor"/>) so the same model maps to one series regardless of how its
-/// display name was spelled. <see cref="ScrapedAt"/> persists as Unix-ms so SQLite can order/filter it
-/// in a WHERE clause — the same trick the profiles use for <c>LastRefreshed</c>.
+/// display name was spelled. <see cref="ScrapedAt"/> persists as Unix-ms — a stable, provider-agnostic
+/// encoding the WHERE clause can still order/filter — the same trick the profiles use for <c>LastRefreshed</c>.
 /// </remarks>
 public sealed class ScrapedPrice
 {

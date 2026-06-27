@@ -42,7 +42,7 @@ public sealed class SavedResultRepository : ISavedResultRepository
     public async Task<IReadOnlyList<SavedResult>> ListAsync(string userId, CancellationToken ct = default) =>
         await _db.SavedResults.AsNoTracking()
             .Where(x => x.UserId == userId)
-            .OrderByDescending(x => x.Id) // SQLite can't ORDER BY DateTimeOffset; Id desc = newest first
+            .OrderByDescending(x => x.Id) // Order by the monotonic identity key; Id desc = newest first
             .ToListAsync(ct);
 
     public Task<SavedResult?> GetAsync(string userId, int id, CancellationToken ct = default) =>

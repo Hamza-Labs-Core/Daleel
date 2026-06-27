@@ -37,7 +37,7 @@ public class UserDataIsolationTests
     [Fact]
     public async Task History_List_ReturnsOnlyOwnRows()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SearchHistoryRepository(ctx.Db);
         await repo.AddAsync(Entry(Alice, "alice question"));
         await repo.AddAsync(Entry(Bob, "bob question"));
@@ -52,7 +52,7 @@ public class UserDataIsolationTests
     [Fact]
     public async Task History_Get_DeniesCrossUserAccess()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SearchHistoryRepository(ctx.Db);
         var aliceRow = await repo.AddAsync(Entry(Alice, "secret"));
 
@@ -64,7 +64,7 @@ public class UserDataIsolationTests
     [Fact]
     public async Task History_Delete_CannotDeleteAnotherUsersRow()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SearchHistoryRepository(ctx.Db);
         var aliceRow = await repo.AddAsync(Entry(Alice, "keep me"));
 
@@ -77,7 +77,7 @@ public class UserDataIsolationTests
     [Fact]
     public async Task History_Clear_OnlyClearsOwnRows()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SearchHistoryRepository(ctx.Db);
         await repo.AddAsync(Entry(Alice, "a1"));
         await repo.AddAsync(Entry(Alice, "a2"));
@@ -93,7 +93,7 @@ public class UserDataIsolationTests
     [Fact]
     public async Task Saved_List_ReturnsOnlyOwnRows()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SavedResultRepository(ctx.Db);
         await repo.AddAsync(Saved(Alice, "alice report"));
         await repo.AddAsync(Saved(Bob, "bob report"));
@@ -105,7 +105,7 @@ public class UserDataIsolationTests
     [Fact]
     public async Task Saved_GetAndDelete_DenyCrossUserAccess()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SavedResultRepository(ctx.Db);
         var aliceRow = await repo.AddAsync(Saved(Alice, "private"));
 

@@ -10,11 +10,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Test-only Elsa SQLite EF provider: the app persists workflow instances to Postgres only, but the
-         persistence round-trip test drives the same EF Core store against a throwaway SQLite file (no
-         Postgres needed in CI). The provider is provider-agnostic, so this still exercises migrations +
-         IWorkflowInstanceStore + the run-summary round-trip. -->
-    <PackageReference Include="Elsa.EntityFrameworkCore.Sqlite" Version="3.3.3" />
+    <!-- Tests run against real PostgreSQL via Testcontainers (a throwaway postgres:16-alpine container,
+         one per test run, with a fresh database per test for isolation) — the same engine production
+         uses. Elsa's Postgres EF provider backs the workflow-instance persistence round-trip test. -->
+    <PackageReference Include="Testcontainers.PostgreSql" Version="3.10.0" />
+    <PackageReference Include="Elsa.EntityFrameworkCore.PostgreSql" Version="3.3.3" />
     <PackageReference Include="bunit" Version="1.40.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />

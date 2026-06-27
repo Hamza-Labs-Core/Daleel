@@ -1,13 +1,12 @@
 namespace Daleel.Web.Events;
 
 /// <summary>
-/// The append-only pipeline event store. Implemented over PostgreSQL when configured, or a no-op
-/// (<see cref="NullEventStore"/>) when no Postgres connection is set — so the app runs SQLite-only
-/// out of the box and gains durable event auditing the moment a connection string is provided.
+/// The append-only pipeline event store, backed by PostgreSQL (<see cref="PostgresEventStore"/>).
+/// Every pipeline action is recorded here for the admin usage/cost dashboard.
 /// </summary>
 public interface IEventStore
 {
-    /// <summary>False for the no-op store; the dashboard shows a "not configured" hint when false.</summary>
+    /// <summary>Whether the store is active; the dashboard shows a "not configured" hint when false.</summary>
     bool IsEnabled { get; }
 
     /// <summary>Persists a batch of events (best-effort: a write failure must never fail a search).</summary>

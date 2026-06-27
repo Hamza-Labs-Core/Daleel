@@ -10,11 +10,11 @@ namespace Daleel.Web.Tests.Services;
 /// The product detail page reads from saved data, never a live scrape. These tests pin the assembly
 /// rules: prices/profile alone are enough to render a page, a harvested <see cref="BrandModel"/> adds
 /// specs + image + brand reputation, and a product with nothing saved resolves to null (the page then
-/// shows "not yet available"). Real SQLite-backed repositories exercise the same SQL production runs.
+/// shows "not yet available"). Real Postgres-backed repositories exercise the same SQL production runs.
 /// </summary>
 public class ProductDetailDbServiceTests
 {
-    private static ProductDetailDbService Service(SqliteTestContext ctx) =>
+    private static ProductDetailDbService Service(PostgresTestContext ctx) =>
         new(
             new BrandModelRepository(ctx.Db),
             new ProductProfileRepository(ctx.Db),
@@ -24,7 +24,7 @@ public class ProductDetailDbServiceTests
     [Fact]
     public async Task GetAsync_ReturnsNull_WhenNothingAboutTheProductIsSaved()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var view = await Service(ctx).GetAsync("p_deadbeef", "Totally Unknown Phone", "jordan");
         view.Should().BeNull("with no catalogue row, profile or scraped price there's nothing to show");
     }
@@ -32,7 +32,7 @@ public class ProductDetailDbServiceTests
     [Fact]
     public async Task GetAsync_AssemblesFromProfileAndScrapedPrices_WithoutACatalogueRow()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var profiles = new ProductProfileRepository(ctx.Db);
         var prices = new ScrapedPriceRepository(ctx.Db);
         var now = DateTimeOffset.UtcNow;
@@ -68,7 +68,7 @@ public class ProductDetailDbServiceTests
     [Fact]
     public async Task GetAsync_ByCatalogueId_IncludesSpecsImageAndBrandReputation()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brands = new BrandRepository(ctx.Db);
         var models = new BrandModelRepository(ctx.Db);
         var prices = new ScrapedPriceRepository(ctx.Db);
@@ -102,7 +102,7 @@ public class ProductDetailDbServiceTests
     [Fact]
     public async Task GetComparable_ReturnsNull_WhenNeitherSpecsNorPricesAreSaved()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var model = await Service(ctx).GetComparableAsync("Nothing Saved Yet");
         model.Should().BeNull("the compare page shows 'specs not yet profiled' for this");
     }
@@ -110,7 +110,7 @@ public class ProductDetailDbServiceTests
     [Fact]
     public async Task GetComparable_BuildsSpecsAndOffersFromSavedData()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brands = new BrandRepository(ctx.Db);
         var models = new BrandModelRepository(ctx.Db);
         var prices = new ScrapedPriceRepository(ctx.Db);

@@ -14,7 +14,7 @@ public sealed class EventStoreDbContextFactory : IDesignTimeDbContextFactory<Eve
     public EventStoreDbContext CreateDbContext(string[] args)
     {
         var conn = Environment.GetEnvironmentVariable("POSTGRES_CONNECTION_STRING")
-                   ?? "Host=localhost;Port=5432;Database=daleel_events;Username=postgres;Password=postgres";
+                   ?? "Host=localhost;Port=5432;Database=daleel_events;Username=daleel;Password=daleel";
 
         var options = new DbContextOptionsBuilder<EventStoreDbContext>()
             .UseNpgsql(conn, o => o.MigrationsAssembly(typeof(EventStoreDbContext).Assembly.FullName))

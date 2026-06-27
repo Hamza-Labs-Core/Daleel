@@ -11,7 +11,7 @@ namespace Daleel.Web.Tests.Data;
 /// </summary>
 public class VisionAndBrandModelSmartTests
 {
-    private static async Task<BrandModel> SeedModelAsync(SqliteTestContext ctx, string name = "Galaxy S24")
+    private static async Task<BrandModel> SeedModelAsync(PostgresTestContext ctx, string name = "Galaxy S24")
     {
         var brand = await new BrandRepository(ctx.Db).UpsertAsync(
             new Brand { Name = "Samsung", LastRefreshed = DateTimeOffset.UtcNow });
@@ -26,7 +26,7 @@ public class VisionAndBrandModelSmartTests
     [Fact]
     public async Task VisionCache_Upsert_InsertsThenOverwritesOnSamePair()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var model = await SeedModelAsync(ctx);
         var repo = new VisionMatchCacheRepository(ctx.Db);
 
@@ -50,7 +50,7 @@ public class VisionAndBrandModelSmartTests
     [Fact]
     public async Task VisionCache_Get_ReturnsNull_WhenNeverCompared()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var model = await SeedModelAsync(ctx);
         (await new VisionMatchCacheRepository(ctx.Db).GetAsync("never", model.Id)).Should().BeNull();
     }
@@ -58,7 +58,7 @@ public class VisionAndBrandModelSmartTests
     [Fact]
     public async Task BrandModel_Upsert_UnionsListsAndKeepsFirstDiscoveredAt()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var brand = await new BrandRepository(ctx.Db).UpsertAsync(
             new Brand { Name = "Samsung", LastRefreshed = DateTimeOffset.UtcNow });
         var repo = new BrandModelRepository(ctx.Db);
@@ -88,7 +88,7 @@ public class VisionAndBrandModelSmartTests
     [Fact]
     public async Task SaveFinalSpecs_WritesThenCoalescesNulls()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var model = await SeedModelAsync(ctx);
         var repo = new BrandModelRepository(ctx.Db);
 
@@ -106,7 +106,7 @@ public class VisionAndBrandModelSmartTests
     [Fact]
     public async Task SaveFinalSpecs_OnMissingModel_IsNoOp()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         await new BrandModelRepository(ctx.Db).SaveFinalSpecsAsync(9999, "{}", null); // must not throw
     }
 }

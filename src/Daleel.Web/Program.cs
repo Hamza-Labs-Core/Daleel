@@ -56,33 +56,28 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptio
     o.RequestCultureProviders.Insert(0, new Microsoft.AspNetCore.Localization.CookieRequestCultureProvider());
 });
 
-// ── Persistence ────────────────────────────────────────────────────────────
-// SQLite only (data/daleel.db). The migrations under Data/Migrations are SQLite-specific (INTEGER
-// autoincrement keys, INTEGER booleans/timestamps baked in at scaffold time), so this context cannot
-// simply be repointed at Postgres via UseNpgsql — that would need a separate provider-specific
-// migrations assembly. The Postgres event store below is a SEPARATE context with its own migrations.
-var connection = builder.Configuration.GetConnectionString("DefaultConnection")
-                 ?? "Data Source=data/daleel.db";
-builder.Services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(connection));
+// ── Persistence (PostgreSQL) ─────────────────────────────────────────────────
+// The whole app runs on PostgreSQL — there is no SQLite/in-memory fallback. The main app DB
+// (Identity + every app entity) lives in its own `daleel` database; the pipeline event store and
+// Elsa's workflow-instance store get their own `daleel_events` database on the SAME server, so the
+// three migration histories never collide (see PostgresConnection.ResolveAppDatabase). A missing
+// POSTGRES_CONNECTION_STRING / DATABASE_URL is a fatal misconfiguration: fail fast rather than boot a
+// half-configured app with no database.
+var appConnection = Daleel.Web.Events.PostgresConnection.ResolveAppDatabase(builder.Configuration)
+    ?? throw new InvalidOperationException(
+        "PostgreSQL is required but not configured. Set POSTGRES_CONNECTION_STRING (Npgsql keyword " +
+        "form) or DATABASE_URL (postgres:// URL). See deploy/.env.example.");
+builder.Services.AddDbContext<DaleelDbContext>(o => o.UseNpgsql(appConnection));
 
-// ── Pipeline event store (PostgreSQL, optional) ───────────────────────────────
-// A separate append-only store on Postgres records every pipeline action (provider call, scrape,
-// LLM, cache, profile, places, extract) for the admin usage/cost dashboard. It is OPTIONAL: with no
-// POSTGRES_CONNECTION_STRING / DATABASE_URL set, the app runs SQLite-only and the store is a no-op.
+// ── Pipeline event store (PostgreSQL) ─────────────────────────────────────────
+// A separate append-only context on the same Postgres server (the `daleel_events` database) records
+// every pipeline action (provider call, scrape, LLM, cache, profile, places, extract) for the admin
+// usage/cost dashboard. Kept in its own database so the high-volume event firehose stays off the
+// transactional app DB.
 var eventStoreConn = Daleel.Web.Events.PostgresConnection.Resolve(builder.Configuration);
-if (eventStoreConn is not null)
-{
-    builder.Services.AddDbContextFactory<Daleel.Web.Events.EventStoreDbContext>(
-        o => o.UseNpgsql(eventStoreConn));
-    builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.PostgresEventStore>();
-}
-else
-{
-    // No Postgres: serve the admin usage/cost dashboard from the always-present SQLite ApiCallLog,
-    // which every search run already writes to. (Previously a NullEventStore, which left the dashboard
-    // empty / "not configured" even though full provider-call analytics existed in SQLite.)
-    builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.SqliteApiCallEventStore>();
-}
+builder.Services.AddDbContextFactory<Daleel.Web.Events.EventStoreDbContext>(
+    o => o.UseNpgsql(eventStoreConn));
+builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.PostgresEventStore>();
 
 // ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
 // ASP.NET encrypts the Identity auth cookie with Data Protection keys. By default those keys live in
@@ -90,8 +85,9 @@ else
 // so there is no $HOME and the key ring falls back to IN-MEMORY storage. New keys are then minted on every
 // container start, which makes every previously-issued cookie undecryptable — i.e. every user is silently
 // signed out on each redeploy/restart. Persisting the keys to the data/ directory fixes this: that path
-// maps to the `daleel_data` named volume (owned by the app user) and survives redeploys, just like the
-// SQLite DB next to it. Path is configurable; defaults alongside the DB so container + local both work.
+// maps to the `daleel_data` named volume (owned by the app user) and survives redeploys. (The database
+// itself now lives in Postgres; this volume only holds the Data-Protection key ring and local-fallback
+// logs.) Path is configurable; defaults under data/ so container + local both work.
 //   SetApplicationName pins the key-ring purpose string so the keys stay valid across app revisions.
 var keysDirectory = builder.Configuration.GetValue<string>("DataProtection:KeysDirectory") ?? "data/keys";
 Directory.CreateDirectory(keysDirectory);
@@ -202,7 +198,7 @@ builder.Services.AddScoped<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddScoped<IFilteredContentLogRepository, FilteredContentLogRepository>();
 builder.Services.AddHttpContextAccessor();
 
-// Persistent brand/store profiles: researched once via Context.dev + the LLM, saved to SQLite, and
+// Persistent brand/store profiles: researched once via Context.dev + the LLM, saved to Postgres, and
 // refreshed only when stale (>30 days). Search results JOIN against these instead of re-fetching.
 builder.Services.AddScoped<IBrandRepository, BrandRepository>();
 builder.Services.AddScoped<IStoreRepository, StoreRepository>();
@@ -358,9 +354,9 @@ builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.We
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
 builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 
-// Search cache: SQLite-backed store (singleton — opens its own DbContext scope per call, since the
+// Search cache: Postgres-backed store (singleton — opens its own DbContext scope per call, since the
 // agent runs providers in parallel) plus a weekly background sweep of expired entries.
-builder.Services.AddSingleton<Daleel.Core.Caching.ICacheStore, Daleel.Web.Data.SqliteCacheStore>();
+builder.Services.AddSingleton<Daleel.Core.Caching.ICacheStore, Daleel.Web.Data.PostgresCacheStore>();
 builder.Services.AddHostedService<Daleel.Web.Services.CacheCleanupService>();
 
 // IP rate limiting (in-memory fixed-window — no Redis at this scale).
@@ -392,7 +388,7 @@ builder.Services.Configure<ForwardedHeadersOptions>(options =>
 
 var app = builder.Build();
 
-// Ensure the SQLite directory exists, then apply any pending migrations on boot.
+// Create the app database if needed and apply any pending migrations on boot.
 EnsureDatabase(app);
 
 app.UseForwardedHeaders();
@@ -453,26 +449,19 @@ app.Run();
 
 static void EnsureDatabase(WebApplication app)
 {
-    var connection = app.Configuration.GetConnectionString("DefaultConnection")
-                     ?? "Data Source=data/daleel.db";
-    var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(connection);
-    var dir = Path.GetDirectoryName(builder.DataSource);
-    if (!string.IsNullOrEmpty(dir))
-    {
-        Directory.CreateDirectory(dir);
-    }
-
     using var scope = app.Services.CreateScope();
+    // Migrate() creates the `daleel` database on the Postgres server if it does not yet exist, then
+    // applies any pending migrations. The bundled compose `postgres` service only seeds `daleel_events`,
+    // so the very first boot provisions the app database here.
     var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
     db.Database.Migrate();
 
     // Seed admin-editable system settings (idempotent).
     scope.ServiceProvider.GetRequiredService<ISystemConfigService>().SeedDefaultsAsync().GetAwaiter().GetResult();
 
-    // Bring the Postgres event store up to schema when it's configured. The factory is only registered
-    // on the Postgres path (the SQLite fallback store needs no migration of its own — it reads the app
-    // DB's ApiCallLog), so key off the factory's presence rather than IEventStore.IsEnabled. Best-effort:
-    // a Postgres that is unreachable at boot must not stop the app — the store just degrades to no writes.
+    // Bring the event store's `daleel_events` database up to schema. The app DB Migrate() above already
+    // proved the Postgres server is reachable, but the event store is a separate database, so keep this
+    // best-effort: a transient failure here must degrade to dropping events, never stop the app.
     var eventDbFactory = scope.ServiceProvider
         .GetService<IDbContextFactory<Daleel.Web.Events.EventStoreDbContext>>();
     if (eventDbFactory is not null)

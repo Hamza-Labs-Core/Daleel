@@ -35,7 +35,7 @@ project still **compiles and the run stays green**.
 
 ## Running against a local dev instance
 
-1. Start the app (uses local SQLite, no external services required):
+1. Start the app (needs a PostgreSQL server — set POSTGRES_CONNECTION_STRING; the postgres service in deploy/docker-compose.yml works for local runs):
 
    ```bash
    dotnet run --project src/Daleel.Web
@@ -79,7 +79,7 @@ E2E_ADMIN_EMAIL=admin@example.com E2E_ADMIN_PASSWORD='…' dotnet test tests/Dal
   lifecycle, ignores the self-signed dev HTTPS cert, and provides Blazor-aware
   waits (`WaitForBlazorAsync`) for the SignalR circuit to come up.
 - **Serial execution** — `.runsettings` disables parallelism. The app uses a
-  single shared SQLite DB and the "first-user-is-admin" rule, so concurrent
+  single shared Postgres DB and the "first-user-is-admin" rule, so concurrent
   tests would race. Run with `--settings tests/Daleel.E2E.Tests/.runsettings`
   (or it is picked up automatically by IDEs).
 - **Static-SSR auth** — `/login`, `/register`, `/logout` are plain HTML forms

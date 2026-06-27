@@ -37,7 +37,7 @@ public sealed class AnalyticsEvent
     /// <summary>Comma-separated categories the filter tripped (alcohol, pork, …) — for moderation stats.</summary>
     public string? FilteredCategories { get; set; }
 
-    /// <summary>UTC timestamp. Stored as DateTime (not DateTimeOffset) so SQLite can range/group it.</summary>
+    /// <summary>UTC timestamp. Stored as DateTime (not DateTimeOffset) — a stable, provider-agnostic encoding the column can still range/group on.</summary>
     public DateTime Timestamp { get; set; }
 }
 

@@ -1,13 +1,39 @@
+using Npgsql;
+
 namespace Daleel.Web.Events;
 
 /// <summary>
-/// Resolves the event-store Postgres connection from configuration, accepting either a ready-made
-/// Npgsql keyword string (<c>POSTGRES_CONNECTION_STRING</c>) or a URL-form <c>DATABASE_URL</c>
+/// Resolves the Postgres connection from configuration, accepting either a ready-made Npgsql keyword
+/// string (<c>POSTGRES_CONNECTION_STRING</c>) or a URL-form <c>DATABASE_URL</c>
 /// (<c>postgres://user:pass@host:port/db</c>) as handed out by most managed Postgres providers.
-/// Returns null when neither is set, which keeps the event store on its no-op path.
+/// Returns null when neither is set. PostgreSQL is required for the app to run, so a null result is a
+/// fatal misconfiguration the host fails fast on (see Program.cs).
 /// </summary>
 public static class PostgresConnection
 {
+    /// <summary>Default name of the main application database (Identity + app tables).</summary>
+    public const string DefaultAppDatabase = "daleel";
+
+    /// <summary>
+    /// The connection for the main application database (<see cref="Data.DaleelDbContext"/>). It reuses
+    /// the same Postgres <i>server + credentials</i> as <see cref="Resolve"/> but points at a separate
+    /// database — default <c>daleel</c>, overridable via <c>POSTGRES_APP_DATABASE</c> — so the app's
+    /// migration history never collides with the event store's (which keeps <c>daleel_events</c>). EF
+    /// Core creates the database on first <c>Migrate()</c> if it does not yet exist. Returns null when
+    /// no Postgres connection is configured at all.
+    /// </summary>
+    public static string? ResolveAppDatabase(IConfiguration config)
+    {
+        var baseConn = Resolve(config);
+        if (baseConn is null)
+        {
+            return null;
+        }
+
+        var appDb = Get(config, "POSTGRES_APP_DATABASE") ?? DefaultAppDatabase;
+        return new NpgsqlConnectionStringBuilder(baseConn) { Database = appDb }.ConnectionString;
+    }
+
     public static string? Resolve(IConfiguration config)
     {
         var keyword = Get(config, "POSTGRES_CONNECTION_STRING")

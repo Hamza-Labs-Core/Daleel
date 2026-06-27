@@ -84,8 +84,8 @@ public sealed class QuotaService : IQuotaService
     private async Task<SubscriptionPlan> ResolvePlanAsync(string userId, CancellationToken ct)
     {
         var now = _clock();
-        // SQLite can't translate DateTimeOffset comparison/ordering, so filter+order in memory over
-        // the (tiny) set of a user's active subscriptions.
+        // Filter+order in memory over the (tiny) set of a user's active subscriptions so the maths
+        // stays a pure, tested function rather than depending on provider DateTimeOffset translation.
         var active = await _db.UserSubscriptions
             .Include(s => s.Plan)
             .Where(s => s.UserId == userId && s.Status == "active")

@@ -10,14 +10,14 @@ using Xunit;
 namespace Daleel.Web.Tests.Identification;
 
 /// <summary>
-/// Drives the identification cascade end-to-end over real SQLite repositories, faking only the two external
+/// Drives the identification cascade end-to-end over real Postgres repositories, faking only the two external
 /// edges (cross-region discovery and the vision LLM). Pins the cheapest-first order: text → discovery →
 /// vision, plus the memoization that stops the same image pair being compared twice.
 /// </summary>
 public class SmartProductIdentifierTests
 {
     private static async Task<(Brand Brand, SmartProductIdentifier Id, FakeCatalogSearcher Searcher, FakeVisionMatcher Vision, VisionMatchCacheRepository Cache, BrandModelRepository Models)>
-        BuildAsync(SqliteTestContext ctx, FakeCatalogSearcher searcher, FakeVisionMatcher vision)
+        BuildAsync(PostgresTestContext ctx, FakeCatalogSearcher searcher, FakeVisionMatcher vision)
     {
         var brands = new BrandRepository(ctx.Db);
         var models = new BrandModelRepository(ctx.Db);
@@ -39,7 +39,7 @@ public class SmartProductIdentifierTests
     [Fact]
     public async Task Identify_ReturnsNone_WhenBrandUnknown()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var (_, id, _, _, _, _) = await BuildAsync(ctx, new FakeCatalogSearcher(), new FakeVisionMatcher(VisionMatchResult.NoMatch));
 
         var result = await id.IdentifyAsync(new ProductModel { Brand = "Nokia", Model = "X" });
@@ -50,7 +50,7 @@ public class SmartProductIdentifierTests
     [Fact]
     public async Task Identify_TextMatchesKnownModel_WithoutDiscoveryOrVision()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var searcher = new FakeCatalogSearcher();
         var vision = new FakeVisionMatcher(new VisionMatchResult(true, 1, "x"));
         var (brand, id, _, _, _, models) = await BuildAsync(ctx, searcher, vision);
@@ -72,7 +72,7 @@ public class SmartProductIdentifierTests
     [Fact]
     public async Task Identify_TextMatchesByRegionalAlias()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var (brand, id, _, _, _, models) = await BuildAsync(ctx, new FakeCatalogSearcher(), new FakeVisionMatcher(VisionMatchResult.NoMatch));
         await models.UpsertAsync(new BrandModel
         {
@@ -89,7 +89,7 @@ public class SmartProductIdentifierTests
     [Fact]
     public async Task Identify_DiscoversThenTextMatches_OnInitialMiss()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var discovered = new BrandModel
         {
             Id = 42, ModelName = "Galaxy S24", ModelKey = BrandModel.Normalize("Galaxy S24"), Category = "Smartphone"
@@ -106,7 +106,7 @@ public class SmartProductIdentifierTests
     [Fact]
     public async Task Identify_FallsBackToVision_AndCachesTheVerdict()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var searcher = new FakeCatalogSearcher();
         var vision = new FakeVisionMatcher(new VisionMatchResult(true, 0.93, "Galaxy S24"));
         var (brand, id, _, _, cache, models) = await BuildAsync(ctx, searcher, vision);
@@ -131,7 +131,7 @@ public class SmartProductIdentifierTests
     [Fact]
     public async Task Identify_UsesCachedVision_WithoutCallingTheModelAgain()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var searcher = new FakeCatalogSearcher();
         var vision = new FakeVisionMatcher(new VisionMatchResult(true, 1, "should-not-be-called"));
         var (brand, id, _, _, cache, models) = await BuildAsync(ctx, searcher, vision);
@@ -161,7 +161,7 @@ public class SmartProductIdentifierTests
     [Fact]
     public async Task Identify_ReturnsNone_WhenVisionBelowThreshold()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var searcher = new FakeCatalogSearcher();
         var vision = new FakeVisionMatcher(new VisionMatchResult(false, 0.2, null));
         var (brand, id, _, _, _, models) = await BuildAsync(ctx, searcher, vision);

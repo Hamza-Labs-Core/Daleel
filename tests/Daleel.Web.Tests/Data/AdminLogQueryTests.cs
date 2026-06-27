@@ -4,9 +4,9 @@ using Microsoft.EntityFrameworkCore;
 namespace Daleel.Web.Tests.Data;
 
 /// <summary>
-/// Regression tests for the admin Analytics + Filtered-content pages. Both crashed with a SQLite
+/// Regression tests for the admin Analytics + Filtered-content pages. Both once crashed on a provider
 /// translation error because <see cref="ApiCallLog.CreatedAt"/> / <see cref="FilteredContentLog.CreatedAt"/>
-/// were stored as TEXT DateTimeOffsets, which SQLite can't compare (`>= since`) or order. Persisting
+/// were stored as raw DateTimeOffsets that couldn't be compared (`>= since`) or order. Persisting
 /// them as Unix-ms longs fixes it — these tests exercise the exact time-windowed queries the pages run.
 /// </summary>
 public sealed class AdminLogQueryTests
@@ -21,7 +21,7 @@ public sealed class AdminLogQueryTests
     [Fact]
     public async Task ApiCallLog_time_windowed_aggregates_translate_and_aggregate()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         ctx.Db.SearchJobs.Add(new SearchJob { Id = 1, UserId = "u", Query = "air conditioner" });
         ctx.Db.ApiCallLogs.AddRange(
             Call("context.dev", 0.10m, DateTimeOffset.UtcNow.AddDays(-1), model: "gpt", inTok: 100, outTok: 50),
@@ -55,7 +55,7 @@ public sealed class AdminLogQueryTests
     [Fact]
     public async Task FilteredContentLog_count_since_and_recent_translate()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         ctx.Db.FilteredContentLogs.AddRange(
             new FilteredContentLog { Category = "alcohol", CreatedAt = DateTimeOffset.UtcNow.AddDays(-1) },
             new FilteredContentLog { Category = "gambling", CreatedAt = DateTimeOffset.UtcNow.AddDays(-40) });

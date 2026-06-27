@@ -19,7 +19,8 @@ public static class SerilogConfiguration
     /// <summary>
     /// Default on-disk location for the file fallback. Relative to the content root, which is
     /// <c>/app</c> in the container (WORKDIR) — so this resolves to <c>/app/data/logs</c> on the
-    /// persisted <c>daleel_data</c> volume, exactly like the SQLite DB (<c>data/daleel.db</c>). Staying
+    /// persisted <c>daleel_data</c> volume, which now holds the logs and the Data-Protection key ring
+    /// (the database itself lives in PostgreSQL). Staying
     /// relative keeps local dev writable too (an absolute <c>/app/...</c> path would fail outside Docker).
     /// </summary>
     public const string DefaultFileLogDirectory = "data/logs";

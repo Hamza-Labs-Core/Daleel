@@ -1,8 +1,8 @@
 using System.Collections.Concurrent;
 using Daleel.Web.Conversation;
 using Daleel.Web.Data;
+using Daleel.Web.Tests.Data;
 using FluentAssertions;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,18 +12,18 @@ namespace Daleel.Web.Tests.Conversation;
 
 public class ConversationBackendTests : IDisposable
 {
-    private readonly SqliteConnection _conn;
     private readonly ServiceProvider _provider;
     private readonly RecordingBroadcaster _broadcaster = new();
 
     public ConversationBackendTests()
     {
-        _conn = new SqliteConnection("Data Source=:memory:");
-        _conn.Open();
+        // A dedicated Postgres database on the shared test server; each DI scope opens its own
+        // connection to it, the way request scopes do in production.
+        var connStr = PostgresTestServer.CreateFreshDatabase();
 
         var services = new ServiceCollection();
         services.AddLogging();
-        services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(_conn));
+        services.AddDbContext<DaleelDbContext>(o => o.UseNpgsql(connStr));
         services.AddScoped<IConversationStore, ConversationStore>();
         services.AddScoped<IAnalyticsService>(sp => new AnalyticsService(sp.GetRequiredService<DaleelDbContext>()));
         services.AddScoped<ISearchHistoryRepository, SearchHistoryRepository>();
@@ -149,7 +149,6 @@ public class ConversationBackendTests : IDisposable
     public void Dispose()
     {
         _provider.Dispose();
-        _conn.Dispose();
     }
 
     /// <summary>Fake runner: returns a canned result, or blocks until cancelled for the cancel test.</summary>

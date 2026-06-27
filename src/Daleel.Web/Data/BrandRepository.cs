@@ -110,7 +110,7 @@ public sealed class BrandRepository : IBrandRepository
         DateTimeOffset olderThan, int max, CancellationToken ct = default) =>
         await _db.Brands.AsNoTracking()
             // LastRefreshed persists as Unix-ms, so EF translates this comparison to an integer
-            // WHERE that SQLite can run (a raw DateTimeOffset comparison can't be translated).
+            // WHERE the provider can run (a raw DateTimeOffset comparison may not translate).
             .Where(b => b.LastRefreshed < olderThan)
             .OrderBy(b => b.LastRefreshed)
             .Take(max)

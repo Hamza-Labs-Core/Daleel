@@ -25,7 +25,7 @@ public class ItemEnrichmentServiceTests
 {
     private static readonly DateTimeOffset Now = new(2026, 6, 27, 12, 0, 0, TimeSpan.Zero);
 
-    private static ItemEnrichmentService Build(SqliteTestContext ctx, IBrandCatalogService? catalog = null) =>
+    private static ItemEnrichmentService Build(PostgresTestContext ctx, IBrandCatalogService? catalog = null) =>
         new(
             new ProductProfileRepository(ctx.Db),
             new ProfileOptions { Now = () => Now, Ttl = TimeSpan.FromDays(30) },
@@ -37,7 +37,7 @@ public class ItemEnrichmentServiceTests
     [Fact]
     public async Task EnrichAsync_NoModels_ReturnsNoChange()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var svc = Build(ctx);
 
         var result = await svc.EnrichAsync(NoScrapeAgent(), new ProductSearchResult(), _ => { }, "sid", default);
@@ -48,7 +48,7 @@ public class ItemEnrichmentServiceTests
     [Fact]
     public async Task EnrichAsync_ReusesFreshSavedProfile_WithoutScraping()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var key = ProductProfile.KeyFor("Samsung", "S24", "Galaxy S24");
         await new ProductProfileRepository(ctx.Db).UpsertAsync(new ProductProfile
         {
@@ -77,7 +77,7 @@ public class ItemEnrichmentServiceTests
     [Fact]
     public async Task EnrichAsync_ScrapesAndPersists_AThinUncachedModel()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var svc = Build(ctx);
         var agent = new AgentService(new StubLlm(), new AgentOptions(),
             scraper: new FixedScraper("# Specs\nCooling: 24000 BTU"));

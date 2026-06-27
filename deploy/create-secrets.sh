@@ -41,11 +41,11 @@ SECRETS=(
 # via R2_BUCKET_{LOGS,IMAGES,SPECS,DATA} only if named differently. To serve images from R2, also
 # set R2_PUBLIC_URL_IMAGES. The R2 endpoint is derived from CLOUDFLARE_ACCOUNT_ID.
 #
-# NOTE: the Postgres event store (POSTGRES_PASSWORD / POSTGRES_CONNECTION_STRING / DATABASE_URL)
-# is likewise OPTIONAL and NOT seeded — when unset the app runs SQLite-only and the /admin/usage
-# event store is a no-op. To enable it, set POSTGRES_PASSWORD (for the bundled postgres service)
-# and POSTGRES_CONNECTION_STRING in /opt/daleel/.env (see deploy/.env.example). Seeding a bogus
-# connection string would make the app try to migrate against an unreachable database at boot.
+# NOTE: PostgreSQL is REQUIRED — the whole app runs on it (main `daleel` DB, the `daleel_events`
+# event store, and Elsa's workflow store). POSTGRES_PASSWORD (for the bundled postgres service) and
+# POSTGRES_CONNECTION_STRING must be set as GitHub secrets; the deploy workflow renders them into
+# /opt/daleel/.env (see deploy/.env.example). The app fails fast at startup if no Postgres connection
+# is configured, so these are not optional.
 
 if ! command -v gh >/dev/null 2>&1; then
   echo "ERROR: GitHub CLI (gh) is not installed. See https://cli.github.com/" >&2

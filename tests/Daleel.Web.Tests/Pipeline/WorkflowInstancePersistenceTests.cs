@@ -23,16 +23,16 @@ namespace Daleel.Web.Tests.Pipeline;
 /// workflow-management feature on Elsa's EF Core store, a completed <see cref="SearchWorkflow"/> run is
 /// persisted as a queryable instance (after the provider migrations create the schema), and the run summary
 /// we stamp into <c>WorkflowState.Properties</c> survives the round-trip. The production app persists to
-/// Postgres ONLY; this test drives the same provider-agnostic EF store against a throwaway SQLite file so it
-/// needs no Postgres in CI.
+/// Postgres; this test drives the same Elsa Postgres EF store against a throwaway database on the shared
+/// test container.
 /// </summary>
-public class WorkflowInstancePersistenceTests : IDisposable
+public class WorkflowInstancePersistenceTests
 {
     private const string StrategyJson =
         """{ "queryType": "General", "subject": "tea", "webQueries": [], "shoppingQueries": [], "reasoning": "n/a" }""";
 
-    // A unique SQLite file per test run so the EF schema + rows are isolated and don't leak across runs.
-    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"elsa-test-{Guid.NewGuid():N}.db");
+    // A unique Postgres database per test run so the EF schema + rows are isolated and don't leak across runs.
+    private readonly string _connectionString = Daleel.Web.Tests.Data.PostgresTestServer.CreateFreshDatabase();
 
     [Fact]
     public async Task CompletedRun_IsPersistedToEfStore_AndSummaryRoundTrips()
@@ -43,7 +43,7 @@ public class WorkflowInstancePersistenceTests : IDisposable
         {
             elsa.AddActivitiesFrom<SearchWorkflow>();
             elsa.UseWorkflowManagement(management =>
-                management.UseEntityFrameworkCore(ef => ef.UseSqlite($"Data Source={_dbPath}")));
+                management.UseEntityFrameworkCore(ef => ef.UsePostgreSql(_connectionString)));
         });
         services.AddScoped<SearchPipelineState>();
         services.AddScoped<SearchPipelineServices>();
@@ -82,7 +82,7 @@ public class WorkflowInstancePersistenceTests : IDisposable
             instanceId = instance.Id;
         }
 
-        // A fresh scope (as the admin page would) reads the persisted instance back out of SQLite.
+        // A fresh scope (as the admin page would) reads the persisted instance back out of Postgres.
         var store = provider.GetRequiredService<IWorkflowInstanceStore>();
         var found = await store.FindAsync(new WorkflowInstanceFilter { Id = instanceId }, default);
         found.Should().NotBeNull("the completed run is persisted to the EF instance store");
@@ -95,11 +95,6 @@ public class WorkflowInstancePersistenceTests : IDisposable
         summary!.Query.Should().Be("tell me about tea");
         summary.Geo.Should().Be("jordan");
         summary.ResultType.Should().Be("ask");
-    }
-
-    public void Dispose()
-    {
-        try { if (File.Exists(_dbPath)) File.Delete(_dbPath); } catch { /* best-effort temp cleanup */ }
     }
 
     private sealed class FixedLlm : ILlmClient

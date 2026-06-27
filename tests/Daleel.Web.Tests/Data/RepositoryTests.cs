@@ -12,7 +12,7 @@ public class RepositoryTests
     [Fact]
     public async Task History_AutoSave_PersistsAndIsListedNewestFirst()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SearchHistoryRepository(ctx.Db);
 
         await repo.AddAsync(new SearchHistoryEntry
@@ -35,7 +35,7 @@ public class RepositoryTests
     [Fact]
     public async Task History_List_FiltersBySearchText()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SearchHistoryRepository(ctx.Db);
         await repo.AddAsync(Make("best AC in Amman"));
         await repo.AddAsync(Make("cheapest fridge"));
@@ -49,7 +49,7 @@ public class RepositoryTests
     [Fact]
     public async Task History_List_Paginates()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SearchHistoryRepository(ctx.Db);
         for (var i = 0; i < 25; i++)
         {
@@ -68,7 +68,7 @@ public class RepositoryTests
     [Fact]
     public async Task Saved_SaveListDelete_RoundTrips()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SavedResultRepository(ctx.Db);
 
         var saved = await repo.AddAsync(new SavedResult
@@ -93,7 +93,7 @@ public class RepositoryTests
     [Fact]
     public async Task Saved_CountForUser_IsScopedToOwner()
     {
-        using var ctx = new SqliteTestContext();
+        using var ctx = new PostgresTestContext();
         var repo = new SavedResultRepository(ctx.Db);
 
         for (var i = 0; i < 3; i++)

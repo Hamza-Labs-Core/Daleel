@@ -60,9 +60,10 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
             .ToListAsync(ct);
     }
 
-    // NOTE on aggregation: SQLite can't SUM/AVG a `decimal` in SQL (NotSupportedException), so every
-    // cost rollup below materializes the (time-windowed, index-backed) rows first and aggregates in
-    // memory. The WHERE stays server-side — CreatedAt is a Unix-ms long, so `>= since` translates fine.
+    // NOTE on aggregation: aggregation is done in memory (the windows are small) so the maths stays a
+    // pure, tested function, so every cost rollup below materializes the (time-windowed, index-backed)
+    // rows first and aggregates in memory. The WHERE stays server-side — CreatedAt is a Unix-ms long, so
+    // `>= since` translates fine.
 
     public async Task<(int Calls, decimal Cost)> UserUsageSinceAsync(string userId, DateTimeOffset since, CancellationToken ct = default)
     {

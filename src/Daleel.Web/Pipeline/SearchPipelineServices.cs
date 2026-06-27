@@ -23,7 +23,7 @@ public sealed class SearchPipelineServices
     /// <summary>The request-scoped agent that drives planning, gathering, extraction and scraping.</summary>
     public AgentService Agent { get; set; } = default!;
 
-    /// <summary>The result cache (SQLite-backed). Null when caching is disabled for the run.</summary>
+    /// <summary>The result cache (PostgreSQL-backed). Null when caching is disabled for the run.</summary>
     public ICacheStore? Cache { get; set; }
 
     /// <summary>Progress sink the run streams live status through (SignalR → the conversation UI).</summary>
