@@ -138,17 +138,29 @@
             </div>
         }
 
-        <!-- Chat input. The market is a per-search choice, not a buried global setting: it rides on each
-             query (the server still lets an explicit market named in the query text — "AC in Dubai" —
-             override it). Seeded from the last-used / detected market; changing it sticks as the seed for
-             next time but is freely changed per search. -->
+        @* When the query text doesn't name a market we never assume one — we ask, inline, right above the
+           input, before the search runs. Picking a market here runs the pending query against it. *@
+        @if (_awaitingMarket)
+        {
+            <MudPaper Class="pa-3 mt-4" Outlined="true" Elevation="0" Style="border-radius:14px;">
+                <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Market.Prompt"]</MudText>
+                <div class="d-flex gap-2" style="flex-wrap:wrap;">
+                    @foreach (var geo in Catalog.Geos)
+                    {
+                        <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                                   OnClick="@(() => RunPendingSearchAsync(geo.Key))">@geo.Display</MudButton>
+                    }
+                </div>
+            </MudPaper>
+        }
+
+        <!-- Chat input. The market isn't a control here: it's detected from the query text itself
+             (GeoProfiles.DetectInText, e.g. "AC in Dubai" → UAE). When the query names no market we ask
+             inline (above) instead of silently defaulting to one. -->
         <MudPaper Class="pa-3 mt-4" Outlined="true" Elevation="0" Style="position:sticky;bottom:12px;border-radius:14px;">
             <div class="d-flex align-center gap-2" style="flex-wrap:wrap;">
                 <MudTextField @bind-Value="_input" Placeholder="@(L["Search.Placeholder"])" Variant="Variant.Text"
                               Immediate="true" OnKeyDown="OnKey" Class="mt-0" Style="flex:1 1 200px;" Disabled="_running" />
-                <div style="flex:0 0 auto;max-width:200px;">
-                    <GeoSelect Value="@_market" ValueChanged="OnMarketChanged" />
-                </div>
                 <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
                                OnClick="SubmitAsync" Disabled="@(_running || string.IsNullOrWhiteSpace(_input))" />
             </div>
@@ -166,9 +178,10 @@
 
     private string? _userId;
     private string _input = string.Empty;
-    // The market this search runs against — a per-query choice surfaced in the search bar, seeded from the
-    // last-used / detected market. The server still lets a market named in the query text override it.
-    private string _market = "jordan";
+    // Set while we're asking the user which market to search (the query named none). Holds the query the
+    // user submitted so we can run it once they pick a market.
+    private bool _awaitingMarket;
+    private string? _pendingQuery;
     private string? _query;
     private string? _status; // idle | running | completed | error
     private string? _error;
@@ -204,9 +217,6 @@
             _emailNotice = Email.IsEnabled && recipient is { WantsSearchEmails: true };
 
             await LoadStateAsync();
-            await EnsureMarketAsync();
-            // Seed the per-search market selector from the resolved default/detected market.
-            _market = await Store.GetAsync("geo") ?? "jordan";
 
             // Opening a saved search from History: show its stored results instead of the live convo.
             if (HistoryId is int hid)
@@ -243,33 +253,6 @@
         }
     }
 
-    /// <summary>
-    /// On a visitor's first search session we don't silently assume a market. Try to auto-detect it
-    /// from the browser (locale/timezone) and persist it; if we can't determine a supported market,
-    /// ask the user to pick one rather than defaulting to a fixed country.
-    /// </summary>
-    private async Task EnsureMarketAsync()
-    {
-        if (await Store.GetAsync("geo") is not null)
-        {
-            return; // already detected or chosen previously
-        }
-
-        var detected = GeoProfiles.Resolve(await Store.DetectMarketCodeAsync())?.Key;
-        if (detected is not null)
-        {
-            await Store.SetAsync("geo", detected);
-            return;
-        }
-
-        // Couldn't detect — ask the user.
-        var dialog = await Dialogs.ShowAsync<MarketPickerDialog>(
-            L["Common.Market"], new DialogParameters(), new DialogOptions { BackdropClick = false });
-        var result = await dialog.Result;
-        var chosen = result is { Canceled: false, Data: string key } ? key : "jordan";
-        await Store.SetAsync("geo", chosen);
-    }
-
     private async Task LoadStateAsync()
     {
         var convo = await ConvoStore.GetAsync(_userId!);
@@ -295,15 +278,6 @@
         }
     }
 
-    // The market for the next search. Persisted as the seed so the selector remembers the last choice —
-    // but it's a per-search control, freely changed before each query (and overridden when the query text
-    // itself names a market).
-    private async Task OnMarketChanged(string market)
-    {
-        _market = string.IsNullOrWhiteSpace(market) ? "jordan" : market;
-        await Store.SetAsync("geo", _market);
-    }
-
     private async Task SubmitAsync()
     {
         if (string.IsNullOrWhiteSpace(_input) || _status == "running") return;
@@ -314,13 +288,40 @@
             return;
         }
 
-        // Use the market chosen for THIS search (the per-search selector), not a single global setting.
-        var geo = string.IsNullOrWhiteSpace(_market) ? "jordan" : _market;
+        var query = _input.Trim();
+
+        // The market comes solely from the query text. If the user named one ("AC in Dubai"), run with it;
+        // otherwise stop and ask which market — we never silently assume a default.
+        var detected = GeoProfiles.DetectInText(query)?.Key;
+        if (detected is null)
+        {
+            _pendingQuery = query;
+            _awaitingMarket = true;
+            return;
+        }
+
+        _awaitingMarket = false;
+        await RunSearchAsync(query, detected);
+    }
+
+    // Runs the query the user submitted before we knew the market, now that they've picked one inline.
+    private async Task RunPendingSearchAsync(string market)
+    {
+        var query = _pendingQuery;
+        _awaitingMarket = false;
+        _pendingQuery = null;
+        if (string.IsNullOrWhiteSpace(query)) return;
+
+        await RunSearchAsync(query, market);
+    }
+
+    private async Task RunSearchAsync(string query, string geo)
+    {
         var model = await Store.GetAsync("model");
         var isAdmin = await CurrentUser.IsAdminAsync();
 
         var lang = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
-        var result = await Conversations.SubmitAsync(_userId, isAdmin, _input, geo, model, lang);
+        var result = await Conversations.SubmitAsync(_userId!, isAdmin, query, geo, model, lang);
         if (!result.Accepted)
         {
             _status = "error";
@@ -328,7 +329,7 @@
             return;
         }
 
-        _query = _input.Trim();
+        _query = query;
         _input = string.Empty;
         _jobId = result.JobId;
         _status = "running";
