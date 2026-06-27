@@ -97,7 +97,10 @@ public sealed class SynthesizeBrandProfileActivity : CodeActivity
         state.Result = b with
         {
             Reputation = b.Reputation ?? ToReputation(saved),
-            Url = b.Url ?? saved.Website
+            Url = b.Url ?? saved.Website,
+            // Carry the real database id so the brand page routes by it (a freshly-researched profile
+            // has no id until SaveBrandProfileActivity persists it — that step backfills it then).
+            DbId = saved.Id > 0 ? saved.Id : b.DbId
         };
         state.Log($"Built reputation profile for {b.Name}.");
         return ValueTask.CompletedTask;
@@ -133,6 +136,11 @@ public sealed class SaveBrandProfileActivity : CodeActivity
         if (saved is not null)
         {
             state.Saved = saved;
+            // Backfill the now-persisted database id onto the result so the brand page routes by it.
+            if (saved.Id > 0)
+            {
+                state.Result = state.Result with { DbId = saved.Id };
+            }
             state.Log($"Saved {state.Brand.Name}'s profile.");
         }
     }

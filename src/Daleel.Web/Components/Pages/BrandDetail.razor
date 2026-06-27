@@ -1,12 +1,13 @@
-@page "/brand/{Name}"
+@page "/brand/{Id}"
 @using DbBrand = Daleel.Web.Data.Brand
 @inject IBrandRepository Brands
 @inject IBrandModelRepository BrandModels
 @inject NavigationManager Nav
 
 @* Dedicated full page for a brand: logo, in-market reputation, strengths/complaints, price
-   positioning and the catalogue of harvested models (with images and local prices). Loads the
-   persisted profile saved during search enrichment; the brand card / dialog links here. *@
+   positioning and the catalogue of harvested models (with images and local prices). Routing is by a
+   stable id: a numeric id resolves the saved profile directly, otherwise the brand is loaded by the
+   name carried in the query (the fallback for brands not yet persisted). The brand card / dialog links here. *@
 
 <PageTitle>دليل · @DecodedName</PageTitle>
 
@@ -146,12 +147,14 @@ else
 }
 
 @code {
-    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [SupplyParameterFromQuery] public string? Name { get; set; }
 
     private DbBrand? _brand;
     private IReadOnlyList<BrandModel> _models = Array.Empty<BrandModel>();
     private bool _loading = true;
 
+    // Display/lookup fallback: the brand name carried in the query (routing is by the stable id).
     private string DecodedName => Uri.UnescapeDataString(Name ?? string.Empty);
 
     private string? LogoSrc
@@ -172,7 +175,13 @@ else
 
         try
         {
-            _brand = await Brands.GetByNameAsync(DecodedName);
+            // A numeric id is a real database key — resolve it directly. Anything else is a name-hash
+            // for a brand that may not be persisted, so fall back to the name carried in the query.
+            _brand = int.TryParse(Id, out var dbId)
+                ? await Brands.GetByIdAsync(dbId)
+                : !string.IsNullOrWhiteSpace(DecodedName)
+                    ? await Brands.GetByNameAsync(DecodedName)
+                    : null;
             if (_brand is not null)
             {
                 _models = await BrandModels.ListByBrandAsync(_brand.Id);

@@ -1,11 +1,12 @@
-@page "/product/{Name}"
+@page "/product/{Id}"
 @inject IModelDetailService Details
 @inject NavigationManager Nav
 
 @* Dedicated full page for a single product model — "everything": large image, identity, the full
    price-comparison table across every seller, brand reputation, pros/cons and the spec sheet. The
-   compact detail dialog links here via "View Full Details". The model is re-scanned on demand from
-   its name (results aren't persisted with a stable id), so this page works from a shared/bookmarked URL. *@
+   compact detail dialog links here via "View Full Details". Routing is by a stable id (a hash of the
+   product's identity), with the human name carried as a query parameter so the model can be re-scanned
+   on demand — products aren't persisted with a database key, so the name is what the deep scan needs. *@
 
 <PageTitle>دليل · @DecodedName</PageTitle>
 
@@ -165,12 +166,14 @@ else
 }
 
 @code {
-    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [SupplyParameterFromQuery] public string? Name { get; set; }
     [SupplyParameterFromQuery] public string? Geo { get; set; }
 
     private ProductModel? _model;
     private bool _loading = true;
 
+    // Routing is by stable id; the name (carried in the query) is what the deep scan actually keys on.
     private string DecodedName => Uri.UnescapeDataString(Name ?? string.Empty);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)

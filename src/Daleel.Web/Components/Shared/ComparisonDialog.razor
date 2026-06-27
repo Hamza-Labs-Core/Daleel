@@ -1,6 +1,6 @@
-@* Side-by-side comparison of 2–4 models. When the search produced a product-type-aware schema
-   (BTU/energy for ACs, RAM/storage for phones…) the spec rows follow it — labelled, unit-suffixed,
-   and with the best value per row highlighted. The cheapest column is flagged best value. *@
+@* Side-by-side comparison of 2–4 models. The actual per-spec table (schema-aware rows, best-value
+   highlighting, N/A for missing specs) lives in the shared <ComparisonTable>, so this dialog and the
+   full-page /compare view render identical numbers. *@
 @using Daleel.Core.Intelligence
 
 <MudDialog>
@@ -15,81 +15,7 @@
         </MudText>
     </TitleContent>
     <DialogContent>
-        <div style="overflow-x:auto;">
-            <MudSimpleTable Dense="true" Bordered="true" Style="min-width:480px;">
-                <thead>
-                    <tr>
-                        <th></th>
-                        @foreach (var m in Items)
-                        {
-                            <th style="@HeaderStyle(m)">
-                                <MudText Typo="Typo.subtitle2" dir="@Catalog.Dir(m.Name)">@m.Name</MudText>
-                                @if (IsCheapest(m))
-                                {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Filled"
-                                             Icon="@Icons.Material.Filled.Savings">Best value</MudChip>
-                                }
-                            </th>
-                        }
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td><strong>Lowest price</strong></td>
-                        @foreach (var m in Items)
-                        {
-                            <td style="@HeaderStyle(m)">
-                                @if (m.LowestPrice is { } p && m.LowestOffer?.Currency is { } c)
-                                {
-                                    <MudText Color="Color.Primary" Typo="Typo.body1" Style="font-weight:600;">@(new Money(p, c).ToDisplay())</MudText>
-                                }
-                                else { <span>—</span> }
-                            </td>
-                        }
-                    </tr>
-                    <tr>
-                        <td><strong>Sellers</strong></td>
-                        @foreach (var m in Items)
-                        {
-                            <td>@m.SellerCount</td>
-                        }
-                    </tr>
-                    @foreach (var row in Rows)
-                    {
-                        <tr>
-                            <td>
-                                <strong>@row.Label</strong>
-                                @if (!string.IsNullOrWhiteSpace(row.Unit))
-                                {
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">@row.Unit</MudText>
-                                }
-                            </td>
-                            @foreach (var m in Items)
-                            {
-                                var value = SpecValue(m, row.Key);
-                                <td style="@(IsBestSpec(row, m) ? "background:var(--mud-palette-success-hover);font-weight:600;" : "")">
-                                    @(string.IsNullOrWhiteSpace(value) ? "—" : value)
-                                </td>
-                            }
-                        </tr>
-                    }
-                    <tr>
-                        <td><strong>Buy</strong></td>
-                        @foreach (var m in Items)
-                        {
-                            <td>
-                                @if (m.LowestOffer?.Url is { Length: > 0 } url)
-                                {
-                                    <MudButton Href="@url" Target="_blank" Size="Size.Small" Variant="Variant.Filled"
-                                               Color="Color.Primary" StartIcon="@Icons.Material.Filled.ShoppingCart">Buy</MudButton>
-                                }
-                                else { <span>—</span> }
-                            </td>
-                        }
-                    </tr>
-                </tbody>
-            </MudSimpleTable>
-        </div>
+        <ComparisonTable Items="Items" Schema="Schema" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="Close">Close</MudButton>
@@ -102,93 +28,6 @@
 
     /// <summary>The product-type-aware schema for this search; empty falls back to the spec union.</summary>
     [Parameter] public ProductSchema Schema { get; set; } = ProductSchema.General;
-
-    /// <summary>One comparison row: either a schema field or a discovered free-form spec key.</summary>
-    private readonly record struct Row(string Key, string Label, string? Unit, bool? HigherIsBetter);
-
-    // Prefer the schema's ordered, labelled fields; otherwise fall back to the union of spec keys
-    // present across the compared models (the legacy behaviour).
-    private IReadOnlyList<Row> Rows =>
-        Schema.IsEmpty
-            ? Items.SelectMany(i => i.Specs.Keys)
-                   .Distinct(StringComparer.OrdinalIgnoreCase)
-                   .Select(k => new Row(k, Humanize(k), null, null))
-                   .ToList()
-            : Schema.Fields.Select(f => new Row(f.Key, f.Label, f.Unit, f.HigherIsBetter)).ToList();
-
-    private static string? SpecValue(ProductModel m, string key) =>
-        m.Specs.TryGetValue(key, out var v) ? v : null;
-
-    private decimal? MinPrice => Items.Where(i => i.LowestPrice is not null).Select(i => i.LowestPrice).DefaultIfEmpty(null).Min();
-
-    private bool IsCheapest(ProductModel m) => MinPrice is { } min && m.LowestPrice == min;
-
-    private string HeaderStyle(ProductModel m) =>
-        IsCheapest(m) ? "background:var(--mud-palette-success-hover);" : string.Empty;
-
-    // Highlight the best value in a spec row when the field is orderable (HigherIsBetter set) and at
-    // least two models quote a comparable number — purely a visual aid, never changes the data.
-    private bool IsBestSpec(Row row, ProductModel m)
-    {
-        if (row.HigherIsBetter is not { } higher)
-        {
-            return false;
-        }
-
-        var mine = ParseLeadingNumber(SpecValue(m, row.Key));
-        if (mine is null)
-        {
-            return false;
-        }
-
-        var numbers = Items.Select(i => ParseLeadingNumber(SpecValue(i, row.Key))).Where(n => n is not null).Select(n => n!.Value).ToList();
-        if (numbers.Count < 2)
-        {
-            return false;
-        }
-
-        var best = higher ? numbers.Max() : numbers.Min();
-        return mine.Value == best;
-    }
-
-    private static decimal? ParseLeadingNumber(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return null;
-        }
-
-        var start = 0;
-        while (start < value.Length && !char.IsDigit(value[start]))
-        {
-            start++;
-        }
-        if (start == value.Length)
-        {
-            return null;
-        }
-
-        // Preserve a sign attached to the number so negatives stay negative (e.g. "-10", "−5 °C").
-        var negative = start > 0 && value[start - 1] is '-' or '−';
-
-        var end = start;
-        while (end < value.Length && (char.IsDigit(value[end]) || value[end] is '.' or ','))
-        {
-            end++;
-        }
-
-        var digits = value[start..end].Replace(",", string.Empty);
-        if (!decimal.TryParse(digits, System.Globalization.NumberStyles.Any,
-            System.Globalization.CultureInfo.InvariantCulture, out var n))
-        {
-            return null;
-        }
-        return negative ? -n : n;
-    }
-
-    private static string Humanize(string key) =>
-        string.Join(' ', key.Replace('_', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
 
     private void Close() => MudDialog.Close();
 }

@@ -1,10 +1,11 @@
-@page "/store/{Name}"
+@page "/store/{Id}"
 @inject IStoreRepository Stores
 @inject NavigationManager Nav
 
 @* Dedicated full page for a store: name, type, Google-verified rating, address, phone, opening
-   hours, the brands it carries and a map link. Loads the persisted profile saved during search
-   enrichment; the store card links here via "View Store Page". *@
+   hours, the brands it carries and a map link. Routing is by a stable id: a numeric id resolves the
+   saved profile directly, otherwise the store is loaded by the name carried in the query (the fallback
+   for stores not yet persisted). The store card links here via "Store page". *@
 
 <PageTitle>دليل · @DecodedName</PageTitle>
 
@@ -98,18 +99,20 @@ else
             @foreach (var brand in _store.BrandsCarried)
             {
                 <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                         OnClick="@(() => Nav.NavigateTo($"/brand/{Uri.EscapeDataString(brand)}"))">@brand</MudChip>
+                         OnClick="@(() => Nav.NavigateTo($"/brand/{StableId.ForBrand(brand)}?name={Uri.EscapeDataString(brand)}"))">@brand</MudChip>
             }
         </div>
     }
 }
 
 @code {
-    [Parameter] public string Name { get; set; } = string.Empty;
+    [Parameter] public string Id { get; set; } = string.Empty;
+    [SupplyParameterFromQuery] public string? Name { get; set; }
 
     private Store? _store;
     private bool _loading = true;
 
+    // Display/lookup fallback: the store name carried in the query (routing is by the stable id).
     private string DecodedName => Uri.UnescapeDataString(Name ?? string.Empty);
 
     private string? MapUrl =>
@@ -129,7 +132,13 @@ else
 
         try
         {
-            _store = await Stores.GetByNameAsync(DecodedName);
+            // A numeric id is a real database key — resolve it directly. Anything else is a name-hash
+            // for a store that may not be persisted, so fall back to the name carried in the query.
+            _store = int.TryParse(Id, out var dbId)
+                ? await Stores.GetByIdAsync(dbId)
+                : !string.IsNullOrWhiteSpace(DecodedName)
+                    ? await Stores.GetByNameAsync(DecodedName)
+                    : null;
         }
         catch
         {

@@ -66,6 +66,14 @@ public record ProductModel
     public string? ProductLine { get; init; }
     public string? ImageUrl { get; init; }
 
+    /// <summary>
+    /// Stable, URL-safe identifier used to route to the model's detail page. Products aren't persisted
+    /// with a database key, so this is a deterministic hash of the model's (brand + model) identity —
+    /// see <see cref="StableId.ForProduct"/>. The human <see cref="Name"/> is kept as a display/scan
+    /// fallback and travels alongside the id as a query parameter.
+    /// </summary>
+    public string Id => StableId.ForProduct(Brand, Model, Name);
+
     public IReadOnlyDictionary<string, string> Specs { get; init; } = new Dictionary<string, string>();
 
     /// <summary>Official manufacturer suggested retail price, when found.</summary>

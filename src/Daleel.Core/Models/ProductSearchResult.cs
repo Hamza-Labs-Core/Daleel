@@ -147,6 +147,16 @@ public record BrandInfo
     public string? Url { get; init; }
     public string? LogoUrl { get; init; }
 
+    /// <summary>Database id when this brand has a saved profile; null for live, unsaved brands.</summary>
+    public int? DbId { get; init; }
+
+    /// <summary>
+    /// Stable, URL-safe identifier used to route to the brand page: the database id when persisted,
+    /// otherwise a deterministic hash of the name (<see cref="StableId.ForBrand"/>). <see cref="Name"/>
+    /// is kept as a display/lookup fallback and travels alongside the id.
+    /// </summary>
+    public string Id => DbId?.ToString() ?? StableId.ForBrand(Name);
+
     /// <summary>How many distinct product models under this brand were found in the market.</summary>
     public int ListingCount { get; init; }
 
@@ -182,6 +192,17 @@ public record StoreInfo
 {
     public string Name { get; init; } = string.Empty;
     public string? Url { get; init; }
+
+    /// <summary>Database id when this store has a saved profile; null for live, unsaved stores.</summary>
+    public int? DbId { get; init; }
+
+    /// <summary>
+    /// Stable, URL-safe identifier used to route to the store page: the database id when persisted,
+    /// otherwise a deterministic hash of the name (<see cref="StableId.ForStore"/>). <see cref="Name"/>
+    /// is kept as a display/lookup fallback and travels alongside the id.
+    /// </summary>
+    public string Id => DbId?.ToString() ?? StableId.ForStore(Name);
+
     public string? Address { get; init; }
     public string? Phone { get; init; }
     public bool IsOnline { get; init; }

@@ -74,6 +74,26 @@
         </MudPaper>
     }
 
+    @* Deep per-spec table: the actual values for each product (6.7" vs 6.1", 8 GB vs 6 GB, lowest
+       price…), schema-ordered with the better value per row highlighted and "N/A" where a spec is
+       missing. Same component the in-results compare dialog uses. *@
+    @if (_models.Count >= 2)
+    {
+        <MudPaper Class="pa-3 mt-3" Outlined="true" Elevation="0">
+            <MudText Typo="Typo.subtitle1" Class="mb-2">
+                <MudIcon Icon="@Icons.Material.Filled.TableChart" Class="mr-1" />Spec-by-spec
+            </MudText>
+            <ComparisonTable Items="_models" Schema="_result.Schema" />
+        </MudPaper>
+    }
+    else
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">
+            We couldn't load full spec sheets for a side-by-side table this time — the verdict and
+            pros/cons below still apply. Try running the comparison again.
+        </MudAlert>
+    }
+
     <MudGrid Spacing="3" Class="mt-2">
         @foreach (var (product, index) in _result.Products.Select((p, i) => (p, i)))
         {
@@ -124,6 +144,10 @@
     private string _b = string.Empty;
     private ProductComparison? _result;
 
+    // Full spec sheets for the two products, deep-scanned so the per-spec table can show real values
+    // (not just the schema dimensions). Empty when a deep scan turned up nothing.
+    private List<ProductModel> _models = new();
+
     private string _compareTitle => string.IsNullOrWhiteSpace(_a) && string.IsNullOrWhiteSpace(_b)
         ? "Compare"
         : $"{_a} vs {_b}";
@@ -154,16 +178,50 @@
         }
 
         _result = null;
+        _models = new();
         await Store.SetAsync("geo", Geo);
         await Store.SetAsync("model", Model);
         var products = new[] { _a.Trim(), _b.Trim() };
         await RunAsync(
-            async (agent, ct) => _result = await agent.CompareAsync(products, Geo, ct),
+            async (agent, ct) =>
+            {
+                _result = await agent.CompareAsync(products, Geo, ct);
+                // Deep-scan each product's full spec sheet so the side-by-side table shows actual
+                // values. Best-effort per product (sequential to keep the shared agent single-threaded);
+                // a product that can't be scanned is simply dropped and the table degrades gracefully.
+                _models = new();
+                foreach (var product in products)
+                {
+                    var model = await SafeResearchModel(agent, product, Geo, ct);
+                    if (model is not null)
+                    {
+                        _models.Add(model);
+                    }
+                }
+            },
             () => _result is null ? null : new SearchHistoryEntry
             {
                 Query = $"{_a.Trim()} vs {_b.Trim()}",
                 QueryType = "compare",
                 ResultSummary = _result.Summary
             });
+    }
+
+    // Deep-scan one product's spec sheet, swallowing failures so one un-scannable product never sinks
+    // the whole comparison (the table just shows fewer columns / N/A where data is missing).
+    private static async Task<ProductModel?> SafeResearchModel(AgentService agent, string product, string geo, CancellationToken ct)
+    {
+        try
+        {
+            return await agent.ResearchModelAsync(product, geo, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            return null;
+        }
     }
 }
