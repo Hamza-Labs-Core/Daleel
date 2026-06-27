@@ -43,7 +43,9 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: daleel
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      # No insecure default: a missing/empty POSTGRES_PASSWORD fails the deploy rather than silently
+      # booting Postgres with a well-known password.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       POSTGRES_DB: daleel_events
     volumes:
       - postgres_data:/var/lib/postgresql/data

@@ -93,6 +93,7 @@ public sealed class BrandCatalogService : IBrandCatalogService
         }
 
         var harvested = 0;
+        var dropped = 0;
         foreach (var product in catalogue)
         {
             if (string.IsNullOrWhiteSpace(product.Name))
@@ -128,8 +129,18 @@ public sealed class BrandCatalogService : IBrandCatalogService
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
             {
+                dropped++;
                 _logger.LogDebug(ex, "Persisting brand model {Model} for {Brand} failed", product.Name, brand.Name);
             }
+        }
+
+        // Surface dropped models at Warning: a single drop is benign, but a brand where many models fail to
+        // persist signals a systematic problem (a constraint error, a poisoned tracker) that would otherwise
+        // be invisible — the harvest just looks like "this brand had few models".
+        if (dropped > 0)
+        {
+            _logger.LogWarning("Brand catalogue harvest for {Brand} dropped {Dropped} of {Total} model(s) on persist",
+                brand.Name, dropped, dropped + harvested);
         }
 
         return harvested;

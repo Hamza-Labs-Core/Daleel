@@ -10,10 +10,12 @@ namespace Daleel.Web.Pipeline.SubWorkflows;
 /// the whole bounded-parallel fan-out, and <see cref="DispatchAsync{TWorkflow,TState}"/> runs a single
 /// child.
 ///
-/// Each child gets its own scope (hence its own <c>DaleelDbContext</c> + scoped state), so the children
-/// are concurrency-safe. A sub-workflow is best-effort: a timeout or research failure leaves the seeded
-/// state untouched (the entity flows through un-enriched) rather than failing the parent search — only a
-/// genuine outer cancel (cost cap trip / user cancel) propagates.
+/// Each child gets its own scope (hence its own <c>DaleelDbContext</c> + scoped state + services), so the
+/// children are concurrency-safe. The <paramref name="seed"/> fills both the serializable
+/// <typeparamref name="TState"/> and the live <see cref="SubWorkflowServices"/> for that child before it
+/// runs. A sub-workflow is best-effort: a timeout or research failure leaves the seeded state untouched
+/// (the entity flows through un-enriched) rather than failing the parent search — only a genuine outer
+/// cancel (cost cap trip / user cancel) propagates.
 /// </summary>
 public static class SubWorkflowDispatcher
 {
@@ -24,27 +26,42 @@ public static class SubWorkflowDispatcher
     public const int MaxConcurrency = 5;
 
     /// <summary>
+    /// When at least this fraction of the fanned-out children fault, the failure is treated as systematic
+    /// (e.g. Context.dev 401 on every call) rather than one bad entity, and surfaced as a WARN-level event.
+    /// </summary>
+    private const double SystematicFailureRatio = 0.5;
+
+    /// <summary>
     /// Fans <paramref name="items"/> out through one child <typeparamref name="TWorkflow"/> each, at most
-    /// <see cref="MaxConcurrency"/> at a time, each seeded by <paramref name="seed"/> and bounded by
-    /// <paramref name="timeout"/>. Returns the finished states in input order.
+    /// <see cref="MaxConcurrency"/> at a time, each seeded by <paramref name="seed"/> (state + services) and
+    /// bounded by <paramref name="timeout"/>. Returns the finished states in input order. The parent's
+    /// <paramref name="progress"/> sink surfaces a live line if the fan-out fails systematically.
     /// </summary>
     public static async Task<IReadOnlyList<TState>> RunManyAsync<TWorkflow, TState, TItem>(
         IServiceScopeFactory scopeFactory,
         IReadOnlyList<TItem> items,
-        Action<TState, TItem> seed,
+        Action<TState, SubWorkflowServices, TItem> seed,
+        Action<string>? progress,
         TimeSpan timeout,
         CancellationToken ct)
         where TWorkflow : IWorkflow, new()
-        where TState : class
+        where TState : SubWorkflowState
     {
         using var gate = new SemaphoreSlim(MaxConcurrency);
+        var faults = 0;
         var tasks = items.Select(async item =>
         {
             await gate.WaitAsync(ct).ConfigureAwait(false);
             try
             {
-                return await DispatchAsync<TWorkflow, TState>(
-                    scopeFactory, state => seed(state, item), timeout, ct).ConfigureAwait(false);
+                var (state, faulted) = await RunChildAsync<TWorkflow, TState>(
+                    scopeFactory, (s, svc) => seed(s, svc, item), timeout, ct).ConfigureAwait(false);
+                if (faulted)
+                {
+                    Interlocked.Increment(ref faults);
+                }
+
+                return state;
             }
             finally
             {
@@ -52,21 +69,58 @@ public static class SubWorkflowDispatcher
             }
         });
 
-        return await Task.WhenAll(tasks).ConfigureAwait(false);
+        var states = await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        // Aggregate-failure signal: per-entity faults are swallowed so one bad brand/store/item can't sink
+        // the run — but that also hides a *systematic* failure where every child faults the same way. Count
+        // them and, above the threshold, emit a structured WARN event (merged into the parent run's stream)
+        // plus a live progress line, so the failure is observable instead of silently "no enrichment".
+        if (items.Count > 0 && faults >= Math.Max(2, (int)Math.Ceiling(items.Count * SystematicFailureRatio)))
+        {
+            progress?.Invoke($"⚠️ {faults}/{items.Count} {typeof(TWorkflow).Name} sub-workflows failed — possible systematic enrichment failure.");
+            states.FirstOrDefault()?.RecordEvent("pipeline", "subworkflow_failures", "dispatcher", success: false,
+                metadata: new Dictionary<string, object?>
+                {
+                    ["workflow"] = typeof(TWorkflow).Name,
+                    ["failed"] = faults,
+                    ["total"] = items.Count
+                });
+        }
+
+        return states;
     }
 
     /// <summary>Runs one child workflow in a fresh scope; always returns the seeded state, even on timeout.</summary>
     public static async Task<TState> DispatchAsync<TWorkflow, TState>(
         IServiceScopeFactory scopeFactory,
-        Action<TState> seed,
+        Action<TState, SubWorkflowServices> seed,
         TimeSpan timeout,
         CancellationToken ct)
         where TWorkflow : IWorkflow, new()
-        where TState : class
+        where TState : SubWorkflowState
+    {
+        var (state, _) = await RunChildAsync<TWorkflow, TState>(scopeFactory, seed, timeout, ct)
+            .ConfigureAwait(false);
+        return state;
+    }
+
+    /// <summary>
+    /// Core child-runner: returns the (possibly partial) seeded state and whether it faulted. A per-entity
+    /// timeout or sub-workflow fault is caught here so the entity flows through un-enriched; only a genuine
+    /// outer cancel (cost-cap trip / user cancel) propagates.
+    /// </summary>
+    private static async Task<(TState State, bool Faulted)> RunChildAsync<TWorkflow, TState>(
+        IServiceScopeFactory scopeFactory,
+        Action<TState, SubWorkflowServices> seed,
+        TimeSpan timeout,
+        CancellationToken ct)
+        where TWorkflow : IWorkflow, new()
+        where TState : SubWorkflowState
     {
         using var scope = scopeFactory.CreateScope();
         var state = scope.ServiceProvider.GetRequiredService<TState>();
-        seed(state);
+        var services = scope.ServiceProvider.GetRequiredService<SubWorkflowServices>();
+        seed(state, services);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);
@@ -81,11 +135,12 @@ public static class SubWorkflowDispatcher
         }
         catch
         {
-            // Per-entity timeout or sub-workflow fault: keep the partial state and let the entity flow
-            // through un-enriched. One bad brand/store/item must never sink the search.
+            // Per-entity timeout or sub-workflow fault: keep the partial state, let the entity flow through
+            // un-enriched, and report the fault so the dispatcher can spot a systematic failure.
+            return (state, true);
         }
 
         // The scope (and its DbContext) disposes here; the state holds only plain DTOs from this point on.
-        return state;
+        return (state, false);
     }
 }

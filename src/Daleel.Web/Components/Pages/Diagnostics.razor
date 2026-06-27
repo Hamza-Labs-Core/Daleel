@@ -1,10 +1,12 @@
 @page "/diagnostics"
+@attribute [Authorize(Roles = "Admin")]
 @using Daleel.Web.Services
 @inject IProviderDiagnostics Diag
 
-@* QA-ONLY provider testbench. Public (no auth) but a hard no-op unless DIAGNOSTICS_ENABLED is set,
-   which only the QA deploy does — so production never exposes raw provider calls. Used to discover
-   the exact Context.dev endpoints/shapes the live key accepts before wiring them into the pipeline. *@
+@* QA-ONLY provider testbench. Defence in depth: Admin-only AND a hard no-op unless DIAGNOSTICS_ENABLED
+   is set (only the QA deploy sets it). Previously the flag was the only gate, which made this an
+   unauthenticated server-keyed proxy to Context.dev whenever the flag was on. Used to discover the
+   exact Context.dev endpoints/shapes the live key accepts before wiring them into the pipeline. *@
 
 <PageTitle>دليل · Provider diagnostics</PageTitle>
 

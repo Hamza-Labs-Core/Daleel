@@ -21,9 +21,13 @@ public interface IProductDetailDbService
     /// <summary>
     /// Builds the full detail view for a product from the database. <paramref name="id"/> is the route
     /// segment (a numeric catalogue id or a stable-id hash); <paramref name="name"/> is the human name
-    /// carried alongside it. Returns null when nothing about the product has been saved yet.
+    /// carried alongside it. <paramref name="lookupKey"/>, when supplied, is the exact stored
+    /// <see cref="ScrapedPrice.ProductKey"/> and takes precedence over reconstructing the key from the name —
+    /// a store page links by it so a product whose display name isn't "brand model" still resolves. Returns
+    /// null when nothing about the product has been saved yet.
     /// </summary>
-    Task<ProductDetailView?> GetAsync(string id, string name, string geo, CancellationToken ct = default);
+    Task<ProductDetailView?> GetAsync(
+        string id, string name, string geo, string? lookupKey = null, CancellationToken ct = default);
 
     /// <summary>
     /// Builds a lightweight <see cref="ProductModel"/> (specs + offers) from the database for the
@@ -53,9 +57,14 @@ public sealed class ProductDetailDbService : IProductDetailDbService
         _brands = brands;
     }
 
-    public async Task<ProductDetailView?> GetAsync(string id, string name, string geo, CancellationToken ct = default)
+    public async Task<ProductDetailView?> GetAsync(
+        string id, string name, string geo, string? lookupKey = null, CancellationToken ct = default)
     {
-        var key = ProductProfile.Normalize(name ?? string.Empty);
+        // Prefer the exact stored key when the caller has it (a store page links by ScrapedPrice.ProductKey),
+        // since a product's display name often isn't "brand model" and Normalize(name) would miss the
+        // price/profile rows. Normalize is idempotent, so an already-normalized key passes through unchanged.
+        var key = ProductProfile.Normalize(
+            !string.IsNullOrWhiteSpace(lookupKey) ? lookupKey! : name ?? string.Empty);
 
         // A numeric id is a real catalogue key — resolve it directly. Anything else (a stable-id hash)
         // can't index a row, so fall back to the normalized name shared with the price/profile tables.
@@ -106,14 +115,23 @@ public sealed class ProductDetailDbService : IProductDetailDbService
                 p.ScrapedAt))
             .ToList();
 
-        var observedPrices = history.Where(p => p.Price is not null).Select(p => p.Price!.Value).ToList();
         var lowestOffer = offers.FirstOrDefault(o => o.Price is not null);
+        var displayCurrency = lowestOffer?.Currency ?? brandModel?.Currency;
 
-        var brand = brandModel is not null
-            ? await _brands.GetByIdAsync(brandModel.BrandId, ct)
-            : !string.IsNullOrWhiteSpace(profile?.Brand)
+        // The observed range renders in a single currency, so only fold in history priced in that same
+        // currency — otherwise a product whose history mixes e.g. USD and JOD shows a nonsensical min–max band.
+        var observedPrices = history
+            .Where(p => p.Price is not null &&
+                (displayCurrency is null ||
+                 string.Equals(p.Currency, displayCurrency, StringComparison.OrdinalIgnoreCase)))
+            .Select(p => p.Price!.Value)
+            .ToList();
+
+        // brandModel is always loaded with its Brand (Include), so reuse it rather than re-querying by id.
+        var brand = brandModel?.Brand
+            ?? (!string.IsNullOrWhiteSpace(profile?.Brand)
                 ? await _brands.GetByNameAsync(profile!.Brand!, ct)
-                : null;
+                : null);
 
         var brandName = brand?.Name ?? brandModel?.Brand?.Name ?? profile?.Brand;
         var displayName = brandModel?.ModelName ?? profile?.Name;
@@ -132,7 +150,7 @@ public sealed class ProductDetailDbService : IProductDetailDbService
             Specs = specs,
             Offers = offers,
             LowestPrice = lowestOffer?.Price ?? brandModel?.LocalPrice,
-            Currency = lowestOffer?.Currency ?? brandModel?.Currency,
+            Currency = displayCurrency,
             LowestSeen = observedPrices.Count > 0 ? observedPrices.Min() : null,
             HighestSeen = observedPrices.Count > 0 ? observedPrices.Max() : null,
             LastUpdated = latest.Count > 0 ? latest.Max(p => p.ScrapedAt) : null,

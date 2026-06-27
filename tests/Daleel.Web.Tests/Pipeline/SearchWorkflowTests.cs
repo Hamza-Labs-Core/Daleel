@@ -74,12 +74,13 @@ public class SearchWorkflowTests
     {
         using var scope = provider.CreateScope();
         var state = scope.ServiceProvider.GetRequiredService<SearchPipelineState>();
-        state.Agent = new AgentService(new FixedLlm(StrategyJson), new AgentOptions { DefaultGeo = "jordan" });
+        var services = scope.ServiceProvider.GetRequiredService<SearchPipelineServices>();
+        services.Agent = new AgentService(new FixedLlm(StrategyJson), new AgentOptions { DefaultGeo = "jordan" });
         state.Query = query;
         state.Geo = "jordan";
         state.ResultKey = resultKey;
-        state.Cache = cache;
-        state.Progress = progress;
+        services.Cache = cache;
+        services.Progress = progress;
 
         var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
         var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: default);
@@ -93,6 +94,7 @@ public class SearchWorkflowTests
         services.AddLogging();
         services.AddElsa(elsa => elsa.AddActivitiesFrom<SearchWorkflow>());
         services.AddScoped<SearchPipelineState>();
+        services.AddScoped<SearchPipelineServices>();
         services.AddSingleton(cache);
         // Enrichment + deep-dive only resolve these for product queries; register no-ops for completeness.
         services.AddSingleton<IBrandProfileService, NoopBrandProfiles>();

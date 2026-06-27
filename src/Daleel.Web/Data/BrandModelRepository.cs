@@ -59,9 +59,13 @@ public sealed class BrandModelRepository : IBrandModelRepository
         }
         catch (DbUpdateException)
         {
-            // A concurrent insert won the (BrandId, ModelKey) unique-index race: drop ours, reload the
-            // committed row, and merge our values onto the winner. Same recovery as BrandRepository.
-            _db.Entry(model).State = EntityState.Detached;
+            // A concurrent insert won the (BrandId, ModelKey) unique-index race. Reset the WHOLE change
+            // tracker (not just our failed entity): this upsert can run on the shared request-scoped
+            // DbContext during brand-catalogue harvesting, so a single failed SaveChanges could otherwise
+            // leave a poisoned tracker that makes the next model's SaveChanges re-throw and silently drop
+            // models. Then reload the committed row and merge our values onto the winner. Same recovery as
+            // BrandRepository.
+            _db.ChangeTracker.Clear();
             var winner = await _db.BrandModels
                 .FirstOrDefaultAsync(m => m.BrandId == model.BrandId && m.ModelKey == key, ct);
             if (winner is null)
@@ -113,16 +117,24 @@ public sealed class BrandModelRepository : IBrandModelRepository
 
     private static void ApplyUpdates(BrandModel existing, BrandModel model)
     {
-        existing.ModelName = model.ModelName;
-        existing.Category = model.Category;
-        existing.SpecsJson = model.SpecsJson;
-        // Keep a previously-stored image if the fresh harvest didn't find one (don't blank it out).
+        // Null-coalesce the optional enrichment fields: structured LLM/Context.dev extraction is flaky,
+        // so a partial re-harvest that momentarily omits specs/prices/category must NOT blank out
+        // previously-good values. "Absent this harvest" means "unknown", not "deleted". Only overwrite a
+        // field when the fresh harvest actually carries a value for it.
+        if (!string.IsNullOrWhiteSpace(model.ModelName))
+        {
+            existing.ModelName = model.ModelName;
+        }
+
+        existing.Category = model.Category ?? existing.Category;
+        existing.SpecsJson = model.SpecsJson ?? existing.SpecsJson;
         existing.ImageUrl = model.ImageUrl ?? existing.ImageUrl;
-        existing.LocalPrice = model.LocalPrice;
-        existing.GlobalPrice = model.GlobalPrice;
-        existing.Currency = model.Currency;
+        existing.LocalPrice = model.LocalPrice ?? existing.LocalPrice;
+        existing.GlobalPrice = model.GlobalPrice ?? existing.GlobalPrice;
+        existing.Currency = model.Currency ?? existing.Currency;
+        existing.SourceUrl = model.SourceUrl ?? existing.SourceUrl;
+        // IsAvailable and LastRefreshed are always current-harvest facts (no "unknown" state).
         existing.IsAvailable = model.IsAvailable;
-        existing.SourceUrl = model.SourceUrl;
         existing.LastRefreshed = model.LastRefreshed;
     }
 }

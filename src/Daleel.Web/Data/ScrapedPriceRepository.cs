@@ -37,6 +37,14 @@ public interface IScrapedPriceRepository
 
 public sealed class ScrapedPriceRepository : IScrapedPriceRepository
 {
+    /// <summary>
+    /// Upper bound on how many recent observations <see cref="LatestForProductAsync"/> pulls into memory
+    /// before collapsing to one row per store. The table is append-only and never pruned, so without this
+    /// the read degrades to materializing the entire per-key history. Newest-first ordering means the most
+    /// recent price for every active store is comfortably inside this window.
+    /// </summary>
+    private const int MaxHistoryRows = 500;
+
     private readonly DaleelDbContext _db;
 
     public ScrapedPriceRepository(DaleelDbContext db) => _db = db;
@@ -67,6 +75,7 @@ public sealed class ScrapedPriceRepository : IScrapedPriceRepository
         var rows = await _db.ScrapedPrices.AsNoTracking()
             .Where(p => p.ProductKey == productKey)
             .OrderByDescending(p => p.ScrapedAt)
+            .Take(MaxHistoryRows)
             .ToListAsync(ct);
 
         return rows

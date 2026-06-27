@@ -170,6 +170,11 @@ namespace Daleel.Web.Data.Migrations
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("INTEGER");
 
+                    b.Property<bool>("EmailSearchResults")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER")
+                        .HasDefaultValue(true);
+
                     b.Property<bool>("IsAdmin")
                         .HasColumnType("INTEGER");
 

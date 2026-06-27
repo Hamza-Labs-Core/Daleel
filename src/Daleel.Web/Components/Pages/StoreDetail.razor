@@ -2,6 +2,7 @@
 @inject IStoreRepository Stores
 @inject IScrapedPriceRepository Prices
 @inject NavigationManager Nav
+@inject ILogger<StoreDetail> Logger
 
 @* Dedicated full page for a store: name, type, Google-verified rating, address, phone, opening
    hours, the brands it carries and a map link. Routing is by a stable id: a numeric id resolves the
@@ -185,9 +186,12 @@ else
     private static Money? PriceOf(ScrapedPrice p) =>
         p.Price is { } v && !string.IsNullOrWhiteSpace(p.Currency) ? new Money(v, p.Currency!) : null;
 
-    // Link to the product's detail page using the app's stable-id convention (name carried for lookup).
+    // Link to the product's detail page using the app's stable-id convention. Carry both the display name
+    // and the exact stored ProductKey so the page resolves prices/profile even when the name isn't "brand
+    // model" (which Normalize(name) alone would miss).
     private static string ProductHref(ScrapedPrice p) =>
-        $"/product/{StableId.ForProduct(null, null, p.ProductName)}?name={Uri.EscapeDataString(p.ProductName)}";
+        $"/product/{StableId.ForProduct(null, null, p.ProductName)}" +
+        $"?name={Uri.EscapeDataString(p.ProductName)}&key={Uri.EscapeDataString(p.ProductKey)}";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -211,8 +215,11 @@ else
                 _products = await Prices.LatestForStoreAsync(_store.Name);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            // Log so a real load error is distinguishable from a genuine "not found"; the not-found panel
+            // still covers the user-facing case without leaking internal detail.
+            Logger.LogWarning(ex, "Loading store detail for {Name} failed", DecodedName);
             _store = null;
         }
         finally
