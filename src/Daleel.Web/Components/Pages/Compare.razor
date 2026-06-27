@@ -1,6 +1,7 @@
 @page "/compare"
 @inherits AgentPageBase
 @inject IStringLocalizer<SharedResource> L
+@inject IProductDetailDbService Details
 
 <PageTitle>دليل · @L["Compare.Title"]</PageTitle>
 
@@ -95,8 +96,9 @@
     else
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-3">
-            We couldn't load full spec sheets for a side-by-side table this time — the verdict and
-            pros/cons below still apply. Try running the comparison again.
+            Specs not yet profiled for a side-by-side table — these products haven't been fully saved to
+            the database yet. The verdict and pros/cons below still apply; search for each product first
+            to build out its spec sheet.
         </MudAlert>
     }
 
@@ -150,8 +152,8 @@
     private string _b = string.Empty;
     private ProductComparison? _result;
 
-    // Full spec sheets for the two products, deep-scanned so the per-spec table can show real values
-    // (not just the schema dimensions). Empty when a deep scan turned up nothing.
+    // Full spec sheets for the two products, read from the saved database so the per-spec table shows
+    // real values (not just the schema dimensions). Empty when neither product has been profiled yet.
     private List<ProductModel> _models = new();
 
     private string _compareTitle => string.IsNullOrWhiteSpace(_a) && string.IsNullOrWhiteSpace(_b)
@@ -192,13 +194,13 @@
             async (agent, ct) =>
             {
                 _result = await agent.CompareAsync(products, Geo, ct);
-                // Deep-scan each product's full spec sheet so the side-by-side table shows actual
-                // values. Best-effort per product (sequential to keep the shared agent single-threaded);
-                // a product that can't be scanned is simply dropped and the table degrades gracefully.
+                // Read each product's saved spec sheet from the database so the side-by-side table shows
+                // actual values. A product not yet profiled is simply dropped and the table degrades
+                // gracefully (the alert above explains the "specs not yet profiled" case).
                 _models = new();
                 foreach (var product in products)
                 {
-                    var model = await SafeResearchModel(agent, product, Geo, ct);
+                    var model = await Details.GetComparableAsync(product, ct);
                     if (model is not null)
                     {
                         _models.Add(model);
@@ -211,23 +213,5 @@
                 QueryType = "compare",
                 ResultSummary = _result.Summary
             });
-    }
-
-    // Deep-scan one product's spec sheet, swallowing failures so one un-scannable product never sinks
-    // the whole comparison (the table just shows fewer columns / N/A where data is missing).
-    private static async Task<ProductModel?> SafeResearchModel(AgentService agent, string product, string geo, CancellationToken ct)
-    {
-        try
-        {
-            return await agent.ResearchModelAsync(product, geo, ct);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch
-        {
-            return null;
-        }
     }
 }

@@ -111,7 +111,8 @@ else
             @foreach (var m in _models)
             {
                 <MudItem xs="6" sm="4" md="3">
-                    <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                    <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;cursor:pointer;"
+                             @onclick="@(() => OpenModel(m))">
                         <div style="height:120px;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);overflow:hidden;">
                             @if (!string.IsNullOrWhiteSpace(m.ImageUrl))
                             {
@@ -127,6 +128,10 @@ else
                             @if (m.LocalPrice is { } lp)
                             {
                                 <MudText Typo="Typo.caption" Color="Color.Primary">@lp.ToString("0.##") @m.Currency</MudText>
+                            }
+                            @if (m.GlobalPrice is { } gp && m.GlobalPrice != m.LocalPrice)
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">global @gp.ToString("0.##") @m.Currency</MudText>
                             }
                         </MudCardContent>
                     </MudCard>
@@ -200,6 +205,14 @@ else
             _loading = false;
             StateHasChanged();
         }
+    }
+
+    // Open a model's product page. Routing is by the stable id (a hash of brand+model identity); the
+    // human "Brand Model" name travels along to reconstruct the saved-data lookup key on that page.
+    private void OpenModel(BrandModel m)
+    {
+        var name = $"{_brand?.Name} {m.ModelName}".Trim();
+        Nav.NavigateTo($"/product/{StableId.ForProduct(_brand?.Name, m.ModelName)}?name={Uri.EscapeDataString(name)}");
     }
 
     private static string? HostOf(string? url)

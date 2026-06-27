@@ -15,6 +15,17 @@ public interface IBrandModelRepository
     /// <summary>All harvested models for a brand, most-recently-refreshed first.</summary>
     Task<IReadOnlyList<BrandModel>> ListByBrandAsync(int brandId, CancellationToken ct = default);
 
+    /// <summary>A single harvested model by its database id (with its owning brand loaded), or null.</summary>
+    Task<BrandModel?> GetByIdAsync(int id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Finds the harvested model whose identity normalizes to <paramref name="productKey"/> — the same
+    /// normalized "brand model" key <see cref="ProductProfile"/>/<see cref="ScrapedPrice"/> are stored
+    /// under — so a product detail page can resolve a catalogue row from the key it already has for
+    /// prices/profile. Returns null when no model matches.
+    /// </summary>
+    Task<BrandModel?> FindByProductKeyAsync(string productKey, CancellationToken ct = default);
+
     Task<int> CountForBrandAsync(int brandId, CancellationToken ct = default);
 
     Task<int> CountAsync(CancellationToken ct = default);
@@ -73,6 +84,31 @@ public sealed class BrandModelRepository : IBrandModelRepository
             .Where(m => m.BrandId == brandId)
             .OrderByDescending(m => m.LastRefreshed)
             .ToListAsync(ct);
+
+    public Task<BrandModel?> GetByIdAsync(int id, CancellationToken ct = default) =>
+        _db.BrandModels.AsNoTracking()
+            .Include(m => m.Brand)
+            .FirstOrDefaultAsync(m => m.Id == id, ct);
+
+    public async Task<BrandModel?> FindByProductKeyAsync(string productKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(productKey))
+        {
+            return null;
+        }
+
+        // BrandModel is keyed per-brand by (BrandId, ModelKey), not by the cross-table normalized
+        // "brand model" key that ProductProfile/ScrapedPrice share — and EF can't translate that
+        // normalization into SQL. The harvested catalogue is small (a handful of brands), so we load it
+        // and match in memory: a model matches when its brand+model (or model alone) normalizes to the
+        // same key the price/profile rows are stored under. Newest harvest wins on ties.
+        var models = await _db.BrandModels.AsNoTracking().Include(m => m.Brand).ToListAsync(ct);
+        return models
+            .Where(m => ProductProfile.KeyFor(m.Brand?.Name, m.ModelName, m.ModelName) == productKey
+                        || ProductProfile.Normalize(m.ModelName) == productKey)
+            .OrderByDescending(m => m.LastRefreshed)
+            .FirstOrDefault();
+    }
 
     public Task<int> CountForBrandAsync(int brandId, CancellationToken ct = default) =>
         _db.BrandModels.CountAsync(m => m.BrandId == brandId, ct);

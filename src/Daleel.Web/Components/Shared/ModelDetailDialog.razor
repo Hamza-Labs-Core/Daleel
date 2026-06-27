@@ -1,7 +1,6 @@
-@* Full model detail: image, identity, specs, MSRP, pros/cons, and a price-comparison
-   panel listing every source sorted cheapest-first with deal tags + buy links. Can deep-scrape
-   on demand to fill in full specs and an LLM pros/cons verdict. *@
-@inject IModelDetailService Details
+@* Concise model preview: image, identity, the lowest price, a compact brand-reputation rating and the
+   top few pros/cons. It deliberately stays small — the full price table, spec sheet and saved details
+   live on the dedicated page, which reads from the database; "View Full Details" links there. *@
 @inject NavigationManager Nav
 @inject IStringLocalizer<SharedResource> L
 
@@ -21,141 +20,63 @@
             {
                 <MudItem xs="12" sm="4">
                     <SafeImage Src="@_model.ImageUrl" Alt="@_model.Name" Style="max-width:100%;object-fit:contain;" />
-                    @if (_model.Msrp_ is { } msrp)
-                    {
-                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">MSRP: @msrp.ToDisplay()</MudText>
-                    }
                 </MudItem>
             }
 
             <MudItem xs="12" sm="@(string.IsNullOrWhiteSpace(_model.ImageUrl) ? 12 : 8)">
-                <!-- Price comparison panel -->
-                <MudText Typo="Typo.subtitle1" Class="mb-2">
-                    <MudIcon Icon="@Icons.Material.Filled.PriceCheck" Class="mr-1" />Available at @_model.SellerCount @(_model.SellerCount == 1 ? "place" : "places")
-                </MudText>
-                <MudSimpleTable Dense="true" Hover="true" Style="min-width:320px;">
-                    <tbody>
-                        @foreach (var offer in _model.Offers)
-                        {
-                            <tr>
-                                <td><SourceBadge SourceType="offer.SourceType" Source="@offer.Source" /></td>
-                                <td>
-                                    @if (offer.AsMoney is { } m)
-                                    {
-                                        <MudText Typo="Typo.body1" Color="Color.Primary" Style="font-weight:600;">@m.ToDisplay()</MudText>
-                                        @if (Approx(offer) is { } approx)
-                                        {
-                                            <MudText Typo="Typo.caption" Color="Color.Secondary">≈ @approx.ToDisplay()</MudText>
-                                        }
-                                    }
-                                    else
-                                    {
-                                        <span>—</span>
-                                    }
-                                </td>
-                                <td>
-                                    @foreach (var tag in offer.Tags)
-                                    {
-                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Filled"
-                                                 Color="@TagColor(tag)">@tag</MudChip>
-                                    }
-                                    @if (!string.IsNullOrWhiteSpace(offer.Condition))
-                                    {
-                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@offer.Condition</MudChip>
-                                    }
-                                </td>
-                                <td>
-                                    @if (!string.IsNullOrWhiteSpace(offer.Url))
-                                    {
-                                        <MudButton Href="@offer.Url" Target="_blank" Size="Size.Small" Variant="Variant.Filled"
-                                                   Color="Color.Primary" StartIcon="@Icons.Material.Filled.ShoppingCart">Buy</MudButton>
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </MudSimpleTable>
+                @if (_model.LowestPrice is { } p && _model.LowestOffer?.Currency is { } cur)
+                {
+                    <MudText Typo="Typo.h5" Color="Color.Primary">@(new Money(p, cur).ToDisplay())</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                        lowest across @_model.SellerCount @(_model.SellerCount == 1 ? "seller" : "sellers")
+                    </MudText>
+                }
+                else if (_model.SellerCount > 0)
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">Available at @_model.SellerCount @(_model.SellerCount == 1 ? "place" : "places")</MudText>
+                }
+
+                @if (_model.Msrp_ is { } msrp)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="mt-2">MSRP @msrp.ToDisplay()</MudChip>
+                }
+
+                @if (_model.BrandReputation is { HasSignal: true })
+                {
+                    <div class="mt-2"><BrandReputationView Reputation="_model.BrandReputation" Compact="true" /></div>
+                }
             </MudItem>
         </MudGrid>
 
-        <!-- About this brand (reputation in-market) -->
-        @if (_model.BrandReputation is { HasSignal: true })
+        @* Top few pros/cons only — the full list is on the detail page. *@
+        @if (_model.Pros.Count > 0 || _model.Cons.Count > 0)
         {
             <MudDivider Class="my-3" />
-            <MudText Typo="Typo.subtitle2" class="mb-1">
-                <MudIcon Icon="@Icons.Material.Filled.Verified" Size="Size.Small" Class="mr-1" />Brand reputation
-            </MudText>
-            <BrandReputationView Reputation="_model.BrandReputation" Compact="false" />
-        }
-
-        <!-- Pros / cons (filled by deep scrape) -->
-        @if (!string.IsNullOrWhiteSpace(_model.ReviewSummary) || _model.Pros.Count > 0 || _model.Cons.Count > 0)
-        {
-            <MudDivider Class="my-3" />
-            @if (!string.IsNullOrWhiteSpace(_model.ReviewSummary))
-            {
-                <MudText Typo="Typo.body2" Class="mb-2" dir="@Catalog.Dir(_model.ReviewSummary)">@_model.ReviewSummary</MudText>
-            }
             <MudGrid>
                 @if (_model.Pros.Count > 0)
                 {
                     <MudItem xs="12" sm="6">
                         <MudText Typo="Typo.subtitle2" Color="Color.Success">Pros</MudText>
-                        <MudList T="string" Dense="true">
-                            @foreach (var p in _model.Pros)
-                            {
-                                <MudListItem T="string" Icon="@Icons.Material.Filled.Add"><MudText Typo="Typo.body2">@p</MudText></MudListItem>
-                            }
-                        </MudList>
+                        @foreach (var p in _model.Pros.Take(3))
+                        {
+                            <MudText Typo="Typo.body2" dir="@Catalog.Dir(p)">＋ @p</MudText>
+                        }
                     </MudItem>
                 }
                 @if (_model.Cons.Count > 0)
                 {
                     <MudItem xs="12" sm="6">
                         <MudText Typo="Typo.subtitle2" Color="Color.Error">Cons</MudText>
-                        <MudList T="string" Dense="true">
-                            @foreach (var c in _model.Cons)
-                            {
-                                <MudListItem T="string" Icon="@Icons.Material.Filled.Remove"><MudText Typo="Typo.body2">@c</MudText></MudListItem>
-                            }
-                        </MudList>
+                        @foreach (var c in _model.Cons.Take(3))
+                        {
+                            <MudText Typo="Typo.body2" dir="@Catalog.Dir(c)">－ @c</MudText>
+                        }
                     </MudItem>
                 }
             </MudGrid>
         }
-
-        <!-- Specs: ONLY clean structured key/value pairs — never the raw scraped "details" blob. -->
-        @if (ProductSpecs.ForDisplay(_model.Specs) is { Count: > 0 } cleanSpecs)
-        {
-            <MudDivider Class="my-3" />
-            <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Detail.Specifications"]</MudText>
-            <MudSimpleTable Dense="true" Style="min-width:280px;">
-                <tbody>
-                    @foreach (var (key, value) in cleanSpecs)
-                    {
-                        <tr><td><strong>@Humanize(key)</strong></td><td dir="@Catalog.Dir(value)">@value</td></tr>
-                    }
-                </tbody>
-            </MudSimpleTable>
-        }
-        else if (_enriched)
-        {
-            <MudDivider Class="my-3" />
-            <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Detail.SpecsUnavailable"]</MudText>
-        }
     </DialogContent>
     <DialogActions>
-        @if (!_enriched)
-        {
-            <MudButton OnClick="DeepScrape" Disabled="_loading" StartIcon="@Icons.Material.Filled.Troubleshoot">
-                @(_loading ? "Scanning…" : "Load full specs & reviews")
-            </MudButton>
-            @if (_loading)
-            {
-                <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="ml-2" />
-            }
-        }
-        <MudSpacer />
         <MudButton OnClick="ViewFullDetails" Variant="Variant.Filled" Color="Color.Primary"
                    StartIcon="@Icons.Material.Filled.OpenInFull">View Full Details</MudButton>
         <MudButton OnClick="Close">Close</MudButton>
@@ -168,56 +89,11 @@
     [Parameter] public string Geo { get; set; } = "jordan";
 
     private ProductModel _model = default!;
-    private bool _loading;
-    private bool _enriched;
 
     protected override void OnInitialized() => _model = Model;
 
-    private string BaseCurrency => GeoProfiles.ResolveOrDefault(Geo).Currency;
-
-    private Money? Approx(PriceOffer offer) =>
-        offer.AsMoney is { } m && CurrencyConverter.CanConvert(m.Currency, BaseCurrency)
-            ? CurrencyConverter.Convert(m, BaseCurrency)
-            : null;
-
-    private static Color TagColor(string tag) => tag switch
-    {
-        "LOWEST" => Color.Success,
-        "SALE" => Color.Error,
-        "FREE SHIPPING" => Color.Info,
-        _ => Color.Default
-    };
-
-    private async Task DeepScrape()
-    {
-        _loading = true;
-        try
-        {
-            var query = string.IsNullOrWhiteSpace(_model.Model) ? _model.Name : $"{_model.Brand} {_model.Model}".Trim();
-            var enriched = await Details.GetAsync(query, Geo);
-            if (enriched is not null)
-            {
-                // Keep the original offers if the deep scan found fewer, but take the richer specs/verdict.
-                _model = enriched.Offers.Count >= _model.Offers.Count ? enriched : enriched with { Offers = _model.Offers };
-            }
-            _enriched = true;
-        }
-        catch
-        {
-            _enriched = true; // don't trap the user in a retry loop; they still have the base panel.
-        }
-        finally
-        {
-            _loading = false;
-        }
-    }
-
-    private static string Humanize(string key) =>
-        string.Join(' ', key.Replace('_', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
-
     // Close the compact dialog and open the dedicated full page for this model. Routing is by the
-    // model's stable id; the human name (what the page re-scans on) and geo travel as query params.
+    // model's stable id; the human name (which reconstructs the DB lookup key) and geo travel as params.
     private void ViewFullDetails()
     {
         var query = string.IsNullOrWhiteSpace(_model.Model) ? _model.Name : $"{_model.Brand} {_model.Model}".Trim();

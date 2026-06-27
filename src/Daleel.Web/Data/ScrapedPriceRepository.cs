@@ -20,6 +20,18 @@ public interface IScrapedPriceRepository
     /// </summary>
     Task<IReadOnlyList<ScrapedPrice>> LatestForProductAsync(string productKey, CancellationToken ct = default);
 
+    /// <summary>
+    /// The most recent observation per product at a given store (matched case-insensitively), newest
+    /// first. Drives the "products carried with prices" list on a store's page.
+    /// </summary>
+    Task<IReadOnlyList<ScrapedPrice>> LatestForStoreAsync(string storeName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Recent raw observations for a product across all stores, newest first (capped at
+    /// <paramref name="max"/>). The product page uses this to show the observed price range over time.
+    /// </summary>
+    Task<IReadOnlyList<ScrapedPrice>> HistoryForProductAsync(string productKey, int max = 500, CancellationToken ct = default);
+
     Task<int> CountAsync(CancellationToken ct = default);
 }
 
@@ -71,6 +83,39 @@ public sealed class ScrapedPriceRepository : IScrapedPriceRepository
             .Select(g => g.First())
             .ToList();
     }
+
+    public async Task<IReadOnlyList<ScrapedPrice>> LatestForStoreAsync(
+        string storeName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(storeName))
+        {
+            return Array.Empty<ScrapedPrice>();
+        }
+
+        // Scraped store names and a saved Store's name can differ in casing, so match case-insensitively
+        // (lower() is SQLite-translatable). Then collapse the store's history to the current price per
+        // product, newest observation winning — the same per-key collapse LatestForProductAsync does.
+        var lowered = storeName.Trim().ToLowerInvariant();
+        var rows = await _db.ScrapedPrices.AsNoTracking()
+            .Where(p => p.StoreName.ToLower() == lowered)
+            .OrderByDescending(p => p.ScrapedAt)
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(p => p.ProductKey, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<ScrapedPrice>> HistoryForProductAsync(
+        string productKey, int max = 500, CancellationToken ct = default) =>
+        string.IsNullOrWhiteSpace(productKey)
+            ? Array.Empty<ScrapedPrice>()
+            : await _db.ScrapedPrices.AsNoTracking()
+                .Where(p => p.ProductKey == productKey)
+                .OrderByDescending(p => p.ScrapedAt)
+                .Take(max)
+                .ToListAsync(ct);
 
     public Task<int> CountAsync(CancellationToken ct = default) => _db.ScrapedPrices.CountAsync(ct);
 }
