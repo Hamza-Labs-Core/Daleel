@@ -298,6 +298,9 @@
   <data name="Progress.Step.Stores" xml:space="preserve"><value>Finding stores</value></data>
   <data name="Progress.Step.Compare" xml:space="preserve"><value>Comparing prices</value></data>
   <data name="Progress.Step.Done" xml:space="preserve"><value>Done</value></data>
+  <!-- Compact mobile stepper: position + completed-count summaries -->
+  <data name="Progress.StepCount" xml:space="preserve"><value>Step {0} of {1}</value></data>
+  <data name="Progress.StepsComplete" xml:space="preserve"><value>{0} of {1} steps complete</value></data>
   <!-- Query-type nouns slotted into the "Looking for {0}" line -->
   <data name="Progress.Noun.Products" xml:space="preserve"><value>products</value></data>
   <data name="Progress.Noun.Brand" xml:space="preserve"><value>brand info</value></data>

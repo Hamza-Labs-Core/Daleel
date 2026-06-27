@@ -2,37 +2,53 @@
    workflow stage-by-stage, a proportional progress bar, and a live activity feed of localized
    status lines. Driven entirely by the encoded progress strings streamed from SearchPipelineState —
    each message decodes into a SearchProgressSignal (step + localization key + args); anything that
-   isn't an encoded signal is shown as a plain feed line. See SearchProgressSignal. *@
+   isn't an encoded signal is shown as a plain feed line. See SearchProgressSignal.
+
+   Layout is responsive: at ≥ sm widths the full horizontal stepper is shown; on phones it collapses
+   to a prominent current-stage header plus a tap-to-expand "N of M complete" step list, so the
+   eight stages never get crushed into an unreadable row. *@
 @inject IStringLocalizer<SharedResource> L
 
-<MudPaper Class="pa-4 mb-3 daleel-card daleel-progress" Outlined="true" Elevation="0" aria-live="polite">
+<MudPaper Class="pa-3 pa-sm-4 mb-3 daleel-card daleel-progress" Outlined="true" Elevation="0" aria-live="polite">
 
-    @* ── Header: pulsing dot + current stage chip + cancel ─────────────────────── *@
-    <div class="d-flex align-center gap-3 mb-3">
+    @* ── Header: pulsing dot + current stage + step counter + cancel ───────────────── *@
+    <div class="d-flex align-center gap-2 gap-sm-3 mb-2 mb-sm-3 daleel-progress-head">
         @if (Active)
         {
             <span class="daleel-status-pulse"></span>
+        }
+        else
+        {
+            <MudIcon Icon="@Icons.Material.Filled.CheckCircle" Color="Color.Success" Size="Size.Small" />
         }
         <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Text"
                  Icon="@Steps[_current].Icon" Class="daleel-stage-chip">
             @L[Steps[_current].LabelKey]
         </MudChip>
         <MudSpacer />
+        <MudText Typo="Typo.caption" Class="daleel-step-counter" Color="Color.Secondary">
+            @L["Progress.StepCount", _current + 1, Steps.Length] · @_percent%
+        </MudText>
         @if (OnCancel.HasDelegate)
         {
             <MudButton Size="Size.Small" Color="Color.Error" StartIcon="@Icons.Material.Filled.Stop"
-                       OnClick="OnCancel">@L["Search.Cancel"]</MudButton>
+                       Class="daleel-cancel-btn" OnClick="OnCancel">@L["Search.Cancel"]</MudButton>
         }
     </div>
 
-    @* ── Horizontal stepper ────────────────────────────────────────────────────── *@
-    <div class="daleel-stepper" role="list">
+    @* ── Proportional progress bar (sits high so the percentage above always has meaning) ── *@
+    <MudProgressLinear Color="Color.Primary" Rounded="true" Value="@_percent"
+                       Class="daleel-progress-bar mb-3" Style="height:6px;"
+                       aria-label="@L["Progress.StepCount", _current + 1, Steps.Length]" />
+
+    @* ── Desktop / tablet: full horizontal stepper ─────────────────────────────────── *@
+    <div class="daleel-stepper daleel-stepper-wide" role="list">
         @for (var i = 0; i < Steps.Length; i++)
         {
-            var state = i < _current ? "done" : i == _current ? "active" : "pending";
+            var state = StateOf(i);
             <div class="daleel-step @state" role="listitem" title="@L[Steps[i].LabelKey]">
                 <div class="daleel-step-icon">
-                    @if (i < _current)
+                    @if (state == "done")
                     {
                         <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="daleel-step-check" />
                     }
@@ -46,15 +62,47 @@
         }
     </div>
 
-    @* ── Proportional progress bar ─────────────────────────────────────────────── *@
-    <MudProgressLinear Color="Color.Primary" Rounded="true" Value="@_percent"
-                       Class="daleel-progress-bar my-3" Style="height:6px;" />
+    @* ── Phone: compact "N of M complete" summary that expands into a vertical step list ── *@
+    <div class="daleel-stepper-compact">
+        <div class="daleel-compact-summary" @onclick="ToggleExpanded" role="button" tabindex="0"
+             aria-expanded="@(_expanded ? "true" : "false")" @onkeydown="OnSummaryKey">
+            <MudIcon Icon="@Icons.Material.Filled.Checklist" Size="Size.Small" Class="me-2" Color="Color.Primary" />
+            <MudText Typo="Typo.body2" Class="daleel-compact-count">
+                @L["Progress.StepsComplete", _completed, Steps.Length]
+            </MudText>
+            <MudSpacer />
+            <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small"
+                     Class="@($"daleel-compact-chevron {(_expanded ? "expanded" : "")}")" />
+        </div>
+
+        <MudCollapse Expanded="_expanded">
+            <div class="daleel-step-list" role="list">
+                @for (var i = 0; i < Steps.Length; i++)
+                {
+                    var state = StateOf(i);
+                    <div class="daleel-step-row @state" role="listitem">
+                        <div class="daleel-step-icon">
+                            @if (state == "done")
+                            {
+                                <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="daleel-step-check" />
+                            }
+                            else
+                            {
+                                <MudIcon Icon="@Steps[i].Icon" Size="Size.Small" />
+                            }
+                        </div>
+                        <MudText Typo="Typo.body2" Class="daleel-step-row-label">@L[Steps[i].LabelKey]</MudText>
+                    </div>
+                }
+            </div>
+        </MudCollapse>
+    </div>
 
     @* ── Live activity feed (newest at the bottom) ─────────────────────────────── *@
     @if (_feed.Count > 0)
     {
         <MudTimeline TimelinePosition="TimelinePosition.Start" TimelineOrientation="TimelineOrientation.Vertical"
-                     Class="daleel-feed">
+                     Class="daleel-feed mt-3">
             @foreach (var line in _feed)
             {
                 @* Key by the stable stream id (not the text) so a brand-new line animates in while the
@@ -88,6 +136,8 @@
 
     private int _current;       // index into Steps of the furthest stage reached
     private int _percent;       // progress-bar fill (0–100)
+    private int _completed;     // count of fully-completed steps (for the compact mobile summary)
+    private bool _expanded;     // mobile: is the full step list expanded? (pure view state)
     private readonly List<FeedLine> _feed = new();
 
     // Id is the line's stable position in the full message stream, used as the @key.
@@ -108,6 +158,22 @@
     };
 
     private readonly record struct StepDef(SearchStep Step, string Icon, string LabelKey);
+
+    // The visual state of step i. When the search has settled (not Active) every step reads as done so
+    // the final view is a clean all-green list rather than a frozen mid-run snapshot.
+    private string StateOf(int i)
+        => !Active || i < _current ? "done" : i == _current ? "active" : "pending";
+
+    private void ToggleExpanded() => _expanded = !_expanded;
+
+    // Keep the summary keyboard-operable (it's a div-as-button): Enter/Space toggle, like a real button.
+    private void OnSummaryKey(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or " " or "Spacebar")
+        {
+            ToggleExpanded();
+        }
+    }
 
     // Recompute step + feed from the message list on every render trigger. Cheap (≤ a few dozen lines)
     // and keeps this component a pure projection of its inputs — no event wiring of its own.
@@ -142,6 +208,8 @@
         _current = Math.Clamp(reached, 0, Steps.Length - 1);
         // +1 so the very first stage already shows a sliver of fill; Done lands on a full bar.
         _percent = (int)Math.Round((_current + 1) / (double)Steps.Length * 100);
+        // Completed = stages strictly behind the current one while running; all of them once settled.
+        _completed = Active ? _current : Steps.Length;
 
         var start = Math.Max(0, lines.Count - FeedWindow);
         for (var i = start; i < lines.Count; i++)

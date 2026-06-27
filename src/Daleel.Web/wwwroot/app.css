@@ -549,28 +549,78 @@ html, body {
     to   { opacity: 1; transform: translateY(0); }
 }
 
-/* ── Mobile: keep the stepper legible on narrow screens ── */
+/* ── Header: keep the right-hand counter from wrapping awkwardly ── */
+.daleel-progress-head .daleel-stage-chip { max-width: 60%; }
+.daleel-step-counter { white-space: nowrap; flex: 0 0 auto; }
+
+/* ── Phone: compact tap-to-expand step list (hidden on ≥ sm; the wide stepper covers those) ── */
+.daleel-stepper-compact { display: none; }
+
+.daleel-compact-summary {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 8px 4px;
+    cursor: pointer;
+    user-select: none;
+    border-radius: 8px;
+    transition: background-color .2s ease;
+    /* Reserve the row's height so toggling the chevron never nudges the feed below. */
+    min-height: 40px;
+}
+.daleel-compact-summary:hover,
+.daleel-compact-summary:focus-visible { background: var(--mud-palette-action-default-hover, rgba(0,0,0,.04)); }
+.daleel-compact-count { font-weight: 600; color: var(--mud-palette-text-primary, #424242); }
+
+/* Chevron points down when collapsed, flips up when expanded. Rotation is direction-agnostic. */
+.daleel-compact-chevron { transition: transform .25s ease; }
+.daleel-compact-chevron.expanded { transform: rotate(180deg); }
+
+/* The expanded vertical list of every stage with its state. */
+.daleel-step-list { padding: 4px 4px 0; }
+.daleel-step-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 0;
+}
+.daleel-step-row .daleel-step-icon { width: 30px; height: 30px; flex: 0 0 auto; }
+.daleel-step-row.done .daleel-step-icon {
+    background: var(--mud-palette-primary, #594ae2);
+    border-color: var(--mud-palette-primary, #594ae2);
+    color: #fff;
+}
+.daleel-step-row.active .daleel-step-icon {
+    border-color: var(--mud-palette-primary, #594ae2);
+    color: var(--mud-palette-primary, #594ae2);
+    animation: step-glow 1.4s ease-in-out infinite;
+}
+.daleel-step-row-label { color: var(--mud-palette-text-secondary, #757575); }
+.daleel-step-row.active .daleel-step-row-label {
+    color: var(--mud-palette-primary, #594ae2);
+    font-weight: 600;
+}
+.daleel-step-row.done .daleel-step-row-label { color: var(--mud-palette-text-primary, #424242); }
+
+/* ── Mobile: swap the horizontal stepper for the compact list ── */
 @media (max-width: 600px) {
-    .daleel-step-icon { width: 30px; height: 30px; }
-    .daleel-step::before { top: 14px; }
-    /* Labels would collide at phone widths — show only the active stage's label. */
-    .daleel-step-label { display: none; }
-    .daleel-step.active .daleel-step-label {
-        display: block;
-        position: absolute;
-        top: 34px;
-        white-space: nowrap;
-        max-width: none;
-    }
+    .daleel-stepper-wide { display: none; }
+    .daleel-stepper-compact { display: block; }
+    /* The stage chip can take the full width now that the counter sits beneath nothing. */
+    .daleel-progress-head .daleel-stage-chip { max-width: none; }
+    /* Drop the cancel button's label to an icon-sized footprint so the header never wraps. */
+    .daleel-cancel-btn .mud-button-label { font-size: .72rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
     .daleel-progress,
     .daleel-step.active .daleel-step-icon,
+    .daleel-step-row.active .daleel-step-icon,
     .daleel-step-check,
     .daleel-feed-line,
     .daleel-results-reveal > * {
         animation: none;
         opacity: 1;
     }
+    .daleel-compact-chevron { transition: none; }
 }

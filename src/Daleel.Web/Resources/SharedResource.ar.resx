@@ -298,6 +298,9 @@
   <data name="Progress.Step.Stores" xml:space="preserve"><value>إيجاد المتاجر</value></data>
   <data name="Progress.Step.Compare" xml:space="preserve"><value>مقارنة الأسعار</value></data>
   <data name="Progress.Step.Done" xml:space="preserve"><value>اكتمل</value></data>
+  <!-- Compact mobile stepper: position + completed-count summaries -->
+  <data name="Progress.StepCount" xml:space="preserve"><value>الخطوة {0} من {1}</value></data>
+  <data name="Progress.StepsComplete" xml:space="preserve"><value>اكتملت {0} من {1} خطوة</value></data>
   <!-- Query-type nouns slotted into the "Looking for {0}" line -->
   <data name="Progress.Noun.Products" xml:space="preserve"><value>منتجات</value></data>
   <data name="Progress.Noun.Brand" xml:space="preserve"><value>معلومات عن علامة تجارية</value></data>
