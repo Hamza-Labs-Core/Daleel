@@ -106,13 +106,18 @@ jobs:
           CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          # Postgres event-store credentials. POSTGRES_PASSWORD is now sourced
+          # from this secret (was previously generated on the box); the connection
+          # string embeds the same password and must be kept in sync with it.
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_CONNECTION_STRING: ${{ secrets.POSTGRES_CONNECTION_STRING }}
           # Host secret is named DEPLOY_SSH_HOST in the repo (the "VPS IP").
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
           set -euo pipefail
-          required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
+          required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN POSTGRES_PASSWORD POSTGRES_CONNECTION_STRING DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
           missing=""
           for var in $required; do
             val="${!var:-}"
@@ -312,23 +317,17 @@ jobs:
             R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
             R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
             R2_ENDPOINT=${{ secrets.R2_ENDPOINT }}
+            # Postgres event store. POSTGRES_PASSWORD now comes from a GitHub secret
+            # (was previously generated once on the box). The connection string
+            # embeds the same password — keep the two secrets in sync. Because
+            # Postgres bakes the password into postgres_data on first init, rotating
+            # the secret requires wiping that volume; the deploy step below does this
+            # one time so Postgres reinitializes with the secret value.
+            POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+            POSTGRES_CONNECTION_STRING=${{ secrets.POSTGRES_CONNECTION_STRING }}
             CADDY_DOMAIN=daleel.hamzalabs.dev
             CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
             EOF
-            # POSTGRES_PASSWORD is generated once and PERSISTED on the box rather
-            # than sourced from a GitHub secret. It is internal to the private
-            # compose network (the app reaches Postgres by service name, never over
-            # the internet) and, crucially, must stay consistent with the
-            # postgres_data volume — Postgres bakes the password in on first init, so
-            # a rotated value would mismatch the stored credential. First deploy
-            # generates it; every later deploy reuses the saved value. Hex => no
-            # shell/compose-interpolation metacharacters.
-            PG_PW_FILE=/opt/daleel/.postgres_password
-            if [ ! -s "$PG_PW_FILE" ]; then
-              ( umask 077; openssl rand -hex 32 > "$PG_PW_FILE" )
-            fi
-            chmod 600 "$PG_PW_FILE"
-            echo "POSTGRES_PASSWORD=$(cat "$PG_PW_FILE")" >> "/tmp/daleel.env.$$"
             # Everything runs as root, so write the file directly. Keep it
             # private (0600) since it holds API keys.
             install -m 0600 "/tmp/daleel.env.$$" /opt/daleel/.env
@@ -367,4 +366,16 @@ jobs:
             install -m 0755 /tmp/daleel-config/deploy.sh           /opt/daleel/deploy.sh
             rm -rf /tmp/daleel-config
             cd /opt/daleel
+            # One-time postgres_data reset: POSTGRES_PASSWORD moved from a
+            # box-generated file to a GitHub secret, but Postgres baked the old
+            # password into this volume on first init — the app would then fail to
+            # authenticate with the new secret. Drop the volume once so Postgres
+            # reinitializes with the secret value. Guarded by a marker so later
+            # deploys DON'T wipe the event store every push. The container must be
+            # stopped/removed first or the volume is "in use" and rm is a no-op.
+            if [ ! -f /opt/daleel/.postgres_volume_reset_done ]; then
+              docker compose rm -sf postgres 2>/dev/null || true
+              docker volume rm daleel_postgres_data 2>/dev/null || true
+              touch /opt/daleel/.postgres_volume_reset_done
+            fi
             DALEEL_TAG="$DALEEL_TAG" ./deploy.sh "$DALEEL_TAG"
