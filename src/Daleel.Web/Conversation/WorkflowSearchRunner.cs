@@ -4,6 +4,7 @@ using Daleel.Core.Caching;
 using Daleel.Core.Moderation;
 using Daleel.Core.Observability;
 using Daleel.Web.Data;
+using Daleel.Web.Email;
 using Daleel.Web.Events;
 using Daleel.Web.Pipeline;
 using Daleel.Web.Services;
@@ -29,13 +30,15 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private readonly IFilteredContentLogRepository _filteredLog;
     private readonly ICacheStore _cache;
     private readonly IEventStore _eventStore;
+    private readonly ISearchEmailNotifier _emailNotifier;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WorkflowSearchRunner> _logger;
 
     public WorkflowSearchRunner(
         IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
         IFilteredContentLogRepository filteredLog, ICacheStore cache, IEventStore eventStore,
-        IServiceScopeFactory scopeFactory, ILogger<WorkflowSearchRunner> logger)
+        ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
+        ILogger<WorkflowSearchRunner> logger)
     {
         _agents = agents;
         _config = config;
@@ -43,6 +46,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         _filteredLog = filteredLog;
         _cache = cache;
         _eventStore = eventStore;
+        _emailNotifier = emailNotifier;
         _scopeFactory = scopeFactory;
         _logger = logger;
     }
@@ -114,6 +118,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 .Select(c => c.Provider)
                 .Where(p => !string.IsNullOrWhiteSpace(p))
                 .Distinct(StringComparer.OrdinalIgnoreCase));
+
+            // Best-effort: email the user a summary now that the report is ready. The notifier swallows its
+            // own failures (no provider, no address, opted out, send error), so it can never fail the search.
+            await _emailNotifier.NotifySearchCompletedAsync(job, state.ResultJson, ct).ConfigureAwait(false);
 
             return new SearchRunResult(
                 state.ResultJson,

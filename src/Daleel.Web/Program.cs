@@ -227,6 +227,39 @@ else
 {
     builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService, Daleel.Web.Storage.NullR2StorageService>();
 }
+
+// Transactional email (Resend). When RESEND_API_KEY is set, search-completion emails are sent via the
+// Resend HTTP API; otherwise a no-op service drops them — the same optional-capability pattern as the
+// event store and R2. EMAIL_FROM sets the sender (default noreply@daleel.hamzalabs.dev) and APP_BASE_URL
+// is the public site URL the "View Full Report" button links back to.
+var resendApiKey = builder.Configuration["RESEND_API_KEY"]?.Trim();
+var emailFrom = builder.Configuration["EMAIL_FROM"]?.Trim();
+if (string.IsNullOrEmpty(emailFrom))
+{
+    emailFrom = "noreply@daleel.hamzalabs.dev";
+}
+var appBaseUrl = builder.Configuration["APP_BASE_URL"]?.Trim();
+if (string.IsNullOrEmpty(appBaseUrl))
+{
+    appBaseUrl = "https://daleel.hamzalabs.dev";
+}
+builder.Services.AddSingleton(new Daleel.Web.Email.EmailNotificationOptions(appBaseUrl));
+if (!string.IsNullOrEmpty(resendApiKey))
+{
+    builder.Services.AddSingleton<Daleel.Web.Email.IEmailService>(sp =>
+        new Daleel.Web.Email.ResendEmailService(
+            resendApiKey, emailFrom!,
+            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            sp.GetRequiredService<ILogger<Daleel.Web.Email.ResendEmailService>>()));
+}
+else
+{
+    builder.Services.AddSingleton<Daleel.Web.Email.IEmailService, Daleel.Web.Email.NullEmailService>();
+}
+builder.Services.AddScoped<Daleel.Web.Email.IUserEmailPreferences, Daleel.Web.Email.UserEmailPreferences>();
+builder.Services.AddScoped<Daleel.Web.Email.SearchResultEmailTemplate>();
+builder.Services.AddScoped<Daleel.Web.Email.ISearchEmailNotifier, Daleel.Web.Email.SearchEmailNotifier>();
+
 builder.Services.AddScoped<Daleel.Web.Pipeline.IItemEnrichmentService, Daleel.Web.Pipeline.ItemEnrichmentService>();
 builder.Services.AddSingleton(new Daleel.Web.Profiles.ProfileOptions());
 builder.Services.AddSingleton<Daleel.Web.Profiles.IProfileResearcher, Daleel.Web.Profiles.ContextDevProfileResearcher>();

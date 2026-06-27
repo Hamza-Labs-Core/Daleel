@@ -473,4 +473,23 @@
   <data name="Admin.Usage.Retry" xml:space="preserve"><value>إعادة المحاولة</value></data>
   <data name="Admin.Usage.StatusOk" xml:space="preserve"><value>ناجح</value></data>
   <data name="Admin.Usage.StatusFail" xml:space="preserve"><value>فشل</value></data>
+
+  <data name="Search.EmailNotice" xml:space="preserve"><value>سنرسل إليك النتائج عبر البريد الإلكتروني عند جاهزيتها.</value></data>
+  <data name="Settings.EmailResults" xml:space="preserve"><value>أرسل نتائج البحث إلى بريدي الإلكتروني</value></data>
+  <data name="Settings.EmailResultsHelp" xml:space="preserve"><value>احصل على ملخّص عبر البريد الإلكتروني عند انتهاء بحثك.</value></data>
+  <data name="Settings.Snack.EmailResultsOn" xml:space="preserve"><value>سنرسل إليك بريدًا عند انتهاء عمليات البحث.</value></data>
+  <data name="Settings.Snack.EmailResultsOff" xml:space="preserve"><value>تم إيقاف رسائل نتائج البحث.</value></data>
+  <data name="Email.Search.Subject" xml:space="preserve"><value>نتائج بحثك جاهزة</value></data>
+  <data name="Email.Search.Preheader" xml:space="preserve"><value>ملخّص بحثك — المنتجات والعلامات التجارية والمتاجر التي وجدناها.</value></data>
+  <data name="Email.Search.Heading" xml:space="preserve"><value>نتائج بحثك جاهزة</value></data>
+  <data name="Email.Search.Intro" xml:space="preserve"><value>إليك ملخّصًا لما وجدناه من أجل:</value></data>
+  <data name="Email.Search.Products" xml:space="preserve"><value>منتجات</value></data>
+  <data name="Email.Search.Brands" xml:space="preserve"><value>علامات تجارية</value></data>
+  <data name="Email.Search.Stores" xml:space="preserve"><value>متاجر</value></data>
+  <data name="Email.Search.TopProducts" xml:space="preserve"><value>أبرز المنتجات</value></data>
+  <data name="Email.Search.TopStores" xml:space="preserve"><value>أبرز المتاجر</value></data>
+  <data name="Email.Search.PriceNa" xml:space="preserve"><value>السعر عند الطلب</value></data>
+  <data name="Email.Search.ViewReport" xml:space="preserve"><value>عرض التقرير الكامل</value></data>
+  <data name="Email.Search.FooterReason" xml:space="preserve"><value>تصلك هذه الرسالة لأن إشعارات البريد الإلكتروني مُفعّلة في حساب دليل الخاص بك.</value></data>
+  <data name="Email.Search.FooterManage" xml:space="preserve"><value>يمكنك إدارة تفضيلات البريد الإلكتروني من إعدادات حسابك.</value></data>
 </root>
