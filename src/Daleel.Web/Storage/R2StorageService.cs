@@ -120,10 +120,13 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
                 return sourceUrl;
             }
 
-            var bytes = await response.Content.ReadAsByteArrayAsync(ct).ConfigureAwait(false);
-            if (bytes.Length == 0 || bytes.Length > MaxImageBytes)
+            // Cap the read at the stream level: ContentLength can be absent (chunked transfer) or lie, and
+            // ReadAsByteArrayAsync would otherwise buffer the entire body of this attacker-influenced fetch
+            // into memory before any size check.
+            var bytes = await ReadCappedAsync(response.Content, MaxImageBytes, ct).ConfigureAwait(false);
+            if (bytes is not { Length: > 0 })
             {
-                return sourceUrl;
+                return sourceUrl; // empty body, or exceeded the size cap mid-stream
             }
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? ContentTypeFor(key);
@@ -151,6 +154,31 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             _logger.LogDebug(ex, "R2 image store failed for {Url}; keeping original", sourceUrl);
             return sourceUrl;
         }
+    }
+
+    /// <summary>
+    /// Reads an HTTP body into memory but never buffers more than <paramref name="maxBytes"/>. Guards the
+    /// image-fetch path against a missing/lying Content-Length (e.g. chunked transfer) — returns null as
+    /// soon as the cap is crossed rather than reading the rest. Memory use is bounded to maxBytes + one
+    /// read buffer.
+    /// </summary>
+    private static async Task<byte[]?> ReadCappedAsync(HttpContent content, long maxBytes, CancellationToken ct)
+    {
+        await using var stream = await content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var buffer = new MemoryStream();
+        var chunk = new byte[81920];
+        int read;
+        while ((read = await stream.ReadAsync(chunk, ct).ConfigureAwait(false)) > 0)
+        {
+            if (buffer.Length + read > maxBytes)
+            {
+                return null; // over the cap — stop without buffering the remainder
+            }
+
+            buffer.Write(chunk, 0, read);
+        }
+
+        return buffer.ToArray();
     }
 
     /// <summary>Builds a collision-resistant, extension-preserving object key from the source URL.</summary>
