@@ -19,6 +19,7 @@ COPY src/Daleel.Web/Daleel.Web.csproj                     src/Daleel.Web/
 COPY src/Daleel.Web.Client/Daleel.Web.Client.csproj       src/Daleel.Web.Client/
 COPY tests/Daleel.Agent.Tests/Daleel.Agent.Tests.csproj       tests/Daleel.Agent.Tests/
 COPY tests/Daleel.Core.Tests/Daleel.Core.Tests.csproj         tests/Daleel.Core.Tests/
+COPY tests/Daleel.E2E.Tests/Daleel.E2E.Tests.csproj           tests/Daleel.E2E.Tests/
 COPY tests/Daleel.Pipeline.Tests/Daleel.Pipeline.Tests.csproj tests/Daleel.Pipeline.Tests/
 COPY tests/Daleel.Search.Tests/Daleel.Search.Tests.csproj     tests/Daleel.Search.Tests/
 COPY tests/Daleel.Web.Tests/Daleel.Web.Tests.csproj           tests/Daleel.Web.Tests/
