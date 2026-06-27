@@ -279,10 +279,22 @@ jobs:
             CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
             R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
             R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
-            R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
             R2_ENDPOINT=${{ secrets.R2_ENDPOINT }}
-            # Public host for R2-stored product images; without it images are hot-linked
-            # from source (the S3 API endpoint 403s a plain <img> GET). Unset = empty.
+            # One bucket per concern. Names default in-app to daleel-{logs,images,specs,
+            # data}; override only if your buckets are named differently. Legacy
+            # R2_BUCKET_NAME still seeds the LOGS bucket when R2_BUCKET_LOGS is unset.
+            R2_BUCKET_LOGS=${{ secrets.R2_BUCKET_LOGS }}
+            R2_BUCKET_IMAGES=${{ secrets.R2_BUCKET_IMAGES }}
+            R2_BUCKET_SPECS=${{ secrets.R2_BUCKET_SPECS }}
+            R2_BUCKET_DATA=${{ secrets.R2_BUCKET_DATA }}
+            R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
+            # Public hosts. Images REQUIRE one to be served from R2 (without it images are
+            # hot-linked from source; the S3 API endpoint 403s a plain <img> GET). Specs/
+            # data hosts are optional; logs are never public. Legacy R2_PUBLIC_URL seeds
+            # the IMAGES host when R2_PUBLIC_URL_IMAGES is unset.
+            R2_PUBLIC_URL_IMAGES=${{ secrets.R2_PUBLIC_URL_IMAGES }}
+            R2_PUBLIC_URL_SPECS=${{ secrets.R2_PUBLIC_URL_SPECS }}
+            R2_PUBLIC_URL_DATA=${{ secrets.R2_PUBLIC_URL_DATA }}
             R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}
             # QA runs the PR-scoped image tag (not production's latest).
             DALEEL_IMAGE=ghcr.io/hamza-labs-core/daleel:${{ env.QA_TAG }}

@@ -224,11 +224,13 @@ public sealed class IdentifyProductActivity : CodeActivity
 }
 
 /// <summary>
-/// New step — persist each source's raw specs (store listing, identified brand catalogue, scraped detail)
-/// and the store product image to R2 under <c>site-data/{brand}/{model}/</c>, and stage the structured
-/// sources for the merge. The DB only ever stores R2 URLs, never the raw blobs.
+/// New step — persist each source's raw specs and the store product image, routing each to its own R2
+/// bucket: structured store-listing / brand-site specs → the specs bucket (<c>raw/{brand}/{model}/</c>),
+/// the raw scraped-detail dump → the data bucket (<c>site-data/{brand}/{model}/</c>), the product image →
+/// the images bucket (<c>products/{brand}/{model}/</c>). Stages the structured sources for the merge. The
+/// DB only ever stores R2 URLs, never the raw blobs.
 /// </summary>
-[Activity("Daleel", "Item", "Save raw specs: persist each source's specs + image to R2 (site-data/)")]
+[Activity("Daleel", "Item", "Save raw specs: route each source's specs + image to its R2 bucket")]
 public sealed class SaveRawSpecsActivity : CodeActivity
 {
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
@@ -244,7 +246,10 @@ public sealed class SaveRawSpecsActivity : CodeActivity
             return;
         }
 
-        var prefix = $"site-data/{brandKey}/{modelKey}";
+        // Raw structured specs → the specs bucket; the raw scraped-detail dump and product image route to
+        // their own buckets (data / images). Each path keeps the {brand}/{model} folder layout.
+        var modelPath = $"{brandKey}/{modelKey}";
+        var dataPrefix = $"site-data/{modelPath}";
 
         // 1. Store-listing structured specs (the as-extracted specs, NOT the raw markdown dump).
         var store = new Dictionary<string, string>(state.Model.Specs);
@@ -252,7 +257,7 @@ public sealed class SaveRawSpecsActivity : CodeActivity
         if (store.Count > 0)
         {
             state.RawSpecsBySource.Add(SpecSource.Store(store));
-            await ItemSpecPipeline.SaveJson(r2, state, $"{prefix}/store-listing.json", store, ct);
+            await ItemSpecPipeline.SaveJson(r2, state, $"raw/{modelPath}/store-listing.json", store, R2Bucket.Specs, ct);
         }
 
         // 2. Brand-site specs from the identified catalogue model (the authoritative source).
@@ -266,19 +271,19 @@ public sealed class SaveRawSpecsActivity : CodeActivity
             if (brandSpecs.Count > 0)
             {
                 state.RawSpecsBySource.Add(SpecSource.Brand(brandSpecs));
-                await ItemSpecPipeline.SaveJson(r2, state, $"{prefix}/brand-site.json", brandSpecs, ct);
+                await ItemSpecPipeline.SaveJson(r2, state, $"raw/{modelPath}/brand-site.json", brandSpecs, R2Bucket.Specs, ct);
             }
         }
 
-        // 3. The raw scraped detail markdown — archived for the record, never merged as a key-value spec.
+        // 3. The raw scraped detail markdown — archived scraped data, never merged as a key-value spec.
         if (!string.IsNullOrWhiteSpace(state.Details))
         {
             var blob = JsonSerializer.Serialize(new { source = state.SourceUrl, content = state.Details });
-            await ItemSpecPipeline.SaveJsonBlob(r2, state, $"{prefix}/scraped-detail.json", blob, ct);
+            await ItemSpecPipeline.SaveJsonBlob(r2, state, $"{dataPrefix}/scraped-detail.json", blob, R2Bucket.Data, ct);
         }
 
-        // 4. The store product image → R2 (no hot-linking; the DB keeps the hosted URL only).
-        var hosted = await ItemSpecPipeline.SafeStoreImage(r2, state.Model.ImageUrl, prefix, ct);
+        // 4. The store product image → the images bucket (no hot-linking; the DB keeps the hosted URL only).
+        var hosted = await ItemSpecPipeline.SafeStoreImage(r2, state.Model.ImageUrl, $"products/{modelPath}", ct);
         if (!string.IsNullOrWhiteSpace(hosted) && hosted != state.Model.ImageUrl)
         {
             state.Result = state.Result with { ImageUrl = hosted };
@@ -368,7 +373,8 @@ public sealed class SaveFinalSpecsActivity : CodeActivity
         }
 
         var r2 = context.GetRequiredService<IR2StorageService>();
-        state.FinalSpecsR2Url = await ItemSpecPipeline.SafeStoreJson(r2, $"final-specs/{brandKey}/{modelKey}.json", json, ct);
+        state.FinalSpecsR2Url = await ItemSpecPipeline.SafeStoreJson(
+            r2, $"final-specs/{brandKey}/{modelKey}.json", json, R2Bucket.Specs, ct);
 
         // Persist the canonical sheet onto the identified brand model so the model DB carries it directly.
         if (state.IdentifiedBrandModelId is { } id && json.Length <= MaxFinalSpecsChars)
@@ -393,26 +399,28 @@ public sealed class SaveFinalSpecsActivity : CodeActivity
 /// <summary>Shared best-effort helpers for the spec-pipeline activities (R2 writes never fail the search).</summary>
 internal static class ItemSpecPipeline
 {
-    /// <summary>Serializes a spec dictionary, uploads it to R2, and records the URL on the state.</summary>
+    /// <summary>Serializes a spec dictionary, uploads it to the given R2 bucket, and records the URL on the state.</summary>
     public static async Task SaveJson(
         IR2StorageService r2, ItemDeepDiveState state, string objectKey,
-        IReadOnlyDictionary<string, string> specs, CancellationToken ct) =>
-        await SaveJsonBlob(r2, state, objectKey, JsonSerializer.Serialize(specs), ct);
+        IReadOnlyDictionary<string, string> specs, R2Bucket bucket, CancellationToken ct) =>
+        await SaveJsonBlob(r2, state, objectKey, JsonSerializer.Serialize(specs), bucket, ct);
 
-    /// <summary>Uploads a pre-serialized blob to R2 and records the URL on the state.</summary>
+    /// <summary>Uploads a pre-serialized blob to the given R2 bucket and records the URL on the state.</summary>
     public static async Task SaveJsonBlob(
-        IR2StorageService r2, ItemDeepDiveState state, string objectKey, string json, CancellationToken ct)
+        IR2StorageService r2, ItemDeepDiveState state, string objectKey, string json,
+        R2Bucket bucket, CancellationToken ct)
     {
-        var url = await SafeStoreJson(r2, objectKey, json, ct);
+        var url = await SafeStoreJson(r2, objectKey, json, bucket, ct);
         if (url is not null)
         {
             state.RawSpecsR2Urls.Add(url);
         }
     }
 
-    public static async Task<string?> SafeStoreJson(IR2StorageService r2, string objectKey, string json, CancellationToken ct)
+    public static async Task<string?> SafeStoreJson(
+        IR2StorageService r2, string objectKey, string json, R2Bucket bucket, CancellationToken ct)
     {
-        try { return await r2.StoreJsonAsync(json, objectKey, ct); }
+        try { return await r2.StoreJsonAsync(json, objectKey, bucket, ct); }
         catch (OperationCanceledException) { throw; }
         catch { return null; }
     }

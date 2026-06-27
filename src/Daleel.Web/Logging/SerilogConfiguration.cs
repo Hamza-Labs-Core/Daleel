@@ -1,3 +1,4 @@
+using Daleel.Web.Storage;
 using Serilog;
 using Serilog.Events;
 using Serilog.Formatting.Json;
@@ -50,7 +51,7 @@ public static class SerilogConfiguration
             // (4) Console stays for debug — Information+, human-readable, to container stdout.
             .WriteTo.Console();
 
-        var r2 = R2LoggingOptions.FromConfiguration(configuration);
+        var r2 = R2Options.FromConfiguration(configuration);
         if (r2 is not null)
         {
             ConfigureR2Sink(loggerConfiguration, r2);
@@ -62,10 +63,10 @@ public static class SerilogConfiguration
     }
 
     /// <summary>
-    /// (3) Warning-level and above to R2 as JSON Lines, partitioned into a date folder so a day's errors
-    /// live together: <c>errors/2026/06/24/errors.jsonl</c>.
+    /// (3) Warning-level and above to the R2 <see cref="R2Bucket.Logs"/> bucket as JSON Lines, partitioned
+    /// into a date folder so a day's errors live together: <c>errors/2026/06/24/errors.jsonl</c>.
     /// </summary>
-    private static void ConfigureR2Sink(LoggerConfiguration loggerConfiguration, R2LoggingOptions r2)
+    private static void ConfigureR2Sink(LoggerConfiguration loggerConfiguration, R2Options r2)
     {
         // The date folder is fixed at process start. Daleel redeploys (and thus restarts) frequently,
         // so the folder tracks the current day in practice; a process that ran uninterrupted past
@@ -75,7 +76,7 @@ public static class SerilogConfiguration
 
         loggerConfiguration.WriteTo.AmazonS3(
             path: "errors.jsonl",
-            bucketName: r2.BucketName,
+            bucketName: r2.Logs.BucketName,
             serviceUrl: r2.ServiceUrl,
             awsAccessKeyId: r2.AccessKey,
             awsSecretAccessKey: r2.SecretKey,

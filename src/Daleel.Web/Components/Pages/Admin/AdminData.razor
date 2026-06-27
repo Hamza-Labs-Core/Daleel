@@ -26,9 +26,9 @@ else
         @foreach (var s in Sections)
         {
             <MudButton Size="Size.Small" StartIcon="@s.Icon"
-                       Variant="@(CurrentSection == s.Prefix ? Variant.Filled : Variant.Outlined)"
-                       Color="@(CurrentSection == s.Prefix ? Color.Primary : Color.Default)"
-                       OnClick="@(() => NavigateAsync(s.Prefix))">
+                       Variant="@(IsActiveSection(s) ? Variant.Filled : Variant.Outlined)"
+                       Color="@(IsActiveSection(s) ? Color.Primary : Color.Default)"
+                       OnClick="@(() => NavigateToSectionAsync(s))">
                 @L[s.LabelKey]
             </MudButton>
         }
@@ -113,7 +113,7 @@ else
                                     </MudTooltip>
                                 }
                                 @{
-                                    var url = R2.DownloadUrl(o.Key);
+                                    var url = R2.DownloadUrl(o.Key, _bucket);
                                 }
                                 @if (url is not null)
                                 {
@@ -173,7 +173,7 @@ else
     <DialogActions>
         @if (_previewKey is not null)
         {
-            var dl = R2.DownloadUrl(_previewKey);
+            var dl = R2.DownloadUrl(_previewKey, _bucket);
             @if (dl is not null)
             {
                 <MudButton StartIcon="@Icons.Material.Filled.Download" Href="@dl" Target="_blank">@L["Admin.Data.Download"]</MudButton>
@@ -184,20 +184,25 @@ else
 </MudDialog>
 
 @code {
-    private sealed record Section(string Prefix, string LabelKey, string Icon);
+    private sealed record Section(R2Bucket Bucket, string Prefix, string LabelKey, string Icon);
 
-    // The four data domains the bucket is organized into (each a top-level key prefix).
+    // Each concern now has its own bucket; a section names the bucket plus the key prefix it lands on.
     private static readonly Section[] Sections =
     {
-        new("site-data/", "Admin.Data.Section.Site", Icons.Material.Filled.Description),
-        new("brand-data/", "Admin.Data.Section.Brand", Icons.Material.Filled.BrandingWatermark),
-        new("store-data/", "Admin.Data.Section.Store", Icons.Material.Filled.Store),
-        new("final-specs/", "Admin.Data.Section.Final", Icons.Material.Filled.FactCheck),
+        new(R2Bucket.Images, "", "Admin.Data.Section.Images", Icons.Material.Filled.Image),
+        new(R2Bucket.Specs, "raw/", "Admin.Data.Section.RawSpecs", Icons.Material.Filled.Description),
+        new(R2Bucket.Specs, "final-specs/", "Admin.Data.Section.Final", Icons.Material.Filled.FactCheck),
+        new(R2Bucket.Data, "site-data/", "Admin.Data.Section.Site", Icons.Material.Filled.Dataset),
+        new(R2Bucket.Data, "brand-data/", "Admin.Data.Section.Brand", Icons.Material.Filled.BrandingWatermark),
+        new(R2Bucket.Data, "store-data/", "Admin.Data.Section.Store", Icons.Material.Filled.Store),
+        new(R2Bucket.Logs, "errors/", "Admin.Data.Section.Logs", Icons.Material.Filled.BugReport),
     };
 
     private const int PageSize = 200;
 
-    private string _prefix = "site-data/";
+    // The bucket + prefix the browser is currently viewing (defaults to the images bucket root).
+    private R2Bucket _bucket = R2Bucket.Images;
+    private string _prefix = "";
     private bool _loading;
     private string? _error;
 
@@ -213,8 +218,10 @@ else
     private string? _previewText;
     private bool _previewTruncated;
 
-    // The section whose prefix the current path sits under (drives the quick-jump highlight).
-    private string CurrentSection => Sections.FirstOrDefault(s => _prefix.StartsWith(s.Prefix, StringComparison.Ordinal))?.Prefix ?? "";
+    // True when the current bucket + path sits under this section (drives the quick-jump highlight). A
+    // section with an empty prefix (the images-bucket root) is active for the whole bucket.
+    private bool IsActiveSection(Section s) =>
+        _bucket == s.Bucket && (s.Prefix.Length == 0 || _prefix.StartsWith(s.Prefix, StringComparison.Ordinal));
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -224,6 +231,15 @@ else
         }
     }
 
+    // Jump to a section: switch bucket and land on its prefix.
+    private async Task NavigateToSectionAsync(Section s)
+    {
+        _bucket = s.Bucket;
+        _prefix = s.Prefix;
+        await ReloadAsync();
+    }
+
+    // Navigate within the current bucket (breadcrumbs, folder drill-down).
     private async Task NavigateAsync(string prefix)
     {
         _prefix = prefix;
@@ -262,7 +278,7 @@ else
     {
         try
         {
-            var listing = await R2.ListObjectsAsync(_prefix, continuationToken, PageSize);
+            var listing = await R2.ListObjectsAsync(_prefix, continuationToken, PageSize, _bucket);
             // Sub-prefixes only come back on the first page of a listing; accumulate distinctly anyway.
             foreach (var p in listing.Prefixes)
             {
@@ -291,7 +307,7 @@ else
         if (IsImage(o.Key))
         {
             // Images render straight from a presigned URL — no need to pull bytes through the server.
-            _previewImageUrl = R2.DownloadUrl(o.Key);
+            _previewImageUrl = R2.DownloadUrl(o.Key, _bucket);
             _previewLoading = false;
             StateHasChanged();
             return;
@@ -301,7 +317,7 @@ else
         StateHasChanged();
         try
         {
-            var content = await R2.ReadTextAsync(o.Key);
+            var content = await R2.ReadTextAsync(o.Key, bucket: _bucket);
             if (content is not null)
             {
                 _previewText = TryPrettyJson(content.Text, o.Key);

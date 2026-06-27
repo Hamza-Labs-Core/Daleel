@@ -115,11 +115,15 @@ jobs:
           DEPLOY_SSH_HOST: ${{ secrets.DEPLOY_SSH_HOST }}
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          # Optional R2 object storage (error logs + product-image hosting). Not in the unconditional
-          # required set — the app runs without it (logs to file, hot-links images). But it has an
-          # INTERNAL invariant validated below: if storage is configured, the public host must be too.
+          # Optional R2 object storage (error logs, images, specs, scraped data — one bucket each). Not in
+          # the unconditional required set — the app runs without it (logs to file, hot-links images). But it
+          # has an INTERNAL invariant validated below: if storage is configured, the images public host must
+          # be too. Bucket NAMES are not passed here: they default to daleel-{logs,images,specs,data} and only
+          # need overriding via the per-bucket secrets in the .env render step below.
           R2_ACCESS_KEY: ${{ secrets.R2_ACCESS_KEY }}
           R2_SECRET_KEY: ${{ secrets.R2_SECRET_KEY }}
+          R2_PUBLIC_URL_IMAGES: ${{ secrets.R2_PUBLIC_URL_IMAGES }}
+          # Legacy single-bucket vars, still honoured as fallbacks (logs bucket + images host).
           R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
         run: |
@@ -140,13 +144,13 @@ jobs:
             exit 1
           fi
           # Conditional advisory: R2 image *hosting* needs a public host. If the storage creds are set but
-          # R2_PUBLIC_URL is not, the app deliberately falls back to hot-linking images from their source
-          # (it never points an <img> at the S3 API endpoint, which would 403). That's a valid, working
-          # state — e.g. R2 set up only for error logging — so this WARNS rather than fails. Set
-          # R2_PUBLIC_URL (bucket r2.dev URL or a custom domain) to serve images from R2 instead.
-          if { [ -n "${R2_ACCESS_KEY:-}" ] || [ -n "${R2_SECRET_KEY:-}" ] || [ -n "${R2_BUCKET_NAME:-}" ]; } \
-             && [ -z "${R2_PUBLIC_URL:-}" ]; then
-            echo "::warning::R2 storage is configured but R2_PUBLIC_URL is unset — product images will be hot-linked from source, not served from R2. Set R2_PUBLIC_URL (gh secret set R2_PUBLIC_URL --body 'https://...' --repo Hamza-Labs-Core/Daleel) to host them."
+          # neither R2_PUBLIC_URL_IMAGES nor the legacy R2_PUBLIC_URL is, the app deliberately falls back to
+          # hot-linking images from their source (it never points an <img> at the S3 API endpoint, which would
+          # 403). That's a valid, working state — e.g. R2 set up only for error logging — so this WARNS rather
+          # than fails. Set R2_PUBLIC_URL_IMAGES (images bucket r2.dev URL or a custom domain) to serve images.
+          if { [ -n "${R2_ACCESS_KEY:-}" ] || [ -n "${R2_SECRET_KEY:-}" ]; } \
+             && [ -z "${R2_PUBLIC_URL_IMAGES:-}" ] && [ -z "${R2_PUBLIC_URL:-}" ]; then
+            echo "::warning::R2 storage is configured but no images public host is set — product images will be hot-linked from source, not served from R2. Set R2_PUBLIC_URL_IMAGES (gh secret set R2_PUBLIC_URL_IMAGES --body 'https://...' --repo Hamza-Labs-Core/Daleel) to host them."
           fi
           echo "All required secrets are present and non-placeholder."
 
@@ -322,21 +326,34 @@ jobs:
             # resolve to empty, which the app treats as "absent" — harmless.
             CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
             CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
-            # Cloudflare R2 error-logging creds (optional). If unset they resolve to
-            # empty and the app falls back to file logging at /app/data/logs/ — so
-            # these are intentionally NOT in the required-secrets validation above.
-            # R2_ENDPOINT is normally unnecessary: the app derives it from
-            # CLOUDFLARE_ACCOUNT_ID (set above). It is passed through here only so an
-            # override secret (e.g. a jurisdiction-specific endpoint) takes effect when
-            # set; unset it resolves to empty and the derived endpoint is used.
+            # Cloudflare R2 object storage (optional). Shared connection: if the creds
+            # are unset they resolve to empty and the app falls back to file logging at
+            # /app/data/logs/ — so these are intentionally NOT in the required-secrets
+            # validation above. R2_ENDPOINT is normally unnecessary: the app derives it
+            # from CLOUDFLARE_ACCOUNT_ID (set above). It is passed through here only so
+            # an override secret (e.g. a jurisdiction-specific endpoint) takes effect
+            # when set; unset it resolves to empty and the derived endpoint is used.
             R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
             R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
-            R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
             R2_ENDPOINT=${{ secrets.R2_ENDPOINT }}
-            # Public host for R2-stored product images (bucket public dev URL or a
-            # custom domain bound to the bucket). REQUIRED to serve images from R2:
-            # without it the app hot-links images from their source instead, because
-            # the S3 API endpoint 403s a plain <img> GET. Unset resolves to empty.
+            # One bucket per concern. Bucket NAMES default in-app to daleel-{logs,images,
+            # specs,data} — just create those buckets in Cloudflare and leave these
+            # unset. Override a name only if your bucket is named differently. The legacy
+            # R2_BUCKET_NAME still seeds the LOGS bucket when R2_BUCKET_LOGS is unset.
+            R2_BUCKET_LOGS=${{ secrets.R2_BUCKET_LOGS }}
+            R2_BUCKET_IMAGES=${{ secrets.R2_BUCKET_IMAGES }}
+            R2_BUCKET_SPECS=${{ secrets.R2_BUCKET_SPECS }}
+            R2_BUCKET_DATA=${{ secrets.R2_BUCKET_DATA }}
+            R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
+            # Public hosts (bucket public dev URL or a custom domain bound to the bucket).
+            # Images REQUIRE a public host to be served from R2 — without it the app
+            # hot-links images from their source, because the S3 API endpoint 403s a
+            # plain <img> GET. Specs/data hosts are optional (the DB copy stays canonical
+            # when unset). Logs are never served publicly. The legacy R2_PUBLIC_URL still
+            # seeds the IMAGES host when R2_PUBLIC_URL_IMAGES is unset.
+            R2_PUBLIC_URL_IMAGES=${{ secrets.R2_PUBLIC_URL_IMAGES }}
+            R2_PUBLIC_URL_SPECS=${{ secrets.R2_PUBLIC_URL_SPECS }}
+            R2_PUBLIC_URL_DATA=${{ secrets.R2_PUBLIC_URL_DATA }}
             R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}
             # Postgres event store. POSTGRES_PASSWORD now comes from a GitHub secret
             # (was previously generated once on the box). The connection string

@@ -17,17 +17,25 @@ public class R2StorageServiceTests
 {
     private const string PublicBase = "https://images.daleel.app";
 
-    private static R2StorageService MakeService()
-    {
-        // Real S3 client with throwaway creds: the tests below never reach a PutObject, so it's never called.
-        var s3 = new AmazonS3Client("ak", "sk", new AmazonS3Config
+    // Test options: one connection, every concern pointed at the same bucket/host unless a test wants
+    // distinct routing. publicUrl="" exercises the no-public-host degradation path.
+    private static R2Options Options(string bucket = "bucket", string? publicUrl = PublicBase) =>
+        new("ak", "sk", "https://acc.r2.cloudflarestorage.com",
+            new R2BucketConfig(bucket, publicUrl),
+            new R2BucketConfig(bucket, publicUrl),
+            new R2BucketConfig(bucket, publicUrl),
+            new R2BucketConfig(bucket, publicUrl));
+
+    private static AmazonS3Client FakeS3() =>
+        // Real S3 client with throwaway creds: most tests never reach a PutObject, so it's never called.
+        new("ak", "sk", new AmazonS3Config
         {
             ServiceURL = "https://acc.r2.cloudflarestorage.com",
             ForcePathStyle = true
         });
-        return new R2StorageService(s3, new HttpClient(), "bucket", PublicBase,
-            NullLogger<R2StorageService>.Instance);
-    }
+
+    private static R2StorageService MakeService() =>
+        new(FakeS3(), new HttpClient(), Options(), NullLogger<R2StorageService>.Instance);
 
     [Fact]
     public async Task NullService_ReportsUnconfigured_AndEchoesInput()
@@ -61,19 +69,31 @@ public class R2StorageServiceTests
     [Fact]
     public async Task StoreImage_WithoutPublicHost_HotLinksOriginal_NeverRewritesToS3Endpoint()
     {
-        // No R2_PUBLIC_URL: rewriting to "{serviceUrl}/{bucket}/{key}" would 403 a plain <img> GET, so the
+        // No public host: rewriting to "{serviceUrl}/{bucket}/{key}" would 403 a plain <img> GET, so the
         // service must hand back the original URL unchanged (and never touch the network) instead.
-        var s3 = new AmazonS3Client("ak", "sk", new AmazonS3Config
-        {
-            ServiceURL = "https://acc.r2.cloudflarestorage.com",
-            ForcePathStyle = true
-        });
-        using var svc = new R2StorageService(s3, new HttpClient(), "bucket", publicBaseUrl: "",
-            NullLogger<R2StorageService>.Instance);
+        using var svc = new R2StorageService(
+            FakeS3(), new HttpClient(), Options(publicUrl: ""), NullLogger<R2StorageService>.Instance);
 
         var source = "https://cdn.store.com/img/galaxy-s24.png";
         (await svc.StoreImageAsync(source, "products")).Should().Be(source);
         (await svc.StoreJsonAsync("{}", "site-data/x.json")).Should().BeNull();
+    }
+
+    [Fact]
+    public void DownloadUrl_RoutesEachConcernToItsOwnBucket()
+    {
+        // Distinct bucket per concern: the presigned (path-style) URL embeds the bucket name, so it proves
+        // StoreJson/List/Read/DownloadUrl land in the right bucket rather than one shared dumping ground.
+        var options = new R2Options("ak", "sk", "https://acc.r2.cloudflarestorage.com",
+            new R2BucketConfig("daleel-logs", null),
+            new R2BucketConfig("daleel-images", PublicBase),
+            new R2BucketConfig("daleel-specs", PublicBase),
+            new R2BucketConfig("daleel-data", PublicBase));
+        using var svc = new R2StorageService(FakeS3(), new HttpClient(), options, NullLogger<R2StorageService>.Instance);
+
+        svc.DownloadUrl("x.png", R2Bucket.Images)!.Should().Contain("/daleel-images/x.png");
+        svc.DownloadUrl("x.json", R2Bucket.Specs)!.Should().Contain("/daleel-specs/x.json");
+        svc.DownloadUrl("x.json", R2Bucket.Data)!.Should().Contain("/daleel-data/x.json");
     }
 
     [Fact]

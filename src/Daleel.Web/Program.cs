@@ -207,28 +207,30 @@ builder.Services.AddScoped<IProductProfileRepository, ProductProfileRepository>(
 builder.Services.AddScoped<IBrandModelRepository, BrandModelRepository>();
 builder.Services.AddScoped<IScrapedPriceRepository, ScrapedPriceRepository>();
 
-// Cloudflare R2 image storage. Scraped product/brand images are copied into R2 and the hosted URL is
-// stored instead of hot-linking the external source. Registered only when R2 is fully configured; the
-// no-op fallback keeps the original URLs so the rest of the pipeline is unaffected.
-var r2Options = Daleel.Web.Logging.R2LoggingOptions.FromConfiguration(builder.Configuration);
+// Cloudflare R2 object storage. Each concern routes to its own bucket: error logs (daleel-logs), product
+// /brand/store images (daleel-images), raw + final product specs (daleel-specs) and scraped site/brand
+// data (daleel-data). Registered only when R2 is fully configured (shared credentials + endpoint); the
+// no-op fallback keeps the original image URLs so the rest of the pipeline is unaffected.
+var r2Options = Daleel.Web.Storage.R2Options.FromConfiguration(builder.Configuration);
 if (r2Options is not null)
 {
-    // Image hosting needs a genuinely public object host — an R2 bucket public dev URL or a custom domain
-    // bound to the bucket — supplied via R2_PUBLIC_URL. We deliberately do NOT fall back to the S3 service
-    // URL ("{serviceUrl}/{bucket}"): that endpoint requires SigV4 auth and returns 403 for the plain GET an
-    // <img> tag makes, so every "hosted" image would silently break. When R2_PUBLIC_URL is unset the service
-    // still runs (JSON specs, the admin data browser) but StoreImageAsync hot-links the original URL instead.
-    var publicBase = builder.Configuration["R2_PUBLIC_URL"]?.Trim() ?? string.Empty;
-    if (string.IsNullOrEmpty(publicBase))
+    // Image hosting needs a genuinely public object host — the images bucket's public dev URL or a custom
+    // domain — supplied via R2_PUBLIC_URL_IMAGES (or the legacy R2_PUBLIC_URL). We deliberately do NOT fall
+    // back to the S3 service URL ("{serviceUrl}/{bucket}"): that endpoint requires SigV4 auth and returns 403
+    // for the plain GET an <img> tag makes, so every "hosted" image would silently break. When the images
+    // public host is unset the service still runs (JSON specs, the admin data browser) but StoreImageAsync
+    // hot-links the original URL instead.
+    if (string.IsNullOrEmpty(r2Options.Images.PublicUrl))
     {
         Console.WriteLine(
-            "[startup] R2 is configured but R2_PUBLIC_URL is unset — product images will be hot-linked from " +
-            "their source rather than served from R2. Set R2_PUBLIC_URL to the bucket's public URL to host them.");
+            "[startup] R2 is configured but the images public host (R2_PUBLIC_URL_IMAGES / R2_PUBLIC_URL) is " +
+            "unset — product images will be hot-linked from their source rather than served from R2. Set it to " +
+            "the images bucket's public URL to host them.");
     }
 
     builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService>(sp =>
         new Daleel.Web.Storage.R2StorageService(
-            r2Options, publicBase,
+            r2Options,
             // Dedicated SSRF-guarded client (connect-time IP pinning, redirects disabled): this fetch
             // pulls attacker-influenced image URLs onto our own host, so it gets the hardened client.
             Daleel.Search.Http.SsrfGuard.CreateGuardedClient(),

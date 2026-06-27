@@ -32,12 +32,14 @@ SECRETS=(
 # here — they are provided at the GitHub org level, so they don't need a per-repo secret.
 # The app still reads them at runtime via /opt/daleel/.env (see deploy/.env.example).
 #
-# NOTE: the R2 error-logging secrets (R2_ACCESS_KEY, R2_SECRET_KEY, R2_BUCKET_NAME) are
-# also intentionally NOT seeded. They are OPTIONAL — when unset the app falls back to file
-# logging — and seeding them with the CHANGE_ME placeholder would make the app think R2 is
-# configured and try to connect with bogus credentials. Set them by hand only if you want R2
-# logging: gh secret set R2_ACCESS_KEY --body '<real>' --repo "$REPO" (and likewise for the
-# secret key + bucket). The R2 endpoint is derived from CLOUDFLARE_ACCOUNT_ID.
+# NOTE: the R2 object-storage secrets (R2_ACCESS_KEY, R2_SECRET_KEY) are also intentionally
+# NOT seeded. They are OPTIONAL — when unset the app falls back to file logging + hot-linked
+# images — and seeding them with the CHANGE_ME placeholder would make the app think R2 is
+# configured and try to connect with bogus credentials. Set them by hand only if you want R2:
+# gh secret set R2_ACCESS_KEY --body '<real>' --repo "$REPO" (and likewise for the secret key).
+# Bucket NAMES default to daleel-{logs,images,specs,data} — just create those buckets; override
+# via R2_BUCKET_{LOGS,IMAGES,SPECS,DATA} only if named differently. To serve images from R2, also
+# set R2_PUBLIC_URL_IMAGES. The R2 endpoint is derived from CLOUDFLARE_ACCOUNT_ID.
 #
 # NOTE: the Postgres event store (POSTGRES_PASSWORD / POSTGRES_CONNECTION_STRING / DATABASE_URL)
 # is likewise OPTIONAL and NOT seeded — when unset the app runs SQLite-only and the /admin/usage

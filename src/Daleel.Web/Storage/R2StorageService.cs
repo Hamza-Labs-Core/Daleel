@@ -3,7 +3,6 @@ using System.Text;
 using Amazon.S3;
 using Amazon.S3.Model;
 using Daleel.Search.Http;
-using Daleel.Web.Logging;
 
 namespace Daleel.Web.Storage;
 
@@ -39,39 +38,45 @@ public interface IR2StorageService
     bool IsConfigured { get; }
 
     /// <summary>
-    /// Downloads <paramref name="sourceUrl"/> and uploads it to R2 under <paramref name="keyPrefix"/>,
-    /// returning the hosted URL. Returns the original <paramref name="sourceUrl"/> unchanged when R2 is
-    /// not configured, the URL is empty/already R2-hosted, or anything goes wrong — never throws.
+    /// Downloads <paramref name="sourceUrl"/> and uploads it to the <see cref="R2Bucket.Images"/> bucket
+    /// under <paramref name="keyPrefix"/>, returning the hosted URL. Returns the original
+    /// <paramref name="sourceUrl"/> unchanged when R2 is not configured, the URL is empty/already R2-hosted,
+    /// or anything goes wrong — never throws.
     /// </summary>
     Task<string?> StoreImageAsync(string? sourceUrl, string keyPrefix, CancellationToken ct = default);
 
     /// <summary>
-    /// Uploads a JSON document to R2 at the human-readable object key <paramref name="objectKey"/> (e.g.
-    /// <c>site-data/samsung/galaxy-s24/brand-site.json</c>) and returns the hosted URL. Used to persist
-    /// raw scraped specs and the final canonical spec sheet outside the database. Returns null when R2 is
-    /// not configured, the input is empty, or anything goes wrong — never throws.
+    /// Uploads a JSON document to the given <paramref name="bucket"/> at the human-readable object key
+    /// <paramref name="objectKey"/> (e.g. <c>samsung/galaxy-s24/brand-site.json</c>) and returns the hosted
+    /// URL. Used to persist raw scraped specs and the final canonical spec sheet (<see cref="R2Bucket.Specs"/>)
+    /// or raw scraped-data dumps (<see cref="R2Bucket.Data"/>) outside the database. Returns null when R2 is
+    /// not configured, the bucket has no public host, the input is empty, or anything goes wrong — never throws.
     /// </summary>
-    Task<string?> StoreJsonAsync(string json, string objectKey, CancellationToken ct = default);
+    Task<string?> StoreJsonAsync(
+        string json, string objectKey, R2Bucket bucket = R2Bucket.Specs, CancellationToken ct = default);
 
     /// <summary>
-    /// Lists the bucket one "folder" deep under <paramref name="prefix"/> (delimiter <c>/</c>): immediate
-    /// sub-prefixes and the objects directly beneath it. Pass <paramref name="continuationToken"/> from a
-    /// previous page to continue. Returns <see cref="R2Listing.Empty"/> when unconfigured or on error.
+    /// Lists <paramref name="bucket"/> one "folder" deep under <paramref name="prefix"/> (delimiter <c>/</c>):
+    /// immediate sub-prefixes and the objects directly beneath it. Pass <paramref name="continuationToken"/>
+    /// from a previous page to continue. Returns <see cref="R2Listing.Empty"/> when unconfigured or on error.
     /// </summary>
     Task<R2Listing> ListObjectsAsync(
-        string? prefix, string? continuationToken = null, int maxKeys = 200, CancellationToken ct = default);
+        string? prefix, string? continuationToken = null, int maxKeys = 200,
+        R2Bucket bucket = R2Bucket.Data, CancellationToken ct = default);
 
     /// <summary>
-    /// Reads up to <paramref name="maxBytes"/> of a text/JSON object for inline preview. Returns null when
-    /// unconfigured, the object is missing, or it's larger-than-cap binary; sets Truncated when clipped.
+    /// Reads up to <paramref name="maxBytes"/> of a text/JSON object from <paramref name="bucket"/> for inline
+    /// preview. Returns null when unconfigured, the object is missing, or it's larger-than-cap binary; sets
+    /// Truncated when clipped.
     /// </summary>
-    Task<R2ObjectText?> ReadTextAsync(string key, long maxBytes = 256 * 1024, CancellationToken ct = default);
+    Task<R2ObjectText?> ReadTextAsync(
+        string key, long maxBytes = 256 * 1024, R2Bucket bucket = R2Bucket.Data, CancellationToken ct = default);
 
     /// <summary>
-    /// A time-limited presigned GET URL for <paramref name="key"/>, usable as an <c>&lt;img&gt;</c> src or a
-    /// download link without the bucket being public. Returns null when unconfigured.
+    /// A time-limited presigned GET URL for <paramref name="key"/> in <paramref name="bucket"/>, usable as an
+    /// <c>&lt;img&gt;</c> src or a download link without the bucket being public. Returns null when unconfigured.
     /// </summary>
-    string? DownloadUrl(string key, TimeSpan? expiry = null);
+    string? DownloadUrl(string key, R2Bucket bucket = R2Bucket.Data, TimeSpan? expiry = null);
 }
 
 /// <summary>No-op storage used when R2 is unconfigured: keeps the original URL so images still render.</summary>
@@ -83,25 +88,27 @@ public sealed class NullR2StorageService : IR2StorageService
         Task.FromResult(sourceUrl);
 
     // No bucket to write to and no public host to serve from, so there is no URL to return.
-    public Task<string?> StoreJsonAsync(string json, string objectKey, CancellationToken ct = default) =>
+    public Task<string?> StoreJsonAsync(
+        string json, string objectKey, R2Bucket bucket = R2Bucket.Specs, CancellationToken ct = default) =>
         Task.FromResult<string?>(null);
 
     public Task<R2Listing> ListObjectsAsync(
-        string? prefix, string? continuationToken = null, int maxKeys = 200, CancellationToken ct = default) =>
+        string? prefix, string? continuationToken = null, int maxKeys = 200,
+        R2Bucket bucket = R2Bucket.Data, CancellationToken ct = default) =>
         Task.FromResult(R2Listing.Empty);
 
-    public Task<R2ObjectText?> ReadTextAsync(string key, long maxBytes = 256 * 1024, CancellationToken ct = default) =>
+    public Task<R2ObjectText?> ReadTextAsync(
+        string key, long maxBytes = 256 * 1024, R2Bucket bucket = R2Bucket.Data, CancellationToken ct = default) =>
         Task.FromResult<R2ObjectText?>(null);
 
-    public string? DownloadUrl(string key, TimeSpan? expiry = null) => null;
+    public string? DownloadUrl(string key, R2Bucket bucket = R2Bucket.Data, TimeSpan? expiry = null) => null;
 }
 
 public sealed class R2StorageService : IR2StorageService, IDisposable
 {
     private readonly IAmazonS3 _s3;
     private readonly HttpClient _http;
-    private readonly string _bucket;
-    private readonly string _publicBaseUrl;
+    private readonly R2Options _options;
     private readonly ILogger<R2StorageService> _logger;
 
     /// <summary>Cap on a single image we'll pull into memory before uploading (8 MB covers product shots).</summary>
@@ -120,14 +127,11 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
 
     public bool IsConfigured => true;
 
-    public R2StorageService(R2LoggingOptions options, string publicBaseUrl, HttpClient http,
-        ILogger<R2StorageService> logger)
+    public R2StorageService(R2Options options, HttpClient http, ILogger<R2StorageService> logger)
     {
-        _bucket = options.BucketName;
+        _options = options;
         _http = http;
         _logger = logger;
-        // Trailing slash trimmed so we can join with "/{key}" without doubling it.
-        _publicBaseUrl = publicBaseUrl.TrimEnd('/');
 
         var config = new AmazonS3Config
         {
@@ -135,22 +139,37 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             // R2 is path-style only (bucket in the path, not a vhost subdomain).
             ForcePathStyle = true
         };
+        // One S3 client serves every bucket: the connection (endpoint + credentials) is shared, only the
+        // BucketName per request differs, so each call routes itself to logs/images/specs/data.
         _s3 = new AmazonS3Client(options.AccessKey, options.SecretKey, config);
     }
 
-    /// <summary>Test/DI seam: inject a fake <see cref="IAmazonS3"/> and <see cref="HttpClient"/>.</summary>
-    public R2StorageService(IAmazonS3 s3, HttpClient http, string bucket, string publicBaseUrl,
-        ILogger<R2StorageService> logger)
+    /// <summary>
+    /// Test/DI seam: inject a fake <see cref="IAmazonS3"/> and <see cref="HttpClient"/> plus the full
+    /// per-bucket <see cref="R2Options"/> so routing can be exercised directly.
+    /// </summary>
+    public R2StorageService(IAmazonS3 s3, HttpClient http, R2Options options, ILogger<R2StorageService> logger)
     {
         _s3 = s3;
         _http = http;
-        _bucket = bucket;
-        _publicBaseUrl = publicBaseUrl.TrimEnd('/');
+        _options = options;
         _logger = logger;
     }
 
+    /// <summary>The bucket name a concern routes to.</summary>
+    private string BucketName(R2Bucket bucket) => _options.For(bucket).BucketName;
+
+    /// <summary>
+    /// The public host for a concern with the trailing slash trimmed (so <c>"{host}/{key}"</c> never
+    /// doubles it), or empty string when the bucket is private (no browser-loadable URL can be minted).
+    /// </summary>
+    private string PublicBaseUrl(R2Bucket bucket) => _options.For(bucket).PublicUrl?.TrimEnd('/') ?? string.Empty;
+
     public async Task<string?> StoreImageAsync(string? sourceUrl, string keyPrefix, CancellationToken ct = default)
     {
+        // Images always live in the dedicated images bucket, served from its public host.
+        var publicBaseUrl = PublicBaseUrl(R2Bucket.Images);
+
         if (string.IsNullOrWhiteSpace(sourceUrl) ||
             !Uri.TryCreate(sourceUrl, UriKind.Absolute, out var uri) ||
             (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
@@ -158,17 +177,17 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             return sourceUrl;
         }
 
-        // No public host configured (R2_PUBLIC_URL unset): we cannot mint a browser-loadable URL, so don't
-        // rewrite. Hot-link the original instead — uploading and returning "{serviceUrl}/{bucket}/{key}"
+        // No public host configured (R2_PUBLIC_URL_IMAGES unset): we cannot mint a browser-loadable URL, so
+        // don't rewrite. Hot-link the original instead — uploading and returning "{serviceUrl}/{bucket}/{key}"
         // would point an <img> at the S3 API endpoint, which 403s every unauthenticated GET, so every
         // hosted image would silently break. Hot-linking the source is the correct graceful degradation.
-        if (string.IsNullOrEmpty(_publicBaseUrl))
+        if (string.IsNullOrEmpty(publicBaseUrl))
         {
             return sourceUrl;
         }
 
         // Already hosted by us — nothing to copy, and re-uploading would loop.
-        if (sourceUrl.StartsWith(_publicBaseUrl, StringComparison.OrdinalIgnoreCase))
+        if (sourceUrl.StartsWith(publicBaseUrl, StringComparison.OrdinalIgnoreCase))
         {
             return sourceUrl;
         }
@@ -214,7 +233,7 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
 
             await _s3.PutObjectAsync(new PutObjectRequest
             {
-                BucketName = _bucket,
+                BucketName = BucketName(R2Bucket.Images),
                 Key = key,
                 InputStream = new MemoryStream(bytes),
                 ContentType = contentType,
@@ -223,7 +242,7 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
                 DisablePayloadSigning = true
             }, ct).ConfigureAwait(false);
 
-            return $"{_publicBaseUrl}/{key}";
+            return $"{publicBaseUrl}/{key}";
         }
         catch (OperationCanceledException)
         {
@@ -237,15 +256,18 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
         }
     }
 
-    public async Task<string?> StoreJsonAsync(string json, string objectKey, CancellationToken ct = default)
+    public async Task<string?> StoreJsonAsync(
+        string json, string objectKey, R2Bucket bucket = R2Bucket.Specs, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(json) || string.IsNullOrWhiteSpace(objectKey))
         {
             return null;
         }
 
-        // Without a public host there is no servable URL to hand back (the DB copy stays canonical).
-        if (string.IsNullOrEmpty(_publicBaseUrl))
+        // Without a public host on the target bucket there is no servable URL to hand back (the DB copy
+        // stays canonical). The object is still useless to a browser, so skip the upload entirely.
+        var publicBaseUrl = PublicBaseUrl(bucket);
+        if (string.IsNullOrEmpty(publicBaseUrl))
         {
             return null;
         }
@@ -263,7 +285,7 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
         {
             await _s3.PutObjectAsync(new PutObjectRequest
             {
-                BucketName = _bucket,
+                BucketName = BucketName(bucket),
                 Key = key,
                 InputStream = new MemoryStream(bytes),
                 ContentType = "application/json",
@@ -271,7 +293,7 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
                 DisablePayloadSigning = true
             }, ct).ConfigureAwait(false);
 
-            return $"{_publicBaseUrl}/{key}";
+            return $"{publicBaseUrl}/{key}";
         }
         catch (OperationCanceledException)
         {
@@ -289,13 +311,14 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
     private static readonly TimeSpan DefaultUrlLifetime = TimeSpan.FromMinutes(15);
 
     public async Task<R2Listing> ListObjectsAsync(
-        string? prefix, string? continuationToken = null, int maxKeys = 200, CancellationToken ct = default)
+        string? prefix, string? continuationToken = null, int maxKeys = 200,
+        R2Bucket bucket = R2Bucket.Data, CancellationToken ct = default)
     {
         try
         {
             var response = await _s3.ListObjectsV2Async(new ListObjectsV2Request
             {
-                BucketName = _bucket,
+                BucketName = BucketName(bucket),
                 // Delimiter "/" makes R2 fold deeper keys into CommonPrefixes, giving a one-level "folder"
                 // view instead of every object in the bucket at once.
                 Delimiter = "/",
@@ -338,7 +361,8 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
         return new R2Listing(prefixes, objects, response.IsTruncated ? response.NextContinuationToken : null);
     }
 
-    public async Task<R2ObjectText?> ReadTextAsync(string key, long maxBytes = 256 * 1024, CancellationToken ct = default)
+    public async Task<R2ObjectText?> ReadTextAsync(
+        string key, long maxBytes = 256 * 1024, R2Bucket bucket = R2Bucket.Data, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(key))
         {
@@ -349,7 +373,7 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
         {
             using var response = await _s3.GetObjectAsync(new GetObjectRequest
             {
-                BucketName = _bucket,
+                BucketName = BucketName(bucket),
                 Key = key
             }, ct).ConfigureAwait(false);
 
@@ -384,7 +408,7 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
         }
     }
 
-    public string? DownloadUrl(string key, TimeSpan? expiry = null)
+    public string? DownloadUrl(string key, R2Bucket bucket = R2Bucket.Data, TimeSpan? expiry = null)
     {
         if (string.IsNullOrEmpty(key))
         {
@@ -395,7 +419,7 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
         {
             return _s3.GetPreSignedURL(new GetPreSignedUrlRequest
             {
-                BucketName = _bucket,
+                BucketName = BucketName(bucket),
                 Key = key,
                 Verb = HttpVerb.GET,
                 Expires = DateTime.UtcNow.Add(expiry ?? DefaultUrlLifetime)
