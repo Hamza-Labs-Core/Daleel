@@ -315,6 +315,20 @@ jobs:
             CADDY_DOMAIN=daleel.hamzalabs.dev
             CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
             EOF
+            # POSTGRES_PASSWORD is generated once and PERSISTED on the box rather
+            # than sourced from a GitHub secret. It is internal to the private
+            # compose network (the app reaches Postgres by service name, never over
+            # the internet) and, crucially, must stay consistent with the
+            # postgres_data volume — Postgres bakes the password in on first init, so
+            # a rotated value would mismatch the stored credential. First deploy
+            # generates it; every later deploy reuses the saved value. Hex => no
+            # shell/compose-interpolation metacharacters.
+            PG_PW_FILE=/opt/daleel/.postgres_password
+            if [ ! -s "$PG_PW_FILE" ]; then
+              ( umask 077; openssl rand -hex 32 > "$PG_PW_FILE" )
+            fi
+            chmod 600 "$PG_PW_FILE"
+            echo "POSTGRES_PASSWORD=$(cat "$PG_PW_FILE")" >> "/tmp/daleel.env.$$"
             # Everything runs as root, so write the file directly. Keep it
             # private (0600) since it holds API keys.
             install -m 0600 "/tmp/daleel.env.$$" /opt/daleel/.env
