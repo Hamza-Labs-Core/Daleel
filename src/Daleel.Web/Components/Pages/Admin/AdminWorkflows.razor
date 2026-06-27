@@ -2,6 +2,8 @@
 @using System.Globalization
 @using System.Text.Json
 @using Daleel.Web.Pipeline
+@using Elsa.Common.Entities
+@using Elsa.Common.Models
 @using Elsa.Workflows
 @using Elsa.Workflows.Management
 @using Elsa.Workflows.Management.Filters
@@ -80,7 +82,7 @@ else
 }
 
 @code {
-    /// <summary>Most-recent runs surfaced; the in-memory store is unbounded so we cap the view.</summary>
+    /// <summary>Most-recent runs surfaced; the durable store accumulates over time so we cap the view.</summary>
     private const int MaxRows = 200;
 
     private bool _loading;
@@ -104,13 +106,12 @@ else
         StateHasChanged();
         try
         {
-            // The default in-memory store returns every instance; sort newest-first and cap in memory.
-            var instances = await Instances.FindManyAsync(new WorkflowInstanceFilter(), CancellationToken.None);
-            _rows = instances
-                .OrderByDescending(i => i.CreatedAt)
-                .Take(MaxRows)
-                .Select(Row.From)
-                .ToList();
+            // Push the newest-first ordering and the row cap to the store (a real query against Postgres/
+            // SQLite) rather than loading every instance into memory and sorting here.
+            var order = new WorkflowInstanceOrder<DateTimeOffset>(i => i.CreatedAt, OrderDirection.Descending);
+            var page = await Instances.FindManyAsync(
+                new WorkflowInstanceFilter(), new PageArgs { Limit = MaxRows }, order, CancellationToken.None);
+            _rows = page.Items.Select(Row.From).ToList();
         }
         catch (Exception ex)
         {

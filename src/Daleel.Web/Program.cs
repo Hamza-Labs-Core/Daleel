@@ -5,6 +5,8 @@ using Daleel.Web.Data;
 using Daleel.Web.Logging;
 using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
+using Elsa.EntityFrameworkCore.Extensions;
+using Elsa.EntityFrameworkCore.Modules.Management;
 using Elsa.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -252,22 +254,46 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp 
 // are discovered automatically.
 //
 // Persistence is ENABLED via the workflow-management feature: it registers IWorkflowInstanceStore +
-// IWorkflowInstanceManager backed by the default in-memory store (no EF/migrations). This used to be
-// forbidden — a startup assertion failed fast if any persistence module was registered — because the
-// pipeline shared a live AgentService + progress delegate by reference through SearchPipelineState, which
-// a suspend/resume would have deserialized as null. That coupling is gone: the live, non-serializable
-// half now lives in the separate scoped SearchPipelineServices/SubWorkflowServices and never touches
-// WorkflowState, so persisting completed instances is safe. WorkflowSearchRunner saves each finished run
-// as an instance the admin workflows page queries.
+// IWorkflowInstanceManager, here backed by a DURABLE EF Core store. This used to be forbidden — a startup
+// assertion failed fast if any persistence module was registered — because the pipeline shared a live
+// AgentService + progress delegate by reference through SearchPipelineState, which a suspend/resume would
+// have deserialized as null. That coupling is gone: the live, non-serializable half now lives in the
+// separate scoped SearchPipelineServices/SubWorkflowServices and never touches WorkflowState, so persisting
+// completed instances is safe. WorkflowSearchRunner saves each finished run as an instance the admin
+// workflows page queries.
 //
-// CAVEAT: the in-memory instance store is unbounded (instances accumulate for the process lifetime). A
-// production deployment should swap in a durable provider (Elsa.EntityFrameworkCore.Sqlite) or add a
-// retention sweep before relying on it long-term.
+// Provider: Postgres when POSTGRES_CONNECTION_STRING/DATABASE_URL is set (the same connection the event
+// store uses — see PostgresConnection.Resolve), otherwise a local SQLite file (elsa.db) alongside the main
+// app DB. Elsa ships the provider migrations and applies them automatically on startup, so no extra
+// migration step is needed for either provider.
+var elsaInstanceConn = Daleel.Web.Events.PostgresConnection.Resolve(builder.Configuration);
+var elsaSqliteConn = ElsaSqliteConnection(connection);
 builder.Services.AddElsa(elsa =>
 {
     elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>();
-    elsa.UseWorkflowManagement();
+    elsa.UseWorkflowManagement(management => management.UseEntityFrameworkCore(ef =>
+    {
+        if (elsaInstanceConn is not null)
+        {
+            ef.UsePostgreSql(elsaInstanceConn);
+        }
+        else
+        {
+            ef.UseSqlite(elsaSqliteConn);
+        }
+    }));
 });
+
+// SQLite fallback connection for Elsa: a separate elsa.db in the same directory as the main app DB, so
+// Elsa's own migration history never collides with DaleelDbContext's on a shared file. Falls back to
+// data/elsa.db when the main connection isn't a parseable "Data Source=…" SQLite string.
+static string ElsaSqliteConnection(string mainConnection)
+{
+    var builder = new Microsoft.Data.Sqlite.SqliteConnectionStringBuilder(mainConnection);
+    var dir = string.IsNullOrWhiteSpace(builder.DataSource) ? "data" : Path.GetDirectoryName(builder.DataSource);
+    var path = Path.Combine(string.IsNullOrWhiteSpace(dir) ? "data" : dir, "elsa.db");
+    return $"Data Source={path}";
+}
 
 // The serializable run state + the live (non-serializable) services half are both scoped, so each run's
 // DI scope gets its own pair: the runner seeds them, the Elsa activities resolve them from their context.

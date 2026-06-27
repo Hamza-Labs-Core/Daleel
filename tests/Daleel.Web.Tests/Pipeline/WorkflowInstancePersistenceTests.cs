@@ -3,45 +3,60 @@ using System.Text.Json;
 using Daleel.Agent;
 using Daleel.Core.Caching;
 using Daleel.Core.Llm;
-using Daleel.Web.Conversation;
 using Daleel.Web.Pipeline;
 using Daleel.Web.Profiles;
+using Elsa.EntityFrameworkCore.Extensions;
+using Elsa.EntityFrameworkCore.Modules.Management;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Management;
 using Elsa.Workflows.Management.Filters;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Daleel.Web.Tests.Pipeline;
 
 /// <summary>
-/// Proves the persistence wiring the admin workflows page depends on: with Elsa's workflow-management
-/// feature enabled, a completed <see cref="SearchWorkflow"/> run can be persisted as a queryable instance,
-/// and the run summary we stamp into <c>WorkflowState.Properties</c> survives the round-trip. This is what
-/// the old startup assertion forbade — it's safe now that the state carries no live references.
+/// Proves the durable-persistence wiring the admin workflows page depends on: with Elsa's
+/// workflow-management feature on the EF Core SQLite provider, a completed <see cref="SearchWorkflow"/> run
+/// is persisted as a queryable instance (after the provider migrations create the schema), and the run
+/// summary we stamp into <c>WorkflowState.Properties</c> survives the round-trip. The production app uses
+/// the same EF path — Postgres when configured, this SQLite provider otherwise.
 /// </summary>
-public class WorkflowInstancePersistenceTests
+public class WorkflowInstancePersistenceTests : IDisposable
 {
     private const string StrategyJson =
         """{ "queryType": "General", "subject": "tea", "webQueries": [], "shoppingQueries": [], "reasoning": "n/a" }""";
 
+    // A unique SQLite file per test run so the EF schema + rows are isolated and don't leak across runs.
+    private readonly string _dbPath = Path.Combine(Path.GetTempPath(), $"elsa-test-{Guid.NewGuid():N}.db");
+
     [Fact]
-    public async Task CompletedRun_IsPersisted_AndSummaryRoundTrips()
+    public async Task CompletedRun_IsPersistedToEfStore_AndSummaryRoundTrips()
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddElsa(elsa =>
         {
             elsa.AddActivitiesFrom<SearchWorkflow>();
-            elsa.UseWorkflowManagement();
+            elsa.UseWorkflowManagement(management =>
+                management.UseEntityFrameworkCore(ef => ef.UseSqlite($"Data Source={_dbPath}")));
         });
         services.AddScoped<SearchPipelineState>();
         services.AddScoped<SearchPipelineServices>();
         services.AddSingleton<ICacheStore, InMemoryCache>();
         services.AddSingleton(new ProfileOptions());
         using var provider = services.BuildServiceProvider();
+
+        // A bare ServiceProvider doesn't start hosted services, so apply the Elsa-shipped provider
+        // migrations by hand — exactly what RunMigrations does automatically at real app startup.
+        await using (var db = await provider.GetRequiredService<IDbContextFactory<ManagementElsaDbContext>>()
+                         .CreateDbContextAsync())
+        {
+            await db.Database.MigrateAsync();
+        }
 
         string instanceId;
         using (var scope = provider.CreateScope())
@@ -58,7 +73,7 @@ public class WorkflowInstancePersistenceTests
             var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: default);
             run.WorkflowState.Status.Should().Be(WorkflowStatus.Finished);
 
-            // Stamp the run summary the admin page reads back, then persist the instance.
+            // Stamp the run summary the admin page reads back, then persist the instance to the EF store.
             run.WorkflowState.Properties[WorkflowRunSummary.PropertyKey] =
                 JsonSerializer.Serialize(WorkflowRunSummary.From(state));
             var manager = scope.ServiceProvider.GetRequiredService<IWorkflowInstanceManager>();
@@ -66,10 +81,10 @@ public class WorkflowInstancePersistenceTests
             instanceId = instance.Id;
         }
 
-        // A fresh scope (as the admin page would) can query the persisted instance back.
+        // A fresh scope (as the admin page would) reads the persisted instance back out of SQLite.
         var store = provider.GetRequiredService<IWorkflowInstanceStore>();
         var found = await store.FindAsync(new WorkflowInstanceFilter { Id = instanceId }, default);
-        found.Should().NotBeNull("the completed run is persisted to the instance store");
+        found.Should().NotBeNull("the completed run is persisted to the EF instance store");
         found!.Status.Should().Be(WorkflowStatus.Finished);
 
         var json = (found.WorkflowState.Properties[WorkflowRunSummary.PropertyKey] as JsonElement?)?.GetString()
@@ -79,6 +94,11 @@ public class WorkflowInstancePersistenceTests
         summary!.Query.Should().Be("tell me about tea");
         summary.Geo.Should().Be("jordan");
         summary.ResultType.Should().Be("ask");
+    }
+
+    public void Dispose()
+    {
+        try { if (File.Exists(_dbPath)) File.Delete(_dbPath); } catch { /* best-effort temp cleanup */ }
     }
 
     private sealed class FixedLlm : ILlmClient
