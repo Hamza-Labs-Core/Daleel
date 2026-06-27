@@ -1,4 +1,5 @@
 using Amazon.S3;
+using Amazon.S3.Model;
 using Daleel.Web.Storage;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -81,5 +82,60 @@ public class R2StorageServiceTests
         var a = new Uri("https://cdn/a.jpg");
         var b = new Uri("https://cdn/b.jpg");
         R2StorageService.BuildKey("p", a.ToString(), a).Should().NotBe(R2StorageService.BuildKey("p", b.ToString(), b));
+    }
+
+    [Fact]
+    public async Task NullService_DataViewerMethods_AreEmptyAndNull()
+    {
+        var svc = new NullR2StorageService();
+        (await svc.ListObjectsAsync("site-data/")).Should().BeSameAs(R2Listing.Empty);
+        (await svc.ReadTextAsync("site-data/x.json")).Should().BeNull();
+        svc.DownloadUrl("site-data/x.json").Should().BeNull();
+    }
+
+    [Fact]
+    public void DownloadUrl_OnConfiguredService_IsPresignedAndScopedToKey()
+    {
+        using var svc = MakeService();
+        var url = svc.DownloadUrl("brand-data/acme/logo.png");
+
+        url.Should().NotBeNull();
+        url!.Should().Contain("brand-data/acme/logo.png")
+            .And.Contain("X-Amz-Signature"); // SigV4 query-string presign
+    }
+
+    [Fact]
+    public void MapListing_FoldsCommonPrefixesAndDropsTheFolderMarkerObject()
+    {
+        var lastMod = new DateTime(2026, 6, 1, 12, 0, 0, DateTimeKind.Utc);
+        var response = new ListObjectsV2Response
+        {
+            // The zero-byte object whose key equals the prefix is R2's "folder marker" — it must not
+            // appear as a file in the listing.
+            S3Objects = new List<S3Object>
+            {
+                new() { Key = "site-data/", Size = 0, LastModified = lastMod },
+                new() { Key = "site-data/specs.json", Size = 2048, LastModified = lastMod },
+            },
+            CommonPrefixes = new List<string> { "site-data/lg/", "site-data/samsung/" },
+            IsTruncated = true,
+            NextContinuationToken = "next-page"
+        };
+
+        var listing = R2StorageService.MapListing(response, "site-data/");
+
+        listing.Prefixes.Should().ContainInOrder("site-data/lg/", "site-data/samsung/");
+        listing.Objects.Should().ContainSingle();
+        listing.Objects[0].Key.Should().Be("site-data/specs.json");
+        listing.Objects[0].Size.Should().Be(2048);
+        listing.Objects[0].LastModified.Offset.Should().Be(TimeSpan.Zero); // pinned to UTC
+        listing.NextContinuationToken.Should().Be("next-page");
+    }
+
+    [Fact]
+    public void MapListing_WhenNotTruncated_HasNoContinuationToken()
+    {
+        var response = new ListObjectsV2Response { IsTruncated = false, NextContinuationToken = "ignored" };
+        R2StorageService.MapListing(response, null).NextContinuationToken.Should().BeNull();
     }
 }
