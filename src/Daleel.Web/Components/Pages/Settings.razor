@@ -5,8 +5,10 @@
 @inject ICurrentUser CurrentUser
 @inject IQuotaService Quota
 @inject IStringLocalizer<SharedResource> L
+@inject UserManager<ApplicationUser> Users
 @using Daleel.Core.Moderation
 @using Daleel.Web.Data
+@using Microsoft.AspNetCore.Identity
 
 <PageTitle>دليل · Settings</PageTitle>
 
@@ -104,6 +106,15 @@
                        Label="@(_dark ? L["Settings.DarkTheme"] : L["Settings.LightTheme"])"
                        ThumbIcon="@(_dark ? Icons.Material.Filled.DarkMode : Icons.Material.Filled.LightMode)" />
 
+            @if (_hasEmail)
+            {
+                <MudDivider Class="my-4" />
+                <MudSwitch T="bool" Value="_emailResults" ValueChanged="OnEmailResultsChanged" Color="Color.Primary"
+                           Label="@L["Settings.EmailResults"]"
+                           ThumbIcon="@Icons.Material.Filled.Email" />
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Settings.EmailResultsHelp"]</MudText>
+            }
+
             <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-4">
                 @L["Settings.PreferencesNote"]
             </MudAlert>
@@ -180,6 +191,9 @@
     private bool _blurImages = true;
     private bool _haramBlurPrompt = true;
     private List<string> _trustedDomains = new();
+    private bool _hasEmail;
+    private bool _emailResults = true;
+    private ApplicationUser? _user;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -201,6 +215,12 @@
         if (userId is not null)
         {
             _credits = await Quota.GetStatusAsync(userId, _isAdmin);
+            _user = await Users.FindByIdAsync(userId);
+            if (_user is not null)
+            {
+                _hasEmail = !string.IsNullOrWhiteSpace(_user.Email);
+                _emailResults = _user.EmailSearchResults;
+            }
         }
         _strictness = (await Store.GetAsync("filter.strictness")) switch
         {
@@ -298,5 +318,20 @@
     {
         _trustedDomains.Remove(domain);
         await Store.SetAsync("img.trusted", string.Join(",", _trustedDomains));
+    }
+
+    private async Task OnEmailResultsChanged(bool value)
+    {
+        _emailResults = value;
+        if (_user is null)
+        {
+            return;
+        }
+
+        // Server-side preference (read by the background search worker), so it persists via the user row.
+        _user.EmailSearchResults = value;
+        await Users.UpdateAsync(_user);
+        Snackbar.Add(value ? L["Settings.Snack.EmailResultsOn"] : L["Settings.Snack.EmailResultsOff"],
+            value ? Severity.Success : Severity.Info);
     }
 }

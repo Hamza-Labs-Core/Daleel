@@ -70,6 +70,13 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             v => v.ToUnixTimeMilliseconds(),
             v => DateTimeOffset.FromUnixTimeMilliseconds(v));
 
+        // Search-result emails are opt-out: default the column to true so existing accounts (and any
+        // insert that doesn't set it) are opted in. The C# initializer handles new entities; this SQL
+        // default backfills the column when the migration adds it to the existing AspNetUsers rows.
+        builder.Entity<ApplicationUser>()
+            .Property(u => u.EmailSearchResults)
+            .HasDefaultValue(true);
+
         builder.Entity<Brand>(e =>
         {
             // Upsert/lookup is an exact match on the normalized name, so it's unique + indexed.
