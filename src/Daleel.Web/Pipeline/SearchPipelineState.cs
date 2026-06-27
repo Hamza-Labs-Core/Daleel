@@ -1,5 +1,5 @@
+using System.Text.Json.Serialization;
 using Daleel.Agent;
-using Daleel.Core.Caching;
 using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
@@ -8,41 +8,43 @@ using Daleel.Web.Events;
 namespace Daleel.Web.Pipeline;
 
 /// <summary>
-/// The mutable state that flows through the Elsa <see cref="SearchWorkflow"/>. Registered scoped and
-/// shared by reference with the activities (Elsa runs them in the caller's DI scope), so the heavy
-/// domain objects — the gathered bundle, the agent answer — never have to round-trip through Elsa's
-/// serialized WorkflowState. The <see cref="WorkflowSearchRunner"/> seeds the inputs, runs the
-/// workflow, then reads the outputs back off this same instance.
+/// The serializable state that flows through the Elsa <see cref="SearchWorkflow"/>: the query inputs, the
+/// intermediate domain objects each activity fills in, and the outputs the runner reads back. Every member
+/// is plain data (primitives, strings, records, lists) — no services, delegates or other live references —
+/// so Elsa can persist and resume it. The live, non-serializable half (the agent, the cache, the progress
+/// sink) lives in <see cref="SearchPipelineServices"/>, resolved separately from DI by each activity.
 /// </summary>
 /// <remarks>
-/// ⚠️ INVARIANT — NEVER PERSIST OR SUSPEND THIS WORKFLOW. <see cref="Agent"/> is a live service and
-/// <see cref="Progress"/> is a delegate; neither is serializable. This design works only because Elsa
-/// is registered core-only with no persistence and the workflow runs to completion in one pass. The
-/// moment an Elsa bookmark/Delay/suspend-resume or instance-store persistence is introduced, the
-/// workflow would resume with a null <see cref="Agent"/>/<see cref="Progress"/> and silently emit empty
-/// results with no error. Program.cs asserts no Elsa persistence module is registered to enforce this.
+/// Registered <c>Scoped</c>; <see cref="Conversation.WorkflowSearchRunner"/> seeds the inputs on a per-run
+/// instance, runs the workflow, then reads the outputs back off it. Because nothing here is a live
+/// reference, the workflow is safe to persist/suspend — the runner additionally hands a snapshot of this
+/// state to Elsa's workflow-instance store so the admin workflows page can replay completed runs.
 /// </remarks>
 public sealed class SearchPipelineState
 {
     // ── Inputs (seeded before the run) ───────────────────────────────────────────
-    public AgentService Agent { get; set; } = default!;
     public string Query { get; set; } = string.Empty;
     public string Geo { get; set; } = "jordan";
     public string Language { get; set; } = "en";
     public string ResultKey { get; set; } = string.Empty;
-    public ICacheStore? Cache { get; set; }
     public TimeSpan CacheTtl { get; set; } = TimeSpan.FromDays(30);
-    public Action<string>? Progress { get; set; }
 
     /// <summary>Correlation id (the SearchJob id) stamped onto every recorded pipeline event.</summary>
     public string? SearchId { get; set; }
+
+    // ── Timing (for the persisted instance + admin workflows page) ───────────────
+    /// <summary>When the run was seeded — the workflow's effective start.</summary>
+    public DateTimeOffset? StartedAt { get; set; }
+
+    /// <summary>When the run finished assembling its result (set by the terminal activity).</summary>
+    public DateTimeOffset? CompletedAt { get; set; }
 
     /// <summary>
     /// Buffer of non-provider pipeline events (cache hits/misses, profile lookups) recorded by the
     /// activities. Provider calls are captured separately via the API-call collector. The runner
     /// flushes both to the event store at the end of the run.
     /// </summary>
-    public List<PipelineEvent> Events { get; } = new();
+    public List<PipelineEvent> Events { get; init; } = new();
 
     // ── Intermediate results (filled by activities) ──────────────────────────────
     public GeoProfile? GeoProfile { get; set; }
@@ -71,20 +73,8 @@ public sealed class SearchPipelineState
     public string FilteredCategories { get; set; } = string.Empty;
     public int ResultCount { get; set; }
 
+    [JsonIgnore]
     public bool IsProductQuery => Strategy?.QueryType == QueryType.ProductResearch;
-
-    /// <summary>Emits a plain, step-less progress line (used for non-localized/legacy text).</summary>
-    public void Log(string message) => Progress?.Invoke(message);
-
-    /// <summary>
-    /// Emits a structured progress signal: advances the UI stepper to <paramref name="step"/> and
-    /// supplies a localization <paramref name="key"/> (+ optional format args) the client resolves in
-    /// the viewer's own culture. Encoded into the same string channel — see <see cref="SearchProgressSignal"/>.
-    /// An arg of the form <c>$Some.Resource.Key</c> tells the client to localize that arg before
-    /// formatting (used for the query-type noun, which is itself translatable).
-    /// </summary>
-    public void Report(SearchStep step, string key, params object?[] args) =>
-        Progress?.Invoke(SearchProgressSignal.Encode(step, key, args));
 
     /// <summary>Buffers a categorized pipeline event (cache/profile/…) for the event store.</summary>
     public void RecordEvent(

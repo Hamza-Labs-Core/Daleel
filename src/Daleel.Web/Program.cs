@@ -272,11 +272,15 @@ if (elsaPersistence is not null)
         "the pipeline to route serializable state through Elsa Variables before enabling it.");
 }
 
+// The serializable run state + the live (non-serializable) services half are both scoped, so each run's
+// DI scope gets its own pair: the runner seeds them, the Elsa activities resolve them from their context.
 builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineServices>();
 // Per-entity sub-workflow states — scoped so each dispatched child (in its own DI scope) gets a fresh one.
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.BrandResearchState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();

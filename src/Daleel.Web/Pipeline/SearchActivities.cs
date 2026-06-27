@@ -26,19 +26,20 @@ public sealed class ParseQueryActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
-        state.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
+        var services = context.GetRequiredService<SearchPipelineServices>();
+        services.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
         // The query itself is the strongest market signal ("AC in Dubai" → UAE), so it overrides the
         // stored/auto-detected default. Fall back to the request's geo when the query names no market.
         state.GeoProfile = GeoProfiles.DetectInText(state.Query) ?? GeoProfiles.ResolveOrDefault(state.Geo);
         state.Geo = state.GeoProfile.Key;
-        state.Report(SearchStep.Analyzing, "Progress.Msg.Market", state.GeoProfile.Country);
-        state.Strategy = await state.Agent.PlanAsync(
+        services.Report(SearchStep.Analyzing, "Progress.Msg.Market", state.GeoProfile.Country);
+        state.Strategy = await services.Agent.PlanAsync(
             PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken);
 
         var subject = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
         // The query-type noun is itself translatable: passing it as a "$"-prefixed resource key tells
         // the UI to localize it before slotting it into the "Looking for {0}: {1}" line.
-        state.Report(SearchStep.Analyzing, "Progress.Msg.LookingFor", "$" + NounKey(state.Strategy.QueryType), subject);
+        services.Report(SearchStep.Analyzing, "Progress.Msg.LookingFor", "$" + NounKey(state.Strategy.QueryType), subject);
     }
 
     /// <summary>Resource key for the friendly query-type noun, localized client-side.</summary>
@@ -61,15 +62,16 @@ public sealed class CheckCacheActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
-        if (state.Cache is null)
+        var services = context.GetRequiredService<SearchPipelineServices>();
+        if (services.Cache is null)
         {
             return;
         }
 
-        state.Report(SearchStep.CheckingVault, "Progress.Msg.Vault");
+        services.Report(SearchStep.CheckingVault, "Progress.Msg.Vault");
         try
         {
-            var payload = await state.Cache.GetAsync(state.ResultKey, context.CancellationToken);
+            var payload = await services.Cache.GetAsync(state.ResultKey, context.CancellationToken);
             if (payload is null)
             {
                 state.RecordEvent(EventCategory.Cache, "cache.miss", "cache");
@@ -85,7 +87,7 @@ public sealed class CheckCacheActivity : CodeActivity
                 state.FilteredCount = cached.FilteredCount;
                 state.FilteredCategories = cached.FilteredCategories ?? string.Empty;
                 state.RecordEvent(EventCategory.Cache, "cache.hit", "cache");
-                state.Report(SearchStep.CheckingVault, "Progress.Msg.CacheHit");
+                services.Report(SearchStep.CheckingVault, "Progress.Msg.CacheHit");
             }
         }
         catch (OperationCanceledException)
@@ -111,6 +113,7 @@ public sealed class AnalyzeMarketActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache || !state.IsProductQuery || state.GeoProfile is null || state.Strategy is null)
         {
             return;
@@ -118,10 +121,10 @@ public sealed class AnalyzeMarketActivity : CodeActivity
 
         var category = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
         // "Analyzing AC market requirements…" — surface the up-front reasoning to the user.
-        state.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
-        state.Log($"Analyzing {category} market requirements…");
+        services.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
+        services.Log($"Analyzing {category} market requirements…");
 
-        var intel = await state.Agent.AnalyzeCategoryAsync(category, state.GeoProfile, context.CancellationToken);
+        var intel = await services.Agent.AnalyzeCategoryAsync(category, state.GeoProfile, context.CancellationToken);
         state.Intelligence = intel;
 
         if (intel is { IsEmpty: false })
@@ -129,7 +132,7 @@ public sealed class AnalyzeMarketActivity : CodeActivity
             // "Looking for electronics and HVAC stores…"
             if (intel.RelevantStoreTypes.Count > 0)
             {
-                state.Log($"Looking for {string.Join(", ", intel.RelevantStoreTypes.Take(3))}…");
+                services.Log($"Looking for {string.Join(", ", intel.RelevantStoreTypes.Take(3))}…");
             }
 
             // "Extracting BTU, energy rating, cooling specs…"
@@ -146,7 +149,7 @@ public sealed class AnalyzeMarketActivity : CodeActivity
 
                 if (keySpecs.Count > 0)
                 {
-                    state.Log($"Extracting {string.Join(", ", keySpecs.Take(4))}…");
+                    services.Log($"Extracting {string.Join(", ", keySpecs.Take(4))}…");
                 }
             }
 
@@ -169,16 +172,17 @@ public sealed class GatherSourcesActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache || state.Strategy is null || state.GeoProfile is null)
         {
             return;
         }
 
-        state.Report(SearchStep.SearchingWeb, "Progress.Msg.Expanding");
-        state.Bundle = await state.Agent.GatherAsync(state.Strategy, state.GeoProfile, context.CancellationToken);
+        services.Report(SearchStep.SearchingWeb, "Progress.Msg.Expanding");
+        state.Bundle = await services.Agent.GatherAsync(state.Strategy, state.GeoProfile, context.CancellationToken);
 
         var b = state.Bundle;
-        state.Report(SearchStep.SearchingWeb, "Progress.Msg.Gathered",
+        services.Report(SearchStep.SearchingWeb, "Progress.Msg.Gathered",
             b.WebResults.Count, b.ShoppingResults.Count, b.Stores.Count);
     }
 }
@@ -190,29 +194,30 @@ public sealed class ExtractProductsActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache || state.Bundle is null || state.GeoProfile is null)
         {
             return;
         }
 
-        state.Report(SearchStep.ExtractingProducts, "Progress.Msg.Reading", state.Bundle.Sources.Count);
+        services.Report(SearchStep.ExtractingProducts, "Progress.Msg.Reading", state.Bundle.Sources.Count);
         var system = state.IsProductQuery ? PromptTemplates.ProductAnalystSystem : null;
-        state.Summary = await state.Agent.AnalyzeAsync(
+        state.Summary = await services.Agent.AnalyzeAsync(
             state.Query, state.GeoProfile, state.Bundle, context.CancellationToken, system);
 
         if (state.IsProductQuery)
         {
-            state.Report(SearchStep.ExtractingProducts, "Progress.Msg.Identifying");
+            services.Report(SearchStep.ExtractingProducts, "Progress.Msg.Identifying");
             var subject = state.Strategy!.Subject is { Length: > 0 } s ? s : state.Query;
             // Pass the up-front category intelligence so extraction is schema-aware (fills the spec
             // keys that matter for this product type) and the schema rides along onto the result.
-            state.Products = await state.Agent.BuildProductSearchResultAsync(
+            state.Products = await services.Agent.BuildProductSearchResultAsync(
                 subject, state.GeoProfile, state.Bundle, state.Summary, context.CancellationToken,
                 intelligence: state.Intelligence);
 
             if (state.Products is { } p)
             {
-                state.Report(SearchStep.ExtractingProducts, "Progress.Msg.Extracted", p.ProductCount, p.BrandCount);
+                services.Report(SearchStep.ExtractingProducts, "Progress.Msg.Extracted", p.ProductCount, p.BrandCount);
             }
         }
     }
@@ -234,6 +239,7 @@ public sealed class DispatchBrandWorkflowsActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache || state.Products is not { Brands.Count: > 0 } products)
         {
             return;
@@ -244,19 +250,20 @@ public sealed class DispatchBrandWorkflowsActivity : CodeActivity
         var rest = products.Brands.Skip(MaxBrands).ToList();
 
         // Advance the stepper to the brand-profile phase (PR #10's animation) before fanning out.
-        state.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", dispatched.Count, products.Stores.Count);
+        services.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", dispatched.Count, products.Stores.Count);
         var results = await SubWorkflowDispatcher
             .RunManyAsync<BrandResearchWorkflow, BrandResearchState, BrandInfo>(
                 scopeFactory, dispatched,
-                (s, brand) =>
+                (s, svc, brand) =>
                 {
-                    s.Agent = state.Agent;
+                    svc.Agent = services.Agent;
+                    svc.Progress = services.Progress;
                     s.Geo = state.Geo;
                     s.SearchId = state.SearchId;
-                    s.Progress = state.Progress;
                     s.Brand = brand;
                     s.Result = brand;
                 },
+                services.Progress,
                 SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
 
         var merged = results.Select(r => r.Result).Concat(rest).ToList();
@@ -269,7 +276,7 @@ public sealed class DispatchBrandWorkflowsActivity : CodeActivity
         var enriched = merged.Count(b => b.Reputation is not null);
         if (enriched > 0)
         {
-            state.Log($"Enriched {enriched} brand(s).");
+            services.Log($"Enriched {enriched} brand(s).");
         }
     }
 }
@@ -284,6 +291,7 @@ public sealed class DispatchStoreWorkflowsActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache || state.Products is not { Stores.Count: > 0 } products)
         {
             return;
@@ -294,19 +302,20 @@ public sealed class DispatchStoreWorkflowsActivity : CodeActivity
         var rest = products.Stores.Skip(MaxStores).ToList();
 
         // Advance the stepper to the store-verification phase (PR #10's animation) before fanning out.
-        state.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", dispatched.Count);
+        services.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", dispatched.Count);
         var results = await SubWorkflowDispatcher
             .RunManyAsync<StoreResearchWorkflow, StoreResearchState, StoreInfo>(
                 scopeFactory, dispatched,
-                (s, store) =>
+                (s, svc, store) =>
                 {
-                    s.Agent = state.Agent;
+                    svc.Agent = services.Agent;
+                    svc.Progress = services.Progress;
                     s.Geo = state.Geo;
                     s.SearchId = state.SearchId;
-                    s.Progress = state.Progress;
                     s.Store = store;
                     s.Result = store;
                 },
+                services.Progress,
                 SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
 
         var merged = results.Select(r => r.Result).Concat(rest).ToList();
@@ -319,7 +328,7 @@ public sealed class DispatchStoreWorkflowsActivity : CodeActivity
         var verified = merged.Count(s => s.Rating is not null);
         if (verified > 0)
         {
-            state.Log($"Verified {verified} store(s) on Google Maps.");
+            services.Log($"Verified {verified} store(s) on Google Maps.");
         }
     }
 }
@@ -334,6 +343,7 @@ public sealed class DispatchItemWorkflowsActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache || !state.IsProductQuery || state.Products is not { Models.Count: > 0 } products)
         {
             return;
@@ -343,19 +353,20 @@ public sealed class DispatchItemWorkflowsActivity : CodeActivity
         var dispatched = products.Models.Take(MaxItems).ToList();
         var rest = products.Models.Skip(MaxItems).ToList();
 
-        state.Log($"Deep-diving {dispatched.Count} product(s) in parallel…");
+        services.Log($"Deep-diving {dispatched.Count} product(s) in parallel…");
         var results = await SubWorkflowDispatcher
             .RunManyAsync<ItemDeepDiveWorkflow, ItemDeepDiveState, ProductModel>(
                 scopeFactory, dispatched,
-                (s, model) =>
+                (s, svc, model) =>
                 {
-                    s.Agent = state.Agent;
+                    svc.Agent = services.Agent;
+                    svc.Progress = services.Progress;
                     s.Geo = state.Geo;
                     s.SearchId = state.SearchId;
-                    s.Progress = state.Progress;
                     s.Model = model;
                     s.Result = model;
                 },
+                services.Progress,
                 SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
 
         var merged = results.Select(r => r.Result).Concat(rest).ToList();
@@ -375,6 +386,7 @@ public sealed class AggregateResultsActivity : CodeActivity
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache)
         {
             return ValueTask.CompletedTask;
@@ -396,7 +408,7 @@ public sealed class AggregateResultsActivity : CodeActivity
 
         if (state.Products is { } p)
         {
-            state.Report(SearchStep.ComparingPrices, "Progress.Msg.Ranking", p.ProductCount, p.BrandCount);
+            services.Report(SearchStep.ComparingPrices, "Progress.Msg.Ranking", p.ProductCount, p.BrandCount);
         }
         return ValueTask.CompletedTask;
     }
@@ -409,13 +421,14 @@ public sealed class ModerateContentActivity : CodeActivity
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache)
         {
             return ValueTask.CompletedTask;
         }
 
-        state.Report(SearchStep.ComparingPrices, "Progress.Msg.Reviewing");
-        var audit = state.Agent.ContentFilter.AuditLog;
+        services.Report(SearchStep.ComparingPrices, "Progress.Msg.Reviewing");
+        var audit = services.Agent.ContentFilter.AuditLog;
         state.FilteredCount = audit.Count;
         state.FilteredCategories = string.Join(",", audit
             .Select(a => a.Contains(':') ? a[(a.IndexOf(':') + 1)..] : a)
@@ -431,23 +444,24 @@ public sealed class CacheResultsActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache || state.Answer is null)
         {
             return;
         }
 
-        state.Report(SearchStep.ComparingPrices, "Progress.Msg.Saving");
+        services.Report(SearchStep.ComparingPrices, "Progress.Msg.Saving");
         state.ResultJson = ResultSerialization.Serialize(state.Answer);
         state.ResultType = "ask";
         state.RecordEvent(EventCategory.Cache, "cache.write", "cache");
 
-        if (state.Cache is not null)
+        if (services.Cache is not null)
         {
             try
             {
                 var cached = new CachedSearchResult(
                     state.ResultJson, state.ResultType, state.FilteredCount, state.FilteredCategories);
-                await state.Cache.SetAsync(
+                await services.Cache.SetAsync(
                     state.ResultKey, JsonSerializer.Serialize(cached), state.CacheTtl, context.CancellationToken);
             }
             catch (OperationCanceledException)
@@ -469,17 +483,19 @@ public sealed class ReturnResultsActivity : CodeActivity
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
+        var services = context.GetRequiredService<SearchPipelineServices>();
+        state.CompletedAt = DateTimeOffset.UtcNow;
         if (state.FromCache)
         {
-            state.Report(SearchStep.Done, "Progress.Msg.LoadedSaved");
+            services.Report(SearchStep.Done, "Progress.Msg.LoadedSaved");
         }
         else if (state.Products is { } p && p.ProductCount > 0)
         {
-            state.Report(SearchStep.Done, "Progress.Msg.DoneCount", p.ProductCount, p.BrandCount);
+            services.Report(SearchStep.Done, "Progress.Msg.DoneCount", p.ProductCount, p.BrandCount);
         }
         else
         {
-            state.Report(SearchStep.Done, "Progress.Msg.Done");
+            services.Report(SearchStep.Done, "Progress.Msg.Done");
         }
         return ValueTask.CompletedTask;
     }

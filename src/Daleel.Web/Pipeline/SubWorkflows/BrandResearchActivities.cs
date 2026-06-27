@@ -20,10 +20,11 @@ public sealed class SearchBrandSiteActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         var repo = context.GetRequiredService<IBrandRepository>();
         var options = context.GetRequiredService<ProfileOptions>();
 
-        state.Log($"Finding {state.Brand.Name}'s local site…");
+        services.Log($"Finding {state.Brand.Name}'s local site…");
         state.Existing = await SafeGet(repo, state.Brand.Name, context.CancellationToken);
         if (state.Existing is not null && !state.Existing.IsStale(options.Now(), options.Ttl))
         {
@@ -48,6 +49,7 @@ public sealed class ScrapeBrandCatalogActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         if (state.ResolvedFromCache)
         {
             return; // the fresh saved profile already has the catalogue-derived reputation
@@ -59,7 +61,7 @@ public sealed class ScrapeBrandCatalogActivity : CodeActivity
             return; // no Context.dev/LLM keys — degrade to the (possibly stale) saved profile
         }
 
-        state.Log($"Scraping {state.Brand.Name}'s catalogue via Context.dev…");
+        services.Log($"Scraping {state.Brand.Name}'s catalogue via Context.dev…");
         state.Researched = await SafeResearch(researcher, state.Brand.Name, state.Geo, context.CancellationToken);
         state.RecordEvent(EventCategory.Profile, "profile.brand", "context.dev",
             success: state.Researched is not null,
@@ -86,6 +88,7 @@ public sealed class SynthesizeBrandProfileActivity : CodeActivity
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         var saved = state.Researched ?? state.Existing;
         if (saved is null)
         {
@@ -102,7 +105,7 @@ public sealed class SynthesizeBrandProfileActivity : CodeActivity
             // has no id until SaveBrandProfileActivity persists it — that step backfills it then).
             DbId = saved.Id > 0 ? saved.Id : b.DbId
         };
-        state.Log($"Built reputation profile for {b.Name}.");
+        services.Log($"Built reputation profile for {b.Name}.");
         return ValueTask.CompletedTask;
     }
 
@@ -124,6 +127,7 @@ public sealed class SaveBrandProfileActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         if (state.Researched is null)
         {
             return; // served from cache (or nothing found) — nothing new to persist
@@ -141,7 +145,7 @@ public sealed class SaveBrandProfileActivity : CodeActivity
             {
                 state.Result = state.Result with { DbId = saved.Id };
             }
-            state.Log($"Saved {state.Brand.Name}'s profile.");
+            services.Log($"Saved {state.Brand.Name}'s profile.");
         }
     }
 
@@ -164,6 +168,7 @@ public sealed class DownloadBrandImagesActivity : CodeActivity
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
 
         var images = new[] { state.Result.LogoUrl }
             .Where(u => !string.IsNullOrWhiteSpace(u))
@@ -185,7 +190,7 @@ public sealed class DownloadBrandImagesActivity : CodeActivity
                 ["images"] = images.Count,
                 ["stored"] = false
             });
-        state.Log($"Located {images.Count} image(s) for {state.Brand.Name} (object storage not configured).");
+        services.Log($"Located {images.Count} image(s) for {state.Brand.Name} (object storage not configured).");
         return ValueTask.CompletedTask;
     }
 }

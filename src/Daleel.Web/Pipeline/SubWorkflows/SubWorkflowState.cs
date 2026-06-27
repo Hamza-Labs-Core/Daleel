@@ -1,4 +1,3 @@
-using Daleel.Agent;
 using Daleel.Web.Events;
 
 namespace Daleel.Web.Pipeline.SubWorkflows;
@@ -9,35 +8,21 @@ namespace Daleel.Web.Pipeline.SubWorkflows;
 /// <c>DaleelDbContext</c>, which is what lets the dispatchers fan the sub-workflows out in parallel
 /// without the concurrency hazard the old sequential enrichment loop had to avoid.
 ///
-/// Like <see cref="SearchPipelineState"/>, the state is shared by reference with the activities and
-/// buffers <see cref="PipelineEvent"/>s the parent run flushes to the event store; the dispatcher reads
-/// the finished <c>Result</c> + <c>Events</c> back off the instance after the child workflow completes.
+/// Like <see cref="SearchPipelineState"/>, this holds only serializable data: the live agent + progress
+/// sink moved to <see cref="SubWorkflowServices"/>, resolved from DI alongside the state. The dispatcher
+/// reads the finished <c>Result</c> + <c>Events</c> back off the instance after the child workflow
+/// completes and merges the events into the parent run's buffer.
 /// </summary>
-/// <remarks>
-/// ⚠️ INVARIANT — NEVER PERSIST OR SUSPEND THESE SUB-WORKFLOWS. Like <see cref="SearchPipelineState"/>,
-/// <see cref="Agent"/> is a live service and <see cref="Progress"/> is a delegate — non-serializable and
-/// shared by reference. Safe only because Elsa is core-only with no persistence; a suspend/resume would
-/// resume with a null Agent/Progress and silently produce empty enrichment. Program.cs fails fast if an
-/// Elsa persistence module is registered.
-/// </remarks>
 public abstract class SubWorkflowState
 {
-    /// <summary>The request-scoped agent (page scraping for item deep-dives); shared from the parent run.</summary>
-    public AgentService Agent { get; set; } = default!;
-
     /// <summary>Market key (e.g. "jordan") the parent search resolved.</summary>
     public string Geo { get; set; } = "jordan";
 
     /// <summary>Correlation id (the SearchJob id) stamped onto every recorded event.</summary>
     public string? SearchId { get; set; }
 
-    /// <summary>Progress sink shared from the parent run so sub-workflow steps stream live status.</summary>
-    public Action<string>? Progress { get; set; }
-
     /// <summary>Events buffered by this sub-workflow's activities; merged into the parent run's buffer.</summary>
-    public List<PipelineEvent> Events { get; } = new();
-
-    public void Log(string message) => Progress?.Invoke(message);
+    public List<PipelineEvent> Events { get; init; } = new();
 
     /// <summary>Buffers a categorized pipeline event (profile/extract/places/…) for the event store.</summary>
     public void RecordEvent(

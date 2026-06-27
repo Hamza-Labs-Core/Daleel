@@ -84,15 +84,17 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             // activities resolve that same instance from their execution context.
             using var scope = _scopeFactory.CreateScope();
             var state = scope.ServiceProvider.GetRequiredService<SearchPipelineState>();
-            state.Agent = agent;
+            var services = scope.ServiceProvider.GetRequiredService<SearchPipelineServices>();
             state.Query = job.Query;
             state.Geo = job.Geo;
             state.Language = language;
             state.ResultKey = resultKey;
-            state.Cache = _cache;
             state.CacheTtl = CacheTtl;
-            state.Progress = progress;
             state.SearchId = job.Id.ToString();
+            state.StartedAt = DateTimeOffset.UtcNow;
+            services.Agent = agent;
+            services.Cache = _cache;
+            services.Progress = progress;
             bufferedEvents = state.Events;
 
             var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
