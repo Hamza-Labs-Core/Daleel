@@ -42,8 +42,18 @@ public sealed class SearchEmailNotifier : ISearchEmailNotifier
         _logger = logger;
     }
 
+    /// <summary>
+    /// Upper bound on the whole best-effort notification. Email runs on the search's completion path, and
+    /// <see cref="HttpClient"/>'s default timeout is 100s — without this a slow/unresponsive provider would
+    /// delay the user's result (and credit charge) by that long. A timeout here just logs and returns.
+    /// </summary>
+    private static readonly TimeSpan NotifyBudget = TimeSpan.FromSeconds(15);
+
     public async Task NotifySearchCompletedAsync(SearchJob job, string resultJson, CancellationToken ct = default)
     {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeout.CancelAfter(NotifyBudget);
+        var budgetCt = timeout.Token;
         try
         {
             // No provider configured → nothing to do (and don't bother hitting the DB for the user).
@@ -52,14 +62,15 @@ public sealed class SearchEmailNotifier : ISearchEmailNotifier
                 return;
             }
 
-            var recipient = await _recipients.GetRecipientAsync(job.UserId, ct).ConfigureAwait(false);
+            var recipient = await _recipients.GetRecipientAsync(job.UserId, budgetCt).ConfigureAwait(false);
             if (recipient is null || !recipient.WantsSearchEmails)
             {
                 return; // unknown user, no address, or opted out
             }
 
-            // A non-product / partial result can't be summarised — skip rather than send an empty email.
-            if (ResultSerialization.Deserialize<AgentAnswer>(resultJson) is not { } answer)
+            // A non-product / informational / partial result has nothing to summarise — skip rather than
+            // send an empty "0 products / 0 brands / 0 stores" email.
+            if (ResultSerialization.Deserialize<AgentAnswer>(resultJson) is not { Products: not null } answer)
             {
                 return;
             }
@@ -80,12 +91,13 @@ public sealed class SearchEmailNotifier : ISearchEmailNotifier
                 TextBody = content.TextBody
             };
 
-            await _email.SendAsync(message, ct).ConfigureAwait(false);
+            await _email.SendAsync(message, budgetCt).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             // Best-effort: emailing happens after the search already succeeded, so a failure here (bad
-            // JSON, a culture lookup, the provider) must never surface to the caller.
+            // JSON, a culture lookup, the provider, or exceeding NotifyBudget) must never surface to the
+            // caller.
             _logger.LogWarning(ex, "Search-result email failed for job {JobId}", job.Id);
         }
     }
