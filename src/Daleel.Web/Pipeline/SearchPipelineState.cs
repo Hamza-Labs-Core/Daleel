@@ -8,17 +8,24 @@ using Daleel.Web.Events;
 namespace Daleel.Web.Pipeline;
 
 /// <summary>
-/// The serializable state that flows through the Elsa <see cref="SearchWorkflow"/>: the query inputs, the
+/// The run state that flows through the Elsa <see cref="SearchWorkflow"/>: the query inputs, the
 /// intermediate domain objects each activity fills in, and the outputs the runner reads back. Every member
-/// is plain data (primitives, strings, records, lists) — no services, delegates or other live references —
-/// so Elsa can persist and resume it. The live, non-serializable half (the agent, the cache, the progress
-/// sink) lives in <see cref="SearchPipelineServices"/>, resolved separately from DI by each activity.
+/// is plain data (primitives, strings, records, lists) — no services, delegates or other live references.
+/// The live, non-serializable half (the agent, the cache, the progress sink) lives in
+/// <see cref="SearchPipelineServices"/>, resolved separately from DI by each activity.
 /// </summary>
 /// <remarks>
 /// Registered <c>Scoped</c>; <see cref="Conversation.WorkflowSearchRunner"/> seeds the inputs on a per-run
-/// instance, runs the workflow, then reads the outputs back off it. Because nothing here is a live
-/// reference, the workflow is safe to persist/suspend — the runner additionally hands a snapshot of this
-/// state to Elsa's workflow-instance store so the admin workflows page can replay completed runs.
+/// instance, runs the workflow to completion in a single in-process pass, then reads the outputs back off it.
+/// <para>
+/// This state lives in the DI scope, NOT in Elsa's <c>WorkflowState</c>/<c>Variables</c>, so the workflow is
+/// <strong>not</strong> resumable across a real suspend/bookmark: a resume would build a fresh, blank instance
+/// from a new DI scope and silently emit empty results. Keep every activity synchronous (no Delay/bookmarks).
+/// Making this type plain-data buys one thing — registering Elsa's instance store no longer trips its
+/// state-serialization guard, so the runner can persist a <em>completed-run summary</em>
+/// (<see cref="WorkflowRunSummary"/>) for the admin workflows page. That is persistence of finished runs, not
+/// mid-run suspend/resume.
+/// </para>
 /// </remarks>
 public sealed class SearchPipelineState
 {

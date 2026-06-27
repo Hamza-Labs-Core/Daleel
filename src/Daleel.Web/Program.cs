@@ -295,9 +295,12 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp 
 // IWorkflowRunner, the runner skips its (best-effort) instance save, and the admin workflows page shows a
 // "not configured" notice. If you want instance tracking, configure Postgres.
 //
-// Enabling persistence is safe now (it used to be blocked by a startup assertion): the pipeline no longer
-// shares a live AgentService + progress delegate through SearchPipelineState — those moved to the separate
-// scoped SearchPipelineServices/SubWorkflowServices and never touch the persisted WorkflowState.
+// Registering the instance store is safe now (it used to be blocked by a startup assertion): the pipeline no
+// longer shares a live AgentService + progress delegate through SearchPipelineState — those moved to the
+// separate scoped SearchPipelineServices/SubWorkflowServices and never touch the persisted WorkflowState.
+// NOTE: this enables persisting *completed-run summaries* for the admin page, NOT mid-run suspend/resume. The
+// working run state lives in the DI scope (not WorkflowState), so the workflow must run to completion in one
+// pass — do not add Delay/bookmarks/suspend activities (a resume would see blank state).
 var elsaInstanceConn = Daleel.Web.Events.PostgresConnection.Resolve(builder.Configuration);
 builder.Services.AddElsa(elsa =>
 {
