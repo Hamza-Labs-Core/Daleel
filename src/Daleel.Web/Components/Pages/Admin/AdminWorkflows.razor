@@ -1,0 +1,176 @@
+@page "/admin/workflows"
+@using System.Globalization
+@using System.Text.Json
+@using Daleel.Web.Pipeline
+@using Elsa.Workflows
+@using Elsa.Workflows.Management
+@using Elsa.Workflows.Management.Filters
+@attribute [Authorize(Roles = "Admin")]
+@inject IWorkflowInstanceStore Instances
+@inject IStringLocalizer<SharedResource> L
+
+<PageTitle>دليل · Admin · Workflows</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">@L["Admin.Workflows.Title"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Admin.Workflows.Subtitle"]</MudText>
+
+<div class="d-flex align-center gap-3 mb-3">
+    <MudButton StartIcon="@Icons.Material.Filled.Refresh" Variant="Variant.Outlined" Size="Size.Small"
+               OnClick="ReloadAsync" Disabled="_loading">@L["Admin.Workflows.Refresh"]</MudButton>
+    @if (_loading)
+    {
+        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary" />
+    }
+</div>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">@_error</MudAlert>
+}
+
+@if (!_loading && _rows.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">@L["Admin.Workflows.Empty"]</MudAlert>
+}
+else
+{
+    <MudTable Items="_rows" Dense="true" Hover="true" Bordered="false" Elevation="0" Class="mt-2">
+        <HeaderContent>
+            <MudTh>@L["Admin.Workflows.Col.Status"]</MudTh>
+            <MudTh>@L["Admin.Workflows.Col.Query"]</MudTh>
+            <MudTh>@L["Admin.Workflows.Col.Market"]</MudTh>
+            <MudTh>@L["Admin.Workflows.Col.Result"]</MudTh>
+            <MudTh Style="text-align:end">@L["Admin.Workflows.Col.Items"]</MudTh>
+            <MudTh Style="text-align:end">@L["Admin.Workflows.Col.Filtered"]</MudTh>
+            <MudTh>@L["Admin.Workflows.Col.Cache"]</MudTh>
+            <MudTh>@L["Admin.Workflows.Col.Started"]</MudTh>
+            <MudTh Style="text-align:end">@L["Admin.Workflows.Col.Duration"]</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Status"]">
+                <MudChip T="string" Size="Size.Small" Color="StatusColor(context)" Variant="Variant.Text">
+                    @context.SubStatus
+                </MudChip>
+            </MudTd>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Query"]">
+                <MudText Typo="Typo.body2">@(string.IsNullOrWhiteSpace(context.Summary?.Query) ? "—" : context.Summary!.Query)</MudText>
+            </MudTd>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Market"]">@(context.Summary?.Geo ?? "—")</MudTd>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Result"]">@(context.Summary?.ResultType ?? "—")</MudTd>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Items"]" Style="text-align:end">@(context.Summary?.ResultCount.ToString("N0", CultureInfo.InvariantCulture) ?? "—")</MudTd>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Filtered"]" Style="text-align:end">@(context.Summary?.FilteredCount.ToString("N0", CultureInfo.InvariantCulture) ?? "—")</MudTd>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Cache"]">
+                @if (context.Summary?.FromCache == true)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">@L["Admin.Workflows.CacheHit"]</MudChip>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">—</MudText>
+                }
+            </MudTd>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Started"]">@context.CreatedAt.LocalDateTime.ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</MudTd>
+            <MudTd DataLabel="@L["Admin.Workflows.Col.Duration"]" Style="text-align:end">@Duration(context)</MudTd>
+        </RowTemplate>
+    </MudTable>
+    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+        @string.Format(CultureInfo.InvariantCulture, L["Admin.Workflows.Count"], _rows.Count)
+    </MudText>
+}
+
+@code {
+    /// <summary>Most-recent runs surfaced; the in-memory store is unbounded so we cap the view.</summary>
+    private const int MaxRows = 200;
+
+    private bool _loading;
+    private string? _error;
+    private List<Row> _rows = new();
+
+    // Deferred to OnAfterRenderAsync like the other admin pages: the store read can't be awaited safely
+    // during the prerender pass.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await ReloadAsync();
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            // The default in-memory store returns every instance; sort newest-first and cap in memory.
+            var instances = await Instances.FindManyAsync(new WorkflowInstanceFilter(), CancellationToken.None);
+            _rows = instances
+                .OrderByDescending(i => i.CreatedAt)
+                .Take(MaxRows)
+                .Select(Row.From)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _rows = new();
+        }
+        _loading = false;
+        StateHasChanged();
+    }
+
+    private static Color StatusColor(Row r) => r.SubStatus switch
+    {
+        WorkflowSubStatus.Finished => Color.Success,
+        WorkflowSubStatus.Faulted => Color.Error,
+        WorkflowSubStatus.Cancelled => Color.Warning,
+        _ => Color.Default
+    };
+
+    // Wall-clock from creation to finish; "—" while still running (no FinishedAt yet).
+    private string Duration(Row r)
+    {
+        if (r.FinishedAt is not { } finished)
+        {
+            return "—";
+        }
+
+        var seconds = (finished - r.CreatedAt).TotalSeconds;
+        return seconds < 0 ? "—" : seconds.ToString("0.0", CultureInfo.InvariantCulture) + "s";
+    }
+
+    /// <summary>Flattened view of one persisted workflow instance + its decoded run summary.</summary>
+    private sealed record Row(
+        WorkflowStatus Status,
+        WorkflowSubStatus SubStatus,
+        DateTimeOffset CreatedAt,
+        DateTimeOffset? FinishedAt,
+        WorkflowRunSummary? Summary)
+    {
+        public static Row From(Elsa.Workflows.Management.Entities.WorkflowInstance i) => new(
+            i.Status, i.SubStatus, i.CreatedAt, i.FinishedAt, DecodeSummary(i));
+
+        // The runner stamps the summary JSON into WorkflowState.Properties; depending on the persistence
+        // provider it round-trips as a raw string or a JsonElement, so handle both.
+        private static WorkflowRunSummary? DecodeSummary(Elsa.Workflows.Management.Entities.WorkflowInstance i)
+        {
+            if (i.WorkflowState.Properties is not { } props ||
+                !props.TryGetValue(WorkflowRunSummary.PropertyKey, out var raw) || raw is null)
+            {
+                return null;
+            }
+
+            try
+            {
+                var json = raw as string ?? (raw is JsonElement je ? je.GetString() : raw.ToString());
+                return string.IsNullOrEmpty(json) ? null : JsonSerializer.Deserialize<WorkflowRunSummary>(json);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+}

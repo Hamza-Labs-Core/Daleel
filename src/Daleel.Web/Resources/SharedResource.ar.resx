@@ -478,6 +478,22 @@
   <data name="Admin.Nav.Plans" xml:space="preserve"><value>الباقات</value></data>
   <data name="Admin.Nav.Analytics" xml:space="preserve"><value>التحليلات</value></data>
   <data name="Admin.Nav.Usage" xml:space="preserve"><value>الاستخدام</value></data>
+  <data name="Admin.Nav.Workflows" xml:space="preserve"><value>سير العمل</value></data>
+  <data name="Admin.Workflows.Title" xml:space="preserve"><value>عمليات سير العمل</value></data>
+  <data name="Admin.Workflows.Subtitle" xml:space="preserve"><value>أحدث عمليات تشغيل خط البحث، متتبَّعة عبر مخزن مثيلات Elsa.</value></data>
+  <data name="Admin.Workflows.Refresh" xml:space="preserve"><value>تحديث</value></data>
+  <data name="Admin.Workflows.Empty" xml:space="preserve"><value>لم تُسجَّل أي عمليات سير عمل بعد.</value></data>
+  <data name="Admin.Workflows.CacheHit" xml:space="preserve"><value>مخبأ</value></data>
+  <data name="Admin.Workflows.Count" xml:space="preserve"><value>عرض {0} عملية.</value></data>
+  <data name="Admin.Workflows.Col.Status" xml:space="preserve"><value>الحالة</value></data>
+  <data name="Admin.Workflows.Col.Query" xml:space="preserve"><value>الاستعلام</value></data>
+  <data name="Admin.Workflows.Col.Market" xml:space="preserve"><value>السوق</value></data>
+  <data name="Admin.Workflows.Col.Result" xml:space="preserve"><value>النتيجة</value></data>
+  <data name="Admin.Workflows.Col.Items" xml:space="preserve"><value>العناصر</value></data>
+  <data name="Admin.Workflows.Col.Filtered" xml:space="preserve"><value>مُصفّى</value></data>
+  <data name="Admin.Workflows.Col.Cache" xml:space="preserve"><value>التخزين المؤقت</value></data>
+  <data name="Admin.Workflows.Col.Started" xml:space="preserve"><value>بدأ</value></data>
+  <data name="Admin.Workflows.Col.Duration" xml:space="preserve"><value>المدة</value></data>
   <data name="Admin.Nav.Moderation" xml:space="preserve"><value>الإشراف</value></data>
   <data name="Admin.Nav.Filtered" xml:space="preserve"><value>المحتوى المحجوب</value></data>
   <data name="Admin.Nav.Brands" xml:space="preserve"><value>العلامات التجارية</value></data>

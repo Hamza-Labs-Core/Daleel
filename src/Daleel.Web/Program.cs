@@ -248,29 +248,26 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationBroadcaster>(
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
 // The search pipeline runs as an in-process Elsa 3 workflow of CodeActivity steps (plan → cache →
 // gather → extract → dispatch brand/store/item sub-workflows → aggregate → moderate → cache → return).
-// Elsa is registered core-only (no Server/Studio/EF persistence), and the workflow runner replaces the
-// old direct-AskAsync runner. AddActivitiesFrom scans the whole assembly, so the sub-workflow activities
-// under Pipeline/SubWorkflows are discovered automatically.
-builder.Services.AddElsa(elsa => elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>());
-
-// INVARIANT: the search workflow shares live, non-serializable state (an AgentService, an Action<string>
-// progress delegate) by reference through the scoped SearchPipelineState/SubWorkflowState — see their
-// remarks. This is safe ONLY because Elsa is registered core-only and the workflow never suspends. If an
-// Elsa persistence / runtime instance-store module is ever added, a suspend/resume would deserialize the
-// state with a null Agent + Progress and silently produce empty results. Fail fast at startup instead.
-var elsaPersistence = builder.Services.FirstOrDefault(d =>
-    d.ServiceType.FullName is { } n &&
-    (n.Contains("IWorkflowInstanceStore", StringComparison.Ordinal) ||
-     n.Contains("IWorkflowStateStore", StringComparison.Ordinal) ||
-     n.Contains("Elsa.Persistence", StringComparison.Ordinal)));
-if (elsaPersistence is not null)
+// AddActivitiesFrom scans the whole assembly, so the sub-workflow activities under Pipeline/SubWorkflows
+// are discovered automatically.
+//
+// Persistence is ENABLED via the workflow-management feature: it registers IWorkflowInstanceStore +
+// IWorkflowInstanceManager backed by the default in-memory store (no EF/migrations). This used to be
+// forbidden — a startup assertion failed fast if any persistence module was registered — because the
+// pipeline shared a live AgentService + progress delegate by reference through SearchPipelineState, which
+// a suspend/resume would have deserialized as null. That coupling is gone: the live, non-serializable
+// half now lives in the separate scoped SearchPipelineServices/SubWorkflowServices and never touches
+// WorkflowState, so persisting completed instances is safe. WorkflowSearchRunner saves each finished run
+// as an instance the admin workflows page queries.
+//
+// CAVEAT: the in-memory instance store is unbounded (instances accumulate for the process lifetime). A
+// production deployment should swap in a durable provider (Elsa.EntityFrameworkCore.Sqlite) or add a
+// retention sweep before relying on it long-term.
+builder.Services.AddElsa(elsa =>
 {
-    throw new InvalidOperationException(
-        $"Elsa persistence module '{elsaPersistence.ServiceType.FullName}' is registered, but the search " +
-        "pipeline shares non-serializable state (AgentService + progress delegate) by reference and must " +
-        "never be persisted/suspended — see SearchPipelineState. Remove the persistence module, or refactor " +
-        "the pipeline to route serializable state through Elsa Variables before enabling it.");
-}
+    elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>();
+    elsa.UseWorkflowManagement();
+});
 
 // The serializable run state + the live (non-serializable) services half are both scoped, so each run's
 // DI scope gets its own pair: the runner seeds them, the Elsa activities resolve them from their context.
