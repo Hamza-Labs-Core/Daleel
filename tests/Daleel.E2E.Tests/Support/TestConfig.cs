@@ -7,22 +7,27 @@ namespace Daleel.E2E.Tests.Support;
 /// </summary>
 public static class TestConfig
 {
+    /// <summary>The QA deployment URL — a convenient target for intentional E2E runs.
+    /// Set <c>E2E_BASE_URL</c> to this (or any other host) to run the suite against it.</summary>
+    public const string QaBaseUrl = "https://qa-daleel.hamzalabs.dev";
+
     /// <summary>
-    /// Base URL of the Daleel app under test. Defaults to the <strong>QA deployment</strong>
-    /// (<c>qa-v1.0</c> tag). Override with the <c>E2E_BASE_URL</c> environment variable to target a
-    /// different environment, e.g. a local <c>https://localhost:7120</c> dev instance.
+    /// Base URL of the Daleel app under test, taken from the <c>E2E_BASE_URL</c> environment variable
+    /// (e.g. a local <c>https://localhost:7120</c> dev instance or <see cref="QaBaseUrl"/>). Falls back
+    /// to the QA deployment, but is only ever read when <see cref="HasLiveServer"/> is <c>true</c>.
     /// </summary>
     public static string BaseUrl =>
         Environment.GetEnvironmentVariable("E2E_BASE_URL")?.TrimEnd('/')
-        ?? "https://qa-daleel.hamzalabs.dev";
+        ?? QaBaseUrl;
 
     /// <summary>
-    /// Whether there is a live app to drive. The suite targets the QA deployment by default, so this
-    /// is normally <c>true</c>. Set <c>E2E_OFFLINE=1</c> to force every test to <c>Assert.Ignore</c>
-    /// — useful for build-only CI that has no network access to QA, keeping the run green.
+    /// Whether there is a live app to drive. These tests are <strong>opt-in</strong>: they only run when
+    /// <c>E2E_BASE_URL</c> is explicitly set to point at a running app. With no env var (a plain
+    /// <c>dotnet test</c> / build-only CI) every test <c>Assert.Ignore</c>s, keeping the solution suite
+    /// green without launching a browser or hitting the network.
     /// </summary>
     public static bool HasLiveServer =>
-        Environment.GetEnvironmentVariable("E2E_OFFLINE") is not ("1" or "true");
+        !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("E2E_BASE_URL"));
 
     /// <summary>Run headed (visible browser) by setting <c>E2E_HEADED=1</c>. Default headless.</summary>
     public static bool Headed =>
