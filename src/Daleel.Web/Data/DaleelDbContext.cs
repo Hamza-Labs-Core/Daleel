@@ -45,6 +45,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ProductProfile> ProductProfiles => Set<ProductProfile>();
     public DbSet<BrandModel> BrandModels => Set<BrandModel>();
     public DbSet<ScrapedPrice> ScrapedPrices => Set<ScrapedPrice>();
+    public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -148,10 +149,34 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.GlobalPrice).HasColumnType("decimal(18,2)");
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
 
+            // Smart-identification columns: the canonical merged spec sheet (what the UI reads), the
+            // R2 pointers, and the discovered image/alias lists (JSON arrays with the shared comparer).
+            e.Property(x => x.FinalSpecsJson).HasMaxLength(8000);
+            e.Property(x => x.FinalSpecsR2Url).HasMaxLength(1000);
+            e.Property(x => x.ImageR2Urls).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.RegionalAliases).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.DiscoveredAt).HasConversion(toUnixMs);
+
             // A model belongs to one brand; deleting a brand removes its harvested models.
             e.HasOne(x => x.Brand)
                 .WithMany()
                 .HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<VisionMatchCache>(e =>
+        {
+            // One verdict per (store image, brand model) pair — the unique index both enforces that and
+            // serves the pre-flight "have we already matched this pair?" lookup the identifier does.
+            e.HasIndex(x => new { x.StoreImageHash, x.BrandModelId }).IsUnique();
+            e.Property(x => x.StoreImageHash).HasMaxLength(64);
+            e.Property(x => x.MatchedModelName).HasMaxLength(300);
+            e.Property(x => x.MatchedAt).HasConversion(toUnixMs);
+
+            // The verdict is meaningless once its brand model is gone — cascade it away.
+            e.HasOne(x => x.BrandModel)
+                .WithMany()
+                .HasForeignKey(x => x.BrandModelId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

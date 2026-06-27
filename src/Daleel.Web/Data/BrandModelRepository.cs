@@ -15,8 +15,17 @@ public interface IBrandModelRepository
     /// <summary>All harvested models for a brand, most-recently-refreshed first.</summary>
     Task<IReadOnlyList<BrandModel>> ListByBrandAsync(int brandId, CancellationToken ct = default);
 
+    /// <summary>The model for a (brand, normalized name) pair, or null if not harvested yet (no tracking).</summary>
+    Task<BrandModel?> GetByBrandAndKeyAsync(int brandId, string modelKey, CancellationToken ct = default);
+
     /// <summary>A single harvested model by its database id (with its owning brand loaded), or null.</summary>
     Task<BrandModel?> GetByIdAsync(int id, CancellationToken ct = default);
+
+    /// <summary>
+    /// Persists the canonical (merged-and-cleaned) spec sheet onto an existing model — the only write
+    /// the spec pipeline makes after a model has been identified. Best-effort: a missing id is a no-op.
+    /// </summary>
+    Task SaveFinalSpecsAsync(int id, string? finalSpecsJson, string? finalSpecsR2Url, CancellationToken ct = default);
 
     /// <summary>
     /// Finds the harvested model whose identity normalizes to <paramref name="productKey"/> — the same
@@ -85,10 +94,27 @@ public sealed class BrandModelRepository : IBrandModelRepository
             .OrderByDescending(m => m.LastRefreshed)
             .ToListAsync(ct);
 
+    public Task<BrandModel?> GetByBrandAndKeyAsync(int brandId, string modelKey, CancellationToken ct = default) =>
+        _db.BrandModels.AsNoTracking()
+            .FirstOrDefaultAsync(m => m.BrandId == brandId && m.ModelKey == modelKey, ct);
+
     public Task<BrandModel?> GetByIdAsync(int id, CancellationToken ct = default) =>
         _db.BrandModels.AsNoTracking()
             .Include(m => m.Brand)
             .FirstOrDefaultAsync(m => m.Id == id, ct);
+
+    public async Task SaveFinalSpecsAsync(int id, string? finalSpecsJson, string? finalSpecsR2Url, CancellationToken ct = default)
+    {
+        var existing = await _db.BrandModels.FirstOrDefaultAsync(m => m.Id == id, ct);
+        if (existing is null)
+        {
+            return; // the model was deleted between identification and merge — nothing to write
+        }
+
+        existing.FinalSpecsJson = finalSpecsJson ?? existing.FinalSpecsJson;
+        existing.FinalSpecsR2Url = finalSpecsR2Url ?? existing.FinalSpecsR2Url;
+        await _db.SaveChangesAsync(ct);
+    }
 
     public async Task<BrandModel?> FindByProductKeyAsync(string productKey, CancellationToken ct = default)
     {
@@ -136,5 +162,40 @@ public sealed class BrandModelRepository : IBrandModelRepository
         // IsAvailable and LastRefreshed are always current-harvest facts (no "unknown" state).
         existing.IsAvailable = model.IsAvailable;
         existing.LastRefreshed = model.LastRefreshed;
+
+        // Smart-identification fields. The canonical spec sheet only ever moves forward (a re-harvest
+        // that hasn't re-run the merge carries no FinalSpecs, and must not erase a good one). Image and
+        // alias lists are UNIONED, not replaced: each regional crawl discovers a different subset, and we
+        // want their cumulative knowledge so a store photo can match against every shot we've ever seen.
+        existing.FinalSpecsJson = model.FinalSpecsJson ?? existing.FinalSpecsJson;
+        existing.FinalSpecsR2Url = model.FinalSpecsR2Url ?? existing.FinalSpecsR2Url;
+        existing.ImageR2Urls = UnionPreserveOrder(existing.ImageR2Urls, model.ImageR2Urls);
+        existing.RegionalAliases = UnionPreserveOrder(existing.RegionalAliases, model.RegionalAliases);
+        // DiscoveredAt is a "first seen" fact: keep the earliest non-default value, never overwrite it
+        // with a later harvest's timestamp.
+        if (existing.DiscoveredAt == default)
+        {
+            existing.DiscoveredAt = model.DiscoveredAt;
+        }
+
+        // Sticky: a re-harvest that simply doesn't list a model can't observe its discontinuation, so never
+        // clear a previously-set flag — only let a harvest turn it on.
+        existing.IsDiscontinued = existing.IsDiscontinued || model.IsDiscontinued;
+    }
+
+    /// <summary>Merges two string lists, case-insensitively de-duplicated, preserving first-seen order.</summary>
+    private static List<string> UnionPreserveOrder(IEnumerable<string>? first, IEnumerable<string>? second)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var result = new List<string>();
+        foreach (var s in (first ?? Enumerable.Empty<string>()).Concat(second ?? Enumerable.Empty<string>()))
+        {
+            if (!string.IsNullOrWhiteSpace(s) && seen.Add(s.Trim()))
+            {
+                result.Add(s.Trim());
+            }
+        }
+
+        return result;
     }
 }

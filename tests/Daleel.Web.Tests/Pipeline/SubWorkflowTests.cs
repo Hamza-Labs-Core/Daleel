@@ -3,9 +3,11 @@ using Daleel.Agent;
 using Daleel.Core.Llm;
 using Daleel.Core.Models;
 using Daleel.Web.Data;
+using Daleel.Web.Identification;
 using Daleel.Web.Pipeline.SubWorkflows;
 using Daleel.Web.Profiles;
 using Daleel.Web.Services;
+using Daleel.Web.Storage;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using FluentAssertions;
@@ -239,6 +241,11 @@ public class SubWorkflowTests
         services.AddSingleton<IStoreRepository>(new InMemoryStoreRepo());
         services.AddSingleton<IProductProfileRepository>(new InMemoryProductRepo());
         services.AddSingleton<IAgentFactory>(new FakeAgentFactory());
+        // Smart-identification dependencies the item deep-dive now resolves. A no-op identifier keeps these
+        // sequencing tests focused on the original behavior; the identifier itself is covered separately.
+        services.AddSingleton<IProductIdentifier>(new NoOpProductIdentifier());
+        services.AddSingleton<ISpecMerger>(new SpecMerger());
+        services.AddSingleton<IR2StorageService>(new NullR2StorageService());
         configure(services);
         return services.BuildServiceProvider();
     }
@@ -345,6 +352,14 @@ public class SubWorkflowTests
         }
 
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(_store.Count);
+    }
+
+    // A no-op identifier: every listing is "unidentified", so the spec pipeline runs on store specs only —
+    // preserving the pre-identification behavior these sequencing tests assert.
+    private sealed class NoOpProductIdentifier : IProductIdentifier
+    {
+        public Task<ProductIdentification> IdentifyAsync(ProductModel item, CancellationToken ct = default) =>
+            Task.FromResult(ProductIdentification.None);
     }
 
     // Resolve returns null so the store ScrapePrices step (which needs CONTEXT_DEV_API_KEY) no-ops.

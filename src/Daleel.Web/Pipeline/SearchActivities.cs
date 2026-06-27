@@ -365,6 +365,9 @@ public sealed class DispatchItemWorkflowsActivity : CodeActivity
                     s.SearchId = state.SearchId;
                     s.Model = model;
                     s.Result = model;
+                    // Thread the category schema through so the per-item spec merge can order/rename
+                    // recognized fields against it (the right attributes per category, not a blind dump).
+                    s.Schema = products.Schema;
                 },
                 services.Progress,
                 SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
