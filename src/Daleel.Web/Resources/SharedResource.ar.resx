@@ -483,4 +483,6 @@
   <data name="Admin.Nav.Brands" xml:space="preserve"><value>العلامات التجارية</value></data>
   <data name="Admin.Nav.Stores" xml:space="preserve"><value>المتاجر</value></data>
   <data name="Admin.Nav.Settings" xml:space="preserve"><value>الإعدادات</value></data>
+  <data name="Detail.Specifications" xml:space="preserve"><value>المواصفات</value></data>
+  <data name="Detail.SpecsUnavailable" xml:space="preserve"><value>لا تتوفر مواصفات تفصيلية لهذا المنتج بعد.</value></data>
 </root>
