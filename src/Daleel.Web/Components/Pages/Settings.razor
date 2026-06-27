@@ -53,42 +53,9 @@
             </MudPaper>
         </MudItem>
     }
-    <MudItem xs="12" md="7">
-        <MudPaper Class="pa-4" Elevation="0" Outlined="true">
-            <div class="d-flex align-center mb-3">
-                <MudIcon Icon="@Icons.Material.Filled.Key" Class="mr-2" />
-                <MudText Typo="Typo.h6">@L["Settings.ApiKeys"]</MudText>
-                <MudSpacer />
-                <MudSwitch T="bool" @bind-Value="_showKeys" Color="Color.Primary" Label="@L["Settings.Show"]" />
-            </div>
-
-            @if (!_ready)
-            {
-                <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-            }
-            else
-            {
-                @foreach (var (name, label, help) in BrowserStore.ApiKeyNames)
-                {
-                    <MudTextField T="string" Value="@GetKey(name)" ValueChanged="@(v => _keys[name] = v ?? string.Empty)"
-                                  Label="@label" HelperText="@help"
-                                  InputType="@(_showKeys ? InputType.Text : InputType.Password)"
-                                  Variant="Variant.Outlined" Class="mb-3" Immediate="true"
-                                  Adornment="Adornment.End"
-                                  AdornmentIcon="@(string.IsNullOrWhiteSpace(GetKey(name)) ? Icons.Material.Filled.RadioButtonUnchecked : Icons.Material.Filled.CheckCircle)" />
-                }
-
-                <div class="d-flex gap-2 mt-2">
-                    <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                               StartIcon="@Icons.Material.Filled.Save" OnClick="SaveKeys">@L["Settings.SaveKeys"]</MudButton>
-                    <MudButton Variant="Variant.Outlined" Color="Color.Error"
-                               StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearKeys">@L["History.ClearAll"]</MudButton>
-                </div>
-            }
-        </MudPaper>
-    </MudItem>
-
-    <MudItem xs="12" md="5">
+    @* Preferences available to every user. Admin-only config (API keys, default model,
+       content filter, image safety) lives in the separate admin column below. *@
+    <MudItem xs="12" md="@(_isAdmin ? 5 : 7)">
         <MudPaper Class="pa-4" Elevation="0" Outlined="true">
             <div class="d-flex align-center mb-3">
                 <MudIcon Icon="@Icons.Material.Filled.Tune" Class="mr-2" />
@@ -96,9 +63,6 @@
             </div>
 
             <GeoSelect Value="@_geo" ValueChanged="OnGeoChanged" Label="@L["Settings.DefaultMarket"]" />
-            <div class="mt-3">
-                <ModelSelect Value="@_model" ValueChanged="OnModelChanged" Label="@L["Settings.DefaultModel"]" />
-            </div>
 
             <MudDivider Class="my-4" />
 
@@ -119,61 +83,103 @@
                 @L["Settings.PreferencesNote"]
             </MudAlert>
         </MudPaper>
-
-        <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
-            <div class="d-flex align-center mb-3">
-                <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Class="mr-2" Color="Color.Success" />
-                <MudText Typo="Typo.h6">@L["Settings.ContentFilter"]</MudText>
-            </div>
-
-            <MudSelect T="FilterStrictness" Value="_strictness" ValueChanged="OnStrictnessChanged"
-                       Label="@L["Settings.HalalFiltering"]" Variant="Variant.Outlined" Dense="true">
-                <MudSelectItem Value="FilterStrictness.Strict">@L["Settings.Strict"]</MudSelectItem>
-                <MudSelectItem Value="FilterStrictness.Moderate">@L["Settings.Moderate"]</MudSelectItem>
-                @if (_isAdmin)
-                {
-                    <MudSelectItem Value="FilterStrictness.Off">@L["Settings.Off"]</MudSelectItem>
-                }
-            </MudSelect>
-
-            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
-                @(_strictness == FilterStrictness.Strict ? L["Settings.FilterDesc.Strict"] : L["Settings.FilterDesc"])
-                @if (!_isAdmin)
-                {
-                    <text> @L["Settings.FilterAdminNote"]</text>
-                }
-            </MudText>
-        </MudPaper>
-
-        <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
-            <div class="d-flex align-center mb-3">
-                <MudIcon Icon="@Icons.Material.Filled.HideImage" Class="mr-2" Color="Color.Info" />
-                <MudText Typo="Typo.h6">@L["Settings.ImageSafety"]</MudText>
-            </div>
-
-            <MudSwitch T="bool" Value="_blurImages" ValueChanged="OnBlurChanged" Color="Color.Primary"
-                       Label="@L["Settings.BlurImages"]"
-                       ThumbIcon="@Icons.Material.Filled.BlurOn" />
-            <MudSwitch T="bool" Value="_haramBlurPrompt" ValueChanged="OnHaramBlurPromptChanged" Color="Color.Primary"
-                       Label="@L["Settings.HaramBlurPrompt"]"
-                       ThumbIcon="@Icons.Material.Filled.Extension" />
-
-            <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Settings.TrustedDomains"]</MudText>
-            @if (_trustedDomains.Count == 0)
-            {
-                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Settings.NoTrustedDomains"]</MudText>
-            }
-            else
-            {
-                <div class="d-flex flex-wrap gap-2 mt-1">
-                    @foreach (var d in _trustedDomains)
-                    {
-                        <MudChip T="string" Size="Size.Small" OnClose="@(() => RemoveTrusted(d))">@d</MudChip>
-                    }
-                </div>
-            }
-        </MudPaper>
     </MudItem>
+
+    @* Admin-only configuration. The @if gates rendering; server-side handlers must still
+       re-validate the admin role since the UI gate alone is not a security boundary. *@
+    @if (_isAdmin)
+    {
+        <MudItem xs="12" md="7">
+            <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+                <div class="d-flex align-center mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.Key" Class="mr-2" />
+                    <MudText Typo="Typo.h6">@L["Settings.ApiKeys"]</MudText>
+                    <MudSpacer />
+                    <MudSwitch T="bool" @bind-Value="_showKeys" Color="Color.Primary" Label="@L["Settings.Show"]" />
+                </div>
+
+                @if (!_ready)
+                {
+                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+                }
+                else
+                {
+                    @foreach (var (name, label, help) in BrowserStore.ApiKeyNames)
+                    {
+                        <MudTextField T="string" Value="@GetKey(name)" ValueChanged="@(v => _keys[name] = v ?? string.Empty)"
+                                      Label="@label" HelperText="@help"
+                                      InputType="@(_showKeys ? InputType.Text : InputType.Password)"
+                                      Variant="Variant.Outlined" Class="mb-3" Immediate="true"
+                                      Adornment="Adornment.End"
+                                      AdornmentIcon="@(string.IsNullOrWhiteSpace(GetKey(name)) ? Icons.Material.Filled.RadioButtonUnchecked : Icons.Material.Filled.CheckCircle)" />
+                    }
+
+                    <div class="d-flex gap-2 mt-2">
+                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
+                                   StartIcon="@Icons.Material.Filled.Save" OnClick="SaveKeys">@L["Settings.SaveKeys"]</MudButton>
+                        <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                                   StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearKeys">@L["History.ClearAll"]</MudButton>
+                    </div>
+                }
+            </MudPaper>
+
+            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
+                <div class="d-flex align-center mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.SmartToy" Class="mr-2" />
+                    <MudText Typo="Typo.h6">@L["Settings.DefaultModel"]</MudText>
+                </div>
+
+                <ModelSelect Value="@_model" ValueChanged="OnModelChanged" Label="@L["Settings.DefaultModel"]" />
+            </MudPaper>
+
+            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
+                <div class="d-flex align-center mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Class="mr-2" Color="Color.Success" />
+                    <MudText Typo="Typo.h6">@L["Settings.ContentFilter"]</MudText>
+                </div>
+
+                <MudSelect T="FilterStrictness" Value="_strictness" ValueChanged="OnStrictnessChanged"
+                           Label="@L["Settings.HalalFiltering"]" Variant="Variant.Outlined" Dense="true">
+                    <MudSelectItem Value="FilterStrictness.Strict">@L["Settings.Strict"]</MudSelectItem>
+                    <MudSelectItem Value="FilterStrictness.Moderate">@L["Settings.Moderate"]</MudSelectItem>
+                    <MudSelectItem Value="FilterStrictness.Off">@L["Settings.Off"]</MudSelectItem>
+                </MudSelect>
+
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
+                    @(_strictness == FilterStrictness.Strict ? L["Settings.FilterDesc.Strict"] : L["Settings.FilterDesc"])
+                </MudText>
+            </MudPaper>
+
+            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
+                <div class="d-flex align-center mb-3">
+                    <MudIcon Icon="@Icons.Material.Filled.HideImage" Class="mr-2" Color="Color.Info" />
+                    <MudText Typo="Typo.h6">@L["Settings.ImageSafety"]</MudText>
+                </div>
+
+                <MudSwitch T="bool" Value="_blurImages" ValueChanged="OnBlurChanged" Color="Color.Primary"
+                           Label="@L["Settings.BlurImages"]"
+                           ThumbIcon="@Icons.Material.Filled.BlurOn" />
+                <MudSwitch T="bool" Value="_haramBlurPrompt" ValueChanged="OnHaramBlurPromptChanged" Color="Color.Primary"
+                           Label="@L["Settings.HaramBlurPrompt"]"
+                           ThumbIcon="@Icons.Material.Filled.Extension" />
+
+                <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Settings.TrustedDomains"]</MudText>
+                @if (_trustedDomains.Count == 0)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Settings.NoTrustedDomains"]</MudText>
+                }
+                else
+                {
+                    <div class="d-flex flex-wrap gap-2 mt-1">
+                        @foreach (var d in _trustedDomains)
+                        {
+                            <MudChip T="string" Size="Size.Small" OnClose="@(() => RemoveTrusted(d))">@d</MudChip>
+                        }
+                    </div>
+                }
+            </MudPaper>
+        </MudItem>
+    }
 </MudGrid>
 
 @code {
@@ -202,15 +208,12 @@
             return;
         }
 
-        foreach (var (name, _, _) in BrowserStore.ApiKeyNames)
-        {
-            _keys[name] = await Store.GetAsync("key." + name) ?? string.Empty;
-        }
-
-        _geo = await Store.GetAsync("geo") ?? _geo;
-        _model = await Store.GetAsync("model") ?? _model;
-        _dark = (await Store.GetAsync("theme") ?? "dark") != "light";
         _isAdmin = await CurrentUser.IsAdminAsync();
+
+        // Preferences shown to every user.
+        _geo = await Store.GetAsync("geo") ?? _geo;
+        _dark = (await Store.GetAsync("theme") ?? "dark") != "light";
+
         var userId = await CurrentUser.GetUserIdAsync();
         if (userId is not null)
         {
@@ -222,16 +225,28 @@
                 _emailResults = _user.EmailSearchResults;
             }
         }
-        _strictness = (await Store.GetAsync("filter.strictness")) switch
+
+        // Admin-only configuration: only load it when the corresponding UI is rendered,
+        // so a regular user's browser never pulls API keys (or other admin state) into memory.
+        if (_isAdmin)
         {
-            "off" when _isAdmin => FilterStrictness.Off,
-            "moderate" => FilterStrictness.Moderate,
-            _ => FilterStrictness.Strict
-        };
-        _blurImages = (await Store.GetAsync("img.blur") ?? "0") != "0";
-        _haramBlurPrompt = (await Store.GetAsync("img.haramblur_prompt") ?? "1") != "0";
-        _trustedDomains = (await Store.GetAsync("img.trusted") ?? string.Empty)
-            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+            foreach (var (name, _, _) in BrowserStore.ApiKeyNames)
+            {
+                _keys[name] = await Store.GetAsync("key." + name) ?? string.Empty;
+            }
+
+            _model = await Store.GetAsync("model") ?? _model;
+            _strictness = (await Store.GetAsync("filter.strictness")) switch
+            {
+                "off" => FilterStrictness.Off,
+                "moderate" => FilterStrictness.Moderate,
+                _ => FilterStrictness.Strict
+            };
+            _blurImages = (await Store.GetAsync("img.blur") ?? "0") != "0";
+            _haramBlurPrompt = (await Store.GetAsync("img.haramblur_prompt") ?? "1") != "0";
+            _trustedDomains = (await Store.GetAsync("img.trusted") ?? string.Empty)
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+        }
 
         Layout.SetDarkMode(_dark);
 
