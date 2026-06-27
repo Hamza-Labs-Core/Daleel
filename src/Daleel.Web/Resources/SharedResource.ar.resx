@@ -438,4 +438,39 @@
   <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>لا يوجد مفتاح ذكاء اصطناعي</value></data>
   <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>أو اضبط</value></data>
   <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>على الخادم.</value></data>
+
+  <data name="Admin.Usage.Title" xml:space="preserve"><value>استخدام المزوّدين والتكلفة</value></data>
+  <data name="Admin.Usage.Subtitle" xml:space="preserve"><value>كل إجراء خارجي قام به مسار البحث — استدعاءات المزوّدين وعمليات الكشط وإكمالات نماذج الذكاء الاصطناعي وعمليات البحث في الذاكرة المؤقتة والملفات — مع تكلفة تقديرية لكل مزوّد. مصدرها مخزن الأحداث في PostgreSQL.</value></data>
+  <data name="Admin.Usage.NotConfiguredBefore" xml:space="preserve"><value>مخزن الأحداث غير مُهيّأ. اضبط</value></data>
+  <data name="Admin.Usage.NotConfiguredOr" xml:space="preserve"><value>(أو</value></data>
+  <data name="Admin.Usage.NotConfiguredAfter" xml:space="preserve"><value>) لبدء تسجيل استخدام المزوّدين والتكلفة هنا.</value></data>
+  <data name="Admin.Usage.Period.Today" xml:space="preserve"><value>اليوم</value></data>
+  <data name="Admin.Usage.Period.Week" xml:space="preserve"><value>7 أيام</value></data>
+  <data name="Admin.Usage.Period.Month" xml:space="preserve"><value>30 يومًا</value></data>
+  <data name="Admin.Usage.Period.All" xml:space="preserve"><value>كل الوقت</value></data>
+  <data name="Admin.Usage.Kpi.Cost" xml:space="preserve"><value>التكلفة التقديرية</value></data>
+  <data name="Admin.Usage.Kpi.Actions" xml:space="preserve"><value>الإجراءات المُسجّلة</value></data>
+  <data name="Admin.Usage.Kpi.Providers" xml:space="preserve"><value>المزوّدون النشطون</value></data>
+  <data name="Admin.Usage.ByProvider" xml:space="preserve"><value>حسب المزوّد</value></data>
+  <data name="Admin.Usage.ByCategory" xml:space="preserve"><value>حسب الفئة</value></data>
+  <data name="Admin.Usage.Recent" xml:space="preserve"><value>النشاط الأخير</value></data>
+  <data name="Admin.Usage.RecentHint" xml:space="preserve"><value>أحدث 50 إجراءً مُسجّلًا، الأحدث أولًا.</value></data>
+  <data name="Admin.Usage.Col.Provider" xml:space="preserve"><value>المزوّد</value></data>
+  <data name="Admin.Usage.Col.Calls" xml:space="preserve"><value>الاستدعاءات</value></data>
+  <data name="Admin.Usage.Col.Errors" xml:space="preserve"><value>الأخطاء</value></data>
+  <data name="Admin.Usage.Col.ErrorRate" xml:space="preserve"><value>نسبة الأخطاء</value></data>
+  <data name="Admin.Usage.Col.AvgMs" xml:space="preserve"><value>متوسط (مللي ثانية)</value></data>
+  <data name="Admin.Usage.Col.Cost" xml:space="preserve"><value>التكلفة التقديرية</value></data>
+  <data name="Admin.Usage.Col.Category" xml:space="preserve"><value>الفئة</value></data>
+  <data name="Admin.Usage.Col.Actions" xml:space="preserve"><value>الإجراءات</value></data>
+  <data name="Admin.Usage.Col.Time" xml:space="preserve"><value>الوقت</value></data>
+  <data name="Admin.Usage.Col.Search" xml:space="preserve"><value>البحث</value></data>
+  <data name="Admin.Usage.Col.Type" xml:space="preserve"><value>النوع</value></data>
+  <data name="Admin.Usage.Col.Status" xml:space="preserve"><value>الحالة</value></data>
+  <data name="Admin.Usage.Empty" xml:space="preserve"><value>لا يوجد نشاط في هذه الفترة.</value></data>
+  <data name="Admin.Usage.RecentEmpty" xml:space="preserve"><value>لا توجد إجراءات مُسجّلة بعد.</value></data>
+  <data name="Admin.Usage.LoadError" xml:space="preserve"><value>تعذّر تحميل بيانات الاستخدام:</value></data>
+  <data name="Admin.Usage.Retry" xml:space="preserve"><value>إعادة المحاولة</value></data>
+  <data name="Admin.Usage.StatusOk" xml:space="preserve"><value>ناجح</value></data>
+  <data name="Admin.Usage.StatusFail" xml:space="preserve"><value>فشل</value></data>
 </root>

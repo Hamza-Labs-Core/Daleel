@@ -278,6 +278,9 @@ public class SubWorkflowTests
         public Task<Brand?> GetByNameAsync(string name, CancellationToken ct = default) =>
             Task.FromResult(_store.TryGetValue(Brand.Normalize(name), out var b) ? b : null);
 
+        public Task<Brand?> GetByIdAsync(int id, CancellationToken ct = default) =>
+            Task.FromResult(_store.Values.FirstOrDefault(b => b.Id == id));
+
         public Task<Brand> UpsertAsync(Brand brand, CancellationToken ct = default)
         {
             var key = string.IsNullOrEmpty(brand.NameKey) ? Brand.Normalize(brand.Name) : brand.NameKey;
@@ -301,6 +304,9 @@ public class SubWorkflowTests
 
         public Task<Store?> GetByNameAsync(string name, CancellationToken ct = default) =>
             Task.FromResult(_store.TryGetValue(Store.Normalize(name), out var s) ? s : null);
+
+        public Task<Store?> GetByIdAsync(int id, CancellationToken ct = default) =>
+            Task.FromResult(_store.Values.FirstOrDefault(s => s.Id == id));
 
         public Task<Store> UpsertAsync(Store store, CancellationToken ct = default)
         {

@@ -186,11 +186,18 @@ public sealed partial class AgentService
         var bundle = await GatherAsync(strategy, geo, cancellationToken).ConfigureAwait(false);
         var summary = await AnalyzeAsync($"Compare: {joined}", geo, bundle, cancellationToken).ConfigureAwait(false);
 
+        // Determine the product type up-front so the compare page can show WHICH dimensions decide
+        // this category (BTU/energy for ACs, RAM/storage for phones). Uses the planner's understood
+        // subject when it has one, else the joined product names.
+        var category = strategy.Subject is { Length: > 0 } s ? s : joined;
+        var intelligence = await AnalyzeCategoryAsync(category, geo, cancellationToken).ConfigureAwait(false);
+
         return new ProductComparison
         {
             Products = products,
             Geo = geo.Key,
             Summary = summary,
+            Schema = intelligence.Schema,
             Sources = bundle.Sources,
             GeneratedAt = _options.Clock()
         };
@@ -252,6 +259,10 @@ public sealed partial class AgentService
             {
                 sb.Append("- ").Append(r.Title).Append(" — ").Append(r.Snippet);
                 if (!string.IsNullOrWhiteSpace(r.Url)) sb.Append(" (").Append(r.Url).Append(')');
+                // Surface the result's thumbnail so the extractor can attach a real image URL to the
+                // product. Without this the LLM has no image to return — a common cause of missing
+                // product images in the grid.
+                if (!string.IsNullOrWhiteSpace(r.ImageUrl)) sb.Append(" [image: ").Append(r.ImageUrl).Append(']');
                 sb.AppendLine();
             }
         }
@@ -264,6 +275,8 @@ public sealed partial class AgentService
                 sb.Append("- ").Append(r.Title);
                 if (r.Price is { } price) sb.Append(" — ").Append(price.ToDisplay());
                 if (!string.IsNullOrWhiteSpace(r.Seller)) sb.Append(" @ ").Append(r.Seller);
+                if (!string.IsNullOrWhiteSpace(r.Url)) sb.Append(" (").Append(r.Url).Append(')');
+                if (!string.IsNullOrWhiteSpace(r.ImageUrl)) sb.Append(" [image: ").Append(r.ImageUrl).Append(']');
                 sb.AppendLine();
             }
         }
