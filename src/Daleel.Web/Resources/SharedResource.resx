@@ -438,4 +438,39 @@
   <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>No LLM key configured. Add one on the</value></data>
   <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>page, or set</value></data>
   <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>on the server.</value></data>
+
+  <data name="Admin.Usage.Title" xml:space="preserve"><value>Provider usage &amp; cost</value></data>
+  <data name="Admin.Usage.Subtitle" xml:space="preserve"><value>Every external action the search pipeline took — provider calls, scrapes, LLM completions, cache and profile lookups — with an estimated cost per provider. Sourced from the PostgreSQL event store.</value></data>
+  <data name="Admin.Usage.NotConfiguredBefore" xml:space="preserve"><value>The event store isn't configured. Set</value></data>
+  <data name="Admin.Usage.NotConfiguredOr" xml:space="preserve"><value>(or</value></data>
+  <data name="Admin.Usage.NotConfiguredAfter" xml:space="preserve"><value>) to start recording provider usage and cost here.</value></data>
+  <data name="Admin.Usage.Period.Today" xml:space="preserve"><value>Today</value></data>
+  <data name="Admin.Usage.Period.Week" xml:space="preserve"><value>7 days</value></data>
+  <data name="Admin.Usage.Period.Month" xml:space="preserve"><value>30 days</value></data>
+  <data name="Admin.Usage.Period.All" xml:space="preserve"><value>All time</value></data>
+  <data name="Admin.Usage.Kpi.Cost" xml:space="preserve"><value>Estimated cost</value></data>
+  <data name="Admin.Usage.Kpi.Actions" xml:space="preserve"><value>Recorded actions</value></data>
+  <data name="Admin.Usage.Kpi.Providers" xml:space="preserve"><value>Active providers</value></data>
+  <data name="Admin.Usage.ByProvider" xml:space="preserve"><value>By provider</value></data>
+  <data name="Admin.Usage.ByCategory" xml:space="preserve"><value>By category</value></data>
+  <data name="Admin.Usage.Recent" xml:space="preserve"><value>Recent activity</value></data>
+  <data name="Admin.Usage.RecentHint" xml:space="preserve"><value>The 50 most recent recorded actions, newest first.</value></data>
+  <data name="Admin.Usage.Col.Provider" xml:space="preserve"><value>Provider</value></data>
+  <data name="Admin.Usage.Col.Calls" xml:space="preserve"><value>Calls</value></data>
+  <data name="Admin.Usage.Col.Errors" xml:space="preserve"><value>Errors</value></data>
+  <data name="Admin.Usage.Col.ErrorRate" xml:space="preserve"><value>Error %</value></data>
+  <data name="Admin.Usage.Col.AvgMs" xml:space="preserve"><value>Avg ms</value></data>
+  <data name="Admin.Usage.Col.Cost" xml:space="preserve"><value>Est. cost</value></data>
+  <data name="Admin.Usage.Col.Category" xml:space="preserve"><value>Category</value></data>
+  <data name="Admin.Usage.Col.Actions" xml:space="preserve"><value>Actions</value></data>
+  <data name="Admin.Usage.Col.Time" xml:space="preserve"><value>Time</value></data>
+  <data name="Admin.Usage.Col.Search" xml:space="preserve"><value>Search</value></data>
+  <data name="Admin.Usage.Col.Type" xml:space="preserve"><value>Type</value></data>
+  <data name="Admin.Usage.Col.Status" xml:space="preserve"><value>Status</value></data>
+  <data name="Admin.Usage.Empty" xml:space="preserve"><value>No activity in this period.</value></data>
+  <data name="Admin.Usage.RecentEmpty" xml:space="preserve"><value>No recorded actions yet.</value></data>
+  <data name="Admin.Usage.LoadError" xml:space="preserve"><value>Couldn't load usage:</value></data>
+  <data name="Admin.Usage.Retry" xml:space="preserve"><value>Retry</value></data>
+  <data name="Admin.Usage.StatusOk" xml:space="preserve"><value>OK</value></data>
+  <data name="Admin.Usage.StatusFail" xml:space="preserve"><value>Failed</value></data>
 </root>

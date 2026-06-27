@@ -256,7 +256,13 @@ else
     private Task OpenComparison()
     {
         var items = _selected.OrderBy(i => i).Select(i => Result.Models[i]).ToList();
-        var parameters = new DialogParameters<ComparisonDialog> { { x => x.Items, items } };
+        // Pass the product-type-aware schema so the table leads with the specs that matter for
+        // this category (BTU/energy for ACs, RAM/storage for phones) instead of an arbitrary union.
+        var parameters = new DialogParameters<ComparisonDialog>
+        {
+            { x => x.Items, items },
+            { x => x.Schema, Result.Schema }
+        };
         var options = new DialogOptions { MaxWidth = MaxWidth.Large, FullWidth = true, CloseButton = true };
         return Dialogs.ShowAsync<ComparisonDialog>(L["Results.CompareProducts"], parameters, options);
     }

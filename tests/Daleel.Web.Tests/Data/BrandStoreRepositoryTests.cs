@@ -147,7 +147,7 @@ public class BrandStoreRepositoryTests
     }
 
     [Fact]
-    public async Task Brand_IsStale_UsesRefreshAgeAgainstTtl()
+    public void Brand_IsStale_UsesRefreshAgeAgainstTtl()
     {
         var now = DateTimeOffset.UtcNow;
         var brand = new Brand { Name = "X", LastRefreshed = now.AddDays(-31) };

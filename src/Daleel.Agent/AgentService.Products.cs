@@ -41,7 +41,7 @@ public sealed partial class AgentService
     /// </summary>
     public async Task<ProductSearchResult> BuildProductSearchResultAsync(
         string query, GeoProfile geo, ResearchBundle bundle, string summary, CancellationToken cancellationToken,
-        bool assessReputation = true, bool useLlmExtraction = true)
+        bool assessReputation = true, bool useLlmExtraction = true, SearchIntelligence? intelligence = null)
     {
         var cc = geo.CountryCode;
         var countryName = geo.Country;
@@ -108,7 +108,8 @@ public sealed partial class AgentService
         // APIs return thin or no data — the common case for e.g. "best ACs in Jordan"). The aggregator
         // turns every source — structured and LLM-extracted alike — into a price offer on the same model.
         var (llmListings, llmInsights) = useLlmExtraction
-            ? await ExtractProductListingsAsync(query, geo, bundle, includeIntl, cancellationToken).ConfigureAwait(false)
+            ? await ExtractProductListingsAsync(query, geo, bundle, includeIntl, cancellationToken, intelligence?.Schema)
+                .ConfigureAwait(false)
             : (Array.Empty<ProductListing>(),
                (IReadOnlyDictionary<string, ModelInsight>)new Dictionary<string, ModelInsight>(StringComparer.Ordinal));
 
@@ -291,6 +292,7 @@ public sealed partial class AgentService
             Social = social,
             Marketplaces = marketplaces.Values.OrderByDescending(m => m.ListingCount).ToList(),
             Comparisons = comparisons,
+            Schema = intelligence?.Schema ?? ProductSchema.General,
             GeneratedAt = _options.Clock()
         };
     }
@@ -531,7 +533,8 @@ public sealed partial class AgentService
     /// </summary>
     private async Task<(IReadOnlyList<ProductListing> Listings, IReadOnlyDictionary<string, ModelInsight> Insights)>
         ExtractProductListingsAsync(
-        string query, GeoProfile geo, ResearchBundle bundle, bool includeIntl, CancellationToken cancellationToken)
+        string query, GeoProfile geo, ResearchBundle bundle, bool includeIntl, CancellationToken cancellationToken,
+        ProductSchema? schema = null)
     {
         var empty = (
             (IReadOnlyList<ProductListing>)Array.Empty<ProductListing>(),
@@ -545,7 +548,7 @@ public sealed partial class AgentService
 
         // Ask the LLM for structured products; if its JSON can't be parsed, retry once before
         // falling back gracefully to no LLM listings (the deterministic sources still stand).
-        var dto = await ExtractProductsDtoAsync(query, geo, context, cancellationToken).ConfigureAwait(false);
+        var dto = await ExtractProductsDtoAsync(query, geo, context, cancellationToken, schema).ConfigureAwait(false);
         if (dto?.Products is null)
         {
             return empty;
@@ -669,9 +672,9 @@ public sealed partial class AgentService
     /// attempts fail, so the caller can fall back gracefully to no LLM-extracted listings.
     /// </summary>
     private async Task<ExtractedProductsDto?> ExtractProductsDtoAsync(
-        string query, GeoProfile geo, string context, CancellationToken cancellationToken)
+        string query, GeoProfile geo, string context, CancellationToken cancellationToken, ProductSchema? schema = null)
     {
-        var prompt = PromptTemplates.ExtractProducts(query, geo, context);
+        var prompt = PromptTemplates.ExtractProducts(query, geo, context, schema);
 
         for (var attempt = 1; attempt <= 2; attempt++)
         {

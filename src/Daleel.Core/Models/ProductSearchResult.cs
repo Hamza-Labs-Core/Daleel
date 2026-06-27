@@ -63,6 +63,13 @@ public record ProductSearchResult
     /// <summary>Listings pre-grouped into budget/mid/premium tiers for comparison.</summary>
     public IReadOnlyList<ComparisonGroup> Comparisons { get; init; } = Array.Empty<ComparisonGroup>();
 
+    /// <summary>
+    /// The product-type-aware comparison schema the LLM determined for this search (BTU/energy
+    /// for ACs, RAM/storage for phones…). Drives the schema columns of the compare table. Empty
+    /// (<see cref="ProductSchema.General"/>) for non-product or unclassifiable queries.
+    /// </summary>
+    public ProductSchema Schema { get; init; } = ProductSchema.General;
+
     public DateTimeOffset? GeneratedAt { get; init; }
 
     /// <summary>True when at least one aggregated product model was found.</summary>
@@ -140,6 +147,16 @@ public record BrandInfo
     public string? Url { get; init; }
     public string? LogoUrl { get; init; }
 
+    /// <summary>Database id when this brand has a saved profile; null for live, unsaved brands.</summary>
+    public int? DbId { get; init; }
+
+    /// <summary>
+    /// Stable, URL-safe identifier used to route to the brand page: the database id when persisted,
+    /// otherwise a deterministic hash of the name (<see cref="StableId.ForBrand"/>). <see cref="Name"/>
+    /// is kept as a display/lookup fallback and travels alongside the id.
+    /// </summary>
+    public string Id => DbId?.ToString() ?? StableId.ForBrand(Name);
+
     /// <summary>How many distinct product models under this brand were found in the market.</summary>
     public int ListingCount { get; init; }
 
@@ -175,6 +192,17 @@ public record StoreInfo
 {
     public string Name { get; init; } = string.Empty;
     public string? Url { get; init; }
+
+    /// <summary>Database id when this store has a saved profile; null for live, unsaved stores.</summary>
+    public int? DbId { get; init; }
+
+    /// <summary>
+    /// Stable, URL-safe identifier used to route to the store page: the database id when persisted,
+    /// otherwise a deterministic hash of the name (<see cref="StableId.ForStore"/>). <see cref="Name"/>
+    /// is kept as a display/lookup fallback and travels alongside the id.
+    /// </summary>
+    public string Id => DbId?.ToString() ?? StableId.ForStore(Name);
+
     public string? Address { get; init; }
     public string? Phone { get; init; }
     public bool IsOnline { get; init; }
