@@ -7,11 +7,6 @@ on:
         description: "Image tag to deploy (defaults to latest)"
         required: false
         default: "latest"
-      reset_postgres:
-        description: "Wipe the postgres_data volume before compose up (one-time password reset). DESTROYS the Postgres event store."
-        required: false
-        type: boolean
-        default: false
   push:
     branches:
       - main
@@ -364,9 +359,8 @@ jobs:
             # (was previously generated once on the box). The connection string
             # embeds the same password — keep the two secrets in sync. Because
             # Postgres bakes the password into postgres_data on first init, rotating
-            # the secret requires wiping that volume; run the deploy with the
-            # reset_postgres=true workflow input once so Postgres reinitializes with
-            # the secret value.
+            # the secret requires wiping that volume; the deploy step below does this
+            # one time so Postgres reinitializes with the secret value.
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_CONNECTION_STRING=${{ secrets.POSTGRES_CONNECTION_STRING }}
             CADDY_DOMAIN=daleel.hamzalabs.dev
@@ -397,14 +391,11 @@ jobs:
         uses: appleboy/ssh-action@v1
         env:
           DALEEL_TAG: ${{ steps.tag.outputs.tag }}
-          # Untrusted-input-safe: passed via env (not interpolated into the script
-          # body). Empty on push events; "true"/"false" on a manual dispatch.
-          RESET_POSTGRES: ${{ github.event.inputs.reset_postgres }}
         with:
           host: ${{ secrets.DEPLOY_SSH_HOST }}
           username: ${{ secrets.DEPLOY_SSH_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          envs: DALEEL_TAG,RESET_POSTGRES
+          envs: DALEEL_TAG
           script: |
             set -euo pipefail
             # Everything runs as root — install the freshly-staged config directly.
@@ -413,18 +404,16 @@ jobs:
             install -m 0755 /tmp/daleel-config/deploy.sh           /opt/daleel/deploy.sh
             rm -rf /tmp/daleel-config
             cd /opt/daleel
-            # Optional postgres_data reset, triggered MANUALLY via the
-            # reset_postgres workflow_dispatch input (empty/false on every push, so
-            # a normal deploy NEVER wipes the event store). POSTGRES_PASSWORD moved
-            # from a box-generated file to a GitHub secret, but Postgres bakes the
-            # password into postgres_data on first init — so after the secret
-            # changed the app can't authenticate until the volume is dropped and
-            # Postgres reinitializes with the secret value. We bring the WHOLE stack
-            # down first (not just `rm postgres`) so nothing holds the volume open,
-            # then `docker volume rm` succeeds; deploy.sh below brings it back up.
-            if [ "${RESET_POSTGRES:-false}" = "true" ]; then
-              echo "reset_postgres=true — stopping stack and removing daleel_postgres_data volume."
-              docker compose -f /opt/daleel/docker-compose.yml down
-              docker volume rm daleel_postgres_data || true
+            # One-time postgres_data reset: POSTGRES_PASSWORD moved from a
+            # box-generated file to a GitHub secret, but Postgres baked the old
+            # password into this volume on first init — the app would then fail to
+            # authenticate with the new secret. Drop the volume once so Postgres
+            # reinitializes with the secret value. Guarded by a marker so later
+            # deploys DON'T wipe the event store every push. The container must be
+            # stopped/removed first or the volume is "in use" and rm is a no-op.
+            if [ ! -f /opt/daleel/.postgres_volume_reset_done ]; then
+              docker compose rm -sf postgres 2>/dev/null || true
+              docker volume rm daleel_postgres_data 2>/dev/null || true
+              touch /opt/daleel/.postgres_volume_reset_done
             fi
             DALEEL_TAG="$DALEEL_TAG" ./deploy.sh "$DALEEL_TAG"

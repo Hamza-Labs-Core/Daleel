@@ -1,0 +1,45 @@
+name: Reset Postgres Volume
+
+# One-time, MANUAL maintenance workflow. POSTGRES_PASSWORD is now a GitHub secret,
+# but Postgres bakes the password into the daleel_postgres_data volume on FIRST
+# init only — so after the secret changed the app can no longer authenticate
+# (the volume still holds the OLD password). This stops the stack, drops the
+# volume, and brings the stack back up so Postgres reinitializes fresh against the
+# current /opt/daleel/.env.
+#
+# DESTRUCTIVE: wiping the volume erases the Postgres event store. Run only when you
+# intend to reset Postgres credentials/data.
+on:
+  workflow_dispatch:
+
+# Share the Deploy workflow's concurrency group so a reset never races a deploy
+# that is mid-flight (cancel-in-progress: false → it queues instead of clobbering).
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  reset-postgres:
+    name: Reset postgres_data volume on VPS
+    runs-on: ubuntu-latest
+    # Same environment as the Deploy job so the DEPLOY_SSH_* secrets resolve (and
+    # so any required-reviewers approval gate on "production" applies to this
+    # destructive action too).
+    environment: production
+    steps:
+      - name: Stop stack, drop postgres volume, bring stack back up
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_SSH_HOST }}
+          username: ${{ secrets.DEPLOY_SSH_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/daleel
+            echo "==> Stopping the stack (docker compose down)..."
+            docker compose -f /opt/daleel/docker-compose.yml down
+            echo "==> Removing the daleel_postgres_data volume..."
+            docker volume rm daleel_postgres_data || true
+            echo "==> Starting the stack back up (docker compose up -d)..."
+            docker compose -f /opt/daleel/docker-compose.yml up -d
+            echo "==> Done. Postgres will reinitialize with the current POSTGRES_PASSWORD."
