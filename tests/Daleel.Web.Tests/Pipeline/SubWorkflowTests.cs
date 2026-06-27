@@ -165,7 +165,8 @@ public class SubWorkflowTests
         var results = await SubWorkflowDispatcher
             .RunManyAsync<BrandResearchWorkflow, BrandResearchState, BrandInfo>(
                 scopeFactory, brands,
-                (st, b) => { st.Agent = BuildAgent(); st.Geo = "jordan"; st.Brand = b; st.Result = b; },
+                (st, svc, b) => { svc.Agent = BuildAgent(); st.Geo = "jordan"; st.Brand = b; st.Result = b; },
+                progress: null,
                 SubWorkflowDispatcher.DefaultTimeout, CancellationToken.None);
 
         results.Should().HaveCount(3);
@@ -180,7 +181,7 @@ public class SubWorkflowTests
     {
         using var scope = provider.CreateScope();
         var state = scope.ServiceProvider.GetRequiredService<BrandResearchState>();
-        state.Agent = BuildAgent();
+        scope.ServiceProvider.GetRequiredService<SubWorkflowServices>().Agent = BuildAgent();
         state.Geo = "jordan";
         state.Brand = brand;
         state.Result = brand;
@@ -192,7 +193,7 @@ public class SubWorkflowTests
     {
         using var scope = provider.CreateScope();
         var state = scope.ServiceProvider.GetRequiredService<StoreResearchState>();
-        state.Agent = BuildAgent();
+        scope.ServiceProvider.GetRequiredService<SubWorkflowServices>().Agent = BuildAgent();
         state.Geo = "jordan";
         state.Store = store;
         state.Result = store;
@@ -204,7 +205,7 @@ public class SubWorkflowTests
     {
         using var scope = provider.CreateScope();
         var state = scope.ServiceProvider.GetRequiredService<ItemDeepDiveState>();
-        state.Agent = BuildAgent();
+        scope.ServiceProvider.GetRequiredService<SubWorkflowServices>().Agent = BuildAgent();
         state.Geo = "jordan";
         state.Model = model;
         state.Result = model;
@@ -230,6 +231,7 @@ public class SubWorkflowTests
         services.AddScoped<BrandResearchState>();
         services.AddScoped<StoreResearchState>();
         services.AddScoped<ItemDeepDiveState>();
+        services.AddScoped<SubWorkflowServices>();
         services.AddSingleton(new ProfileOptions { Now = () => Now });
         // Defaults so each test only overrides what it exercises.
         services.AddSingleton<IProfileResearcher>(new FakeResearcher());

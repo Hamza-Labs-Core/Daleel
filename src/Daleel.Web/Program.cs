@@ -5,6 +5,8 @@ using Daleel.Web.Data;
 using Daleel.Web.Logging;
 using Daleel.Web.RateLimiting;
 using Daleel.Web.Services;
+using Elsa.EntityFrameworkCore.Extensions;
+using Elsa.EntityFrameworkCore.Modules.Management;
 using Elsa.Extensions;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -281,35 +283,44 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationBroadcaster>(
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
 // The search pipeline runs as an in-process Elsa 3 workflow of CodeActivity steps (plan → cache →
 // gather → extract → dispatch brand/store/item sub-workflows → aggregate → moderate → cache → return).
-// Elsa is registered core-only (no Server/Studio/EF persistence), and the workflow runner replaces the
-// old direct-AskAsync runner. AddActivitiesFrom scans the whole assembly, so the sub-workflow activities
-// under Pipeline/SubWorkflows are discovered automatically.
-builder.Services.AddElsa(elsa => elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>());
-
-// INVARIANT: the search workflow shares live, non-serializable state (an AgentService, an Action<string>
-// progress delegate) by reference through the scoped SearchPipelineState/SubWorkflowState — see their
-// remarks. This is safe ONLY because Elsa is registered core-only and the workflow never suspends. If an
-// Elsa persistence / runtime instance-store module is ever added, a suspend/resume would deserialize the
-// state with a null Agent + Progress and silently produce empty results. Fail fast at startup instead.
-var elsaPersistence = builder.Services.FirstOrDefault(d =>
-    d.ServiceType.FullName is { } n &&
-    (n.Contains("IWorkflowInstanceStore", StringComparison.Ordinal) ||
-     n.Contains("IWorkflowStateStore", StringComparison.Ordinal) ||
-     n.Contains("Elsa.Persistence", StringComparison.Ordinal)));
-if (elsaPersistence is not null)
+// AddActivitiesFrom scans the whole assembly, so the sub-workflow activities under Pipeline/SubWorkflows
+// are discovered automatically.
+//
+// Workflow-instance persistence is OPTIONAL and Postgres-only, mirroring the event store: when
+// POSTGRES_CONNECTION_STRING/DATABASE_URL is set, the workflow-management feature is registered on Elsa's
+// EF Core Postgres provider (the same connection the event store uses — see PostgresConnection.Resolve),
+// which gives IWorkflowInstanceStore + IWorkflowInstanceManager and ships+applies its own migrations at
+// startup. When Postgres is NOT configured, persistence is simply unavailable — no in-memory or SQLite
+// fallback — and the management feature is not registered; the search workflow still runs in-process via
+// IWorkflowRunner, the runner skips its (best-effort) instance save, and the admin workflows page shows a
+// "not configured" notice. If you want instance tracking, configure Postgres.
+//
+// Registering the instance store is safe now (it used to be blocked by a startup assertion): the pipeline no
+// longer shares a live AgentService + progress delegate through SearchPipelineState — those moved to the
+// separate scoped SearchPipelineServices/SubWorkflowServices and never touch the persisted WorkflowState.
+// NOTE: this enables persisting *completed-run summaries* for the admin page, NOT mid-run suspend/resume. The
+// working run state lives in the DI scope (not WorkflowState), so the workflow must run to completion in one
+// pass — do not add Delay/bookmarks/suspend activities (a resume would see blank state).
+var elsaInstanceConn = Daleel.Web.Events.PostgresConnection.Resolve(builder.Configuration);
+builder.Services.AddElsa(elsa =>
 {
-    throw new InvalidOperationException(
-        $"Elsa persistence module '{elsaPersistence.ServiceType.FullName}' is registered, but the search " +
-        "pipeline shares non-serializable state (AgentService + progress delegate) by reference and must " +
-        "never be persisted/suspended — see SearchPipelineState. Remove the persistence module, or refactor " +
-        "the pipeline to route serializable state through Elsa Variables before enabling it.");
-}
+    elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>();
+    if (elsaInstanceConn is not null)
+    {
+        elsa.UseWorkflowManagement(management =>
+            management.UseEntityFrameworkCore(ef => ef.UsePostgreSql(elsaInstanceConn)));
+    }
+});
 
+// The serializable run state + the live (non-serializable) services half are both scoped, so each run's
+// DI scope gets its own pair: the runner seeds them, the Elsa activities resolve them from their context.
 builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineServices>();
 // Per-entity sub-workflow states — scoped so each dispatched child (in its own DI scope) gets a fresh one.
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.BrandResearchState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
 builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();

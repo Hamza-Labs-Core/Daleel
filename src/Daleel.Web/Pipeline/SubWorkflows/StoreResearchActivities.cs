@@ -21,10 +21,11 @@ public sealed class ScrapeStoreSiteActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         var repo = context.GetRequiredService<IStoreRepository>();
         var options = context.GetRequiredService<ProfileOptions>();
 
-        state.Log($"Looking up {state.Store.Name}…");
+        services.Log($"Looking up {state.Store.Name}…");
         state.Existing = await SafeGet(repo, state.Store.Name, context.CancellationToken);
         if (state.Existing is not null && !state.Existing.IsStale(options.Now(), options.Ttl))
         {
@@ -40,7 +41,7 @@ public sealed class ScrapeStoreSiteActivity : CodeActivity
             return;
         }
 
-        state.Log($"Scraping {state.Store.Name}'s site via Context.dev…");
+        services.Log($"Scraping {state.Store.Name}'s site via Context.dev…");
         state.Researched = await SafeResearch(researcher, state.Store.Name, state.Geo, context.CancellationToken);
         state.Saved = state.Researched ?? state.Existing;
         state.RecordEvent(EventCategory.Profile, "profile.store", "context.dev",
@@ -75,12 +76,13 @@ public sealed class VerifyOnMapsActivity : CodeActivity
     protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         if (state.Saved is not { } saved)
         {
             return ValueTask.CompletedTask;
         }
 
-        state.Log($"Verifying {state.Store.Name} on Google Maps…");
+        services.Log($"Verifying {state.Store.Name} on Google Maps…");
         var s = state.Result;
         state.Result = s with
         {
@@ -130,6 +132,7 @@ public sealed class SaveStoreProfileActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         if (state.Saved is { } saved)
         {
             var s = state.Result;
@@ -157,7 +160,7 @@ public sealed class SaveStoreProfileActivity : CodeActivity
             {
                 state.Result = state.Result with { DbId = persisted.Id };
             }
-            state.Log($"Saved {state.Store.Name}'s profile.");
+            services.Log($"Saved {state.Store.Name}'s profile.");
         }
     }
 
@@ -183,6 +186,7 @@ public sealed class ScrapePricesActivity : CodeActivity
     protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
+        var services = context.GetRequiredService<SubWorkflowServices>();
         var factory = context.GetRequiredService<IAgentFactory>();
 
         var key = factory.Resolve("CONTEXT_DEV_API_KEY");
@@ -192,7 +196,7 @@ public sealed class ScrapePricesActivity : CodeActivity
             return; // no Context.dev key or no resolvable store domain — nothing to crawl
         }
 
-        state.Log($"Reading {state.Store.Name}'s catalogue for prices…");
+        services.Log($"Reading {state.Store.Name}'s catalogue for prices…");
         var provider = new ContextDevProvider(key);
         var products = await SafeCatalog(provider, domain, context.CancellationToken);
         state.PricedProducts = products.Count(p => p.Price is not null);
@@ -206,7 +210,7 @@ public sealed class ScrapePricesActivity : CodeActivity
             });
         if (state.PricedProducts > 0)
         {
-            state.Log($"Found {state.PricedProducts} priced product(s) at {state.Store.Name}.");
+            services.Log($"Found {state.PricedProducts} priced product(s) at {state.Store.Name}.");
         }
     }
 

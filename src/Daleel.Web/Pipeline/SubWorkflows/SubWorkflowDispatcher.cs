@@ -10,10 +10,12 @@ namespace Daleel.Web.Pipeline.SubWorkflows;
 /// the whole bounded-parallel fan-out, and <see cref="DispatchAsync{TWorkflow,TState}"/> runs a single
 /// child.
 ///
-/// Each child gets its own scope (hence its own <c>DaleelDbContext</c> + scoped state), so the children
-/// are concurrency-safe. A sub-workflow is best-effort: a timeout or research failure leaves the seeded
-/// state untouched (the entity flows through un-enriched) rather than failing the parent search — only a
-/// genuine outer cancel (cost cap trip / user cancel) propagates.
+/// Each child gets its own scope (hence its own <c>DaleelDbContext</c> + scoped state + services), so the
+/// children are concurrency-safe. The <paramref name="seed"/> fills both the serializable
+/// <typeparamref name="TState"/> and the live <see cref="SubWorkflowServices"/> for that child before it
+/// runs. A sub-workflow is best-effort: a timeout or research failure leaves the seeded state untouched
+/// (the entity flows through un-enriched) rather than failing the parent search — only a genuine outer
+/// cancel (cost cap trip / user cancel) propagates.
 /// </summary>
 public static class SubWorkflowDispatcher
 {
@@ -31,13 +33,15 @@ public static class SubWorkflowDispatcher
 
     /// <summary>
     /// Fans <paramref name="items"/> out through one child <typeparamref name="TWorkflow"/> each, at most
-    /// <see cref="MaxConcurrency"/> at a time, each seeded by <paramref name="seed"/> and bounded by
-    /// <paramref name="timeout"/>. Returns the finished states in input order.
+    /// <see cref="MaxConcurrency"/> at a time, each seeded by <paramref name="seed"/> (state + services) and
+    /// bounded by <paramref name="timeout"/>. Returns the finished states in input order. The parent's
+    /// <paramref name="progress"/> sink surfaces a live line if the fan-out fails systematically.
     /// </summary>
     public static async Task<IReadOnlyList<TState>> RunManyAsync<TWorkflow, TState, TItem>(
         IServiceScopeFactory scopeFactory,
         IReadOnlyList<TItem> items,
-        Action<TState, TItem> seed,
+        Action<TState, SubWorkflowServices, TItem> seed,
+        Action<string>? progress,
         TimeSpan timeout,
         CancellationToken ct)
         where TWorkflow : IWorkflow, new()
@@ -51,7 +55,7 @@ public static class SubWorkflowDispatcher
             try
             {
                 var (state, faulted) = await RunChildAsync<TWorkflow, TState>(
-                    scopeFactory, s => seed(s, item), timeout, ct).ConfigureAwait(false);
+                    scopeFactory, (s, svc) => seed(s, svc, item), timeout, ct).ConfigureAwait(false);
                 if (faulted)
                 {
                     Interlocked.Increment(ref faults);
@@ -73,9 +77,8 @@ public static class SubWorkflowDispatcher
         // plus a live progress line, so the failure is observable instead of silently "no enrichment".
         if (items.Count > 0 && faults >= Math.Max(2, (int)Math.Ceiling(items.Count * SystematicFailureRatio)))
         {
-            var signal = states.FirstOrDefault();
-            signal?.Log($"⚠️ {faults}/{items.Count} {typeof(TWorkflow).Name} sub-workflows failed — possible systematic enrichment failure.");
-            signal?.RecordEvent("pipeline", "subworkflow_failures", "dispatcher", success: false,
+            progress?.Invoke($"⚠️ {faults}/{items.Count} {typeof(TWorkflow).Name} sub-workflows failed — possible systematic enrichment failure.");
+            states.FirstOrDefault()?.RecordEvent("pipeline", "subworkflow_failures", "dispatcher", success: false,
                 metadata: new Dictionary<string, object?>
                 {
                     ["workflow"] = typeof(TWorkflow).Name,
@@ -90,7 +93,7 @@ public static class SubWorkflowDispatcher
     /// <summary>Runs one child workflow in a fresh scope; always returns the seeded state, even on timeout.</summary>
     public static async Task<TState> DispatchAsync<TWorkflow, TState>(
         IServiceScopeFactory scopeFactory,
-        Action<TState> seed,
+        Action<TState, SubWorkflowServices> seed,
         TimeSpan timeout,
         CancellationToken ct)
         where TWorkflow : IWorkflow, new()
@@ -108,7 +111,7 @@ public static class SubWorkflowDispatcher
     /// </summary>
     private static async Task<(TState State, bool Faulted)> RunChildAsync<TWorkflow, TState>(
         IServiceScopeFactory scopeFactory,
-        Action<TState> seed,
+        Action<TState, SubWorkflowServices> seed,
         TimeSpan timeout,
         CancellationToken ct)
         where TWorkflow : IWorkflow, new()
@@ -116,7 +119,8 @@ public static class SubWorkflowDispatcher
     {
         using var scope = scopeFactory.CreateScope();
         var state = scope.ServiceProvider.GetRequiredService<TState>();
-        seed(state);
+        var services = scope.ServiceProvider.GetRequiredService<SubWorkflowServices>();
+        seed(state, services);
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(timeout);

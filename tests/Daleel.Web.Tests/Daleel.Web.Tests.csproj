@@ -10,6 +10,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Test-only Elsa SQLite EF provider: the app persists workflow instances to Postgres only, but the
+         persistence round-trip test drives the same EF Core store against a throwaway SQLite file (no
+         Postgres needed in CI). The provider is provider-agnostic, so this still exercises migrations +
+         IWorkflowInstanceStore + the run-summary round-trip. -->
+    <PackageReference Include="Elsa.EntityFrameworkCore.Sqlite" Version="3.3.3" />
     <PackageReference Include="bunit" Version="1.40.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.0" />
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
