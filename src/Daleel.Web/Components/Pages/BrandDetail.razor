@@ -3,6 +3,7 @@
 @inject IBrandRepository Brands
 @inject IBrandModelRepository BrandModels
 @inject NavigationManager Nav
+@inject ILogger<BrandDetail> Logger
 
 @* Dedicated full page for a brand: logo, in-market reputation, strengths/complaints, price
    positioning and the catalogue of harvested models (with images and local prices). Routing is by a
@@ -187,8 +188,11 @@ else
                 _models = await BrandModels.ListByBrandAsync(_brand.Id);
             }
         }
-        catch
+        catch (Exception ex)
         {
+            // Log so a real DB/load error is distinguishable from a genuine "no profile yet"; the not-found
+            // panel still covers the user-facing case without surfacing internal detail.
+            Logger.LogWarning(ex, "Loading brand detail for {Name} failed", DecodedName);
             _brand = null;
         }
         finally

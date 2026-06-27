@@ -1,6 +1,7 @@
 @page "/product/{Id}"
 @inject IModelDetailService Details
 @inject NavigationManager Nav
+@inject ILogger<ProductDetail> Logger
 
 @* Dedicated full page for a single product model — "everything": large image, identity, the full
    price-comparison table across every seller, brand reputation, pros/cons and the spec sheet. The
@@ -189,9 +190,12 @@ else
             // works cold from a bookmark/share link, not just from an in-memory result.
             _model = await Details.GetAsync(DecodedName, string.IsNullOrWhiteSpace(Geo) ? "jordan" : Geo!);
         }
-        catch
+        catch (Exception ex)
         {
-            _model = null; // the not-found panel covers this; never surface internal detail.
+            // Log so a real load error is distinguishable from a genuine "not found"; the not-found panel
+            // covers this for the user and never surfaces internal detail.
+            Logger.LogWarning(ex, "Loading product detail for {Name} failed", DecodedName);
+            _model = null;
         }
         finally
         {

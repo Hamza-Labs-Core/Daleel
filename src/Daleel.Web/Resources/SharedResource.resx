@@ -473,4 +473,14 @@
   <data name="Admin.Usage.Retry" xml:space="preserve"><value>Retry</value></data>
   <data name="Admin.Usage.StatusOk" xml:space="preserve"><value>OK</value></data>
   <data name="Admin.Usage.StatusFail" xml:space="preserve"><value>Failed</value></data>
+  <data name="Admin.Nav.Dashboard" xml:space="preserve"><value>Dashboard</value></data>
+  <data name="Admin.Nav.Users" xml:space="preserve"><value>Users</value></data>
+  <data name="Admin.Nav.Plans" xml:space="preserve"><value>Plans</value></data>
+  <data name="Admin.Nav.Analytics" xml:space="preserve"><value>Analytics</value></data>
+  <data name="Admin.Nav.Usage" xml:space="preserve"><value>Usage</value></data>
+  <data name="Admin.Nav.Moderation" xml:space="preserve"><value>Moderation</value></data>
+  <data name="Admin.Nav.Filtered" xml:space="preserve"><value>Filtered</value></data>
+  <data name="Admin.Nav.Brands" xml:space="preserve"><value>Brands</value></data>
+  <data name="Admin.Nav.Stores" xml:space="preserve"><value>Stores</value></data>
+  <data name="Admin.Nav.Settings" xml:space="preserve"><value>Settings</value></data>
 </root>

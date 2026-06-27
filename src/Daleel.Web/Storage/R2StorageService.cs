@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Amazon.S3;
 using Amazon.S3.Model;
+using Daleel.Search.Http;
 using Daleel.Web.Logging;
 
 namespace Daleel.Web.Storage;
@@ -88,6 +89,16 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
         // Already hosted by us — nothing to copy, and re-uploading would loop.
         if (sourceUrl.StartsWith(_publicBaseUrl, StringComparison.OrdinalIgnoreCase))
         {
+            return sourceUrl;
+        }
+
+        // SSRF guard: sourceUrl comes from scraped pages / LLM-extracted image fields, and the fetch
+        // below runs from our own host. Refuse private/internal targets pre-flight (the injected client
+        // is also connect-time guarded, so a DNS rebind after this check is still blocked). Best-effort:
+        // a blocked URL degrades to the original rather than throwing.
+        if (!await SsrfGuard.IsSafePublicUrlAsync(sourceUrl, ct).ConfigureAwait(false))
+        {
+            _logger.LogDebug("R2 image store skipped {Url}: blocked by SSRF guard", sourceUrl);
             return sourceUrl;
         }
 

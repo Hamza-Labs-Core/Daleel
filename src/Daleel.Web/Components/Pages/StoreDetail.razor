@@ -1,6 +1,7 @@
 @page "/store/{Id}"
 @inject IStoreRepository Stores
 @inject NavigationManager Nav
+@inject ILogger<StoreDetail> Logger
 
 @* Dedicated full page for a store: name, type, Google-verified rating, address, phone, opening
    hours, the brands it carries and a map link. Routing is by a stable id: a numeric id resolves the
@@ -140,8 +141,11 @@ else
                     ? await Stores.GetByNameAsync(DecodedName)
                     : null;
         }
-        catch
+        catch (Exception ex)
         {
+            // Log so a real load error is distinguishable from a genuine "not found"; the not-found panel
+            // still covers the user-facing case without leaking internal detail.
+            Logger.LogWarning(ex, "Loading store detail for {Name} failed", DecodedName);
             _store = null;
         }
         finally

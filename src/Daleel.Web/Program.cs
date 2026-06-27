@@ -55,7 +55,10 @@ builder.Services.Configure<Microsoft.AspNetCore.Builder.RequestLocalizationOptio
 });
 
 // ── Persistence ────────────────────────────────────────────────────────────
-// SQLite locally (data/daleel.db); swap UseSqlite → UseNpgsql for Postgres without model changes.
+// SQLite only (data/daleel.db). The migrations under Data/Migrations are SQLite-specific (INTEGER
+// autoincrement keys, INTEGER booleans/timestamps baked in at scaffold time), so this context cannot
+// simply be repointed at Postgres via UseNpgsql — that would need a separate provider-specific
+// migrations assembly. The Postgres event store below is a SEPARATE context with its own migrations.
 var connection = builder.Configuration.GetConnectionString("DefaultConnection")
                  ?? "Data Source=data/daleel.db";
 builder.Services.AddDbContext<DaleelDbContext>(o => o.UseSqlite(connection));
@@ -220,7 +223,9 @@ if (r2Options is not null)
     builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService>(sp =>
         new Daleel.Web.Storage.R2StorageService(
             r2Options, publicBase!,
-            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            // Dedicated SSRF-guarded client (connect-time IP pinning, redirects disabled): this fetch
+            // pulls attacker-influenced image URLs onto our own host, so it gets the hardened client.
+            Daleel.Search.Http.SsrfGuard.CreateGuardedClient(),
             sp.GetRequiredService<ILogger<Daleel.Web.Storage.R2StorageService>>()));
 }
 else
@@ -247,6 +252,26 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp 
 // old direct-AskAsync runner. AddActivitiesFrom scans the whole assembly, so the sub-workflow activities
 // under Pipeline/SubWorkflows are discovered automatically.
 builder.Services.AddElsa(elsa => elsa.AddActivitiesFrom<Daleel.Web.Pipeline.SearchWorkflow>());
+
+// INVARIANT: the search workflow shares live, non-serializable state (an AgentService, an Action<string>
+// progress delegate) by reference through the scoped SearchPipelineState/SubWorkflowState — see their
+// remarks. This is safe ONLY because Elsa is registered core-only and the workflow never suspends. If an
+// Elsa persistence / runtime instance-store module is ever added, a suspend/resume would deserialize the
+// state with a null Agent + Progress and silently produce empty results. Fail fast at startup instead.
+var elsaPersistence = builder.Services.FirstOrDefault(d =>
+    d.ServiceType.FullName is { } n &&
+    (n.Contains("IWorkflowInstanceStore", StringComparison.Ordinal) ||
+     n.Contains("IWorkflowStateStore", StringComparison.Ordinal) ||
+     n.Contains("Elsa.Persistence", StringComparison.Ordinal)));
+if (elsaPersistence is not null)
+{
+    throw new InvalidOperationException(
+        $"Elsa persistence module '{elsaPersistence.ServiceType.FullName}' is registered, but the search " +
+        "pipeline shares non-serializable state (AgentService + progress delegate) by reference and must " +
+        "never be persisted/suspended — see SearchPipelineState. Remove the persistence module, or refactor " +
+        "the pipeline to route serializable state through Elsa Variables before enabling it.");
+}
+
 builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
 // Per-entity sub-workflow states — scoped so each dispatched child (in its own DI scope) gets a fresh one.
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.BrandResearchState>();

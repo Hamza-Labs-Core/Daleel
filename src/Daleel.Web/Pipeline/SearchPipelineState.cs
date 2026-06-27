@@ -14,6 +14,14 @@ namespace Daleel.Web.Pipeline;
 /// serialized WorkflowState. The <see cref="WorkflowSearchRunner"/> seeds the inputs, runs the
 /// workflow, then reads the outputs back off this same instance.
 /// </summary>
+/// <remarks>
+/// ⚠️ INVARIANT — NEVER PERSIST OR SUSPEND THIS WORKFLOW. <see cref="Agent"/> is a live service and
+/// <see cref="Progress"/> is a delegate; neither is serializable. This design works only because Elsa
+/// is registered core-only with no persistence and the workflow runs to completion in one pass. The
+/// moment an Elsa bookmark/Delay/suspend-resume or instance-store persistence is introduced, the
+/// workflow would resume with a null <see cref="Agent"/>/<see cref="Progress"/> and silently emit empty
+/// results with no error. Program.cs asserts no Elsa persistence module is registered to enforce this.
+/// </remarks>
 public sealed class SearchPipelineState
 {
     // ── Inputs (seeded before the run) ───────────────────────────────────────────
