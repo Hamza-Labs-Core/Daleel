@@ -139,18 +139,14 @@ jobs:
             echo "Set each with: gh secret set <NAME> --body '<real-value>' --repo Hamza-Labs-Core/Daleel" >&2
             exit 1
           fi
-          # Conditional invariant: R2 image hosting needs a public host. If the storage creds are set
-          # but R2_PUBLIC_URL is not, every R2-hosted product image 404/403s for the browser (the S3 API
-          # endpoint rejects a plain <img> GET). Fail fast rather than ship visibly-broken images. Leave
-          # ALL four blank to disable R2 (images hot-link from source) — that path is allowed.
+          # Conditional advisory: R2 image *hosting* needs a public host. If the storage creds are set but
+          # R2_PUBLIC_URL is not, the app deliberately falls back to hot-linking images from their source
+          # (it never points an <img> at the S3 API endpoint, which would 403). That's a valid, working
+          # state — e.g. R2 set up only for error logging — so this WARNS rather than fails. Set
+          # R2_PUBLIC_URL (bucket r2.dev URL or a custom domain) to serve images from R2 instead.
           if { [ -n "${R2_ACCESS_KEY:-}" ] || [ -n "${R2_SECRET_KEY:-}" ] || [ -n "${R2_BUCKET_NAME:-}" ]; } \
              && [ -z "${R2_PUBLIC_URL:-}" ]; then
-            echo "::error::Deploy aborted — R2 storage is configured but R2_PUBLIC_URL is unset."
-            echo "ERROR: R2_ACCESS_KEY/R2_SECRET_KEY/R2_BUCKET_NAME are set, so R2 image hosting is on, but" >&2
-            echo "R2_PUBLIC_URL is empty — hosted images would 403 for the browser. Set the bucket's public" >&2
-            echo "URL (r2.dev or a custom domain): gh secret set R2_PUBLIC_URL --body 'https://...' --repo Hamza-Labs-Core/Daleel" >&2
-            echo "(Or leave all R2_* secrets blank to disable R2 and hot-link images from their source.)" >&2
-            exit 1
+            echo "::warning::R2 storage is configured but R2_PUBLIC_URL is unset — product images will be hot-linked from source, not served from R2. Set R2_PUBLIC_URL (gh secret set R2_PUBLIC_URL --body 'https://...' --repo Hamza-Labs-Core/Daleel) to host them."
           fi
           echo "All required secrets are present and non-placeholder."
 
