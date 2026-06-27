@@ -78,7 +78,10 @@ if (eventStoreConn is not null)
 }
 else
 {
-    builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.NullEventStore>();
+    // No Postgres: serve the admin usage/cost dashboard from the always-present SQLite ApiCallLog,
+    // which every search run already writes to. (Previously a NullEventStore, which left the dashboard
+    // empty / "not configured" even though full provider-call analytics existed in SQLite.)
+    builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.SqliteApiCallEventStore>();
 }
 
 // ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
@@ -466,16 +469,17 @@ static void EnsureDatabase(WebApplication app)
     // Seed admin-editable system settings (idempotent).
     scope.ServiceProvider.GetRequiredService<ISystemConfigService>().SeedDefaultsAsync().GetAwaiter().GetResult();
 
-    // Bring the Postgres event store up to schema when it's configured. Best-effort: a Postgres that
-    // is unreachable at boot must not stop the app — the event store just degrades to dropping writes.
-    var events = scope.ServiceProvider.GetService<Daleel.Web.Events.IEventStore>();
-    if (events?.IsEnabled == true)
+    // Bring the Postgres event store up to schema when it's configured. The factory is only registered
+    // on the Postgres path (the SQLite fallback store needs no migration of its own — it reads the app
+    // DB's ApiCallLog), so key off the factory's presence rather than IEventStore.IsEnabled. Best-effort:
+    // a Postgres that is unreachable at boot must not stop the app — the store just degrades to no writes.
+    var eventDbFactory = scope.ServiceProvider
+        .GetService<IDbContextFactory<Daleel.Web.Events.EventStoreDbContext>>();
+    if (eventDbFactory is not null)
     {
         try
         {
-            var factory = scope.ServiceProvider
-                .GetRequiredService<IDbContextFactory<Daleel.Web.Events.EventStoreDbContext>>();
-            using var eventDb = factory.CreateDbContext();
+            using var eventDb = eventDbFactory.CreateDbContext();
             eventDb.Database.Migrate();
         }
         catch (Exception ex)

@@ -26,4 +26,26 @@
     <MudNavLink Href="/faq" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.HelpOutline">@L["Nav.Faq"]</MudNavLink>
     <MudNavLink Href="/status" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.MonitorHeart">@L["Nav.Status"]</MudNavLink>
     <MudNavLink Href="/settings" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Settings">@L["Nav.Settings"]</MudNavLink>
+
+    @* ── Account section — mobile only ──────────────────────────────────────────────
+       On desktop the account/sign-in controls live in the top app bar's UserMenu. On narrow screens
+       that app bar is crowded and its right-edge items get clipped, so the user-account destinations
+       are unreachable there. Mirror them into the drawer (hidden at md+ via d-md-none) so profile,
+       admin and sign-out stay accessible on phones. History/Saved already appear above when signed in. *@
+    <div class="d-md-none">
+        <MudDivider Class="my-2" />
+        <AuthorizeView>
+            <Authorized>
+                <MudNavLink Href="/account" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AccountCircle">@L["Nav.Account"]</MudNavLink>
+                @if (context.User.IsInRole("Admin"))
+                {
+                    <MudNavLink Href="/admin" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AdminPanelSettings">@L["Nav.Admin"]</MudNavLink>
+                }
+                <MudNavLink Href="/logout" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Logout">@L["Nav.Logout"]</MudNavLink>
+            </Authorized>
+            <NotAuthorized>
+                <MudNavLink Href="/login" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Login">@L["Nav.Login"]</MudNavLink>
+            </NotAuthorized>
+        </AuthorizeView>
+    </div>
 </MudNavMenu>
