@@ -21,10 +21,18 @@ public static class PromptTemplates
     /// <c>ContentFilter</c> is the real enforcement layer; this simply asks the model to avoid
     /// generating the content in the first place, so the filter rarely has to remove anything.
     /// </summary>
+    /// <remarks>
+    /// Policy: we filter haram <em>content</em> (what a result sells/shows), not a store's financing
+    /// model. Banks, financial institutions, and retailers that offer interest-based (riba)
+    /// installment plans MUST still appear — the user can pay cash. So riba is intentionally absent
+    /// from this list; keep it in sync with <c>ContentFilter.Categories</c>.
+    /// </remarks>
     public const string HalalGuard =
         " IMPORTANT: Only include halal-compliant results. Exclude any products, stores, or content " +
-        "related to: alcohol, pork/non-halal meat, gambling, adult content, tobacco, or interest-based " +
-        "financial products (riba). If a result contains any of these, skip it entirely.";
+        "related to: alcohol/wine, pork/non-halal meat, gambling, adult or immodest content, drugs, or " +
+        "tobacco. If a result promotes any of these, skip it entirely. Do NOT exclude a store merely " +
+        "because it is a bank or offers interest-based (riba) financing — the user can pay cash, so " +
+        "such stores are allowed; only the haram products/content themselves are excluded.";
 
     /// <summary>System prompt shared by all planning calls.</summary>
     public const string PlannerSystem =

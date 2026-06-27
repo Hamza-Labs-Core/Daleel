@@ -378,7 +378,7 @@
   <data name="Settings.Moderate" xml:space="preserve"><value>Moderate</value></data>
   <data name="Settings.Off" xml:space="preserve"><value>Off (admin only)</value></data>
   <data name="Settings.FilterDesc" xml:space="preserve"><value>Filters alcohol, pork, gambling, adult, drugs from all results.</value></data>
-  <data name="Settings.FilterDesc.Strict" xml:space="preserve"><value>Filters alcohol, pork, gambling, adult, drugs, tobacco and riba from all results.</value></data>
+  <data name="Settings.FilterDesc.Strict" xml:space="preserve"><value>Filters alcohol, pork, gambling, adult, drugs and tobacco content from all results. Stores are not filtered by their financing (e.g. interest-based plans).</value></data>
   <data name="Settings.FilterAdminNote" xml:space="preserve"><value>Turning the filter off requires an admin account.</value></data>
   <data name="Settings.ImageSafety" xml:space="preserve"><value>Image Safety</value></data>
   <data name="Settings.BlurImages" xml:space="preserve"><value>Blur all external images</value></data>

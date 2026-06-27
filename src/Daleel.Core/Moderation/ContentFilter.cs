@@ -13,7 +13,13 @@ public enum FilterStrictness
     /// <summary>Blocks the core haram categories (alcohol, pork, gambling, adult, drugs).</summary>
     Moderate,
 
-    /// <summary>Moderate plus tobacco and interest-based finance (riba). The default.</summary>
+    /// <summary>
+    /// Moderate plus tobacco. The default.
+    /// </summary>
+    /// <remarks>
+    /// Note: a store's <em>financing model</em> (riba / interest-based banking) is deliberately NOT
+    /// screened at any level — see the policy note on <see cref="Categories"/>.
+    /// </remarks>
     Strict
 }
 
@@ -50,6 +56,20 @@ public sealed class ContentFilter
         }
     }
 
+    // Halal-compliance policy — what we filter and what we deliberately do NOT.
+    //
+    // We filter haram *content*: things a result actually sells, shows, or promotes that are
+    // themselves forbidden — alcohol/wine, pork, gambling, adult/immodest content, drugs, tobacco.
+    // For a shopping assistant the user is choosing a *product or venue*, so blocking these protects
+    // them from being shown the haram item itself.
+    //
+    // We do NOT filter a store by its *business model* or financing options. A bank, a financial
+    // institution, or any retailer that happens to offer riba (interest-based) installment plans is
+    // NOT haram for the purpose of this assistant: the user can still walk in and pay cash for a
+    // perfectly halal TV or fridge. Filtering the store would wrongly hide a legitimate option over a
+    // payment method the user need not use. Hence there is intentionally no "riba"/"banking" category
+    // here — keep it that way. (Previously a Strict-level "riba" category existed; it was removed
+    // because it conflated the store's financing with the halal status of what it sells.)
     private static readonly Category[] Categories =
     {
         new("alcohol", FilterStrictness.Moderate,
@@ -79,9 +99,8 @@ public sealed class ContentFilter
             new[] { "cigarette", "cigar", "tobacco", "vape", "vaping", "e-cigarette", "shisha", "hookah", "nicotine" },
             new[] { "سجائر", "سيجارة", "تبغ", "دخان", "شيشة", "أركيلة", "نرجيلة", "نيكوتين" }),
 
-        new("riba", FilterStrictness.Strict,
-            new[] { "interest rate", "interest-based", "usury", "payday loan", "conventional mortgage" },
-            new[] { "ربا", "فائدة ربوية", "قرض ربوي", "فوائد ربوية" }),
+        // No "riba"/"banking" category: a store's financing model is not haram content — see the
+        // policy note above. Banks and interest-offering retailers must remain visible in results.
     };
 
     /// <summary>

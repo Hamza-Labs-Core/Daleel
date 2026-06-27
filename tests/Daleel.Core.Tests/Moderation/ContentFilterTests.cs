@@ -84,6 +84,38 @@ public class ContentFilterTests
         kept.Should().ContainSingle().Which.Name.Should().Be("Smart Electronics");
     }
 
+    [Theory]
+    // A store's financing model is not haram content: banks and retailers that offer interest-based
+    // (riba) installment plans must stay in results — the user can always pay cash. See the policy
+    // note in ContentFilter.Categories.
+    [InlineData("Arab Bank — personal loans")]
+    [InlineData("Smart Electronics — 0% interest installments available")]
+    [InlineData("Cairo Amman Bank mortgage rates")]
+    [InlineData("بنك الإسكان للتجارة والتمويل")]      // Housing Bank for Trade & Finance
+    [InlineData("تقسيط بفائدة على الأجهزة")]          // installments with interest on appliances
+    public void IsHalal_DoesNotFilterBanksOrInterestFinancing(string text)
+    {
+        // Even at the strictest level a store is judged by what it sells, not how it finances it.
+        _strict.IsHalal(text).Should().BeTrue();
+    }
+
+    [Fact]
+    public void FilterStores_KeepsBankButRemovesLiquorStore()
+    {
+        var stores = new List<StoreLocation>
+        {
+            new() { Name = "Arab Bank", Address = "King Hussein St" },          // riba financing — allowed
+            new() { Name = "Smart Electronics (installments)", Address = "Mecca St" }, // allowed
+            new() { Name = "The Liquor Store", Address = "Rainbow St" }          // haram content — removed
+        };
+
+        var kept = _strict.FilterStores(stores);
+
+        kept.Should().HaveCount(2);
+        kept.Should().Contain(s => s.Name == "Arab Bank");
+        kept.Should().NotContain(s => s.Name.Contains("Liquor"));
+    }
+
     [Fact]
     public void Moderate_DoesNotBlockTobacco_ButStrictDoes()
     {

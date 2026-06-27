@@ -378,7 +378,7 @@
   <data name="Settings.Moderate" xml:space="preserve"><value>معتدل</value></data>
   <data name="Settings.Off" xml:space="preserve"><value>إيقاف (للمشرفين فقط)</value></data>
   <data name="Settings.FilterDesc" xml:space="preserve"><value>يُصفّي الكحول ولحم الخنزير والقمار ومحتوى البالغين والمخدرات من كل النتائج.</value></data>
-  <data name="Settings.FilterDesc.Strict" xml:space="preserve"><value>يُصفّي الكحول ولحم الخنزير والقمار ومحتوى البالغين والمخدرات والتبغ والربا من كل النتائج.</value></data>
+  <data name="Settings.FilterDesc.Strict" xml:space="preserve"><value>يُصفّي الكحول ولحم الخنزير والقمار ومحتوى البالغين والمخدرات والتبغ من كل النتائج. لا تُستبعد المتاجر بسبب طريقة تمويلها (مثل خطط التقسيط بفائدة).</value></data>
   <data name="Settings.FilterAdminNote" xml:space="preserve"><value>يتطلّب إيقاف الفلتر حساب مشرف.</value></data>
   <data name="Settings.ImageSafety" xml:space="preserve"><value>أمان الصور</value></data>
   <data name="Settings.BlurImages" xml:space="preserve"><value>إخفاء كل الصور الخارجية</value></data>
