@@ -20,17 +20,31 @@ public static class StableId
 {
     /// <summary>Stable id for a product model, keyed on its brand + model identity (its name as a
     /// last resort), per the requirement to hash from (brand + model name).</summary>
+    /// <remarks>
+    /// The identity basis is built and normalized identically to <c>ProductProfile.KeyFor</c> (which
+    /// defers to <see cref="NormalizeIdentity"/>), so a product *routed* by this id maps to the same
+    /// <c>ProductKey</c> it was *persisted* under — otherwise a name with punctuation would route to one
+    /// id but be stored under a different key, and the detail page could never find its own saved data.
+    /// </remarks>
     public static string ForProduct(string? brand, string? model, string? name = null)
     {
-        var identity = string.Join('|', new[] { brand, model }
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .Select(s => s!.Trim()));
-        if (identity.Length == 0)
-        {
-            identity = name?.Trim() ?? string.Empty;
-        }
+        var basis = !string.IsNullOrWhiteSpace(brand) || !string.IsNullOrWhiteSpace(model)
+            ? $"{brand} {model}"
+            : name;
+        return Hash("p", NormalizeIdentity(basis));
+    }
 
-        return Hash("p", identity);
+    /// <summary>
+    /// The shared identity normalization for products: keep letters/digits/spaces, collapse whitespace
+    /// runs, lower-case. <c>ProductProfile.Normalize</c> delegates here so the routing id and the stored
+    /// upsert key are always derived from the same basis.
+    /// </summary>
+    public static string NormalizeIdentity(string? value)
+    {
+        var filtered = new string((value ?? string.Empty)
+            .Where(c => char.IsLetterOrDigit(c) || char.IsWhiteSpace(c)).ToArray());
+        return string.Join(' ', filtered.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries))
+            .ToLowerInvariant();
     }
 
     /// <summary>Stable id for a brand, keyed on its name (used when no database id exists yet).</summary>

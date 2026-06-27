@@ -23,11 +23,26 @@
 	email {$CADDY_ACME_EMAIL:admin@daleel.hamzalabs.dev}
 }
 
+# Security-response headers, imported by every site below. The app renders LLM- and scraped-derived
+# content, so these are a second line behind Blazor's auto-encoding. The CSP allows MudBlazor/Blazor's
+# inline styles+scripts and the Google Maps key/script (App.razor); frame-ancestors 'none' plus
+# X-Frame-Options blocks clickjacking; nosniff + Referrer-Policy round it out.
+(security_headers) {
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Content-Security-Policy "default-src 'self'; img-src 'self' data: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://maps.googleapis.com https://maps.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' https: wss: ws:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"
+		-Server
+	}
+}
+
 # Public site — proxy daleel.hamzalabs.dev -> daleel:8080 over automatic HTTPS.
 # Caddy terminates TLS and forwards X-Forwarded-Proto: https, so the app's
 # UseHttpsRedirection() correctly sees a secure request and does not redirect.
 {$CADDY_DOMAIN:daleel.hamzalabs.dev} {
 	encode zstd gzip
+	import security_headers
 
 	reverse_proxy daleel:8080 {
 		# Caddy sets these automatically, but make them explicit: the app's UseForwardedHeaders()
@@ -65,6 +80,7 @@
 # a nonexistent https://<ip>. The domain site above keeps Caddy's real scheme.
 http:// {
 	encode zstd gzip
+	import security_headers
 
 	reverse_proxy daleel:8080 {
 		header_up X-Forwarded-Proto https

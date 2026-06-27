@@ -15,7 +15,12 @@ public sealed record QueryCost(int JobId, string Query, int Calls, decimal Cost)
 public interface IApiCallLogRepository
 {
     Task AddBatchAsync(IEnumerable<ApiCallLog> calls, CancellationToken ct = default);
-    Task<IReadOnlyList<ApiCallLog>> ListByJobAsync(int jobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// The API-call log for one job, scoped to <paramref name="userId"/> (its owner). Filtering by owner
+    /// here — not just by job id — means a caller can never read another user's calls by guessing a job id.
+    /// </summary>
+    Task<IReadOnlyList<ApiCallLog>> ListByJobAsync(int jobId, string userId, CancellationToken ct = default);
 
     /// <summary>(call count, total cost) for a user since a date.</summary>
     Task<(int Calls, decimal Cost)> UserUsageSinceAsync(string userId, DateTimeOffset since, CancellationToken ct = default);
@@ -44,8 +49,16 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task<IReadOnlyList<ApiCallLog>> ListByJobAsync(int jobId, CancellationToken ct = default) =>
-        await _db.ApiCallLogs.AsNoTracking().Where(c => c.JobId == jobId).OrderBy(c => c.Id).ToListAsync(ct);
+    public async Task<IReadOnlyList<ApiCallLog>> ListByJobAsync(
+        int jobId, string userId, CancellationToken ct = default)
+    {
+        // Rows store a hashed user id (privacy); hash the lookup the same way to match the owner's own.
+        var key = Anonymizer.HashUserId(userId);
+        return await _db.ApiCallLogs.AsNoTracking()
+            .Where(c => c.JobId == jobId && c.UserId == key)
+            .OrderBy(c => c.Id)
+            .ToListAsync(ct);
+    }
 
     // NOTE on aggregation: SQLite can't SUM/AVG a `decimal` in SQL (NotSupportedException), so every
     // cost rollup below materializes the (time-windowed, index-backed) rows first and aggregates in

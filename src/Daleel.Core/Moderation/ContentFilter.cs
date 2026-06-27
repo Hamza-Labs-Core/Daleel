@@ -93,6 +93,10 @@ public sealed class ContentFilter
     private readonly FilterStrictness _strictness;
     private readonly List<string> _audit = new();
     private readonly List<FilterAudit> _details = new();
+    // One ContentFilter is shared by reference across up to MaxConcurrency=5 parallel sub-workflows
+    // (the halal moderation chokepoint). Record() and the audit readers run on those threads, so every
+    // touch of _audit/_details is serialized here — unlocked List.Add corrupts the backing array.
+    private readonly object _auditLock = new();
 
     public ContentFilter(FilterStrictness strictness = FilterStrictness.Strict) => _strictness = strictness;
 
@@ -100,13 +104,21 @@ public sealed class ContentFilter
     public FilterStrictness Strictness => _strictness;
 
     /// <summary>Terms/categories that triggered removals, in order — for auditing, never display.</summary>
-    public IReadOnlyList<string> AuditLog => _audit;
+    /// <remarks>Returns a snapshot: the backing list can be mutated concurrently by parallel filtering.</remarks>
+    public IReadOnlyList<string> AuditLog
+    {
+        get { lock (_auditLock) { return _audit.ToArray(); } }
+    }
 
     /// <summary>
     /// Structured removal records (category + matched term + offending content) for the admin
     /// "Filtered content" log. Server/admin-only — never surfaced to end users.
     /// </summary>
-    public IReadOnlyList<FilterAudit> AuditDetails => _details;
+    /// <remarks>Returns a snapshot: the backing list can be mutated concurrently by parallel filtering.</remarks>
+    public IReadOnlyList<FilterAudit> AuditDetails
+    {
+        get { lock (_auditLock) { return _details.ToArray(); } }
+    }
 
     /// <summary>True when the text is free of any blocked term at the current strictness.</summary>
     public bool IsHalal(string? text)
@@ -164,8 +176,11 @@ public sealed class ContentFilter
     /// <summary>Records one removal in both the legacy string log and the structured detail log.</summary>
     private void Record(string category, string term, string kind, string? content)
     {
-        _audit.Add($"{kind}:{category}");
-        _details.Add(new FilterAudit(category, term, kind, Truncate(content)));
+        lock (_auditLock)
+        {
+            _audit.Add($"{kind}:{category}");
+            _details.Add(new FilterAudit(category, term, kind, Truncate(content)));
+        }
     }
 
     private static string Truncate(string? text)

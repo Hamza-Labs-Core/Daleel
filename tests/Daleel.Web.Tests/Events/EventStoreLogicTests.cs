@@ -123,12 +123,55 @@ public class EventStoreLogicTests
         ev.MetadataJson.Should().Contain("Smart Buy").And.Contain("verified");
     }
 
+    [Fact]
+    public void SearchEventSummary_GroupBySearch_RollsUpCostErrorsAndTimePerSearch()
+    {
+        var events = new List<PipelineEvent>
+        {
+            EvFor("42", 0.01m, ms: 100, ok: true),
+            EvFor("42", 0.02m, ms: 300, ok: false),
+            EvFor("7", 0.05m, ms: 800, ok: true),
+            EvFor(null, 99m, ms: 1, ok: true), // ad-hoc action (no search id) must be excluded
+        };
+
+        var byId = SearchEventSummary.GroupBySearch(events);
+
+        byId.Should().HaveCount(2);
+
+        var s42 = byId["42"];
+        s42.Count.Should().Be(2);
+        s42.Cost.Should().Be(0.03m);
+        s42.Errors.Should().Be(1);
+        s42.TotalMs.Should().Be(400);
+
+        byId["7"].Cost.Should().Be(0.05m);
+        byId["7"].Errors.Should().Be(0);
+    }
+
+    [Fact]
+    public void SearchEventSummary_GroupBySearch_EmptyList_IsEmpty()
+    {
+        SearchEventSummary.GroupBySearch(Array.Empty<PipelineEvent>()).Should().BeEmpty();
+    }
+
     private static PipelineEvent Ev(string category, string provider, decimal cost, long ms, bool ok) => new()
     {
         Timestamp = DateTimeOffset.UtcNow,
         Category = category,
         Provider = provider,
         EventType = "x",
+        EstimatedCost = cost,
+        DurationMs = ms,
+        Success = ok
+    };
+
+    private static PipelineEvent EvFor(string? searchId, decimal cost, long ms, bool ok) => new()
+    {
+        Timestamp = DateTimeOffset.UtcNow,
+        Category = EventCategory.Search,
+        Provider = "SerpAPI",
+        EventType = "x",
+        SearchId = searchId,
         EstimatedCost = cost,
         DurationMs = ms,
         Success = ok

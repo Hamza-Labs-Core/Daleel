@@ -473,4 +473,94 @@
   <data name="Admin.Usage.Retry" xml:space="preserve"><value>Retry</value></data>
   <data name="Admin.Usage.StatusOk" xml:space="preserve"><value>OK</value></data>
   <data name="Admin.Usage.StatusFail" xml:space="preserve"><value>Failed</value></data>
+  <data name="Admin.Workflows.Title" xml:space="preserve"><value>Search workflows</value></data>
+  <data name="Admin.Workflows.Subtitle" xml:space="preserve"><value>Live and recent search runs, reconstructed from the SearchJob queue and the pipeline event store. Click a run to see its step timeline.</value></data>
+  <data name="Admin.Workflows.Period.Today" xml:space="preserve"><value>Today</value></data>
+  <data name="Admin.Workflows.Period.Week" xml:space="preserve"><value>7 days</value></data>
+  <data name="Admin.Workflows.Period.Month" xml:space="preserve"><value>30 days</value></data>
+  <data name="Admin.Workflows.Refresh" xml:space="preserve"><value>Refresh</value></data>
+  <data name="Admin.Workflows.LoadError" xml:space="preserve"><value>Couldn't load workflows:</value></data>
+  <data name="Admin.Workflows.Retry" xml:space="preserve"><value>Retry</value></data>
+  <data name="Admin.Workflows.NoEventStore" xml:space="preserve"><value>The pipeline event store isn't configured, so per-step cost and the step timeline are unavailable. Running and completed runs are still listed from the job queue.</value></data>
+  <data name="Admin.Workflows.RunningTitle" xml:space="preserve"><value>Running &amp; queued</value></data>
+  <data name="Admin.Workflows.AutoRefresh" xml:space="preserve"><value>Auto-refresh</value></data>
+  <data name="Admin.Workflows.RunningEmpty" xml:space="preserve"><value>No searches are running right now.</value></data>
+  <data name="Admin.Workflows.CompletedTitle" xml:space="preserve"><value>Completed</value></data>
+  <data name="Admin.Workflows.CompletedEmpty" xml:space="preserve"><value>No completed searches in this period.</value></data>
+  <data name="Admin.Workflows.View" xml:space="preserve"><value>View</value></data>
+  <data name="Admin.Workflows.Close" xml:space="preserve"><value>Close</value></data>
+  <data name="Admin.Workflows.StepUnknown" xml:space="preserve"><value>Starting…</value></data>
+  <data name="Admin.Workflows.DetailTitle" xml:space="preserve"><value>Step timeline</value></data>
+  <data name="Admin.Workflows.DetailEmpty" xml:space="preserve"><value>No recorded steps for this run. Steps appear once a run finishes and its events are flushed to the store.</value></data>
+  <data name="Admin.Workflows.Col.Query" xml:space="preserve"><value>Query</value></data>
+  <data name="Admin.Workflows.Col.User" xml:space="preserve"><value>User</value></data>
+  <data name="Admin.Workflows.Col.Started" xml:space="preserve"><value>Started</value></data>
+  <data name="Admin.Workflows.Col.Elapsed" xml:space="preserve"><value>Elapsed</value></data>
+  <data name="Admin.Workflows.Col.Step" xml:space="preserve"><value>Current step</value></data>
+  <data name="Admin.Workflows.Col.Status" xml:space="preserve"><value>Status</value></data>
+  <data name="Admin.Workflows.Col.Finished" xml:space="preserve"><value>Finished</value></data>
+  <data name="Admin.Workflows.Col.Duration" xml:space="preserve"><value>Duration</value></data>
+  <data name="Admin.Workflows.Col.Results" xml:space="preserve"><value>Results</value></data>
+  <data name="Admin.Workflows.Col.Cost" xml:space="preserve"><value>Est. cost</value></data>
+  <data name="Admin.Workflows.Col.Steps" xml:space="preserve"><value>Steps</value></data>
+  <data name="Admin.Workflows.Status.Completed" xml:space="preserve"><value>Completed</value></data>
+  <data name="Admin.Workflows.Status.Failed" xml:space="preserve"><value>Failed</value></data>
+  <data name="Admin.Workflows.Status.Cancelled" xml:space="preserve"><value>Cancelled</value></data>
+  <data name="Admin.Data.Title" xml:space="preserve"><value>R2 data viewer</value></data>
+  <data name="Admin.Data.Subtitle" xml:space="preserve"><value>Browse the R2 bucket by data type — scraped specs, brand and store images, and canonical spec sheets. Preview images and JSON inline, or download any object.</value></data>
+  <data name="Admin.Data.NotConfiguredBefore" xml:space="preserve"><value>R2 storage isn't configured. Set</value></data>
+  <data name="Admin.Data.NotConfiguredOr" xml:space="preserve"><value>and</value></data>
+  <data name="Admin.Data.NotConfiguredAfter" xml:space="preserve"><value> to browse stored data here.</value></data>
+  <data name="Admin.Data.Root" xml:space="preserve"><value>Bucket root</value></data>
+  <data name="Admin.Data.LoadError" xml:space="preserve"><value>Couldn't list objects:</value></data>
+  <data name="Admin.Data.Retry" xml:space="preserve"><value>Retry</value></data>
+  <data name="Admin.Data.Empty" xml:space="preserve"><value>Nothing here.</value></data>
+  <data name="Admin.Data.Folder" xml:space="preserve"><value>Folder</value></data>
+  <data name="Admin.Data.Preview" xml:space="preserve"><value>Preview</value></data>
+  <data name="Admin.Data.Download" xml:space="preserve"><value>Download</value></data>
+  <data name="Admin.Data.LoadMore" xml:space="preserve"><value>Load more</value></data>
+  <data name="Admin.Data.PreviewTruncated" xml:space="preserve"><value>Preview truncated — download the file to see all of it.</value></data>
+  <data name="Admin.Data.PreviewUnavailable" xml:space="preserve"><value>Preview unavailable for this file.</value></data>
+  <data name="Admin.Data.Close" xml:space="preserve"><value>Close</value></data>
+  <data name="Admin.Data.Col.Name" xml:space="preserve"><value>Name</value></data>
+  <data name="Admin.Data.Col.Type" xml:space="preserve"><value>Type</value></data>
+  <data name="Admin.Data.Col.Size" xml:space="preserve"><value>Size</value></data>
+  <data name="Admin.Data.Col.Modified" xml:space="preserve"><value>Modified</value></data>
+  <data name="Admin.Data.Col.Actions" xml:space="preserve"><value>Actions</value></data>
+  <data name="Admin.Data.Section.Site" xml:space="preserve"><value>Site data</value></data>
+  <data name="Admin.Data.Section.Brand" xml:space="preserve"><value>Brand data</value></data>
+  <data name="Admin.Data.Section.Store" xml:space="preserve"><value>Store data</value></data>
+  <data name="Admin.Data.Section.Final" xml:space="preserve"><value>Final specs</value></data>
+  <data name="Admin.Nav.Dashboard" xml:space="preserve"><value>Dashboard</value></data>
+  <data name="Admin.Nav.Users" xml:space="preserve"><value>Users</value></data>
+  <data name="Admin.Nav.Plans" xml:space="preserve"><value>Plans</value></data>
+  <data name="Admin.Nav.Analytics" xml:space="preserve"><value>Analytics</value></data>
+  <data name="Admin.Nav.Usage" xml:space="preserve"><value>Usage</value></data>
+  <data name="Admin.Nav.Workflows" xml:space="preserve"><value>Workflows</value></data>
+  <data name="Admin.Nav.Data" xml:space="preserve"><value>Data</value></data>
+  <data name="Admin.Nav.Moderation" xml:space="preserve"><value>Moderation</value></data>
+  <data name="Admin.Nav.Filtered" xml:space="preserve"><value>Filtered</value></data>
+  <data name="Admin.Nav.Brands" xml:space="preserve"><value>Brands</value></data>
+  <data name="Admin.Nav.Stores" xml:space="preserve"><value>Stores</value></data>
+  <data name="Admin.Nav.Settings" xml:space="preserve"><value>Settings</value></data>
+  <data name="Detail.Specifications" xml:space="preserve"><value>Specifications</value></data>
+  <data name="Detail.SpecsUnavailable" xml:space="preserve"><value>Detailed specifications aren't available for this product yet.</value></data>
+  <data name="Search.EmailNotice" xml:space="preserve"><value>We'll email you the results when they're ready.</value></data>
+  <data name="Settings.EmailResults" xml:space="preserve"><value>Email me search results</value></data>
+  <data name="Settings.EmailResultsHelp" xml:space="preserve"><value>Get a summary email when your search finishes.</value></data>
+  <data name="Settings.Snack.EmailResultsOn" xml:space="preserve"><value>We'll email you when searches finish.</value></data>
+  <data name="Settings.Snack.EmailResultsOff" xml:space="preserve"><value>Search result emails turned off.</value></data>
+  <data name="Email.Search.Subject" xml:space="preserve"><value>Your Daleel search results are ready</value></data>
+  <data name="Email.Search.Preheader" xml:space="preserve"><value>Your search summary — the products, brands, and stores we found.</value></data>
+  <data name="Email.Search.Heading" xml:space="preserve"><value>Your search results are ready</value></data>
+  <data name="Email.Search.Intro" xml:space="preserve"><value>Here's a summary of what we found for:</value></data>
+  <data name="Email.Search.Products" xml:space="preserve"><value>Products</value></data>
+  <data name="Email.Search.Brands" xml:space="preserve"><value>Brands</value></data>
+  <data name="Email.Search.Stores" xml:space="preserve"><value>Stores</value></data>
+  <data name="Email.Search.TopProducts" xml:space="preserve"><value>Top products</value></data>
+  <data name="Email.Search.TopStores" xml:space="preserve"><value>Top stores</value></data>
+  <data name="Email.Search.PriceNa" xml:space="preserve"><value>Price on request</value></data>
+  <data name="Email.Search.ViewReport" xml:space="preserve"><value>View Full Report</value></data>
+  <data name="Email.Search.FooterReason" xml:space="preserve"><value>You're receiving this because email notifications are on for your Daleel account.</value></data>
+  <data name="Email.Search.FooterManage" xml:space="preserve"><value>Manage email preferences in your account settings.</value></data>
 </root>

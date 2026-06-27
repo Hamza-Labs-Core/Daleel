@@ -18,7 +18,7 @@ public interface IBrandModelRepository
     /// <summary>The model for a (brand, normalized name) pair, or null if not harvested yet (no tracking).</summary>
     Task<BrandModel?> GetByBrandAndKeyAsync(int brandId, string modelKey, CancellationToken ct = default);
 
-    /// <summary>A single model by id (no tracking), or null.</summary>
+    /// <summary>A single harvested model by its database id (with its owning brand loaded), or null.</summary>
     Task<BrandModel?> GetByIdAsync(int id, CancellationToken ct = default);
 
     /// <summary>
@@ -26,6 +26,14 @@ public interface IBrandModelRepository
     /// the spec pipeline makes after a model has been identified. Best-effort: a missing id is a no-op.
     /// </summary>
     Task SaveFinalSpecsAsync(int id, string? finalSpecsJson, string? finalSpecsR2Url, CancellationToken ct = default);
+
+    /// <summary>
+    /// Finds the harvested model whose identity normalizes to <paramref name="productKey"/> — the same
+    /// normalized "brand model" key <see cref="ProductProfile"/>/<see cref="ScrapedPrice"/> are stored
+    /// under — so a product detail page can resolve a catalogue row from the key it already has for
+    /// prices/profile. Returns null when no model matches.
+    /// </summary>
+    Task<BrandModel?> FindByProductKeyAsync(string productKey, CancellationToken ct = default);
 
     Task<int> CountForBrandAsync(int brandId, CancellationToken ct = default);
 
@@ -60,9 +68,13 @@ public sealed class BrandModelRepository : IBrandModelRepository
         }
         catch (DbUpdateException)
         {
-            // A concurrent insert won the (BrandId, ModelKey) unique-index race: drop ours, reload the
-            // committed row, and merge our values onto the winner. Same recovery as BrandRepository.
-            _db.Entry(model).State = EntityState.Detached;
+            // A concurrent insert won the (BrandId, ModelKey) unique-index race. Reset the WHOLE change
+            // tracker (not just our failed entity): this upsert can run on the shared request-scoped
+            // DbContext during brand-catalogue harvesting, so a single failed SaveChanges could otherwise
+            // leave a poisoned tracker that makes the next model's SaveChanges re-throw and silently drop
+            // models. Then reload the committed row and merge our values onto the winner. Same recovery as
+            // BrandRepository.
+            _db.ChangeTracker.Clear();
             var winner = await _db.BrandModels
                 .FirstOrDefaultAsync(m => m.BrandId == model.BrandId && m.ModelKey == key, ct);
             if (winner is null)
@@ -87,7 +99,9 @@ public sealed class BrandModelRepository : IBrandModelRepository
             .FirstOrDefaultAsync(m => m.BrandId == brandId && m.ModelKey == modelKey, ct);
 
     public Task<BrandModel?> GetByIdAsync(int id, CancellationToken ct = default) =>
-        _db.BrandModels.AsNoTracking().FirstOrDefaultAsync(m => m.Id == id, ct);
+        _db.BrandModels.AsNoTracking()
+            .Include(m => m.Brand)
+            .FirstOrDefaultAsync(m => m.Id == id, ct);
 
     public async Task SaveFinalSpecsAsync(int id, string? finalSpecsJson, string? finalSpecsR2Url, CancellationToken ct = default)
     {
@@ -102,6 +116,26 @@ public sealed class BrandModelRepository : IBrandModelRepository
         await _db.SaveChangesAsync(ct);
     }
 
+    public async Task<BrandModel?> FindByProductKeyAsync(string productKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(productKey))
+        {
+            return null;
+        }
+
+        // BrandModel is keyed per-brand by (BrandId, ModelKey), not by the cross-table normalized
+        // "brand model" key that ProductProfile/ScrapedPrice share — and EF can't translate that
+        // normalization into SQL. The harvested catalogue is small (a handful of brands), so we load it
+        // and match in memory: a model matches when its brand+model (or model alone) normalizes to the
+        // same key the price/profile rows are stored under. Newest harvest wins on ties.
+        var models = await _db.BrandModels.AsNoTracking().Include(m => m.Brand).ToListAsync(ct);
+        return models
+            .Where(m => ProductProfile.KeyFor(m.Brand?.Name, m.ModelName, m.ModelName) == productKey
+                        || ProductProfile.Normalize(m.ModelName) == productKey)
+            .OrderByDescending(m => m.LastRefreshed)
+            .FirstOrDefault();
+    }
+
     public Task<int> CountForBrandAsync(int brandId, CancellationToken ct = default) =>
         _db.BrandModels.CountAsync(m => m.BrandId == brandId, ct);
 
@@ -109,16 +143,24 @@ public sealed class BrandModelRepository : IBrandModelRepository
 
     private static void ApplyUpdates(BrandModel existing, BrandModel model)
     {
-        existing.ModelName = model.ModelName;
-        existing.Category = model.Category;
-        existing.SpecsJson = model.SpecsJson;
-        // Keep a previously-stored image if the fresh harvest didn't find one (don't blank it out).
+        // Null-coalesce the optional enrichment fields: structured LLM/Context.dev extraction is flaky,
+        // so a partial re-harvest that momentarily omits specs/prices/category must NOT blank out
+        // previously-good values. "Absent this harvest" means "unknown", not "deleted". Only overwrite a
+        // field when the fresh harvest actually carries a value for it.
+        if (!string.IsNullOrWhiteSpace(model.ModelName))
+        {
+            existing.ModelName = model.ModelName;
+        }
+
+        existing.Category = model.Category ?? existing.Category;
+        existing.SpecsJson = model.SpecsJson ?? existing.SpecsJson;
         existing.ImageUrl = model.ImageUrl ?? existing.ImageUrl;
-        existing.LocalPrice = model.LocalPrice;
-        existing.GlobalPrice = model.GlobalPrice;
-        existing.Currency = model.Currency;
+        existing.LocalPrice = model.LocalPrice ?? existing.LocalPrice;
+        existing.GlobalPrice = model.GlobalPrice ?? existing.GlobalPrice;
+        existing.Currency = model.Currency ?? existing.Currency;
+        existing.SourceUrl = model.SourceUrl ?? existing.SourceUrl;
+        // IsAvailable and LastRefreshed are always current-harvest facts (no "unknown" state).
         existing.IsAvailable = model.IsAvailable;
-        existing.SourceUrl = model.SourceUrl;
         existing.LastRefreshed = model.LastRefreshed;
 
         // Smart-identification fields. The canonical spec sheet only ever moves forward (a re-harvest
@@ -136,7 +178,9 @@ public sealed class BrandModelRepository : IBrandModelRepository
             existing.DiscoveredAt = model.DiscoveredAt;
         }
 
-        existing.IsDiscontinued = model.IsDiscontinued;
+        // Sticky: a re-harvest that simply doesn't list a model can't observe its discontinuation, so never
+        // clear a previously-set flag — only let a harvest turn it on.
+        existing.IsDiscontinued = existing.IsDiscontinued || model.IsDiscontinued;
     }
 
     /// <summary>Merges two string lists, case-insensitively de-duplicated, preserving first-seen order.</summary>

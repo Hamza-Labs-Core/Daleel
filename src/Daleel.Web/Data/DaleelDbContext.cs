@@ -12,8 +12,15 @@ namespace Daleel.Web.Data;
 /// <see cref="IdentityDbContext{TUser}"/> and adds the two app-owned tables.
 /// </summary>
 /// <remarks>
-/// Targets SQLite locally (data/daleel.db) but the model is provider-agnostic, so swapping the
-/// connection to Postgres needs only a different <c>UseNpgsql</c> call and a fresh migration.
+/// This context is <b>SQLite-only</b> (data/daleel.db). Its migrations under
+/// <c>Data/Migrations</c> bake in SQLite-specific decisions at scaffold time — INTEGER autoincrement
+/// primary keys (<c>Sqlite:Autoincrement</c>), and INTEGER columns for booleans and Unix-ms timestamps.
+/// EF emits those for the <i>active</i> provider, so they will not apply against Postgres (which wants
+/// <c>bigint</c>/<c>boolean</c>/identity). Moving the main DB to Postgres is therefore not a one-line
+/// <c>UseNpgsql</c> swap: it needs a separate provider-specific migrations assembly and a parallel
+/// scaffolded migration set. (The optional pipeline event store is a <i>separate</i>
+/// <c>EventStoreDbContext</c> pinned to Postgres with its own migrations — that part is already
+/// provider-split correctly.)
 /// </remarks>
 public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
 {
@@ -63,6 +70,13 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
         var toUnixMs = new ValueConverter<DateTimeOffset, long>(
             v => v.ToUnixTimeMilliseconds(),
             v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+
+        // Search-result emails are opt-out: default the column to true so existing accounts (and any
+        // insert that doesn't set it) are opted in. The C# initializer handles new entities; this SQL
+        // default backfills the column when the migration adds it to the existing AspNetUsers rows.
+        builder.Entity<ApplicationUser>()
+            .Property(u => u.EmailSearchResults)
+            .HasDefaultValue(true);
 
         builder.Entity<Brand>(e =>
         {

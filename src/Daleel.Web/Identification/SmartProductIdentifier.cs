@@ -149,9 +149,13 @@ public sealed class SmartProductIdentifier : IProductIdentifier
 
             ct.ThrowIfCancellationRequested();
 
-            var (confidence, matchedName) = await ComparePairAsync(storeHash, item.ImageUrl!, model, brandImage, ct)
+            var (confidence, matchedName, fromCache) = await ComparePairAsync(storeHash, item.ImageUrl!, model, brandImage, ct)
                 .ConfigureAwait(false);
-            comparisons++;
+            // Only paid (non-cached) comparisons count against the budget; cache hits are free.
+            if (!fromCache)
+            {
+                comparisons++;
+            }
 
             if (confidence > best.Confidence)
             {
@@ -168,18 +172,21 @@ public sealed class SmartProductIdentifier : IProductIdentifier
         return best.Confidence >= VisionMatchCache.MatchThreshold ? best : ProductIdentification.None;
     }
 
-    /// <summary>Returns the cached verdict for a pair, or runs the vision model once and caches it.</summary>
-    private async Task<(double Confidence, string? MatchedName)> ComparePairAsync(
+    /// <summary>Returns the cached verdict for a pair, or runs the vision model once and caches it.
+    /// <c>FromCache</c> is true when no paid LLM call was made, so the caller can keep its paid-call budget
+    /// for genuinely uncached candidates.</summary>
+    private async Task<(double Confidence, string? MatchedName, bool FromCache)> ComparePairAsync(
         string storeHash, string storeImageUrl, BrandModel model, string brandImage, CancellationToken ct)
     {
         var cached = await _cache.GetAsync(storeHash, model.Id, ct).ConfigureAwait(false);
         if (cached is not null)
         {
-            return (cached.Confidence, cached.MatchedModelName);
+            return (cached.Confidence, cached.MatchedModelName, true);
         }
 
         var result = await _vision.CompareAsync(storeImageUrl, brandImage, model.ModelName, ct).ConfigureAwait(false);
-        var confidence = result.SameProduct ? result.Confidence : Math.Min(result.Confidence, 0.0);
+        // A non-match scores 0; result.Confidence is already clamped to [0,1] in the matcher.
+        var confidence = result.SameProduct ? result.Confidence : 0.0;
 
         await SafeCacheAsync(new VisionMatchCache
         {
@@ -190,7 +197,7 @@ public sealed class SmartProductIdentifier : IProductIdentifier
             MatchedAt = _options.Now()
         }, ct).ConfigureAwait(false);
 
-        return (confidence, result.ModelName);
+        return (confidence, result.ModelName, false);
     }
 
     /// <summary>Prioritizes models whose name shares tokens with the listing, and that have an image.</summary>
