@@ -128,13 +128,35 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             }
 
             // A faulted/cancelled run reports Status == Finished but a non-Finished SubStatus, leaving
-            // ResultJson empty or partial. Surface that as a failure instead of returning a broken result.
+            // ResultJson empty or partial. The products are assembled up-front (step 4, ExtractProducts);
+            // everything after — brand/store/item enrichment, the cache/serialize tail — is best-effort. So
+            // rather than discard a result we already built and show a bare "no results", recover the
+            // extracted products (un-enriched is fine) and log the incident so the underlying fault stays
+            // diagnosable. Only a run that produced nothing usable is surfaced as a hard failure.
             if (run.WorkflowState.SubStatus != WorkflowSubStatus.Finished)
             {
                 var reason = string.Join("; ", run.WorkflowState.Incidents.Select(i => i.Message));
-                throw new InvalidOperationException(
-                    $"Search workflow did not finish (sub-status: {run.WorkflowState.SubStatus})" +
-                    (string.IsNullOrWhiteSpace(reason) ? "." : $": {reason}"));
+                _logger.LogWarning(
+                    "Search workflow for job {JobId} ended non-finished ({SubStatus}): {Reason}",
+                    job.Id, run.WorkflowState.SubStatus,
+                    string.IsNullOrWhiteSpace(reason) ? "(no incident detail)" : reason);
+
+                if (string.IsNullOrEmpty(state.ResultJson) && SalvageResultJson(state) is { } salvaged)
+                {
+                    state.ResultJson = salvaged;
+                    state.ResultType = "ask";
+                    state.ResultCount = state.Products?.ProductCount ?? 0;
+                    _logger.LogWarning(
+                        "Recovered {Count} product(s) from faulted search job {JobId} despite the incident above",
+                        state.ResultCount, job.Id);
+                }
+
+                if (string.IsNullOrEmpty(state.ResultJson))
+                {
+                    throw new InvalidOperationException(
+                        $"Search workflow did not finish (sub-status: {run.WorkflowState.SubStatus})" +
+                        (string.IsNullOrWhiteSpace(reason) ? "." : $": {reason}"));
+                }
             }
 
             await RecordResultCacheAsync(job, state.FromCache ? "hit" : "miss", ct).ConfigureAwait(false);
@@ -188,6 +210,50 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         if (events.Count > 0)
         {
             await _eventStore.RecordBatchAsync(events, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Builds a serialized result from a run that faulted after products were extracted, so an enrichment
+    /// or serialize-tail failure doesn't throw away the products the user searched for. Prefers the answer
+    /// the aggregate step assembled; falls back to a fresh answer over the extracted products. If the full
+    /// answer won't serialize (the heavy research bundle — scraped pages / social posts — is the likeliest
+    /// culprit), it retries without that bundle. Returns null when there is nothing worth surfacing.
+    /// </summary>
+    internal static string? SalvageResultJson(SearchPipelineState state)
+    {
+        var answer = state.Answer ?? new AgentAnswer
+        {
+            Question = state.Query,
+            Geo = state.GeoProfile?.Key ?? state.Geo,
+            QueryType = state.Strategy?.QueryType ?? Daleel.Core.Models.QueryType.General,
+            Summary = state.Summary,
+            Research = state.Bundle ?? new ResearchBundle(),
+            Products = state.Products,
+            GeneratedAt = DateTimeOffset.UtcNow
+        };
+
+        if (answer.Products is not { } p ||
+            !(p.HasListings || p.StoreCount > 0 || p.BrandCount > 0 || p.ReviewCount > 0))
+        {
+            return null;
+        }
+
+        try
+        {
+            return ResultSerialization.Serialize(answer);
+        }
+        catch
+        {
+            // Drop the research bundle and keep the products — a usable result beats none.
+            try
+            {
+                return ResultSerialization.Serialize(answer with { Research = new ResearchBundle() });
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 
