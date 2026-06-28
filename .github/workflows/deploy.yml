@@ -123,8 +123,8 @@ jobs:
           CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
-          # Optional — DeepL real-time UI translation. Not in the required set below: the app runs without
-          # it (UI shows original text), exactly like the optional R2 keys.
+          # Required — DeepL real-time UI translation. In the required set below: deploys fail fast if it is
+          # missing/empty/placeholder, exactly like OPENROUTER_API_KEY.
           DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
           # Postgres event-store credentials. POSTGRES_PASSWORD is the single source
           # of truth: the connection string is derived from it at .env render time
@@ -148,7 +148,7 @@ jobs:
           R2_PUBLIC_URL: ${{ secrets.R2_PUBLIC_URL }}
         run: |
           set -euo pipefail
-          required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN POSTGRES_PASSWORD DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
+          required="OPENROUTER_API_KEY SERPAPI_KEY CONTEXT_DEV_API_KEY GOOGLE_PLACES_API_KEY APIFY_TOKEN DEEPL_API_KEY POSTGRES_PASSWORD DEPLOY_SSH_HOST DEPLOY_SSH_USER DEPLOY_SSH_KEY"
           missing=""
           for var in $required; do
             val="${!var:-}"
