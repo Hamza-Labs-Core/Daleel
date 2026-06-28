@@ -41,8 +41,12 @@ daleel.db
 *.db-shm
 *.db-wal
 
-# Data Protection key ring (auth-cookie encryption keys) — never commit
+# Data Protection key ring (auth-cookie encryption keys) — never commit.
+# Patterns are case-sensitive: the app writes to Data/keys/ (capital D), so the
+# lowercase rule alone did NOT match and left the key ring committable.
 data/keys/
+Data/keys/
+src/Daleel.Web/Data/keys/
 
 # Runtime error/audit logs written by the app
 src/Daleel.Web/Data/logs/

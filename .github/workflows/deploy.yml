@@ -422,16 +422,12 @@ jobs:
             install -m 0755 /tmp/daleel-config/deploy.sh           /opt/daleel/deploy.sh
             rm -rf /tmp/daleel-config
             cd /opt/daleel
-            # One-time postgres_data reset: POSTGRES_PASSWORD moved from a
-            # box-generated file to a GitHub secret, but Postgres baked the old
-            # password into this volume on first init — the app would then fail to
-            # authenticate with the new secret. Drop the volume once so Postgres
-            # reinitializes with the secret value. Guarded by a marker so later
-            # deploys DON'T wipe the event store every push. The container must be
-            # stopped/removed first or the volume is "in use" and rm is a no-op.
-            if [ ! -f /opt/daleel/.postgres_volume_reset_done ]; then
-              docker compose rm -sf postgres 2>/dev/null || true
-              docker volume rm daleel_postgres_data 2>/dev/null || true
-              touch /opt/daleel/.postgres_volume_reset_done
-            fi
+            # NOTE: the normal deploy path NEVER touches the postgres_data volume.
+            # Wiping the Postgres event store (e.g. after a POSTGRES_PASSWORD
+            # rotation) is a deliberate, manual-only action — run the standalone
+            # "Reset Postgres Volume" workflow (.github/workflows/reset-postgres.yml).
+            # An earlier marker-file-guarded `docker volume rm` lived here; it was a
+            # latent data-loss landmine (if the on-box marker was ever lost, an
+            # ordinary push-to-main deploy would silently destroy the event store),
+            # so it was removed in favour of the isolated, approval-gated workflow.
             DALEEL_TAG="$DALEEL_TAG" ./deploy.sh "$DALEEL_TAG"
