@@ -16,7 +16,10 @@ env:
 
 concurrency:
   group: deploy-production
-  cancel-in-progress: false
+  # A newer push cancels an older in-flight deploy so a stalled run can never jam the
+  # queue (a Testcontainers/Ryuk hang once left a run In Progress for 6.5h, blocking all
+  # later deploys). The latest commit is always the one we want live anyway.
+  cancel-in-progress: true
 
 jobs:
   build-test:
