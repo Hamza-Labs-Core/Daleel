@@ -365,7 +365,13 @@
   <data name="Settings.CreditsLeft" xml:space="preserve"><value>نقطة متبقية هذا الشهر</value></data>
   <data name="Settings.CreditsHelp" xml:space="preserve"><value>تُحتسب كل عملية بحث نقاطًا بحسب المزوّدات التي تستخدمها. يتجدّد في</value></data>
   <data name="Settings.CreditsGetMore" xml:space="preserve"><value>احصل على المزيد</value></data>
-  <data name="Settings.Subtitle" xml:space="preserve"><value>كل ما هنا يُخزَّن في متصفحك فقط (التخزين المحلي) ويُرسَل مباشرةً إلى المساعد — ولا يُكتب أبدًا في سجلّات الخادم.</value></data>
+  <data name="Settings.Subtitle" xml:space="preserve"><value>أدِر سجلّ بحثك وحسابك.</value></data>
+  <data name="Settings.Account" xml:space="preserve"><value>الحساب</value></data>
+  <data name="Settings.DeleteAccount" xml:space="preserve"><value>حذف حسابي</value></data>
+  <data name="Settings.DeleteAccountDesc" xml:space="preserve"><value>احذف حسابك نهائيًا مع كامل سجلّ بحثك ونتائجك المحفوظة. لا يمكن التراجع عن هذا الإجراء.</value></data>
+  <data name="Settings.DeleteDialog.Title" xml:space="preserve"><value>حذف الحساب؟</value></data>
+  <data name="Settings.DeleteDialog.Body" xml:space="preserve"><value>سيؤدي هذا إلى حذف حسابك وسجلّ بحثك ونتائجك المحفوظة نهائيًا. لا يمكن التراجع عن هذا الإجراء.</value></data>
+  <data name="Settings.Snack.AccountDeleted" xml:space="preserve"><value>تم حذف الحساب.</value></data>
   <data name="Settings.ApiKeys" xml:space="preserve"><value>مفاتيح API</value></data>
   <data name="Settings.Show" xml:space="preserve"><value>إظهار</value></data>
   <data name="Settings.SaveKeys" xml:space="preserve"><value>حفظ المفاتيح</value></data>

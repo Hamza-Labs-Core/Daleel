@@ -365,7 +365,13 @@
   <data name="Settings.CreditsLeft" xml:space="preserve"><value>credits left this month</value></data>
   <data name="Settings.CreditsHelp" xml:space="preserve"><value>Each search costs credits based on the providers it uses. Resets</value></data>
   <data name="Settings.CreditsGetMore" xml:space="preserve"><value>Get more</value></data>
-  <data name="Settings.Subtitle" xml:space="preserve"><value>Everything here is stored in your browser only (localStorage) and sent straight to the agent — never written to server logs.</value></data>
+  <data name="Settings.Subtitle" xml:space="preserve"><value>Manage your search history and account.</value></data>
+  <data name="Settings.Account" xml:space="preserve"><value>Account</value></data>
+  <data name="Settings.DeleteAccount" xml:space="preserve"><value>Delete my account</value></data>
+  <data name="Settings.DeleteAccountDesc" xml:space="preserve"><value>Permanently delete your account along with all of your search history and saved results. This cannot be undone.</value></data>
+  <data name="Settings.DeleteDialog.Title" xml:space="preserve"><value>Delete account?</value></data>
+  <data name="Settings.DeleteDialog.Body" xml:space="preserve"><value>This permanently deletes your account, search history, and saved results. This cannot be undone.</value></data>
+  <data name="Settings.Snack.AccountDeleted" xml:space="preserve"><value>Account deleted.</value></data>
   <data name="Settings.ApiKeys" xml:space="preserve"><value>API Keys</value></data>
   <data name="Settings.Show" xml:space="preserve"><value>Show</value></data>
   <data name="Settings.SaveKeys" xml:space="preserve"><value>Save keys</value></data>

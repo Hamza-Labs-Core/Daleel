@@ -1,14 +1,15 @@
 @page "/settings"
-@inject BrowserStore Store
-@inject LayoutState Layout
-@inject ISnackbar Snackbar
-@inject ICurrentUser CurrentUser
-@inject IQuotaService Quota
-@inject IStringLocalizer<SharedResource> L
-@inject UserManager<ApplicationUser> Users
-@using Daleel.Core.Moderation
-@using Daleel.Web.Data
+@attribute [Authorize]
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
+@inject ICurrentUser CurrentUser
+@inject ISearchHistoryRepository HistoryRepo
+@inject UserManager<ApplicationUser> Users
+@inject DaleelDbContext Db
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Settings</PageTitle>
 
@@ -17,184 +18,90 @@
     @L["Settings.Subtitle"]
 </MudText>
 
-<MudGrid Spacing="3">
-    @if (_credits is not null)
-    {
-        <MudItem xs="12">
-            <MudPaper Class="pa-4" Elevation="0" Outlined="true">
-                <div class="d-flex align-center mb-2">
-                    <MudIcon Icon="@Icons.Material.Filled.Bolt" Class="mr-2" Color="Color.Primary" />
-                    <MudText Typo="Typo.h6">@L["Settings.Credits"]</MudText>
-                    <MudSpacer />
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@_credits.PlanName</MudChip>
-                </div>
-                @if (_credits.IsAdmin || _credits.Unlimited)
-                {
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Settings.CreditsUnlimited"]</MudText>
-                }
-                else
-                {
-                    <MudText Typo="Typo.body2" Class="mb-1">
-                        <b>@_credits.Remaining</b> / @_credits.Limit @L["Settings.CreditsLeft"]
+@if (!_ready)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    @* ── Search history ──────────────────────────────────────────────────── *@
+    <MudPaper Class="pa-4 mb-4" Elevation="0" Outlined="true">
+        <div class="d-flex align-center mb-3">
+            <MudIcon Icon="@Icons.Material.Filled.History" Class="mr-2" />
+            <MudText Typo="Typo.h6">@L["History.Title"]</MudText>
+        </div>
+
+        <div class="d-flex flex-wrap gap-3 align-center mb-3">
+            <MudTextField @bind-Value="_search" @bind-Value:after="OnSearchChanged"
+                          Placeholder="@L["History.FilterPlaceholder"]" Variant="Variant.Outlined"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.FilterList"
+                          Immediate="false" DebounceInterval="300" Style="flex:1;min-width:240px;" />
+            <MudSpacer />
+            <MudButton Variant="Variant.Outlined" Color="Color.Error"
+                       StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearAllAsync">
+                @L["History.ClearAll"]
+            </MudButton>
+        </div>
+
+        <MudTable T="SearchHistoryEntry" ServerData="LoadAsync" @ref="_table" Hover="true"
+                  Dense="true" Bordered="false" Striped="true">
+            <HeaderContent>
+                <MudTh>@L["History.Col.When"]</MudTh>
+                <MudTh>@L["History.Col.Type"]</MudTh>
+                <MudTh>@L["History.Col.Query"]</MudTh>
+                <MudTh>@L["History.Col.Market"]</MudTh>
+                <MudTh>@L["History.Col.Summary"]</MudTh>
+                <MudTh Style="text-align:right;">@L["History.Col.Actions"]</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="@L["History.Col.When"]">
+                    <MudText Typo="Typo.caption">@context.CreatedAt.LocalDateTime.ToString("g")</MudText>
+                </MudTd>
+                <MudTd DataLabel="@L["History.Col.Type"]">
+                    <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@context.QueryType</MudChip>
+                </MudTd>
+                <MudTd DataLabel="@L["History.Col.Query"]">
+                    <MudText Typo="Typo.body2" dir="@Catalog.Dir(context.Query)" Style="text-align:start;">@context.Query</MudText>
+                </MudTd>
+                <MudTd DataLabel="@L["History.Col.Market"]">@Catalog.ResolveGeo(context.Geo).English</MudTd>
+                <MudTd DataLabel="@L["History.Col.Summary"]">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" dir="@Catalog.Dir(context.ResultSummary ?? "")">
+                        @context.ResultSummary
                     </MudText>
-                    <MudProgressLinear Color="@(_credits.CanSearch ? Color.Primary : Color.Error)"
-                                       Value="@CreditPercent" Class="my-2" Size="Size.Large" Rounded="true" />
-                    <div class="d-flex align-center flex-wrap gap-2">
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">
-                            @L["Settings.CreditsHelp"] @_credits.PeriodEnd.ToString("MMM d").
-                        </MudText>
-                        <MudSpacer />
-                        <MudButton Href="/pricing" Size="Size.Small" Variant="Variant.Outlined"
-                                   Color="Color.Primary" StartIcon="@Icons.Material.Filled.Upgrade">
-                            @L["Settings.CreditsGetMore"]
-                        </MudButton>
-                    </div>
-                }
-            </MudPaper>
-        </MudItem>
-    }
-    @* Preferences available to every user. Admin-only config (API keys, default model,
-       content filter, image safety) lives in the separate admin column below. *@
-    <MudItem xs="12" md="@(_isAdmin ? 5 : 7)">
-        <MudPaper Class="pa-4" Elevation="0" Outlined="true">
-            <div class="d-flex align-center mb-3">
-                <MudIcon Icon="@Icons.Material.Filled.Tune" Class="mr-2" />
-                <MudText Typo="Typo.h6">@L["Settings.Preferences"]</MudText>
-            </div>
+                </MudTd>
+                <MudTd Style="text-align:right;">
+                    <MudTooltip Text="@L["History.Delete"]">
+                        <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                       OnClick="@(() => DeleteAsync(context))" />
+                    </MudTooltip>
+                </MudTd>
+            </RowTemplate>
+            <NoRecordsContent>
+                <MudText Class="pa-4" Color="Color.Secondary">@L["History.Empty"]</MudText>
+            </NoRecordsContent>
+            <PagerContent>
+                <MudTablePager PageSizeOptions="new[] { 10, 20, 50 }" />
+            </PagerContent>
+        </MudTable>
+    </MudPaper>
 
-            <MudSwitch T="bool" Value="_dark" ValueChanged="OnDarkChanged" Color="Color.Primary"
-                       Label="@(_dark ? L["Settings.DarkTheme"] : L["Settings.LightTheme"])"
-                       ThumbIcon="@(_dark ? Icons.Material.Filled.DarkMode : Icons.Material.Filled.LightMode)" />
-
-            @if (_hasEmail)
-            {
-                <MudDivider Class="my-4" />
-                <MudSwitch T="bool" Value="_emailResults" ValueChanged="OnEmailResultsChanged" Color="Color.Primary"
-                           Label="@L["Settings.EmailResults"]"
-                           ThumbIcon="@Icons.Material.Filled.Email" />
-                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Settings.EmailResultsHelp"]</MudText>
-            }
-
-            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true" Class="mt-4">
-                @L["Settings.PreferencesNote"]
-            </MudAlert>
-        </MudPaper>
-    </MudItem>
-
-    @* Admin-only configuration. The @if gates rendering; server-side handlers must still
-       re-validate the admin role since the UI gate alone is not a security boundary. *@
-    @if (_isAdmin)
-    {
-        <MudItem xs="12" md="7">
-            <MudPaper Class="pa-4" Elevation="0" Outlined="true">
-                <div class="d-flex align-center mb-3">
-                    <MudIcon Icon="@Icons.Material.Filled.Key" Class="mr-2" />
-                    <MudText Typo="Typo.h6">@L["Settings.ApiKeys"]</MudText>
-                    <MudSpacer />
-                    <MudSwitch T="bool" @bind-Value="_showKeys" Color="Color.Primary" Label="@L["Settings.Show"]" />
-                </div>
-
-                @if (!_ready)
-                {
-                    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
-                }
-                else
-                {
-                    @foreach (var (name, label, help) in BrowserStore.ApiKeyNames)
-                    {
-                        <MudTextField T="string" Value="@GetKey(name)" ValueChanged="@(v => _keys[name] = v ?? string.Empty)"
-                                      Label="@label" HelperText="@help"
-                                      InputType="@(_showKeys ? InputType.Text : InputType.Password)"
-                                      Variant="Variant.Outlined" Class="mb-3" Immediate="true"
-                                      Adornment="Adornment.End"
-                                      AdornmentIcon="@(string.IsNullOrWhiteSpace(GetKey(name)) ? Icons.Material.Filled.RadioButtonUnchecked : Icons.Material.Filled.CheckCircle)" />
-                    }
-
-                    <div class="d-flex gap-2 mt-2">
-                        <MudButton Variant="Variant.Filled" Color="Color.Primary"
-                                   StartIcon="@Icons.Material.Filled.Save" OnClick="SaveKeys">@L["Settings.SaveKeys"]</MudButton>
-                        <MudButton Variant="Variant.Outlined" Color="Color.Error"
-                                   StartIcon="@Icons.Material.Filled.DeleteSweep" OnClick="ClearKeys">@L["History.ClearAll"]</MudButton>
-                    </div>
-                }
-            </MudPaper>
-
-            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
-                <div class="d-flex align-center mb-3">
-                    <MudIcon Icon="@Icons.Material.Filled.SmartToy" Class="mr-2" />
-                    <MudText Typo="Typo.h6">@L["Settings.DefaultModel"]</MudText>
-                </div>
-
-                <ModelSelect Value="@_model" ValueChanged="OnModelChanged" Label="@L["Settings.DefaultModel"]" />
-            </MudPaper>
-
-            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
-                <div class="d-flex align-center mb-3">
-                    <MudIcon Icon="@Icons.Material.Filled.VerifiedUser" Class="mr-2" Color="Color.Success" />
-                    <MudText Typo="Typo.h6">@L["Settings.ContentFilter"]</MudText>
-                </div>
-
-                <MudSelect T="FilterStrictness" Value="_strictness" ValueChanged="OnStrictnessChanged"
-                           Label="@L["Settings.HalalFiltering"]" Variant="Variant.Outlined" Dense="true">
-                    <MudSelectItem Value="FilterStrictness.Strict">@L["Settings.Strict"]</MudSelectItem>
-                    <MudSelectItem Value="FilterStrictness.Moderate">@L["Settings.Moderate"]</MudSelectItem>
-                    <MudSelectItem Value="FilterStrictness.Off">@L["Settings.Off"]</MudSelectItem>
-                </MudSelect>
-
-                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2">
-                    @(_strictness == FilterStrictness.Strict ? L["Settings.FilterDesc.Strict"] : L["Settings.FilterDesc"])
-                </MudText>
-            </MudPaper>
-
-            <MudPaper Class="pa-4 mt-3" Elevation="0" Outlined="true">
-                <div class="d-flex align-center mb-3">
-                    <MudIcon Icon="@Icons.Material.Filled.HideImage" Class="mr-2" Color="Color.Info" />
-                    <MudText Typo="Typo.h6">@L["Settings.ImageSafety"]</MudText>
-                </div>
-
-                <MudSwitch T="bool" Value="_blurImages" ValueChanged="OnBlurChanged" Color="Color.Primary"
-                           Label="@L["Settings.BlurImages"]"
-                           ThumbIcon="@Icons.Material.Filled.BlurOn" />
-                <MudSwitch T="bool" Value="_haramBlurPrompt" ValueChanged="OnHaramBlurPromptChanged" Color="Color.Primary"
-                           Label="@L["Settings.HaramBlurPrompt"]"
-                           ThumbIcon="@Icons.Material.Filled.Extension" />
-
-                <MudText Typo="Typo.subtitle2" Class="mt-3">@L["Settings.TrustedDomains"]</MudText>
-                @if (_trustedDomains.Count == 0)
-                {
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Settings.NoTrustedDomains"]</MudText>
-                }
-                else
-                {
-                    <div class="d-flex flex-wrap gap-2 mt-1">
-                        @foreach (var d in _trustedDomains)
-                        {
-                            <MudChip T="string" Size="Size.Small" OnClose="@(() => RemoveTrusted(d))">@d</MudChip>
-                        }
-                    </div>
-                }
-            </MudPaper>
-        </MudItem>
-    }
-</MudGrid>
+    @* ── Account ─────────────────────────────────────────────────────────── *@
+    <MudPaper Class="pa-4" Elevation="0" Outlined="true">
+        <div class="d-flex align-center mb-2">
+            <MudIcon Icon="@Icons.Material.Filled.ManageAccounts" Class="mr-2" Color="Color.Error" />
+            <MudText Typo="Typo.h6" Color="Color.Error">@L["Settings.Account"]</MudText>
+        </div>
+        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-3">@L["Settings.DeleteAccountDesc"]</MudText>
+        <MudButton Color="Color.Error" Variant="Variant.Outlined" StartIcon="@Icons.Material.Filled.DeleteForever"
+                   OnClick="DeleteAccountAsync">@L["Settings.DeleteAccount"]</MudButton>
+    </MudPaper>
+}
 
 @code {
+    private MudTable<SearchHistoryEntry>? _table;
+    private string? _userId;
     private bool _ready;
-    private QuotaStatus? _credits;
-    private double CreditPercent => _credits?.Limit is int lim && lim > 0
-        ? Math.Min(100, 100.0 * _credits.Used / lim) : 0;
-    private bool _showKeys;
-    private readonly Dictionary<string, string> _keys = new(StringComparer.OrdinalIgnoreCase);
-    private string _model = Catalog.DefaultModel;
-    private bool _dark = true;
-    private FilterStrictness _strictness = FilterStrictness.Strict;
-    private bool _isAdmin;
-    private bool _blurImages = true;
-    private bool _haramBlurPrompt = true;
-    private List<string> _trustedDomains = new();
-    private bool _hasEmail;
-    private bool _emailResults = true;
-    private ApplicationUser? _user;
+    private string _search = string.Empty;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -203,138 +110,81 @@
             return;
         }
 
-        _isAdmin = await CurrentUser.IsAdminAsync();
-
-        // Preferences shown to every user.
-        _dark = (await Store.GetAsync("theme") ?? "dark") != "light";
-
-        var userId = await CurrentUser.GetUserIdAsync();
-        if (userId is not null)
-        {
-            _credits = await Quota.GetStatusAsync(userId, _isAdmin);
-            _user = await Users.FindByIdAsync(userId);
-            if (_user is not null)
-            {
-                _hasEmail = !string.IsNullOrWhiteSpace(_user.Email);
-                _emailResults = _user.EmailSearchResults;
-            }
-        }
-
-        // Admin-only configuration: only load it when the corresponding UI is rendered,
-        // so a regular user's browser never pulls API keys (or other admin state) into memory.
-        if (_isAdmin)
-        {
-            foreach (var (name, _, _) in BrowserStore.ApiKeyNames)
-            {
-                _keys[name] = await Store.GetAsync("key." + name) ?? string.Empty;
-            }
-
-            _model = await Store.GetAsync("model") ?? _model;
-            _strictness = (await Store.GetAsync("filter.strictness")) switch
-            {
-                "off" => FilterStrictness.Off,
-                "moderate" => FilterStrictness.Moderate,
-                _ => FilterStrictness.Strict
-            };
-            _blurImages = (await Store.GetAsync("img.blur") ?? "0") != "0";
-            _haramBlurPrompt = (await Store.GetAsync("img.haramblur_prompt") ?? "1") != "0";
-            _trustedDomains = (await Store.GetAsync("img.trusted") ?? string.Empty)
-                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-        }
-
-        Layout.SetDarkMode(_dark);
-
+        _userId = await CurrentUser.GetUserIdAsync();
         _ready = true;
         StateHasChanged();
     }
 
-    private string GetKey(string name) => _keys.TryGetValue(name, out var v) ? v : string.Empty;
-
-    private async Task SaveKeys()
+    private async Task<TableData<SearchHistoryEntry>> LoadAsync(TableState state, CancellationToken token)
     {
-        foreach (var (name, _, _) in BrowserStore.ApiKeyNames)
+        if (_userId is null)
         {
-            var value = GetKey(name);
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                await Store.RemoveAsync("key." + name);
-            }
-            else
-            {
-                await Store.SetAsync("key." + name, value.Trim());
-            }
+            return new TableData<SearchHistoryEntry> { Items = Array.Empty<SearchHistoryEntry>(), TotalItems = 0 };
         }
 
-        Snackbar.Add(L["Settings.Snack.KeysSaved"], Severity.Success);
+        var page = await HistoryRepo.ListAsync(_userId, _search, state.Page + 1, state.PageSize, token);
+        return new TableData<SearchHistoryEntry> { Items = page.Items, TotalItems = page.TotalCount };
     }
 
-    private async Task ClearKeys()
+    private Task OnSearchChanged() => _table?.ReloadServerData() ?? Task.CompletedTask;
+
+    private async Task DeleteAsync(SearchHistoryEntry entry)
     {
-        foreach (var (name, _, _) in BrowserStore.ApiKeyNames)
-        {
-            await Store.RemoveAsync("key." + name);
-            _keys[name] = string.Empty;
-        }
-
-        Snackbar.Add(L["Settings.Snack.KeysCleared"], Severity.Info);
-    }
-
-    private async Task OnModelChanged(string value)
-    {
-        _model = value;
-        await Store.SetAsync("model", value);
-    }
-
-    private async Task OnDarkChanged(bool value)
-    {
-        _dark = value;
-        Layout.SetDarkMode(value);
-        await Store.SetAsync("theme", value ? "dark" : "light");
-    }
-
-    private async Task OnStrictnessChanged(FilterStrictness value)
-    {
-        // Defensive: never let a non-admin persist "Off" even if the option leaks into the DOM.
-        if (value == FilterStrictness.Off && !_isAdmin)
-        {
-            value = FilterStrictness.Strict;
-        }
-
-        _strictness = value;
-        await Store.SetAsync("filter.strictness", value.ToString().ToLowerInvariant());
-        Snackbar.Add(string.Format(L["Settings.Snack.FilterSet"], value), Severity.Success);
-    }
-
-    private async Task OnBlurChanged(bool value)
-    {
-        _blurImages = value;
-        await Store.SetAsync("img.blur", value ? "1" : "0");
-    }
-
-    private async Task OnHaramBlurPromptChanged(bool value)
-    {
-        _haramBlurPrompt = value;
-        await Store.SetAsync("img.haramblur_prompt", value ? "1" : "0");
-    }
-
-    private async Task RemoveTrusted(string domain)
-    {
-        _trustedDomains.Remove(domain);
-        await Store.SetAsync("img.trusted", string.Join(",", _trustedDomains));
-    }
-
-    private async Task OnEmailResultsChanged(bool value)
-    {
-        _emailResults = value;
-        if (_user is null)
+        if (_userId is null)
         {
             return;
         }
 
-        // Server-side preference (read by the background search worker), so it persists via the user row.
-        _user.EmailSearchResults = value;
-        await Users.UpdateAsync(_user);
-        Snackbar.Add(value ? L["Settings.Snack.EmailResultsOn"] : L["Settings.Snack.EmailResultsOff"],
-            value ? Severity.Success : Severity.Info);
+        await HistoryRepo.DeleteAsync(_userId, entry.Id);
+        Snackbar.Add(L["History.Deleted"], Severity.Success);
+        if (_table is not null)
+        {
+            await _table.ReloadServerData();
+        }
+    }
+
+    private async Task ClearAllAsync()
+    {
+        var ok = await Dialogs.ShowMessageBox(L["History.ClearDialog.Title"],
+            L["History.ClearDialog.Body"], yesText: L["History.ClearAll"], cancelText: L["Search.Cancel"]);
+        if (ok != true || _userId is null)
+        {
+            return;
+        }
+
+        var count = await HistoryRepo.ClearAsync(_userId);
+        Snackbar.Add(string.Format(L["History.Cleared"], count), Severity.Success);
+        if (_table is not null)
+        {
+            await _table.ReloadServerData();
+        }
+    }
+
+    private async Task DeleteAccountAsync()
+    {
+        var ok = await Dialogs.ShowMessageBox(L["Settings.DeleteDialog.Title"],
+            L["Settings.DeleteDialog.Body"], yesText: L["Settings.DeleteAccount"], cancelText: L["Search.Cancel"]);
+        if (ok != true || _userId is null)
+        {
+            return;
+        }
+
+        // Remove the user's owned data first (UserId is a plain string, so there's no cascade).
+        Db.SavedResults.RemoveRange(Db.SavedResults.Where(x => x.UserId == _userId));
+        Db.SearchHistory.RemoveRange(Db.SearchHistory.Where(x => x.UserId == _userId));
+        Db.UserSubscriptions.RemoveRange(Db.UserSubscriptions.Where(x => x.UserId == _userId));
+        Db.UserQuotas.RemoveRange(Db.UserQuotas.Where(x => x.UserId == _userId));
+        Db.ApiCallLogs.RemoveRange(Db.ApiCallLogs.Where(x => x.UserId == _userId));
+        await Db.SaveChangesAsync();
+
+        var user = await Users.FindByIdAsync(_userId);
+        if (user is not null)
+        {
+            await Users.DeleteAsync(user);
+        }
+
+        Snackbar.Add(L["Settings.Snack.AccountDeleted"], Severity.Info);
+        // Logout is POST-only now; send them to the sign-out page to clear the (now-orphaned) cookie.
+        Nav.NavigateTo("/logout", forceLoad: true);
     }
 }

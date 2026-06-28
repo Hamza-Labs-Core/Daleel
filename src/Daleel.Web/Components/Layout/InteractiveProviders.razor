@@ -1,35 +1,33 @@
 @* MudBlazor's global providers. MainLayout is now InteractiveServer (App.razor sets the render mode
-   globally), so this renders interactively as a plain child: the MudThemeProvider reacts to the theme
-   toggle and the dialog/snackbar/popover overlays fire for interactive pages. Every interactive
-   component in the circuit shares one scoped LayoutState, so the app-bar toggle and the Settings page
-   both drive this provider through State.Changed. *@
+   globally), so this renders interactively as a plain child: the MudThemeProvider follows the OS theme
+   and the dialog/snackbar/popover overlays fire for interactive pages. The theme is no longer a stored
+   preference — it tracks the operating system's light/dark setting and updates live via
+   ObserveSystemThemeChange, so there is no client-side theme state to leak between sessions. *@
 @implements IDisposable
 @inject LayoutState State
-@inject BrowserStore Store
 
-<MudThemeProvider Theme="_theme" IsDarkMode="State.IsDarkMode" />
+<MudThemeProvider @ref="_provider" Theme="_theme" IsDarkMode="State.IsDarkMode"
+                  IsDarkModeChanged="State.SetDarkMode" ObserveSystemThemeChange="true" />
 <MudPopoverProvider />
 <MudSnackbarProvider />
 <MudDialogProvider FullWidth="true" MaxWidth="MaxWidth.Small" CloseButton="true" />
 
 @code {
     private readonly MudTheme _theme = DaleelTheme.Build();
+    private MudThemeProvider? _provider;
 
     protected override void OnInitialized() => State.Changed += OnStateChanged;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender)
+        if (!firstRender || _provider is null)
         {
             return;
         }
 
-        // Restore the visitor's saved theme now that the circuit is live and JS interop works.
-        var theme = await Store.GetAsync("theme");
-        if (theme is not null)
-        {
-            State.SetDarkMode(theme != "light");
-        }
+        // Adopt the operating system's theme now that the circuit is live and JS interop works.
+        // ObserveSystemThemeChange keeps it in sync if the OS setting flips while the page is open.
+        State.SetDarkMode(await _provider.GetSystemDarkModeAsync());
     }
 
     private void OnStateChanged() => InvokeAsync(StateHasChanged);
