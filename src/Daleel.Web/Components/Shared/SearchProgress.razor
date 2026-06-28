@@ -45,8 +45,12 @@
     <div class="daleel-stepper daleel-stepper-wide" role="list">
         @for (var i = 0; i < Steps.Length; i++)
         {
+            // Capture the step into a per-iteration local. `i` is a single shared loop variable, so any
+            // RenderFragment (e.g. a component's child content) that closes over it would read i ==
+            // Steps.Length after the loop ends and throw IndexOutOfRangeException. `step` is safe to capture.
+            var step = Steps[i];
             var state = StateOf(i);
-            <div class="daleel-step @state" role="listitem" title="@L[Steps[i].LabelKey]">
+            <div class="daleel-step @state" role="listitem" title="@L[step.LabelKey]">
                 <div class="daleel-step-icon">
                     @if (state == "done")
                     {
@@ -54,10 +58,10 @@
                     }
                     else
                     {
-                        <MudIcon Icon="@Steps[i].Icon" Size="Size.Small" />
+                        <MudIcon Icon="@step.Icon" Size="Size.Small" />
                     }
                 </div>
-                <div class="daleel-step-label">@L[Steps[i].LabelKey]</div>
+                <div class="daleel-step-label">@L[step.LabelKey]</div>
             </div>
         }
     </div>
@@ -79,6 +83,10 @@
             <div class="daleel-step-list" role="list">
                 @for (var i = 0; i < Steps.Length; i++)
                 {
+                    // Same loop-variable capture guard as the wide stepper — and it actually matters here:
+                    // the label lives in <MudText>, a component whose child content is a RenderFragment
+                    // invoked after the loop, so closing over `i` directly would index Steps out of bounds.
+                    var step = Steps[i];
                     var state = StateOf(i);
                     <div class="daleel-step-row @state" role="listitem">
                         <div class="daleel-step-icon">
@@ -88,10 +96,10 @@
                             }
                             else
                             {
-                                <MudIcon Icon="@Steps[i].Icon" Size="Size.Small" />
+                                <MudIcon Icon="@step.Icon" Size="Size.Small" />
                             }
                         </div>
-                        <MudText Typo="Typo.body2" Class="daleel-step-row-label">@L[Steps[i].LabelKey]</MudText>
+                        <MudText Typo="Typo.body2" Class="daleel-step-row-label">@L[step.LabelKey]</MudText>
                     </div>
                 }
             </div>
