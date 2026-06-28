@@ -372,8 +372,9 @@ builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp 
 // Workflow-instance persistence is OPTIONAL and Postgres-only, mirroring the event store: when
 // POSTGRES_CONNECTION_STRING/DATABASE_URL is set, the workflow-management feature is registered on Elsa's
 // EF Core Postgres provider (the same connection the event store uses — see PostgresConnection.Resolve),
-// which gives IWorkflowInstanceStore + IWorkflowInstanceManager and ships+applies its own migrations at
-// startup. When Postgres is NOT configured, persistence is simply unavailable — no in-memory or SQLite
+// which gives IWorkflowInstanceStore + IWorkflowInstanceManager. Its schema is migrated explicitly in
+// EnsureDatabase at startup (Elsa's auto-migration only runs under UseWorkflowRuntime, which we don't use).
+// When Postgres is NOT configured, persistence is simply unavailable — no in-memory or SQLite
 // fallback — and the management feature is not registered; the search workflow still runs in-process via
 // IWorkflowRunner, the runner skips its (best-effort) instance save, and the admin workflows page shows a
 // "not configured" notice. If you want instance tracking, configure Postgres.
@@ -532,6 +533,29 @@ static void EnsureDatabase(WebApplication app)
         catch (Exception ex)
         {
             app.Logger.LogWarning(ex, "Event store migration skipped — Postgres unavailable at startup");
+        }
+    }
+
+    // Bring Elsa's workflow-instance store up to schema. Elsa's EF Core management feature is supposed to
+    // apply its own migrations at startup, but that auto-migration only fires under UseWorkflowRuntime — we
+    // deliberately run in-process via IWorkflowRunner + UseWorkflowManagement only, so it never ran and the
+    // first instance save hit `42P01: relation "Elsa.WorkflowInstances" does not exist`. Apply the
+    // Elsa-shipped migrations explicitly here, exactly like the app DB and event store above. The factory is
+    // only registered when Postgres is configured (UseWorkflowManagement is conditional on elsaInstanceConn),
+    // so this no-ops when persistence is disabled. Best-effort: a transient failure must not stop the app —
+    // the runner's instance save is already best-effort and the workflow still runs in-process.
+    var elsaDbFactory = scope.ServiceProvider
+        .GetService<IDbContextFactory<Elsa.EntityFrameworkCore.Modules.Management.ManagementElsaDbContext>>();
+    if (elsaDbFactory is not null)
+    {
+        try
+        {
+            using var elsaDb = elsaDbFactory.CreateDbContext();
+            elsaDb.Database.Migrate();
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Elsa workflow-instance store migration skipped — Postgres unavailable at startup");
         }
     }
 }
