@@ -42,6 +42,39 @@ public class LocalityClassifierTests
     }
 
     [Theory]
+    // The US's de-facto local commerce namespace is the bare generic gTLD — US retailers live on
+    // .com/.net/.store, never a ".us" ccTLD or "/us/" path. These MUST be local for the US market,
+    // or every US seller is dropped and a "best carry on USA" search returns no products/brands.
+    [InlineData("https://www.amazon.com/dp/x")]
+    [InlineData("https://www.walmart.com/ip/x")]
+    [InlineData("https://www.rei.com/product/x")]
+    [InlineData("https://www.away.com/luggage/carry-on")]
+    [InlineData("https://shop.monos.com/products/carry-on")]
+    public void GenericGTlds_AreLocalForUs(string url)
+    {
+        LocalityClassifier.IsLocal(url, "us", "United States").Should().BeTrue();
+    }
+
+    [Theory]
+    // A genuinely foreign seller must still be dropped for a US shopper — a non-US ccTLD or another
+    // country's locale path is the signal, even though the US otherwise accepts bare gTLDs.
+    [InlineData("https://www.amazon.ae/dp/x")]      // UAE ccTLD
+    [InlineData("https://www.amazon.co.uk/dp/x")]   // UK ccTLD
+    [InlineData("https://noon.com/uae-en/x")]       // foreign locale path
+    public void ForeignSellers_AreNotLocalForUs(string url)
+    {
+        LocalityClassifier.IsLocal(url, "us", "United States").Should().BeFalse();
+    }
+
+    [Fact]
+    public void GenericGTlds_StayNonLocalForOtherMarkets()
+    {
+        // The gTLD-is-local rule is US-only: an Arabic-first market still drops international .com
+        // so its results stay genuinely local (the app's primary purpose).
+        LocalityClassifier.IsLocal("https://www.amazon.com/dp/x", "jo", "Jordan").Should().BeFalse();
+    }
+
+    [Theory]
     [InlineData("ACs in Jordan", false)]
     [InlineData("best AC show international options too", true)]
     [InlineData("مكيفات عالمي", true)]
