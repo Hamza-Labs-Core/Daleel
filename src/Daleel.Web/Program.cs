@@ -19,6 +19,27 @@ using MudBlazor.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ── DI lifetime safety: fail fast on captive dependencies in EVERY environment ─
+// By default the host enables both DI validators ONLY in Development, so a lifetime mistake — a
+// singleton (or a hosted/background service, which the container treats as a singleton) capturing a
+// scoped/transient service such as DaleelDbContext — compiles, passes locally, and then surfaces in
+// PRODUCTION as an opaque runtime circuit crash rather than a startup error. After the SQLite→Postgres
+// migration this class of bug is especially dangerous: Npgsql strictly forbids concurrent use of a
+// single context, so a captured/shared context faults the moment two operations overlap. Forcing both
+// checks ON everywhere makes the container refuse to boot on any such mistake — turning a silent prod
+// incident into a loud, pre-deploy failure (the deploy health check never goes green).
+//   • ValidateScopes  — throws if a scoped service is resolved from the ROOT provider at runtime
+//                       (i.e. a singleton/background service reaching for a scoped service).
+//   • ValidateOnBuild — walks the entire service graph at builder.Build() and throws on the FIRST
+//                       captive dependency, so the failure is caught at startup, not on first request.
+// Safe to force on: WebApplication.CreateBuilder already enables both in Development, and the app boots
+// there with the same config-driven graph, so this only changes which environments enforce the rule.
+builder.Host.UseDefaultServiceProvider(options =>
+{
+    options.ValidateScopes = true;
+    options.ValidateOnBuild = true;
+});
+
 // ── Logging (Serilog) ─────────────────────────────────────────────────────────
 // Replace the default console logger with Serilog: Information+ to the console for debugging, and
 // Warning and above as JSON Lines to Cloudflare R2 (when R2_* env vars are set) or to local files
