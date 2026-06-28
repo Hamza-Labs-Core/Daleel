@@ -46,8 +46,11 @@ builder.Host.UseDefaultServiceProvider(options =>
 // under /app/data/logs otherwise. See Daleel.Web.Logging.SerilogConfiguration.
 builder.AddDaleelLogging();
 
-// Razor components with both interactive runtimes (Server for the secret-bearing agent pages,
-// WebAssembly available for the Auto runtime).
+// Razor components, Server-interactive ONLY. Every routable component injects server-only services
+// (DaleelDbContext, IConversationService, IEventStore, the SignalR notifiers, IAgentFactory) and so can
+// only run inside the live server circuit — none is InteractiveAuto/InteractiveWebAssembly. The
+// WebAssembly runtime was registered but unused; its second renderer only muddied the render-mode
+// handshake behind the "No interop methods are registered for renderer 1" circuit crash.
 //
 // DetailedErrors surfaces the full server-side stack trace of any unhandled circuit exception to the
 // browser (instead of the opaque "Unhandled exception on the current circuit"). It's config-driven so
@@ -58,8 +61,7 @@ builder.Services.AddRazorComponents()
         // TEMPORARY (SEC-2): forced ON in ALL environments to surface the real production circuit
         // exception that the config-driven flag (false in base appsettings) was hiding. Revert to
         // `builder.Configuration.GetValue("DetailedErrors", false)` once the prod crash is diagnosed.
-        options.DetailedErrors = true)
-    .AddInteractiveWebAssemblyComponents();
+        options.DetailedErrors = true);
 
 // MudBlazor UI services (theme, dialogs, snackbars, popovers).
 builder.Services.AddMudServices();
@@ -495,10 +497,11 @@ app.MapAuthEndpoints();
 app.MapConversationEndpoints();
 app.MapHub<Daleel.Web.Conversation.ConversationHub>("/hubs/conversation");
 
+// Single renderer: the server circuit. No WebAssembly render mode and no component-less Client
+// assembly — see the AddRazorComponents comment above. One renderer = no ambiguity over which renderer
+// owns a JS interop call.
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode()
-    .AddInteractiveWebAssemblyRenderMode()
-    .AddAdditionalAssemblies(typeof(Daleel.Web.Client._Imports).Assembly);
+    .AddInteractiveServerRenderMode();
 
 app.Run();
 

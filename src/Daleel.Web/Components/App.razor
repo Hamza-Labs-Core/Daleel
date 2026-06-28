@@ -114,7 +114,14 @@
                 .Metadata.GetMetadata<Microsoft.AspNetCore.Components.Endpoints.ComponentTypeMetadata>()?
                 .Type;
             var isStatic = pageType?.IsDefined(typeof(StaticSsrPageAttribute), inherit: false) == true;
-            return isStatic ? null : InteractiveServer;
+            // prerender:false — every interactive page loads its real data (localStorage keys, geo,
+            // history) over the LIVE circuit in OnAfterRenderAsync, so the static prerender pass only
+            // ever emits empty shells. Worse, prerendering opens a render/hydrate window where JS interop
+            // can be dispatched to the server renderer before its interop channel is registered, which is
+            // exactly the "No interop methods are registered for renderer 1" circuit crash (renderer 1 =
+            // the Server renderer, per WebRendererId). Skipping prerender means a component never renders
+            // until its circuit — and therefore its JS interop — is ready.
+            return isStatic ? null : new InteractiveServerRenderMode(prerender: false);
         }
     }
 }

@@ -154,7 +154,18 @@
         _locationDenied = false;
         StateHasChanged();
 
-        var loc = await JS.InvokeAsync<LocationDto?>("daleelGetLocation");
+        // A geolocation denial / unavailable browser / interop error must degrade to "denied", never
+        // throw an unhandled exception that tears down the circuit. Treat any failure as no-location.
+        LocationDto? loc = null;
+        try
+        {
+            loc = await JS.InvokeAsync<LocationDto?>("daleelGetLocation");
+        }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException or TaskCanceledException)
+        {
+            loc = null;
+        }
+
         _locating = false;
         if (loc is null)
         {
