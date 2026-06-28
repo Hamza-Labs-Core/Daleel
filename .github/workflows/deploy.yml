@@ -22,6 +22,10 @@ jobs:
   build-test:
     name: Build & Test
     runs-on: ubuntu-latest
+    # Hard ceiling so a stalled test never blocks the deploy queue for hours again: a
+    # Testcontainers/Ryuk hang previously left this job In Progress for 6.5h, jamming the
+    # concurrency slot so no later commit could deploy. Fail fast instead.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -37,6 +41,12 @@ jobs:
         run: dotnet build Daleel.sln -c Release --no-restore -warnaserror
 
       - name: Test
+        # The Web.Tests suite spins up a Postgres via Testcontainers. Its Ryuk reaper sidecar
+        # can stall at container startup on the CI Docker socket and hang the whole run silently
+        # (dotnet test produced zero output for 6.5h). Disabling Ryuk makes Testcontainers reap
+        # containers on process exit instead — the documented mitigation (see PostgresTestServer).
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
         run: dotnet test Daleel.sln -c Release --no-restore --verbosity normal
 
   docker:
