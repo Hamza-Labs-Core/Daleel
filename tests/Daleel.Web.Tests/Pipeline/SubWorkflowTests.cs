@@ -79,6 +79,36 @@ public class SubWorkflowTests
         state.Result.Reputation!.Score.Should().Be(3.0);
     }
 
+    [Fact]
+    public async Task BrandResearchWorkflow_StoresLogoToR2_AndRewritesResultUrl()
+    {
+        // Configured R2 that hosts whatever it's handed: the download step must persist the brand logo and
+        // repoint the result at the hosted copy (so the brand card stops hot-linking the source).
+        using var provider = BuildProvider(s => s.AddSingleton<IR2StorageService>(new FakeImageR2()));
+
+        var state = await RunBrandAsync(
+            provider, new BrandInfo { Name = "Samsung", LogoUrl = "https://cdn.samsung.com/logo.png" });
+
+        state.Result.LogoUrl.Should().Be(
+            $"https://images.test/brands/{state.Result.Id}/logo.png",
+            "a successful R2 store rewrites the result to the hosted copy");
+        state.Events.Should().Contain(e => e.EventType == "brand.images" && e.Success);
+    }
+
+    [Fact]
+    public async Task BrandResearchWorkflow_WithoutR2_KeepsSourceLogo_AndRecordsNotStored()
+    {
+        // Default provider wires the NullR2StorageService (IsConfigured == false): the logo URL must survive
+        // untouched and the event must record that nothing was stored.
+        using var provider = BuildProvider(_ => { });
+
+        var state = await RunBrandAsync(
+            provider, new BrandInfo { Name = "Samsung", LogoUrl = "https://cdn.samsung.com/logo.png" });
+
+        state.Result.LogoUrl.Should().Be("https://cdn.samsung.com/logo.png");
+        state.Events.Should().Contain(e => e.EventType == "brand.images" && !e.Success);
+    }
+
     // ── Store ──────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -251,6 +281,30 @@ public class SubWorkflowTests
     }
 
     // ── Fakes ────────────────────────────────────────────────────────────────────────
+
+    // A configured R2 that "hosts" any image by echoing back a deterministic public URL under the prefix.
+    // Only StoreImageAsync is exercised by these tests; the rest satisfy the interface.
+    private sealed class FakeImageR2 : IR2StorageService
+    {
+        public bool IsConfigured => true;
+
+        public Task<R2BucketHealth> ProbeBucketAsync(R2Bucket bucket, CancellationToken ct = default) =>
+            Task.FromResult(new R2BucketHealth(bucket, "fake", Reachable: true, HasObjects: true, PublicUrl: null, Error: null));
+
+        public Task<string?> StoreImageAsync(string? sourceUrl, string keyPrefix, CancellationToken ct = default) =>
+            Task.FromResult<string?>($"https://images.test/{keyPrefix}/logo.png");
+
+        public Task<string?> StoreJsonAsync(string json, string objectKey, R2Bucket bucket = R2Bucket.Specs, CancellationToken ct = default) =>
+            Task.FromResult<string?>(null);
+
+        public Task<R2Listing> ListObjectsAsync(string? prefix, string? continuationToken = null, int maxKeys = 200, R2Bucket bucket = R2Bucket.Data, CancellationToken ct = default) =>
+            Task.FromResult(R2Listing.Empty);
+
+        public Task<R2ObjectText?> ReadTextAsync(string key, long maxBytes = 256 * 1024, R2Bucket bucket = R2Bucket.Data, CancellationToken ct = default) =>
+            Task.FromResult<R2ObjectText?>(null);
+
+        public string? DownloadUrl(string key, R2Bucket bucket = R2Bucket.Data, TimeSpan? expiry = null) => null;
+    }
 
     private sealed class FixedLlm : ILlmClient
     {

@@ -2,6 +2,7 @@ using Daleel.Core.Models;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
 using Daleel.Web.Profiles;
+using Daleel.Web.Storage;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
@@ -158,39 +159,71 @@ public sealed class SaveBrandProfileActivity : CodeActivity
 }
 
 /// <summary>
-/// Step 5 — locate the brand's images (logo + product shots) for storage. An object-store (Cloudflare
-/// R2) image sink isn't wired yet — R2 is configured here only for error-log shipping — so this records
-/// the located images and logs that storage is pending rather than silently doing nothing.
+/// Step 5 — download the brand logo and store it in the Cloudflare R2 <see cref="R2Bucket.Images"/> bucket,
+/// then point the result at the stable hosted copy so the brand card stops hot-linking the source. The store
+/// is best-effort: it degrades to the original URL when R2 is unconfigured, the images bucket has no public
+/// host, or the fetch/upload fails — the sub-workflow never fails over a logo.
 /// </summary>
-[Activity("Daleel", "Brand", "Download brand images to object storage (R2) when configured")]
+[Activity("Daleel", "Brand", "Download the brand logo to the R2 images bucket when configured")]
 public sealed class DownloadBrandImagesActivity : CodeActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
 
-        var images = new[] { state.Result.LogoUrl }
-            .Where(u => !string.IsNullOrWhiteSpace(u))
-            .Select(u => u!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        if (images.Count == 0)
+        var logoUrl = state.Result.LogoUrl;
+        if (string.IsNullOrWhiteSpace(logoUrl))
         {
-            return ValueTask.CompletedTask;
+            return; // no brand logo located — nothing to store
         }
 
-        // No R2 image bucket is wired, so we don't claim to have stored anything — we record the located
-        // images so the seam is observable and a future R2 sink can pick them up.
+        var r2 = context.GetRequiredService<IR2StorageService>();
+        if (!r2.IsConfigured)
+        {
+            RecordImages(state, success: false, reason: "r2-not-configured");
+            services.Log($"Located the {state.Brand.Name} logo (object storage not configured).");
+            return;
+        }
+
+        // Mirror how product shots are keyed (brands/{id}/…) so a brand's logo and product images share a
+        // folder and re-running enrichment overwrites in place rather than piling up duplicates.
+        var stored = await SafeStoreImage(r2, logoUrl, $"brands/{state.Result.Id}", context.CancellationToken);
+
+        // StoreImageAsync hands back the ORIGINAL url unchanged when it could not host the image (no images
+        // public host, an SSRF-blocked target, or a fetch/upload failure). A *changed* url is the signal that
+        // a real hosted copy now exists — only then do we rewrite the result and claim success.
+        var hosted = !string.IsNullOrWhiteSpace(stored)
+                     && !string.Equals(stored, logoUrl, StringComparison.OrdinalIgnoreCase);
+        if (hosted)
+        {
+            state.Result = state.Result with { LogoUrl = stored };
+        }
+
+        RecordImages(state, success: hosted, reason: hosted ? null : "images-host-unset-or-fetch-failed");
+        services.Log(hosted
+            ? $"Stored the {state.Brand.Name} logo to R2."
+            : $"Located the {state.Brand.Name} logo (R2 images host not set — kept the source URL).");
+    }
+
+    private static void RecordImages(BrandResearchState state, bool success, string? reason) =>
         state.RecordEvent(EventCategory.Profile, "brand.images", "r2",
-            success: false,
+            success: success,
             metadata: new Dictionary<string, object?>
             {
                 ["name"] = state.Brand.Name,
-                ["images"] = images.Count,
-                ["stored"] = false
+                ["images"] = 1,
+                ["stored"] = success,
+                ["reason"] = reason
             });
-        services.Log($"Located {images.Count} image(s) for {state.Brand.Name} (object storage not configured).");
-        return ValueTask.CompletedTask;
+
+    private static async Task<string?> SafeStoreImage(
+        IR2StorageService r2, string url, string prefix, CancellationToken ct)
+    {
+        // StoreImageAsync is already best-effort (never throws), but guard anyway so a logo store can never
+        // fail the brand sub-workflow.
+        try { return await r2.StoreImageAsync(url, prefix, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch { return url; }
     }
 }
