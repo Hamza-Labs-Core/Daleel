@@ -1,0 +1,34 @@
+%% Per-STORE/SITE research sub-workflow — dispatched once per store found (max 10).
+%% STATUS: REAL Elsa workflow.
+%%   Class:    src/Daleel.Web/Pipeline/SubWorkflows/StoreResearchWorkflow.cs:12
+%%   Steps:    src/Daleel.Web/Pipeline/SubWorkflows/StoreResearchActivities.cs
+%%   Triggered:SearchActivities.cs:365 (DispatchStoreWorkflowsActivity -> RunManyAsync)
+%%   State:    StoreResearchState ; DI: Program.cs:405
+flowchart TD
+    IN([StoreInfo seeded by dispatcher]) --> A1
+
+    A1["1 · ScrapeStoreSiteActivity<br/>StoreResearchActivities.cs:19<br/>IStoreRepository.GetByNameAsync"]
+    A1 --> FRESH{"saved profile fresh?"}
+    FRESH -->|yes| CACHED["ResolvedFromCache = true (reuse)"]
+    FRESH -->|no| RESEARCH["ResearchStoreAsync(name, geo)<br/>ContextDevProfileResearcher.cs:56"]
+
+    RESEARCH --> SC["scrape site — GET /v1/web/scrape/markdown"]
+    SC --> SYNTH["LLM: ProfileSynthesizer.SynthesizeStoreAsync<br/>ProfileSynthesizer.cs:44<br/>-> Store {location, type, brandsCarried,<br/>rating 0-5, website, phone, email, address}"]
+    SYNTH --> CONTACT["contact fallback:<br/>ContactExtractor.FirstPhone/FirstEmail"]
+    CONTACT --> MAPS["VerifyOnPlacesAsync (Google Maps)<br/>ContextDevProfileResearcher.cs:90"]
+
+    MAPS --> M1["SearchStoresAsync near market centre (15km)<br/>POST /v1/places:searchText"]
+    M1 --> M2{"name-matching place?<br/>NameMatches"}
+    M2 -->|no| MNONE["leave un-verified"]
+    M2 -->|yes| M3["GetPlaceDetailsAsync<br/>GET /v1/places/{id} (hours+reviews mask)"]
+    M3 --> M4["stamp GooglePlaceId, GoogleMapsUrl,<br/>GoogleRating, GoogleReviewCount,<br/>Lat/Lng, OpeningHours"]
+
+    CACHED --> A2
+    MNONE --> A2
+    M4 --> A2
+
+    A2["2 · VerifyOnMapsActivity<br/>StoreResearchActivities.cs:74<br/>fold Rating / ReviewCount / Lat / Lng onto result"]
+    A2 --> A3["3 · ExtractContactInfoActivity<br/>StoreResearchActivities.cs:108<br/>Address ?? Location ; Phone"]
+    A3 --> A4["4 · SaveStoreProfileActivity<br/>StoreResearchActivities.cs:130<br/>Url ?? Website ?? GoogleMapsUrl<br/>IStoreRepository.UpsertAsync (if researched)"]
+    A4 --> A5["5 · ScrapePricesActivity<br/>StoreResearchActivities.cs:181<br/>ContextDevProvider.ExtractProductsAsync(domain, max 12)<br/>POST /v1/brand/ai/products -> PricedProducts"]
+    A5 --> OUT([enriched StoreInfo read back by dispatcher])

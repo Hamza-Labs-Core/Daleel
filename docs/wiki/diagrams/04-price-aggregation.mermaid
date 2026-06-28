@@ -1,0 +1,43 @@
+%% Price aggregation across sources.
+%% STATUS: EXISTS as code, but NOT a single workflow — it is DISTRIBUTED across the
+%% pipeline plus a background service. There is no "PriceAggregationWorkflow" class.
+%%   Source A (gather):     AgentService.GatherAsync -> GoogleShoppingProvider.SearchPricesAsync / OpenSooq
+%%   Source B (extraction): AgentService.BuildProductSearchResultAsync -> per-model Offers[] (LLM)
+%%   Source C (store wf):   ScrapePricesActivity (StoreResearchActivities.cs:181)
+%%   Source D (background): ItemEnrichmentService.AttachCatalogPricesAsync (ItemEnrichmentService.cs:219)
+%%                          REAL scoped service, DI: Program.cs:330. Runs AFTER first paint.
+flowchart TD
+    subgraph LIVE["During the live workflow"]
+        A["A · Gather-time shopping prices<br/>GoogleShoppingProvider.SearchPricesAsync :37<br/>+ OpenSooqProvider -> ResearchBundle.Prices"]
+        B["B · Extraction per-model offers (PRIMARY)<br/>LLM ExtractProducts -> ProductModel.Offers[]<br/>{source, price, currency, url, condition}"]
+        C["C · Per-store catalogue scrape<br/>ScrapePricesActivity (store wf step 5)<br/>ContextDevProvider.ExtractProductsAsync(max 12)<br/>POST /v1/brand/ai/products"]
+    end
+
+    A --> B
+    B --> RES([base result on screen])
+    C --> RES
+
+    RES --> BG["SearchJobService.EnrichInBackground (detached, 90s cap)<br/>SearchJobService.cs:196"]
+    BG --> D
+
+    subgraph BGSVC["D · ItemEnrichmentService (background, not a workflow)"]
+        D["EnrichAsync — top 20 models<br/>ItemEnrichmentService.cs:90"]
+        D --> P1["Phase 1: price-compare + DB-first reuse :109"]
+        P1 --> P2["Phase 2: scrape thin misses (ReadPageAsync) :143"]
+        P2 --> P3["Phase 3: persist deep-dives :156"]
+        P3 --> P4["Phase 4: AttachCatalogPricesAsync :219<br/>(only models with no price)"]
+        P4 --> ATTR
+        P4 --> P5["Phase 5: HarvestBrandCatalogs (side effect) :193"]
+    end
+
+    subgraph ATTR["Phase 4 — fill prices for unpriced items"]
+        D1["primary: Context.dev catalogue<br/>ExtractProductsAsync(max 12, 30s) :256"]
+        D2["fallback: render store /search?q= page<br/>scrape router -> Cloudflare Browser<br/>PriceParser.Extract :395"]
+        D1 --> MATCH["BestCatalogMatch / BestBrowserMatch<br/>token overlap, IsStrongMatch<br/>(>=2 tokens AND >=80% of shorter) :558"]
+        D2 --> MATCH
+        MATCH --> OFFER["append PriceOffer to model.Offers<br/>+ fill ImageUrl if missing :324"]
+        OFFER --> HIST["persist ScrapedPrice history<br/>IScrapedPriceRepository.AddRangeAsync :478"]
+    end
+
+    HIST --> STREAM([Enriched result streamed to UI])
+    P5 --> STREAM

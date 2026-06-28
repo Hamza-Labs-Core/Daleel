@@ -1,0 +1,44 @@
+%% Per-ITEM deep-dive sub-workflow — dispatched once per product/model found (max 20).
+%% STATUS: REAL Elsa workflow.
+%%   Class:    src/Daleel.Web/Pipeline/SubWorkflows/ItemDeepDiveWorkflow.cs:14
+%%   Steps:    src/Daleel.Web/Pipeline/SubWorkflows/ItemDeepDiveActivities.cs
+%%   Triggered:SearchActivities.cs:416 (DispatchItemWorkflowsActivity -> RunManyAsync)
+%%   State:    ItemDeepDiveState ; DI: Program.cs:406
+%% Declared order (ItemDeepDiveWorkflow.cs:20-32):
+%%   scrape pages -> identify -> extract specs -> save raw specs -> merge/clean ->
+%%   save final specs -> compare prices -> collect reviews -> save item profile.
+flowchart TD
+    IN([ProductModel + category Schema seeded]) --> A1
+
+    A1["1 · ScrapeProductPagesActivity<br/>ItemDeepDiveActivities.cs:22<br/>Key = ProductProfile.KeyFor(brand,model,name)<br/>IProductProfileRepository.GetByKeyAsync (DB-first)"]
+    A1 --> REUSE{"fresh saved deep-dive?"}
+    REUSE -->|yes| RU["ReusedFromCache = true (no network)"]
+    REUSE -->|"no + thin (&lt;3 specs) + offer URL"| SCRAPE["agent.ReadPageAsync(OfficialOrCheapestUrl)<br/>store &le;4000 chars -> Details"]
+
+    RU --> A2
+    SCRAPE --> A2
+
+    A2["2 · IdentifyProductActivity<br/>ItemDeepDiveActivities.cs:190<br/>IProductIdentifier.IdentifyAsync"]
+    A2 --> ID1["text match vs known models (conf 1.0)"]
+    ID1 -->|miss| ID2["cross-region discovery + retry (conf 1.0)"]
+    ID2 -->|miss| ID3["vision match (OpenRouter, conf &ge;0.75)<br/>⚠ NullVisionMatcher when no OPENROUTER_API_KEY"]
+    ID1 --> A3
+    ID2 --> A3
+    ID3 --> A3
+
+    A3["3 · ExtractSpecsActivity<br/>ItemDeepDiveActivities.cs:83<br/>fold Details markdown into Specs['details']"]
+    A3 --> A4
+
+    A4["4 · SaveRawSpecsActivity<br/>ItemDeepDiveActivities.cs:234<br/>route each source to R2 + stage for merge:<br/>store-listing -> Specs bucket raw/<br/>brand-site -> Specs bucket raw/<br/>scraped markdown -> Data bucket site-data/"]
+    A4 --> A5
+
+    A5["5 · MergeAndCleanSpecsActivity<br/>ItemDeepDiveActivities.cs:307<br/>ISpecMerger.Merge(RawSpecsBySource, Schema)<br/>dedupe / normalize units / brand wins / schema order"]
+    A5 --> A6
+
+    A6["6 · SaveFinalSpecsActivity<br/>ItemDeepDiveActivities.cs:347<br/>R2 final-specs/{brand}/{model}.json<br/>+ BrandModel.SaveFinalSpecsAsync (if identified)"]
+    A6 --> A7
+
+    A7["7 · ComparePricesActivity<br/>ItemDeepDiveActivities.cs:101<br/>count distinct stores across Offers (in-memory)"]
+    A7 --> A8["8 · CollectReviewsActivity<br/>ItemDeepDiveActivities.cs:128<br/>record gathered reviews/ratings (no network)"]
+    A8 --> A9["9 · SaveItemProfileActivity<br/>ItemDeepDiveActivities.cs:150<br/>IProductProfileRepository.UpsertAsync (if fresh)"]
+    A9 --> OUT([enriched ProductModel read back by dispatcher])

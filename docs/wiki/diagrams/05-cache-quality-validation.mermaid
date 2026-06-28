@@ -1,0 +1,31 @@
+%% Cache quality validation with minimum-data check.
+%% STATUS: EXISTS as code, NOT a workflow — a deterministic validator SERVICE invoked
+%% from within step 2 of the main workflow.
+%%   Validator: CacheQualityValidator (src/Daleel.Web/Pipeline/CacheQualityValidator.cs:103)
+%%              DI: ICacheQualityValidator singleton (Program.cs:411)
+%%   Invoked:   CheckCacheActivity.ScoreQuality -> Evaluate (SearchActivities.cs:91-92, :140)
+flowchart TD
+    IN([Step 2 · CheckCacheActivity<br/>SearchActivities.cs:60]) --> G["Cache.GetAsync(ResultKey)"]
+    G -->|"null / not deserializable"| MISS1["record cache.miss<br/>FromCache = false -> run live"]
+    G -->|payload| EVAL["CacheQualityValidator.Evaluate(answer)<br/>CacheQualityValidator.cs:114"]
+
+    EVAL --> W["weighted blend (dimensions present only):<br/>Products 50 · Brands 25 · Stores 25"]
+
+    W --> WP["ScoreProducts :153<br/>image .30 + price .30 + specs .25<br/>+ model .10 + SKU .05<br/>(specs &ge;3 -> 1.0, &ge;1 -> 0.5)"]
+    W --> WB["ScoreBrands :203<br/>logo .6 + description .4"]
+    W --> WS["ScoreStores :242<br/>location .5 + contact .3 + maps .2"]
+
+    WP --> SCORE["Score = round(100 * weightedSum / weightTotal)<br/>+ gaps, ThinProducts, DeficientBrands/Stores :144"]
+    WB --> SCORE
+    WS --> SCORE
+
+    SCORE --> DEC{"Decision (CacheQualityReport.Decision :74)"}
+    DEC -->|"Score >= 80"| SERVE["ServeAsIs<br/>FromCache=true, replay verbatim<br/>record cache.hit"]
+    DEC -->|"Score < 30"| MISS2["Miss<br/>FromCache=false, run full live search<br/>record cache.stale"]
+    DEC -->|"30-79 AND actionable gaps"| ENRICH["ServeAndEnrich<br/>FromCache=true, show now<br/>record cache.partial"]
+    DEC -->|"30-79, no actionable gaps"| SERVE
+
+    ENRICH --> BG["runner returns CacheQuality -><br/>SearchJobService.ReEnrichInBackground :247<br/>refills ONLY flagged gaps"]
+
+    NOTE["non-product answer or empty result<br/>-> CacheQualityReport.Complete (score 100) :62"]
+    EVAL -.-> NOTE

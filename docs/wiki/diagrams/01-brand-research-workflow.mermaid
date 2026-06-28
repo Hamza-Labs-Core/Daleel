@@ -1,0 +1,38 @@
+%% Per-BRAND research sub-workflow — dispatched once per brand found (max 15).
+%% STATUS: REAL Elsa workflow.
+%%   Class:    src/Daleel.Web/Pipeline/SubWorkflows/BrandResearchWorkflow.cs:12
+%%   Steps:    src/Daleel.Web/Pipeline/SubWorkflows/BrandResearchActivities.cs
+%%   Triggered:SearchActivities.cs:313 (DispatchBrandWorkflowsActivity -> RunManyAsync)
+%%   State:    BrandResearchState ; DI: Program.cs:404
+%% NOTE: step 5 (DownloadBrandImages) is effectively a STUB — no R2 image bucket is wired,
+%%       it only records stored:false and logs "object storage not configured".
+flowchart TD
+    IN([BrandInfo seeded by dispatcher]) --> A1
+
+    A1["1 · SearchBrandSiteActivity<br/>BrandResearchActivities.cs:18<br/>IBrandRepository.GetByNameAsync"]
+    A1 --> FRESH{"saved profile fresh?<br/>(!IsStale)"}
+    FRESH -->|yes| CACHED["ResolvedFromCache = true<br/>reuse saved profile,<br/>skip paid research"]
+    FRESH -->|no| A2
+
+    A2["2 · ScrapeBrandCatalogActivity<br/>BrandResearchActivities.cs:47"]
+    A2 --> AVAIL{"IProfileResearcher.IsAvailable?<br/>(Context.dev + LLM keys)"}
+    AVAIL -->|no| DEGRADE["degrade to stale saved profile"]
+    AVAIL -->|yes| RESEARCH["ResearchBrandAsync(name, geo)<br/>ContextDevProfileResearcher.cs:36"]
+
+    RESEARCH --> R1["GetBrandAsync — GET /v1/brand/retrieve<br/>(name/description/industry/logo)"]
+    RESEARCH --> R2["ScrapeAsync — GET /v1/web/scrape/markdown<br/>(SSRF-guarded, 4000-char cap)"]
+    R1 --> SYNTH["LLM: ProfileSynthesizer.SynthesizeBrandAsync<br/>ProfileSynthesizer.cs:30<br/>-> Brand {reputationScore 0-10, pros, cons,<br/>popularModels, priceRange, website}"]
+    R2 --> SYNTH
+
+    CACHED --> A3
+    DEGRADE --> A3
+    SYNTH --> A3
+
+    A3["3 · SynthesizeBrandProfileActivity<br/>BrandResearchActivities.cs:86<br/>map 0-10 -> UI 1-5 BrandReputation<br/>(Score = clamp(r/2,0,5)); backfill Url + DbId"]
+    A3 --> A4
+
+    A4["4 · SaveBrandProfileActivity<br/>BrandResearchActivities.cs:125<br/>IBrandRepository.UpsertAsync (if researched)<br/>backfill persisted DbId"]
+    A4 --> A5
+
+    A5["5 · DownloadBrandImagesActivity  ⚠ STUB<br/>BrandResearchActivities.cs:166<br/>no R2 image bucket -> records stored:false"]
+    A5 --> OUT([enriched BrandInfo read back by dispatcher])

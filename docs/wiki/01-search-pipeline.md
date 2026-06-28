@@ -9,6 +9,44 @@
 
 ---
 
+## 0.0 Reality check — what exists vs. what's just a workflow
+
+Verified against the DI wiring in [`Program.cs`](../../src/Daleel.Web/Program.cs), not just the
+presence of class files. **The Elsa path is the production path:** `ISearchRunner` resolves to
+`WorkflowSearchRunner` ([Program.cs:408](../../src/Daleel.Web/Program.cs)), Elsa is registered with
+`AddElsa` + `AddActivitiesFrom<SearchWorkflow>` ([Program.cs:389-391](../../src/Daleel.Web/Program.cs)),
+and all pipeline states/services are registered scoped ([Program.cs:401-411](../../src/Daleel.Web/Program.cs)).
+
+| Capability | Real? | Form | Evidence |
+|------------|-------|------|----------|
+| **Per-brand workflow** | ✅ Real | Elsa `BrandResearchWorkflow`, 5 implemented activities | class [BrandResearchWorkflow.cs:12](../../src/Daleel.Web/Pipeline/SubWorkflows/BrandResearchWorkflow.cs); triggered [SearchActivities.cs:313](../../src/Daleel.Web/Pipeline/SearchActivities.cs); state DI [Program.cs:404](../../src/Daleel.Web/Program.cs) |
+| **Per-store / per-site workflow** | ✅ Real | Elsa `StoreResearchWorkflow`, 5 implemented activities | class [StoreResearchWorkflow.cs:12](../../src/Daleel.Web/Pipeline/SubWorkflows/StoreResearchWorkflow.cs); triggered [SearchActivities.cs:365](../../src/Daleel.Web/Pipeline/SearchActivities.cs); DI [Program.cs:405](../../src/Daleel.Web/Program.cs) |
+| **Per-item deep-dive workflow** | ✅ Real | Elsa `ItemDeepDiveWorkflow`, 9 implemented activities | class [ItemDeepDiveWorkflow.cs:14](../../src/Daleel.Web/Pipeline/SubWorkflows/ItemDeepDiveWorkflow.cs); triggered [SearchActivities.cs:416](../../src/Daleel.Web/Pipeline/SearchActivities.cs); DI [Program.cs:406](../../src/Daleel.Web/Program.cs) |
+| **Price aggregation across sources** | ✅ Real, but **not a workflow** | Distributed: gather-time shopping + LLM `Offers[]` + store-wf `ScrapePrices` + the background `ItemEnrichmentService` | service DI [Program.cs:330](../../src/Daleel.Web/Program.cs); `AttachCatalogPricesAsync` [ItemEnrichmentService.cs:219](../../src/Daleel.Web/Pipeline/ItemEnrichmentService.cs). **There is no `PriceAggregationWorkflow` class.** |
+| **Cache quality validation (min-data check)** | ✅ Real, but **not a workflow** | Deterministic `CacheQualityValidator` service called inside step 2 | validator [CacheQualityValidator.cs:103](../../src/Daleel.Web/Pipeline/CacheQualityValidator.cs); DI [Program.cs:411](../../src/Daleel.Web/Program.cs); invoked [SearchActivities.cs:91](../../src/Daleel.Web/Pipeline/SearchActivities.cs) |
+
+**Honest caveats (things that are partial, conditional, or dead):**
+
+- ⚠️ **`DownloadBrandImagesActivity` is effectively a stub.** No R2 image bucket is wired; it records `stored:false` and logs *"object storage not configured"* ([BrandResearchActivities.cs:166-195](../../src/Daleel.Web/Pipeline/SubWorkflows/BrandResearchActivities.cs)). Brand image storage is described but **not built**.
+- ⚠️ **Vision identification is conditional.** `IVisionMatcher` resolves to a no-op `NullVisionMatcher` when `OPENROUTER_API_KEY` is unset ([Program.cs:347-359](../../src/Daleel.Web/Program.cs)); only with the key does the real OpenRouter `VisionMatcher` run. So the vision leg of item identification (§5.1 step 3) silently degrades to "no match" without a key.
+- ⚠️ **The legacy `SearchRunner` is dead code.** `src/Daleel.Web/Conversation/SearchRunner.cs` exists but nothing in `src/` references it — only `WorkflowSearchRunner` is wired to `ISearchRunner`. (A test `FakeRunner` is the only other `ISearchRunner` implementation.)
+- ⚠️ **Elsa instance persistence is optional.** `UseWorkflowManagement` is only registered when Postgres is configured ([Program.cs:394](../../src/Daleel.Web/Program.cs)); without it the admin workflows page has nothing to list, but searches still run.
+
+### Diagrams
+
+Per-capability Mermaid flow diagrams live in [`docs/wiki/diagrams/`](diagrams/):
+
+| Diagram | Capability |
+|---------|-----------|
+| [00-search-pipeline-overview.mermaid](diagrams/00-search-pipeline-overview.mermaid) | The 11-step main `SearchWorkflow` + cache short-circuit + fan-out |
+| [01-brand-research-workflow.mermaid](diagrams/01-brand-research-workflow.mermaid) | Per-brand sub-workflow (✅ real; step 5 stub flagged) |
+| [02-store-research-workflow.mermaid](diagrams/02-store-research-workflow.mermaid) | Per-store sub-workflow incl. Google Maps verify (✅ real) |
+| [03-item-deep-dive-workflow.mermaid](diagrams/03-item-deep-dive-workflow.mermaid) | Per-item 9-step deep dive (✅ real; vision leg conditional) |
+| [04-price-aggregation.mermaid](diagrams/04-price-aggregation.mermaid) | Price aggregation (✅ real, distributed — **not** a workflow) |
+| [05-cache-quality-validation.mermaid](diagrams/05-cache-quality-validation.mermaid) | Cache min-quality scoring + decision (✅ real, a validator service) |
+
+---
+
 ## 0. The shape in one paragraph
 
 A user query becomes a queued `SearchJob`. The `SearchJobService` background worker picks it up,

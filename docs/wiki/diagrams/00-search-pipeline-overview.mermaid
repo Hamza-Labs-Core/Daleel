@@ -1,0 +1,35 @@
+%% Daleel search pipeline — the 11-step Elsa SearchWorkflow (main orchestration).
+%% Source: src/Daleel.Web/Pipeline/SearchWorkflow.cs:34, SearchActivities.cs
+%% STATUS: REAL. Registered as ISearchRunner -> WorkflowSearchRunner (Program.cs:408);
+%% Elsa registered via AddElsa + AddActivitiesFrom<SearchWorkflow> (Program.cs:389-391).
+flowchart TD
+    Q([SearchJob queued]) --> Worker["SearchJobService.ProcessAsync<br/>(background worker)<br/>SearchJobService.cs:53"]
+    Worker --> Runner["WorkflowSearchRunner.RunAsync<br/>seeds state + services, cost cap<br/>WorkflowSearchRunner.cs:57"]
+    Runner --> WF{{"Elsa SearchWorkflow<br/>flat Sequence of 11 CodeActivities"}}
+
+    WF --> S1["1 · ParseQuery<br/>resolve market + PlanAsync<br/>SearchActivities.cs:24"]
+    S1 --> S2["2 · CheckCache<br/>score stored report<br/>SearchActivities.cs:60"]
+    S2 -->|"hit (ServeAsIs / ServeAndEnrich)<br/>FromCache = true"| SHORT["steps 2b–10 self-skip<br/>(if state.FromCache return)"]
+    S2 -->|"miss / stale (run live)"| S2B
+
+    S2B["2b · AnalyzeMarket<br/>category intelligence + schema<br/>SearchActivities.cs:170"] --> S3
+    S3["3 · GatherSources<br/>parallel providers -> ResearchBundle<br/>SearchActivities.cs:229"] --> S4
+    S4["4 · ExtractProducts<br/>LLM analyst + product extraction<br/>(per-model offers/prices)<br/>SearchActivities.cs:251"] --> S5
+
+    S5["5 · DispatchBrandWorkflows<br/>1 BrandResearchWorkflow / brand (max 15)<br/>SearchActivities.cs:293"] --> S6
+    S6["6 · DispatchStoreWorkflows<br/>1 StoreResearchWorkflow / store (max 10)<br/>SearchActivities.cs:345"] --> S7
+    S7["7 · DispatchItemWorkflows<br/>1 ItemDeepDiveWorkflow / item (max 20)<br/>SearchActivities.cs:397"] --> S8
+
+    S8["8 · AggregateResults<br/>assemble AgentAnswer<br/>SearchActivities.cs:446"] --> S9
+    S9["9 · ModerateContent<br/>halal audit record<br/>SearchActivities.cs:481"] --> S10
+    S10["10 · CacheResults<br/>serialize + persist<br/>SearchActivities.cs:504"] --> S11
+    SHORT --> S11
+    S11["11 · ReturnResults<br/>stamp CompletedAt<br/>SearchActivities.cs:543"] --> RES
+
+    RES([SearchRunResult on screen]) --> BG["detached background pass<br/>EnrichInBackground (fresh) /<br/>ReEnrichInBackground (ServeAndEnrich)<br/>SearchJobService.cs:196 / :247"]
+
+    S5 -.->|fan-out| BW[[BrandResearchWorkflow<br/>see brand-research-workflow.mermaid]]
+    S6 -.->|fan-out| SW[[StoreResearchWorkflow<br/>see store-research-workflow.mermaid]]
+    S7 -.->|fan-out| IW[[ItemDeepDiveWorkflow<br/>see item-deep-dive-workflow.mermaid]]
+    BG -.-> PA[[ItemEnrichmentService<br/>see price-aggregation.mermaid]]
+    S2 -.-> CQ[[CacheQualityValidator<br/>see cache-quality-validation.mermaid]]
