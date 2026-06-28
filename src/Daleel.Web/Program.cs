@@ -67,7 +67,26 @@ var appConnection = Daleel.Web.Events.PostgresConnection.ResolveAppDatabase(buil
     ?? throw new InvalidOperationException(
         "PostgreSQL is required but not configured. Set POSTGRES_CONNECTION_STRING (Npgsql keyword " +
         "form) or DATABASE_URL (postgres:// URL). See deploy/.env.example.");
-builder.Services.AddDbContext<DaleelDbContext>(o => o.UseNpgsql(appConnection));
+// TRANSIENT context lifetime — deliberately NOT EF's default Scoped. In Blazor Server a DI scope spans
+// the ENTIRE SignalR circuit, so a *scoped* DaleelDbContext is a single instance shared by every
+// component and service in that circuit. EF Core / Npgsql allow only one operation per context (one
+// connection) at a time, so two independently-rendering components issuing overlapping queries on that
+// shared context throw `Npgsql.NpgsqlOperationInProgressException: A command is already in progress` —
+// which terminates the circuit on page load. The authenticated home reproduced this exactly: the
+// layout's credits widget (QuotaService → UserSubscriptions⋈SubscriptionPlans) and the page's email-
+// prefs lookup (UserManager → AspNetUsers) raced on the one shared context. SQLite tolerated this before
+// the Postgres migration; Npgsql enforces it strictly. Transient gives each consumer its OWN context, so
+// no two ever share one — removing the collision without touching any repository.
+//
+// This is safe for the whole app, not just the circuit: no singleton injects DaleelDbContext (the search
+// worker + sub-workflow dispatchers create their own scopes; PostgresCacheStore uses IServiceScopeFactory),
+// every consumer that needs one context for a multi-step unit of work (e.g. SearchJobService.ProcessAsync,
+// which tracks the SearchJob across Running→Completed) resolves it ONCE and reuses that instance, and no
+// single consumer issues parallel queries on its own context. Identity's UserManager/UserStore likewise
+// each capture their own context per scope.
+builder.Services.AddDbContext<DaleelDbContext>(
+    o => o.UseNpgsql(appConnection),
+    contextLifetime: ServiceLifetime.Transient);
 
 // ── Pipeline event store (PostgreSQL) ─────────────────────────────────────────
 // A separate append-only context on the same Postgres server (the `daleel_events` database) records
@@ -188,23 +207,33 @@ builder.Services.AddAuthorization();
 // ── Daleel intelligence layer ─────────────────────────────────────────────────
 builder.Services.AddScoped<BrowserStore>();              // localStorage bridge (per circuit)
 builder.Services.AddScoped<LayoutState>();               // shared theme state
-builder.Services.AddScoped<ICurrentUser, CurrentUser>(); // authenticated id, from the circuit
-builder.Services.AddScoped<ISearchHistoryRepository, SearchHistoryRepository>();
-builder.Services.AddScoped<ISavedResultRepository, SavedResultRepository>();
-builder.Services.AddScoped<IQuotaService, QuotaService>();
-builder.Services.AddScoped<IAnalyticsService, AnalyticsService>();
-builder.Services.AddScoped<ISystemConfigService, SystemConfigService>();
-builder.Services.AddScoped<IApiCallLogRepository, ApiCallLogRepository>();
-builder.Services.AddScoped<IFilteredContentLogRepository, FilteredContentLogRepository>();
+builder.Services.AddScoped<ICurrentUser, CurrentUser>(); // authenticated id, from the circuit (claims only, no DB)
+// The data repositories/services below are TRANSIENT, not scoped. They are stateless wrappers over the
+// (now transient) DaleelDbContext, and in Blazor Server a scoped service is ONE shared instance for the
+// whole circuit. Two components that render concurrently — most importantly the always-present layout
+// credits badge (QuotaBadge → IQuotaService) and whatever page is open — would then resolve the SAME
+// scoped service, share its one DbContext, and collide ("a command is already in progress" / "a second
+// operation was started on this context"), terminating the circuit on page load. Transient gives each
+// component its own instance + its own context, so no two components ever share one. (Safe because these
+// are stateless and no singleton injects them — a singleton capturing today's scoped repos would already
+// fail DI scope validation at startup.) See the DaleelDbContext registration note above.
+builder.Services.AddTransient<ISearchHistoryRepository, SearchHistoryRepository>();
+builder.Services.AddTransient<ISavedResultRepository, SavedResultRepository>();
+builder.Services.AddTransient<IQuotaService, QuotaService>();
+builder.Services.AddTransient<IAnalyticsService, AnalyticsService>();
+builder.Services.AddTransient<ISystemConfigService, SystemConfigService>();
+builder.Services.AddTransient<IApiCallLogRepository, ApiCallLogRepository>();
+builder.Services.AddTransient<IFilteredContentLogRepository, FilteredContentLogRepository>();
 builder.Services.AddHttpContextAccessor();
 
 // Persistent brand/store profiles: researched once via Context.dev + the LLM, saved to Postgres, and
 // refreshed only when stale (>30 days). Search results JOIN against these instead of re-fetching.
-builder.Services.AddScoped<IBrandRepository, BrandRepository>();
-builder.Services.AddScoped<IStoreRepository, StoreRepository>();
-builder.Services.AddScoped<IProductProfileRepository, ProductProfileRepository>();
-builder.Services.AddScoped<IBrandModelRepository, BrandModelRepository>();
-builder.Services.AddScoped<IScrapedPriceRepository, ScrapedPriceRepository>();
+// Transient for the same Blazor-circuit concurrency reason as the repositories above.
+builder.Services.AddTransient<IBrandRepository, BrandRepository>();
+builder.Services.AddTransient<IStoreRepository, StoreRepository>();
+builder.Services.AddTransient<IProductProfileRepository, ProductProfileRepository>();
+builder.Services.AddTransient<IBrandModelRepository, BrandModelRepository>();
+builder.Services.AddTransient<IScrapedPriceRepository, ScrapedPriceRepository>();
 
 // Cloudflare R2 object storage. Each concern routes to its own bucket: error logs (daleel-logs), product
 // /brand/store images (daleel-images), raw + final product specs (daleel-specs) and scraped site/brand
@@ -350,8 +379,10 @@ builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>(
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
-builder.Services.AddScoped<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
-builder.Services.AddScoped<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
+// Transient: injected into the interactive Home component (and resolved per-use by the background worker),
+// so it must not share a circuit-scoped DbContext with concurrently-rendering components.
+builder.Services.AddTransient<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
+builder.Services.AddTransient<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
 builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 
 // Search cache: Postgres-backed store (singleton — opens its own DbContext scope per call, since the
@@ -365,12 +396,12 @@ builder.Services.AddSingleton<IIpRateLimiter, IpRateLimiter>();
 builder.Services.AddSingleton<IAgentFactory, AgentFactory>();
 // Product/brand/store detail pages read from the saved database (specs, R2 images, scraped prices)
 // rather than re-scraping live; this assembles the product view from those tables.
-builder.Services.AddScoped<IProductDetailDbService, ProductDetailDbService>();
+builder.Services.AddTransient<IProductDetailDbService, ProductDetailDbService>();
 builder.Services.AddSingleton<MonitorService>();
 
 // /status page: HTTP probes against each provider's host + last-search lookup.
 builder.Services.AddHttpClient();
-builder.Services.AddScoped<IStatusService, StatusService>();
+builder.Services.AddTransient<IStatusService, StatusService>();
 // QA-only raw provider diagnostics (gated by DIAGNOSTICS_ENABLED — off in production).
 builder.Services.AddScoped<IProviderDiagnostics, ProviderDiagnostics>();
 
