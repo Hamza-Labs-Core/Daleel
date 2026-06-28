@@ -34,7 +34,10 @@ builder.AddDaleelLogging();
 // to clients) and is enabled only in appsettings.Development.json for local debugging. See SEC-2.
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents(options =>
-        options.DetailedErrors = builder.Configuration.GetValue("DetailedErrors", false))
+        // TEMPORARY (SEC-2): forced ON in ALL environments to surface the real production circuit
+        // exception that the config-driven flag (false in base appsettings) was hiding. Revert to
+        // `builder.Configuration.GetValue("DetailedErrors", false)` once the prod crash is diagnosed.
+        options.DetailedErrors = true)
     .AddInteractiveWebAssemblyComponents();
 
 // MudBlazor UI services (theme, dialogs, snackbars, popovers).
