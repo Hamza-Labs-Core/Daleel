@@ -17,7 +17,7 @@
         <MudPaper Class="pa-4" Elevation="0" Outlined="true">
             <MudText Typo="Typo.h6" Class="mb-3">@L["Monitor.NewMonitor"]</MudText>
             <MudTextField @bind-Value="_keyword" Label="@L["Monitor.KeywordLabel"]"
-                          Placeholder="e.g. مكيف, iPhone" Variant="Variant.Outlined"
+                          Placeholder="@L["Monitor.KeywordPlaceholder"]" Variant="Variant.Outlined"
                           Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Tag" Class="mb-3" />
             <GeoSelect @bind-Value="Geo" />
             <MudSelect T="int" @bind-Value="_interval" Label="@L["Monitor.IntervalLabel"]" Dense="true"
@@ -60,9 +60,9 @@
                                 <MudIcon Icon="@(m.Status == MonitorStatus.Active ? Icons.Material.Filled.PlayCircle : Icons.Material.Filled.PauseCircle)"
                                          Color="@(m.Status == MonitorStatus.Active ? Color.Success : Color.Warning)" />
                                 <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(m.Keyword)">@m.Keyword</MudText>
-                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Catalog.ResolveGeo(m.Geo).Flag @Catalog.ResolveGeo(m.Geo).English</MudChip>
+                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@Catalog.ResolveGeo(m.Geo).Flag @Catalog.ResolveGeo(m.Geo).Name</MudChip>
                                 <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Icon="@Icons.Material.Filled.Schedule">@FormatInterval(m.IntervalMinutes)</MudChip>
-                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">@m.MatchCount matches</MudChip>
+                                <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">@L["Monitor.MatchCount", m.MatchCount]</MudChip>
                                 <MudSpacer />
                                 <MudTooltip Text="Run now">
                                     <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small"
@@ -156,7 +156,7 @@
         }
 
         Monitors.Add(_userId, _keyword, Geo, _interval);
-        Snackbar.Add($"Monitoring “{_keyword}” in {Catalog.ResolveGeo(Geo).English}", Severity.Success);
+        Snackbar.Add(L["Monitor.Added", _keyword, Catalog.ResolveGeo(Geo).Name], Severity.Success);
         _keyword = string.Empty;
         Refresh();
     }

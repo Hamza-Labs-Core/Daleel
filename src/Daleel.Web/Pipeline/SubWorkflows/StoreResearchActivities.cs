@@ -25,7 +25,7 @@ public sealed class ScrapeStoreSiteActivity : CodeActivity
         var repo = context.GetRequiredService<IStoreRepository>();
         var options = context.GetRequiredService<ProfileOptions>();
 
-        services.Log($"Looking up {state.Store.Name}…");
+        services.Report(SearchStep.FindingStores, "Progress.Msg.LookingUpStore", state.Store.Name);
         state.Existing = await SafeGet(repo, state.Store.Name, context.CancellationToken);
         if (state.Existing is not null && !state.Existing.IsStale(options.Now(), options.Ttl))
         {
@@ -41,7 +41,7 @@ public sealed class ScrapeStoreSiteActivity : CodeActivity
             return;
         }
 
-        services.Log($"Scraping {state.Store.Name}'s site via Context.dev…");
+        services.Report(SearchStep.FindingStores, "Progress.Msg.ScrapingStoreSite", state.Store.Name);
         state.Researched = await SafeResearch(researcher, state.Store.Name, state.Geo, context.CancellationToken);
         state.Saved = state.Researched ?? state.Existing;
         state.RecordEvent(EventCategory.Profile, "profile.store", "context.dev",
@@ -82,7 +82,7 @@ public sealed class VerifyOnMapsActivity : CodeActivity
             return ValueTask.CompletedTask;
         }
 
-        services.Log($"Verifying {state.Store.Name} on Google Maps…");
+        services.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStoreMaps", state.Store.Name);
         var s = state.Result;
         state.Result = s with
         {
@@ -160,7 +160,7 @@ public sealed class SaveStoreProfileActivity : CodeActivity
             {
                 state.Result = state.Result with { DbId = persisted.Id };
             }
-            services.Log($"Saved {state.Store.Name}'s profile.");
+            services.Report(SearchStep.FindingStores, "Progress.Msg.SavedStoreProfile", state.Store.Name);
         }
     }
 
@@ -196,7 +196,7 @@ public sealed class ScrapePricesActivity : CodeActivity
             return; // no Context.dev key or no resolvable store domain — nothing to crawl
         }
 
-        services.Log($"Reading {state.Store.Name}'s catalogue for prices…");
+        services.Report(SearchStep.FindingStores, "Progress.Msg.ReadingStoreCatalog", state.Store.Name);
         var provider = new ContextDevProvider(key);
         var products = await SafeCatalog(provider, domain, context.CancellationToken);
         state.PricedProducts = products.Count(p => p.Price is not null);
@@ -210,7 +210,8 @@ public sealed class ScrapePricesActivity : CodeActivity
             });
         if (state.PricedProducts > 0)
         {
-            services.Log($"Found {state.PricedProducts} priced product(s) at {state.Store.Name}.");
+            services.Report(SearchStep.FindingStores, "Progress.Msg.FoundPricedProducts",
+                state.PricedProducts, state.Store.Name);
         }
     }
 

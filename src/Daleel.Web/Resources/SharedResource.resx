@@ -237,6 +237,7 @@
   <data name="Stores.Title" xml:space="preserve"><value>Store Finder</value></data>
   <data name="Stores.Subtitle" xml:space="preserve"><value>Find physical stores selling a product near a location (Google Places).</value></data>
   <data name="Stores.ProductLabel" xml:space="preserve"><value>Product / category</value></data>
+  <data name="Stores.ProductPlaceholder" xml:space="preserve"><value>e.g. air conditioner, fridge</value></data>
   <data name="Stores.Find" xml:space="preserve"><value>Find</value></data>
   <data name="Stores.UseMyLocation" xml:space="preserve"><value>Use my location</value></data>
   <data name="Stores.NearMe" xml:space="preserve"><value>Stores near me</value></data>
@@ -267,6 +268,9 @@
   <data name="Monitor.AddMonitor" xml:space="preserve"><value>Add monitor</value></data>
   <data name="Monitor.ActiveMonitors" xml:space="preserve"><value>Active monitors</value></data>
   <data name="Monitor.ResultsFeed" xml:space="preserve"><value>Results feed</value></data>
+  <data name="Monitor.KeywordPlaceholder" xml:space="preserve"><value>e.g. iPhone, laptop</value></data>
+  <data name="Monitor.MatchCount" xml:space="preserve"><value>{0} matches</value></data>
+  <data name="Monitor.Added" xml:space="preserve"><value>Monitoring “{0}” in {1}</value></data>
 
   <data name="Results.AlsoFound" xml:space="preserve"><value>Also found</value></data>
   <data name="Results.RelatedArticles" xml:space="preserve"><value>Related articles</value></data>
@@ -331,6 +335,33 @@
   <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>Loaded a saved answer.</value></data>
   <data name="Progress.Msg.DoneCount" xml:space="preserve"><value>Done! Found {0} product(s) from {1} brand(s).</value></data>
   <data name="Progress.Msg.Done" xml:space="preserve"><value>Done!</value></data>
+
+  <!-- Per-activity feed lines (previously hardcoded English Log() calls; now localized signals). -->
+  <data name="Progress.Msg.AnalyzingCategory" xml:space="preserve"><value>Analyzing {0} market requirements…</value></data>
+  <data name="Progress.Msg.LookingForStores" xml:space="preserve"><value>Looking for {0}…</value></data>
+  <data name="Progress.Msg.ExtractingSpecs" xml:space="preserve"><value>Extracting {0}…</value></data>
+  <data name="Progress.Msg.EnrichedBrandsCount" xml:space="preserve"><value>Enriched {0} brand(s).</value></data>
+  <data name="Progress.Msg.VerifiedStoresCount" xml:space="preserve"><value>Verified {0} store(s) on Google Maps.</value></data>
+  <data name="Progress.Msg.DeepDiving" xml:space="preserve"><value>Deep-diving {0} product(s) in parallel…</value></data>
+  <data name="Progress.Msg.FindingBrandSite" xml:space="preserve"><value>Finding {0}'s local site…</value></data>
+  <data name="Progress.Msg.ScrapingBrandCatalog" xml:space="preserve"><value>Scraping {0}'s catalogue via Context.dev…</value></data>
+  <data name="Progress.Msg.BuiltReputation" xml:space="preserve"><value>Built reputation profile for {0}.</value></data>
+  <data name="Progress.Msg.SavedBrandProfile" xml:space="preserve"><value>Saved {0}'s profile.</value></data>
+  <data name="Progress.Msg.LocatedLogoNoStorage" xml:space="preserve"><value>Located the {0} logo (object storage not configured).</value></data>
+  <data name="Progress.Msg.StoredLogo" xml:space="preserve"><value>Stored the {0} logo to R2.</value></data>
+  <data name="Progress.Msg.LocatedLogoNoHost" xml:space="preserve"><value>Located the {0} logo (R2 images host not set — kept the source URL).</value></data>
+  <data name="Progress.Msg.LookingUpStore" xml:space="preserve"><value>Looking up {0}…</value></data>
+  <data name="Progress.Msg.ScrapingStoreSite" xml:space="preserve"><value>Scraping {0}'s site via Context.dev…</value></data>
+  <data name="Progress.Msg.VerifyingStoreMaps" xml:space="preserve"><value>Verifying {0} on Google Maps…</value></data>
+  <data name="Progress.Msg.SavedStoreProfile" xml:space="preserve"><value>Saved {0}'s profile.</value></data>
+  <data name="Progress.Msg.ReadingStoreCatalog" xml:space="preserve"><value>Reading {0}'s catalogue for prices…</value></data>
+  <data name="Progress.Msg.FoundPricedProducts" xml:space="preserve"><value>Found {0} priced product(s) at {1}.</value></data>
+  <data name="Progress.Msg.FetchingSpecs" xml:space="preserve"><value>Fetching official specs for {0}…</value></data>
+  <data name="Progress.Msg.ComparingItemPrices" xml:space="preserve"><value>Comparing {0} store price(s) for {1}…</value></data>
+  <data name="Progress.Msg.SavedDeepDive" xml:space="preserve"><value>Saved deep-dive for {0}.</value></data>
+  <data name="Progress.Msg.IdentifiedItem" xml:space="preserve"><value>Identified {0} as “{1}” ({2}, {3}).</value></data>
+  <data name="Progress.Msg.MergedSpecs" xml:space="preserve"><value>Merged {0} source(s) into {1} canonical spec(s) for {2}.</value></data>
+  <data name="Progress.Msg.SavedFinalSpecs" xml:space="preserve"><value>Saved canonical spec sheet for {0} ({1} spec(s)).</value></data>
 
   <data name="Sources.Label" xml:space="preserve"><value>Sources</value></data>
 

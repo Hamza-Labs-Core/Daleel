@@ -1,4 +1,5 @@
 using Daleel.Agent;
+using Daleel.Web.Pipeline;
 
 namespace Daleel.Web.Pipeline.SubWorkflows;
 
@@ -20,6 +21,16 @@ public sealed class SubWorkflowServices
     /// <summary>Progress sink shared from the parent run so sub-workflow steps stream live status.</summary>
     public Action<string>? Progress { get; set; }
 
-    /// <summary>Emits a plain progress line through the shared sink.</summary>
+    /// <summary>Emits a plain (non-localized/legacy) progress line through the shared sink.</summary>
     public void Log(string message) => Progress?.Invoke(message);
+
+    /// <summary>
+    /// Emits a structured progress signal — a localization <paramref name="key"/> (+ optional format args)
+    /// the client resolves in the viewer's own culture, tagged with the <paramref name="step"/> this
+    /// sub-workflow runs within (brand → BuildingProfiles, store → FindingStores, item → ComparingPrices).
+    /// Mirrors <see cref="SearchPipelineServices.Report"/> so per-entity child workflows stream the same
+    /// culture-aware feed as the parent instead of hardcoded English. See <see cref="SearchProgressSignal"/>.
+    /// </summary>
+    public void Report(SearchStep step, string key, params object?[] args) =>
+        Progress?.Invoke(SearchProgressSignal.Encode(step, key, args));
 }

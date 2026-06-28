@@ -23,7 +23,7 @@
 
         @if (!string.IsNullOrWhiteSpace(Summary.Summary))
         {
-            <MudText Typo="Typo.body2" Class="mt-2" dir="@Catalog.Dir(Summary.Summary)">@Summary.Summary</MudText>
+            <TranslatedText Text="@Summary.Summary" Typo="Typo.body2" CssClass="mt-2" />
         }
     </MudPaper>
 }

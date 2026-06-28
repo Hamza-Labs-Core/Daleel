@@ -14,7 +14,7 @@
     <div class="d-flex flex-wrap gap-3 align-center">
         <div style="min-width:240px;flex:2;">
             <MudTextField @bind-Value="_subject" Label="@L["Stores.ProductLabel"]"
-                          Placeholder="e.g. air conditioner, مكيف"
+                          Placeholder="@L["Stores.ProductPlaceholder"]"
                           Variant="Variant.Outlined" Adornment="Adornment.Start"
                           AdornmentIcon="@Icons.Material.Filled.ShoppingBag" OnKeyDown="OnKey" />
         </div>
@@ -71,7 +71,7 @@
     else
     {
         <div class="d-flex align-center mb-2">
-            <MudText Typo="Typo.subtitle1">@_stores.Count @L["Stores.StoresCount"] · @Catalog.ResolveGeo(Geo).English</MudText>
+            <MudText Typo="Typo.subtitle1">@_stores.Count @L["Stores.StoresCount"] · @Catalog.ResolveGeo(Geo).Name</MudText>
             <MudSpacer />
             <SaveResultButton Result="_stores" ResultType="stores" DefaultTitle="@_subject" SearchHistoryId="LastHistoryId" />
         </div>

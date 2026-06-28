@@ -63,7 +63,7 @@ else
                 <MudTd DataLabel="@L["History.Col.Query"]">
                     <MudText Typo="Typo.body2" dir="@Catalog.Dir(context.Query)" Style="text-align:start;">@context.Query</MudText>
                 </MudTd>
-                <MudTd DataLabel="@L["History.Col.Market"]">@Catalog.ResolveGeo(context.Geo).English</MudTd>
+                <MudTd DataLabel="@L["History.Col.Market"]">@Catalog.ResolveGeo(context.Geo).Name</MudTd>
                 <MudTd DataLabel="@L["History.Col.Summary"]">
                     <MudText Typo="Typo.caption" Color="Color.Secondary" dir="@Catalog.Dir(context.ResultSummary ?? "")">
                         @context.ResultSummary

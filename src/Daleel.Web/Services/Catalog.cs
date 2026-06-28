@@ -8,8 +8,17 @@ public sealed record GeoOption(string Key, string English, string Arabic, string
     /// <summary>The underlying market profile (languages, currency, center city, …).</summary>
     public GeoProfile Profile => GeoProfiles.ResolveOrDefault(Key);
 
-    /// <summary>"🇯🇴 Jordan · الأردن" — a single bilingual label for dropdowns.</summary>
-    public string Display => $"{Flag} {English} · {Arabic}";
+    /// <summary>
+    /// The market name in the active UI culture: Arabic under an "ar" UI culture, English otherwise.
+    /// Picking by <see cref="System.Globalization.CultureInfo.CurrentUICulture"/> (rather than always
+    /// concatenating both names) keeps the English UI English and the Arabic UI Arabic — a fixed
+    /// bilingual label used to leak Arabic into the English market selector.
+    /// </summary>
+    public string Name =>
+        System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ar" ? Arabic : English;
+
+    /// <summary>"🇯🇴 Jordan" / "🇯🇴 الأردن" — flag + the culture-appropriate market name for dropdowns.</summary>
+    public string Display => $"{Flag} {Name}";
 }
 
 /// <summary>An OpenRouter model offered in the model selector.</summary>

@@ -22,6 +22,7 @@ SECRETS=(
   CONTEXT_DEV_API_KEY
   GOOGLE_PLACES_API_KEY
   APIFY_TOKEN
+  DEEPL_API_KEY
   # Deploy (consumed by .github/workflows/deploy.yml)
   DEPLOY_SSH_HOST
   DEPLOY_SSH_USER

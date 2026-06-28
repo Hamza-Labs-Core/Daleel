@@ -59,7 +59,7 @@ public sealed class ScrapeProductPagesActivity : CodeActivity
             return;
         }
 
-        services.Log($"Fetching official specs for {state.Model.Name}…");
+        services.Report(SearchStep.ComparingPrices, "Progress.Msg.FetchingSpecs", state.Model.Name);
         var page = await services.Agent.ReadPageAsync(url, ct);
         if (page is not null && !string.IsNullOrWhiteSpace(page.Content))
         {
@@ -111,7 +111,7 @@ public sealed class ComparePricesActivity : CodeActivity
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Count();
 
-        services.Log($"Comparing {stores} store price(s) for {state.Model.Name}…");
+        services.Report(SearchStep.ComparingPrices, "Progress.Msg.ComparingItemPrices", stores, state.Model.Name);
         state.RecordEvent(EventCategory.Extract, "item.compare", "pipeline",
             metadata: new Dictionary<string, object?>
             {
@@ -170,7 +170,7 @@ public sealed class SaveItemProfileActivity : CodeActivity
             SourceUrl = state.SourceUrl,
             LastRefreshed = options.Now()
         }, context.CancellationToken);
-        services.Log($"Saved deep-dive for {state.Model.Name}.");
+        services.Report(SearchStep.ComparingPrices, "Progress.Msg.SavedDeepDive", state.Model.Name);
     }
 
     private static async Task SafeUpsert(IProductProfileRepository repo, ProductProfile profile, CancellationToken ct)
@@ -208,7 +208,8 @@ public sealed class IdentifyProductActivity : CodeActivity
             state.MatchMethod = id.Method;
             state.Category = id.Category ?? state.Category;
 
-            services.Log($"Identified {state.Model.Name} as “{id.CanonicalModelName}” ({id.Method}, {id.Confidence:P0}).");
+            services.Report(SearchStep.ComparingPrices, "Progress.Msg.IdentifiedItem",
+                state.Model.Name, id.CanonicalModelName, id.Method, id.Confidence.ToString("P0"));
             state.RecordEvent(EventCategory.Extract, "item.identify", id.Method == "vision" ? "openrouter" : "pipeline",
                 metadata: new Dictionary<string, object?>
                 {
@@ -326,7 +327,8 @@ public sealed class MergeAndCleanSpecsActivity : CodeActivity
         // The canonical sheet is what the UI reads — replace the as-extracted specs with it.
         state.Result = state.Result with { Specs = new Dictionary<string, string>(merged) };
 
-        services.Log($"Merged {state.RawSpecsBySource.Count} source(s) into {merged.Count} canonical spec(s) for {state.Model.Name}.");
+        services.Report(SearchStep.ComparingPrices, "Progress.Msg.MergedSpecs",
+            state.RawSpecsBySource.Count, merged.Count, state.Model.Name);
         state.RecordEvent(EventCategory.Extract, "item.merge", "pipeline",
             metadata: new Dictionary<string, object?>
             {
@@ -381,7 +383,8 @@ public sealed class SaveFinalSpecsActivity : CodeActivity
             catch { /* best-effort: the R2 copy + in-memory result remain authoritative */ }
         }
 
-        services.Log($"Saved canonical spec sheet for {state.Model.Name} ({merged.Count} spec(s)).");
+        services.Report(SearchStep.ComparingPrices, "Progress.Msg.SavedFinalSpecs",
+            state.Model.Name, merged.Count);
         state.RecordEvent(EventCategory.Extract, "item.finalspecs", state.FinalSpecsR2Url is null ? "db" : "r2",
             metadata: new Dictionary<string, object?>
             {

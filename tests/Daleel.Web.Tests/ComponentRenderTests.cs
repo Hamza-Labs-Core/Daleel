@@ -1,6 +1,7 @@
 using Bunit;
 using Daleel.Core.Models;
 using Daleel.Web.Components.Shared;
+using Daleel.Web.Translation;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using MudBlazor.Services;
@@ -21,7 +22,22 @@ public class ComponentRenderTests : TestContext
         // register localization so they can be constructed in the test container (default culture
         // → the English .resx values embedded in the Daleel.Web assembly).
         Services.AddLocalization();
+        // Shared components also translate dynamic text through ITranslationService. Register a disabled
+        // (pass-through) instance so they render the original text — the translation logic itself is
+        // covered by TranslationServiceTests, not these render tests.
+        Services.AddSingleton<ITranslationService>(new DisabledTranslationService());
         JSInterop.Mode = JSRuntimeMode.Loose;
+    }
+
+    /// <summary>A no-op translator: Enabled=false, so every component falls through to the original text.</summary>
+    private sealed class DisabledTranslationService : ITranslationService
+    {
+        public bool Enabled => false;
+        public Task<string> TranslateAsync(string text, string targetLang, CancellationToken ct = default) =>
+            Task.FromResult(text);
+        public Task<IReadOnlyList<string>> TranslateAsync(
+            IReadOnlyList<string> texts, string targetLang, CancellationToken ct = default) =>
+            Task.FromResult(texts);
     }
 
     [Fact]

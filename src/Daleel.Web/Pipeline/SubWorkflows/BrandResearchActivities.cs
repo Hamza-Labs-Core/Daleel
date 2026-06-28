@@ -25,7 +25,7 @@ public sealed class SearchBrandSiteActivity : CodeActivity
         var repo = context.GetRequiredService<IBrandRepository>();
         var options = context.GetRequiredService<ProfileOptions>();
 
-        services.Log($"Finding {state.Brand.Name}'s local site…");
+        services.Report(SearchStep.BuildingProfiles, "Progress.Msg.FindingBrandSite", state.Brand.Name);
         state.Existing = await SafeGet(repo, state.Brand.Name, context.CancellationToken);
         if (state.Existing is not null && !state.Existing.IsStale(options.Now(), options.Ttl))
         {
@@ -62,7 +62,7 @@ public sealed class ScrapeBrandCatalogActivity : CodeActivity
             return; // no Context.dev/LLM keys — degrade to the (possibly stale) saved profile
         }
 
-        services.Log($"Scraping {state.Brand.Name}'s catalogue via Context.dev…");
+        services.Report(SearchStep.BuildingProfiles, "Progress.Msg.ScrapingBrandCatalog", state.Brand.Name);
         state.Researched = await SafeResearch(researcher, state.Brand.Name, state.Geo, context.CancellationToken);
         state.RecordEvent(EventCategory.Profile, "profile.brand", "context.dev",
             success: state.Researched is not null,
@@ -106,7 +106,7 @@ public sealed class SynthesizeBrandProfileActivity : CodeActivity
             // has no id until SaveBrandProfileActivity persists it — that step backfills it then).
             DbId = saved.Id > 0 ? saved.Id : b.DbId
         };
-        services.Log($"Built reputation profile for {b.Name}.");
+        services.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuiltReputation", b.Name);
         return ValueTask.CompletedTask;
     }
 
@@ -146,7 +146,7 @@ public sealed class SaveBrandProfileActivity : CodeActivity
             {
                 state.Result = state.Result with { DbId = saved.Id };
             }
-            services.Log($"Saved {state.Brand.Name}'s profile.");
+            services.Report(SearchStep.BuildingProfiles, "Progress.Msg.SavedBrandProfile", state.Brand.Name);
         }
     }
 
@@ -182,7 +182,7 @@ public sealed class DownloadBrandImagesActivity : CodeActivity
         if (!r2.IsConfigured)
         {
             RecordImages(state, success: false, reason: "r2-not-configured");
-            services.Log($"Located the {state.Brand.Name} logo (object storage not configured).");
+            services.Report(SearchStep.BuildingProfiles, "Progress.Msg.LocatedLogoNoStorage", state.Brand.Name);
             return;
         }
 
@@ -201,9 +201,8 @@ public sealed class DownloadBrandImagesActivity : CodeActivity
         }
 
         RecordImages(state, success: hosted, reason: hosted ? null : "images-host-unset-or-fetch-failed");
-        services.Log(hosted
-            ? $"Stored the {state.Brand.Name} logo to R2."
-            : $"Located the {state.Brand.Name} logo (R2 images host not set — kept the source URL).");
+        services.Report(SearchStep.BuildingProfiles,
+            hosted ? "Progress.Msg.StoredLogo" : "Progress.Msg.LocatedLogoNoHost", state.Brand.Name);
     }
 
     private static void RecordImages(BrandResearchState state, bool success, string? reason) =>

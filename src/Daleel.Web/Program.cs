@@ -261,6 +261,17 @@ builder.Services.AddTransient<IProductProfileRepository, ProductProfileRepositor
 builder.Services.AddTransient<IBrandModelRepository, BrandModelRepository>();
 builder.Services.AddTransient<IScrapedPriceRepository, ScrapedPriceRepository>();
 
+// Real-time translation (DeepL) with a permanent Postgres cache. Optional: when DEEPL_API_KEY is unset the
+// service reports Enabled=false and every <TranslatedText> is a transparent pass-through, so the app runs
+// unchanged without DeepL. Options + the stateless HTTP client are singletons; the repository and the
+// service are Transient so each UI component that translates gets its OWN DbContext — concurrent
+// translations from independent components must never share one Npgsql connection (the same Blazor-circuit
+// hazard the profile repositories above avoid).
+builder.Services.AddSingleton(Daleel.Web.Translation.TranslationOptions.FromEnvironment());
+builder.Services.AddSingleton<Daleel.Web.Translation.ITranslator, Daleel.Web.Translation.DeepLClient>();
+builder.Services.AddTransient<ITranslationRepository, TranslationRepository>();
+builder.Services.AddTransient<Daleel.Web.Translation.ITranslationService, Daleel.Web.Translation.TranslationService>();
+
 // Cloudflare R2 object storage. Each concern routes to its own bucket: error logs (daleel-logs), product
 // /brand/store images (daleel-images), raw + final product specs (daleel-specs) and scraped site/brand
 // data (daleel-data). Registered only when R2 is fully configured (shared credentials + endpoint); the

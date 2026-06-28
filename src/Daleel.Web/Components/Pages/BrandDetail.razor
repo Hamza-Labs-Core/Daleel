@@ -66,7 +66,7 @@ else
 
     @if (!string.IsNullOrWhiteSpace(_brand.Description))
     {
-        <MudText Typo="Typo.body1" Class="mb-3" dir="@Catalog.Dir(_brand.Description)">@_brand.Description</MudText>
+        <TranslatedText Text="@_brand.Description" Typo="Typo.body1" CssClass="mb-3" />
     }
 
     @if (_brand.Pros.Count > 0 || _brand.Cons.Count > 0)
@@ -80,7 +80,7 @@ else
                         @foreach (var pro in _brand.Pros)
                         {
                             <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbUp" IconColor="Color.Success">
-                                <MudText Typo="Typo.body2" dir="@Catalog.Dir(pro)">@pro</MudText>
+                                <TranslatedText Text="@pro" Typo="Typo.body2" />
                             </MudListItem>
                         }
                     </MudList>
@@ -94,7 +94,7 @@ else
                         @foreach (var con in _brand.Cons)
                         {
                             <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbDown" IconColor="Color.Error">
-                                <MudText Typo="Typo.body2" dir="@Catalog.Dir(con)">@con</MudText>
+                                <TranslatedText Text="@con" Typo="Typo.body2" />
                             </MudListItem>
                         }
                     </MudList>

@@ -3,6 +3,7 @@
 @inject NavigationManager Nav
 @inject ILogger<ProductDetail> Logger
 @inject IStringLocalizer<SharedResource> L
+@inject ITranslationService Translator
 
 @* Dedicated full page for a single product model, read entirely from the saved database — never
    re-scraped live. It assembles the harvested catalogue row (specs + R2 image), the deep-dive profile
@@ -136,9 +137,9 @@ else
         <MudText Typo="Typo.h6" Class="mb-2">@L["Detail.Specifications"]</MudText>
         <MudSimpleTable Dense="true" Bordered="true" Style="max-width:560px;">
             <tbody>
-                @foreach (var (key, value) in _view.Specs)
+                @foreach (var (label, value) in _specRows ?? new())
                 {
-                    <tr><td><strong>@Humanize(key)</strong></td><td dir="@Catalog.Dir(value)">@value</td></tr>
+                    <tr><td><strong dir="@Catalog.Dir(label)">@label</strong></td><td dir="@Catalog.Dir(value)">@value</td></tr>
                 }
             </tbody>
         </MudSimpleTable>
@@ -162,6 +163,11 @@ else
     private ProductDetailView? _view;
     private bool _loading = true;
 
+    // Spec rows shown in the table: built from the persisted (Humanized label, value) pairs, then swapped
+    // in place once the batched translation arrives. Null until the view loads.
+    private List<(string Label, string Value)>? _specRows;
+    private bool _specsTranslated;
+
     // Routing is by stable id; the name (carried in the query) reconstructs the DB lookup key.
     private string DecodedName => Uri.UnescapeDataString(Name ?? string.Empty);
     private string DisplayTitle => _view?.Name is { Length: > 0 } n ? n : DecodedName;
@@ -184,29 +190,72 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender)
+        if (firstRender)
         {
+            try
+            {
+                // Read the assembled view from the database — no live scrape. Works cold from a shared link.
+                _view = await Details.GetAsync(
+                    Id, DecodedName, string.IsNullOrWhiteSpace(Geo) ? "jordan" : Geo!, lookupKey: Key);
+                _specRows = _view?.Specs.Select(s => (Label: Humanize(s.Key), Value: s.Value)).ToList();
+            }
+            catch (Exception ex)
+            {
+                // Log so a real load error is distinguishable from a genuine "not found"; the not-available
+                // panel covers this for the user and never surfaces internal detail.
+                Logger.LogWarning(ex, "Loading product detail for {Name} failed", DecodedName);
+                _view = null;
+            }
+            finally
+            {
+                _loading = false;
+                StateHasChanged();
+            }
             return;
         }
 
+        // Once the table has rendered with the original labels/values, translate the whole spec sheet in a
+        // SINGLE batched DeepL call (cache-first) and swap it in. Runs once; no-op when translation is off
+        // or the content is already in the UI language.
+        if (_view is null || _specRows is not { Count: > 0 } || _specsTranslated)
+        {
+            return;
+        }
+        _specsTranslated = true;
+        if (Translator.Enabled)
+        {
+            await TranslateSpecsAsync();
+        }
+    }
+
+    /// <summary>Translates all spec labels and values as one batch, then swaps the rows in place.</summary>
+    private async Task TranslateSpecsAsync()
+    {
+        var rows = _specRows!;
+        var target = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+
+        // One request: every label followed by every value (DeepL batches up to 50 texts/call).
+        var inputs = new List<string>(rows.Count * 2);
+        inputs.AddRange(rows.Select(r => r.Label));
+        inputs.AddRange(rows.Select(r => r.Value));
+
+        IReadOnlyList<string> translated;
         try
         {
-            // Read the assembled view from the database — no live scrape. Works cold from a shared link.
-            _view = await Details.GetAsync(
-                Id, DecodedName, string.IsNullOrWhiteSpace(Geo) ? "jordan" : Geo!, lookupKey: Key);
+            translated = await Translator.TranslateAsync(inputs, target);
         }
-        catch (Exception ex)
+        catch
         {
-            // Log so a real load error is distinguishable from a genuine "not found"; the not-available
-            // panel covers this for the user and never surfaces internal detail.
-            Logger.LogWarning(ex, "Loading product detail for {Name} failed", DecodedName);
-            _view = null;
+            return; // best-effort: keep the original spec sheet
         }
-        finally
+
+        var swapped = new List<(string Label, string Value)>(rows.Count);
+        for (var i = 0; i < rows.Count; i++)
         {
-            _loading = false;
-            StateHasChanged();
+            swapped.Add((translated[i], translated[rows.Count + i]));
         }
+        _specRows = swapped;
+        await InvokeAsync(StateHasChanged);
     }
 
     private static string Humanize(string key) =>

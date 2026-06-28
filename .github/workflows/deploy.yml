@@ -123,6 +123,9 @@ jobs:
           CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          # Optional — DeepL real-time UI translation. Not in the required set below: the app runs without
+          # it (UI shows original text), exactly like the optional R2 keys.
+          DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
           # Postgres event-store credentials. POSTGRES_PASSWORD is the single source
           # of truth: the connection string is derived from it at .env render time
           # (see below), so there is no separate POSTGRES_CONNECTION_STRING secret to
@@ -339,6 +342,9 @@ jobs:
             CONTEXT_DEV_API_KEY=${{ secrets.CONTEXT_DEV_API_KEY }}
             GOOGLE_PLACES_API_KEY=${{ secrets.GOOGLE_PLACES_API_KEY }}
             APIFY_TOKEN=${{ secrets.APIFY_TOKEN }}
+            # Optional DeepL key for real-time UI translation. Unset → empty → the app treats it as absent
+            # (translation disabled, UI shows original text).
+            DEEPL_API_KEY=${{ secrets.DEEPL_API_KEY }}
             # Cloudflare browser-rendering creds (org-level secrets). If unset they
             # resolve to empty, which the app treats as "absent" — harmless.
             CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

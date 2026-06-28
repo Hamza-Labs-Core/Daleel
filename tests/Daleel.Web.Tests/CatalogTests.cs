@@ -1,3 +1,4 @@
+using System.Globalization;
 using Daleel.Web.Services;
 using FluentAssertions;
 using Xunit;
@@ -39,9 +40,35 @@ public class CatalogTests
     }
 
     [Fact]
-    public void GeoOption_DisplayPairsFlagAndBothLanguages()
+    public void GeoOption_DisplayShowsEnglishNameUnderEnglishCulture()
     {
+        using var _ = new CultureScope("en");
         var jordan = Catalog.ResolveGeo("jordan");
-        jordan.Display.Should().Contain("Jordan").And.Contain("الأردن");
+        jordan.Display.Should().Contain("🇯🇴").And.Contain("Jordan");
+        // The English UI must NOT leak the Arabic name — that was the localization bug.
+        jordan.Display.Should().NotContain("الأردن");
+    }
+
+    [Fact]
+    public void GeoOption_DisplayShowsArabicNameUnderArabicCulture()
+    {
+        using var _ = new CultureScope("ar");
+        var jordan = Catalog.ResolveGeo("jordan");
+        jordan.Display.Should().Contain("🇯🇴").And.Contain("الأردن");
+        jordan.Display.Should().NotContain("Jordan");
+    }
+
+    /// <summary>Pins <see cref="CultureInfo.CurrentUICulture"/> for the scope of one test, then restores it.</summary>
+    private sealed class CultureScope : IDisposable
+    {
+        private readonly CultureInfo _ui;
+
+        public CultureScope(string name)
+        {
+            _ui = CultureInfo.CurrentUICulture;
+            CultureInfo.CurrentUICulture = new CultureInfo(name);
+        }
+
+        public void Dispose() => CultureInfo.CurrentUICulture = _ui;
     }
 }

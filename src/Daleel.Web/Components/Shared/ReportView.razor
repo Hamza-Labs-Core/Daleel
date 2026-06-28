@@ -1,5 +1,10 @@
-@* Renders the LLM narrative. Direction auto-detects Arabic so RTL summaries read correctly. *@
-@if (!string.IsNullOrWhiteSpace(Text))
+@* Renders the LLM narrative. Direction auto-detects Arabic so RTL summaries read correctly. The prose is
+   usually already in the UI language (the analyst is told to "respond in" the requested language), but a
+   CACHED or SAVED report can be in the other language — so we translate it to the current UI language after
+   render (non-blocking, cache-first via DeepL) and swap it in. See TranslationService / TranslatedText. *@
+@inject ITranslationService Translator
+
+@if (!string.IsNullOrWhiteSpace(_display))
 {
     <MudPaper Class="pa-6 my-4" Elevation="0" Outlined="true">
         @if (!string.IsNullOrWhiteSpace(Title))
@@ -11,7 +16,7 @@
             <MudDivider Class="mb-4" />
         }
 
-        <div class="daleel-report" dir="@Catalog.Dir(Text)" style="text-align:@(Catalog.IsArabic(Text) ? "right" : "start");">
+        <div class="daleel-report" dir="@Catalog.Dir(_display)" style="text-align:@(Catalog.IsArabic(_display) ? "right" : "start");">
             @foreach (var para in Paragraphs)
             {
                 <p>@para</p>
@@ -24,8 +29,54 @@
     [Parameter] public string? Text { get; set; }
     [Parameter] public string? Title { get; set; }
 
+    // The prose currently shown — the original on first paint, the translation once it arrives.
+    private string? _display;
+    private string? _handledSource;
+
+    protected override void OnParametersSet()
+    {
+        if (_handledSource != Text)
+        {
+            _display = Text;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_handledSource == Text)
+        {
+            return;
+        }
+        _handledSource = Text;
+
+        if (!Translator.Enabled || string.IsNullOrWhiteSpace(Text))
+        {
+            return;
+        }
+
+        var target = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        if (!TranslationService.NeedsTranslation(Text, target))
+        {
+            return;
+        }
+
+        try
+        {
+            var translated = await Translator.TranslateAsync(Text!, target);
+            if (!string.IsNullOrWhiteSpace(translated) && !string.Equals(translated, _display, StringComparison.Ordinal))
+            {
+                _display = translated;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch
+        {
+            // Best-effort: keep the original prose on any failure.
+        }
+    }
+
     private IEnumerable<string> Paragraphs =>
-        (Text ?? string.Empty)
+        (_display ?? string.Empty)
             .Replace("\r\n", "\n")
             .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .SelectMany(block => block.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));

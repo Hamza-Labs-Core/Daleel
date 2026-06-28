@@ -40,7 +40,7 @@ else
     <div class="d-flex flex-wrap gap-2 mb-3 align-center">
         @if (!string.IsNullOrWhiteSpace(_store.Type))
         {
-            <MudChip T="string" Size="Size.Small" Variant="Variant.Text">@_store.Type</MudChip>
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text"><TranslatedText Inline="true" Text="@_store.Type" /></MudChip>
         }
         @if ((_store.GoogleRating ?? _store.Rating) is { } rating)
         {

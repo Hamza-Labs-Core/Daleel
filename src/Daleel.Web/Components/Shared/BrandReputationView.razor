@@ -40,7 +40,7 @@
                 <ChildContent>
                     @if (!string.IsNullOrWhiteSpace(rep.Summary))
                     {
-                        <MudText Typo="Typo.body2" Class="mb-2" dir="@Catalog.Dir(rep.Summary)">@rep.Summary</MudText>
+                        <TranslatedText Text="@rep.Summary" Typo="Typo.body2" CssClass="mb-2" />
                     }
 
                     <div class="d-flex align-center gap-1 mb-1">
@@ -70,7 +70,7 @@
                                 <MudList T="string" Dense="true">
                                     @foreach (var p in rep.Pros)
                                     {
-                                        <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbUp"><MudText Typo="Typo.body2">@p</MudText></MudListItem>
+                                        <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbUp"><TranslatedText Text="@p" Typo="Typo.body2" /></MudListItem>
                                     }
                                 </MudList>
                             </MudItem>
@@ -82,7 +82,7 @@
                                 <MudList T="string" Dense="true">
                                     @foreach (var c in rep.Complaints)
                                     {
-                                        <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbDown"><MudText Typo="Typo.body2">@c</MudText></MudListItem>
+                                        <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbDown"><TranslatedText Text="@c" Typo="Typo.body2" /></MudListItem>
                                     }
                                 </MudList>
                             </MudItem>
@@ -105,7 +105,7 @@
                         {
                             <MudPaper Class="pa-2 mb-2" Outlined="true" Elevation="0"
                                       Style="@($"border-left:3px solid var(--mud-palette-{SentimentColor(r.Sentiment)});")">
-                                <MudText Typo="Typo.body2" dir="@Catalog.Dir(r.Quote)" Style="font-style:italic;">“@r.Quote”</MudText>
+                                <MudText Typo="Typo.body2" dir="@Catalog.Dir(r.Quote)" Style="font-style:italic;">“<TranslatedText Inline="true" Text="@r.Quote" />”</MudText>
                                 <div class="d-flex align-center gap-2 mt-1" style="flex-wrap:wrap;">
                                     @if (!string.IsNullOrWhiteSpace(r.Source))
                                     {

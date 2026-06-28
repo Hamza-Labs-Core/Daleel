@@ -120,6 +120,8 @@ jobs:
           CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
           APIFY_TOKEN: ${{ secrets.APIFY_TOKEN }}
+          # Optional — DeepL real-time UI translation (not in the required set; app runs without it).
+          DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
           QA_SSH_HOST: ${{ secrets.QA_SSH_HOST }}                 # QA server IP
           DEPLOY_SSH_USER: ${{ secrets.DEPLOY_SSH_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -275,6 +277,8 @@ jobs:
             CONTEXT_DEV_API_KEY=${{ secrets.CONTEXT_DEV_API_KEY }}
             GOOGLE_PLACES_API_KEY=${{ secrets.GOOGLE_PLACES_API_KEY }}
             APIFY_TOKEN=${{ secrets.APIFY_TOKEN }}
+            # Optional DeepL key for real-time UI translation (unset → empty → treated as absent).
+            DEEPL_API_KEY=${{ secrets.DEEPL_API_KEY }}
             CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
             CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
             R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}

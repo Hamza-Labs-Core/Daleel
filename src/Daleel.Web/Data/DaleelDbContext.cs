@@ -43,6 +43,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<BrandModel> BrandModels => Set<BrandModel>();
     public DbSet<ScrapedPrice> ScrapedPrices => Set<ScrapedPrice>();
     public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
+    public DbSet<TranslationCacheEntry> TranslationCache => Set<TranslationCacheEntry>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -276,6 +277,19 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
                 v => v.ToUnixTimeMilliseconds(),
                 v => DateTimeOffset.FromUnixTimeMilliseconds(v));
             e.Property(x => x.ExpiresAt).HasConversion(toUnixMs);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+        });
+
+        builder.Entity<TranslationCacheEntry>(e =>
+        {
+            // Lookups are exact composite-key matches (hash + target language), so that pair is unique and
+            // indexed — it serves both the cache read and any per-language freshness sweep on CreatedAt.
+            e.HasIndex(x => new { x.SourceHash, x.TargetLang }).IsUnique();
+            e.Property(x => x.SourceHash).HasMaxLength(64); // SHA-256 hex
+            e.Property(x => x.TargetLang).HasMaxLength(8);
+
+            // CreatedAt as Unix-ms bigint so the freshness filter (CreatedAt >= now - MaxAge) translates as
+            // a clean long range comparison. Same trick as SearchCache.ExpiresAt.
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 

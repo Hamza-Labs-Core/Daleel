@@ -1,0 +1,81 @@
+@* Renders dynamic content (descriptions, article prose, review text, spec labels) with non-blocking,
+   cache-first translation. The original text shows IMMEDIATELY on first render; the DeepL call runs after
+   render (OnAfterRenderAsync) and swaps in the translation when it arrives — so the network never blocks
+   the page. When translation is disabled / no key is set, or the text is already in the UI language, this
+   is a transparent pass-through. dir is recomputed from whatever is currently displayed so an Arabic→English
+   swap flips RTL→LTR. See TranslationService. *@
+@inject ITranslationService Translator
+
+@if (!string.IsNullOrEmpty(_display))
+{
+    @if (Inline)
+    {
+        <span dir="@Catalog.Dir(_display)" class="@CssClass">@_display</span>
+    }
+    else
+    {
+        <MudText Typo="Typo" Color="Color" Class="@CssClass" dir="@Catalog.Dir(_display)" Style="@Style">@_display</MudText>
+    }
+}
+
+@code {
+    /// <summary>The source text to display (and translate when it differs from the UI language).</summary>
+    [Parameter, EditorRequired] public string? Text { get; set; }
+
+    /// <summary>When true, render a bare &lt;span&gt; (for inline/embedded use) instead of a MudText block.</summary>
+    [Parameter] public bool Inline { get; set; }
+
+    [Parameter] public Typo Typo { get; set; } = Typo.body2;
+    [Parameter] public Color Color { get; set; } = Color.Default;
+    [Parameter] public string? CssClass { get; set; }
+    [Parameter] public string? Style { get; set; }
+
+    // What is shown right now (original first, translated after the swap).
+    private string? _display;
+    // The Text value we have already attempted to translate, so a re-render doesn't re-fire the call and a
+    // changed Text (e.g. navigating between brands) does.
+    private string? _handledSource;
+
+    protected override void OnParametersSet()
+    {
+        // Show the original immediately whenever the source changes; translation (if any) swaps in later.
+        if (_handledSource != Text)
+        {
+            _display = Text;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_handledSource == Text)
+        {
+            return; // already handled this exact source — avoid re-firing on StateHasChanged re-renders
+        }
+        _handledSource = Text;
+
+        if (!Translator.Enabled || string.IsNullOrWhiteSpace(Text))
+        {
+            return;
+        }
+
+        var target = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
+        if (!TranslationService.NeedsTranslation(Text, target))
+        {
+            return;
+        }
+
+        try
+        {
+            var translated = await Translator.TranslateAsync(Text!, target);
+            if (!string.IsNullOrWhiteSpace(translated) && !string.Equals(translated, _display, StringComparison.Ordinal))
+            {
+                _display = translated;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch
+        {
+            // Best-effort: keep the original text on any failure.
+        }
+    }
+}
