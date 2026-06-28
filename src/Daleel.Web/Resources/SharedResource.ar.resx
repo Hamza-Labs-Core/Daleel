@@ -549,6 +549,19 @@
   <data name="Admin.Data.Bucket.Images" xml:space="preserve"><value>الصور</value></data>
   <data name="Admin.Data.Bucket.Specs" xml:space="preserve"><value>المواصفات</value></data>
   <data name="Admin.Data.Bucket.Data" xml:space="preserve"><value>البيانات</value></data>
+  <data name="Admin.Data.View.Table" xml:space="preserve"><value>جدول</value></data>
+  <data name="Admin.Data.View.Cards" xml:space="preserve"><value>بطاقات</value></data>
+  <data name="Admin.Data.Search" xml:space="preserve"><value>تصفية حسب الاسم</value></data>
+  <data name="Admin.Data.NoMatch" xml:space="preserve"><value>لا توجد ملفّات تطابق التصفية.</value></data>
+  <data name="Admin.Data.Detail.Formatted" xml:space="preserve"><value>منسّق</value></data>
+  <data name="Admin.Data.Detail.Raw" xml:space="preserve"><value>JSON خام</value></data>
+  <data name="Admin.Data.Col.Field" xml:space="preserve"><value>الحقل</value></data>
+  <data name="Admin.Data.Col.Value" xml:space="preserve"><value>القيمة</value></data>
+  <data name="Admin.Data.Health.Probing" xml:space="preserve"><value>جارٍ فحص الحاويات…</value></data>
+  <data name="Admin.Data.Health.Recheck" xml:space="preserve"><value>إعادة فحص حالة الحاويات</value></data>
+  <data name="Admin.Data.Health.Unreachable" xml:space="preserve"><value>غير قابلة للوصول</value></data>
+  <data name="Admin.Data.Health.HasData" xml:space="preserve"><value>متاحة، تحتوي بيانات</value></data>
+  <data name="Admin.Data.Health.Empty" xml:space="preserve"><value>متاحة، فارغة</value></data>
   <data name="Admin.Nav.Dashboard" xml:space="preserve"><value>لوحة التحكم</value></data>
   <data name="Admin.Nav.Users" xml:space="preserve"><value>المستخدمون</value></data>
   <data name="Admin.Nav.Plans" xml:space="preserve"><value>الباقات</value></data>

@@ -21,11 +21,36 @@
 }
 else
 {
-    @* ── Bucket selector ─────────────────────────────────────────────────
-       One button per R2 bucket; each browses that bucket from its ROOT so nothing is hidden behind an
-       assumed key prefix. Sub-"folders" (raw/, final-specs/, site-data/, errors/…) are then reachable by
-       clicking into them or via the breadcrumb below. *@
-    <div class="d-flex flex-wrap gap-2 mb-3">
+    @* ── Bucket health strip ──────────────────────────────────────────────
+       Probes all four buckets so a misconfiguration (a per-concern bucket that was never created in
+       Cloudflare, which fails every write silently) is visible at a glance: green = reachable with data,
+       grey = reachable but empty, red = unreachable (with the error in the tooltip). *@
+    <div class="d-flex flex-wrap align-center gap-2 mb-3">
+        @if (_healthLoading)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
+                     Icon="@Icons.Material.Filled.Sync">@L["Admin.Data.Health.Probing"]</MudChip>
+        }
+        else
+        {
+            @foreach (var h in _health)
+            {
+                <MudTooltip Text="@HealthTooltip(h)">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             Color="@HealthColor(h)" Icon="@HealthIcon(h)"
+                             OnClick="@(() => NavigateToBucketAsync(h.Bucket))">
+                        @L[$"Admin.Data.Bucket.{h.Bucket}"]
+                    </MudChip>
+                </MudTooltip>
+            }
+            <MudTooltip Text="@L["Admin.Data.Health.Recheck"]">
+                <MudIconButton Icon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="ProbeBucketsAsync" />
+            </MudTooltip>
+        }
+    </div>
+
+    @* ── Toolbar: bucket selector + view mode + filter ──────────────────── *@
+    <div class="d-flex flex-wrap align-center gap-2 mb-3">
         @foreach (var b in Buckets)
         {
             <MudButton Size="Size.Small" StartIcon="@BucketIcon(b)"
@@ -35,9 +60,19 @@ else
                 @L[$"Admin.Data.Bucket.{b}"]
             </MudButton>
         }
+        <MudSpacer />
+        <MudToggleGroup T="string" Value="_view" ValueChanged="SetViewAsync" Color="Color.Primary"
+                        Size="Size.Small" CheckMark="false" SelectionMode="SelectionMode.SingleSelection">
+            <MudToggleItem Value="@("table")">
+                <MudIcon Icon="@Icons.Material.Filled.TableRows" Size="Size.Small" Class="me-1" />@L["Admin.Data.View.Table"]
+            </MudToggleItem>
+            <MudToggleItem Value="@("cards")">
+                <MudIcon Icon="@Icons.Material.Filled.GridView" Size="Size.Small" Class="me-1" />@L["Admin.Data.View.Cards"]
+            </MudToggleItem>
+        </MudToggleGroup>
     </div>
 
-    @* ── Breadcrumb path ─────────────────────────────────────────────── *@
+    @* ── Breadcrumb path + filter ─────────────────────────────────────── *@
     <MudPaper Outlined="true" Elevation="0" Class="pa-2 mb-3 d-flex align-center flex-wrap gap-1">
         <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Home"
                    OnClick="@(() => NavigateAsync(""))">@L["Admin.Data.Root"]</MudButton>
@@ -46,6 +81,11 @@ else
             <MudIcon Icon="@Icons.Material.Filled.ChevronRight" Size="Size.Small" Color="Color.Secondary" />
             <MudButton Size="Size.Small" Variant="Variant.Text" OnClick="@(() => NavigateAsync(crumb.Prefix))">@crumb.Label</MudButton>
         }
+        <MudSpacer />
+        <MudTextField T="string" @bind-Value="_filter" Immediate="true" Clearable="true" Margin="Margin.Dense"
+                      Variant="Variant.Outlined" Placeholder="@L["Admin.Data.Search"]"
+                      Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                      Style="max-width:260px;" />
     </MudPaper>
 
     @if (_error is not null)
@@ -66,71 +106,154 @@ else
     }
     else
     {
-        <MudPaper Outlined="true" Elevation="0" Class="pa-0">
-            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
-                <thead>
-                    <tr>
-                        <th>@L["Admin.Data.Col.Name"]</th>
-                        <th>@L["Admin.Data.Col.Type"]</th>
-                        <th style="text-align:right;">@L["Admin.Data.Col.Size"]</th>
-                        <th>@L["Admin.Data.Col.Modified"]</th>
-                        <th style="text-align:right;">@L["Admin.Data.Col.Actions"]</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    @* Folders first *@
-                    @foreach (var p in _prefixes)
-                    {
-                        <tr style="cursor:pointer;" @onclick="@(() => NavigateAsync(p))">
-                            <td>
-                                <div class="d-flex align-center gap-2">
-                                    <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Warning" Size="Size.Small" />
-                                    <span>@SegmentName(p)</span>
+        var folders = FilteredPrefixes();
+        var files = FilteredObjects();
+
+        @if (folders.Count == 0 && files.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined" Dense="true">@L["Admin.Data.NoMatch"]</MudAlert>
+        }
+        else if (_view == "cards")
+        {
+            <MudGrid Spacing="3">
+                @foreach (var p in folders)
+                {
+                    <MudItem xs="12" sm="6" md="4" lg="3">
+                        <MudCard Outlined="true" Class="cursor-pointer" @onclick="@(() => NavigateAsync(p))" Style="height:100%;">
+                            <MudCardContent Class="d-flex align-center gap-3">
+                                <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Warning" Size="Size.Large" />
+                                <div style="min-width:0;">
+                                    <MudText Typo="Typo.body1" Style="word-break:break-word;">@SegmentName(p)</MudText>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Admin.Data.Folder"]</MudText>
                                 </div>
-                            </td>
-                            <td><MudText Typo="Typo.caption" Color="Color.Secondary">@L["Admin.Data.Folder"]</MudText></td>
-                            <td style="text-align:right;">—</td>
-                            <td>—</td>
-                            <td style="text-align:right;"></td>
-                        </tr>
-                    }
-                    @* Then files *@
-                    @foreach (var o in _objects)
-                    {
-                        <tr>
-                            <td>
-                                <div class="d-flex align-center gap-2">
-                                    <MudIcon Icon="@FileIcon(o.Key)" Color="Color.Default" Size="Size.Small" />
-                                    <span>@SegmentName(o.Key)</span>
+                            </MudCardContent>
+                        </MudCard>
+                    </MudItem>
+                }
+                @foreach (var o in files)
+                {
+                    <MudItem xs="12" sm="6" md="4" lg="3">
+                        <MudCard Outlined="true" Style="height:100%;">
+                            @if (IsImage(o.Key))
+                            {
+                                var thumb = R2.DownloadUrl(o.Key, _bucket);
+                                <div style="height:140px; background:var(--mud-palette-background-grey); display:flex; align-items:center; justify-content:center; overflow:hidden; cursor:pointer;"
+                                     @onclick="@(() => PreviewAsync(o))">
+                                    @if (thumb is not null)
+                                    {
+                                        <MudImage Src="@thumb" Alt="@SegmentName(o.Key)" ObjectFit="ObjectFit.Cover"
+                                                  Style="width:100%; height:100%;" />
+                                    }
+                                    else
+                                    {
+                                        <MudIcon Icon="@Icons.Material.Filled.BrokenImage" Color="Color.Secondary" Size="Size.Large" />
+                                    }
                                 </div>
-                            </td>
-                            <td><MudText Typo="Typo.caption" Color="Color.Secondary">@ContentType(o.Key)</MudText></td>
-                            <td style="text-align:right; white-space:nowrap;">@HumanSize(o.Size)</td>
-                            <td style="white-space:nowrap;">@o.LastModified.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture)</td>
-                            <td style="text-align:right; white-space:nowrap;">
+                            }
+                            else
+                            {
+                                <div style="height:140px; background:var(--mud-palette-background-grey); display:flex; align-items:center; justify-content:center; cursor:pointer;"
+                                     @onclick="@(() => PreviewAsync(o))">
+                                    <MudIcon Icon="@FileIcon(o.Key)" Color="Color.Secondary"
+                                             Style="font-size:3.5rem;" />
+                                </div>
+                            }
+                            <MudCardContent Class="py-2">
+                                <MudText Typo="Typo.body2" Style="word-break:break-word;">@SegmentName(o.Key)</MudText>
+                                <div class="d-flex align-center gap-2 mt-1">
+                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default">@TypeLabel(o.Key)</MudChip>
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">@HumanSize(o.Size)</MudText>
+                                </div>
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@FormatModified(o.LastModified)</MudText>
+                            </MudCardContent>
+                            <MudCardActions Class="py-0">
                                 @if (IsImage(o.Key) || IsText(o.Key))
                                 {
-                                    <MudTooltip Text="@L["Admin.Data.Preview"]">
-                                        <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
-                                                       OnClick="@(() => PreviewAsync(o))" />
-                                    </MudTooltip>
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Visibility"
+                                               OnClick="@(() => PreviewAsync(o))">@L["Admin.Data.Preview"]</MudButton>
                                 }
                                 @{
-                                    var url = R2.DownloadUrl(o.Key, _bucket);
+                                    var dl = R2.DownloadUrl(o.Key, _bucket);
                                 }
-                                @if (url is not null)
+                                @if (dl is not null)
                                 {
-                                    <MudTooltip Text="@L["Admin.Data.Download"]">
-                                        <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
-                                                       Href="@url" Target="_blank" />
-                                    </MudTooltip>
+                                    <MudButton Size="Size.Small" Variant="Variant.Text" StartIcon="@Icons.Material.Filled.Download"
+                                               Href="@dl" Target="_blank">@L["Admin.Data.Download"]</MudButton>
                                 }
-                            </td>
+                            </MudCardActions>
+                        </MudCard>
+                    </MudItem>
+                }
+            </MudGrid>
+        }
+        else
+        {
+            <MudPaper Outlined="true" Elevation="0" Class="pa-0">
+                <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                    <thead>
+                        <tr>
+                            <th>@L["Admin.Data.Col.Name"]</th>
+                            <th>@L["Admin.Data.Col.Type"]</th>
+                            <th style="text-align:right;">@L["Admin.Data.Col.Size"]</th>
+                            <th>@L["Admin.Data.Col.Modified"]</th>
+                            <th style="text-align:right;">@L["Admin.Data.Col.Actions"]</th>
                         </tr>
-                    }
-                </tbody>
-            </MudSimpleTable>
-        </MudPaper>
+                    </thead>
+                    <tbody>
+                        @* Folders first *@
+                        @foreach (var p in folders)
+                        {
+                            <tr style="cursor:pointer;" @onclick="@(() => NavigateAsync(p))">
+                                <td>
+                                    <div class="d-flex align-center gap-2">
+                                        <MudIcon Icon="@Icons.Material.Filled.Folder" Color="Color.Warning" Size="Size.Small" />
+                                        <span>@SegmentName(p)</span>
+                                    </div>
+                                </td>
+                                <td><MudText Typo="Typo.caption" Color="Color.Secondary">@L["Admin.Data.Folder"]</MudText></td>
+                                <td style="text-align:right;">—</td>
+                                <td>—</td>
+                                <td style="text-align:right;"></td>
+                            </tr>
+                        }
+                        @* Then files *@
+                        @foreach (var o in files)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="d-flex align-center gap-2">
+                                        <MudIcon Icon="@FileIcon(o.Key)" Color="Color.Default" Size="Size.Small" />
+                                        <span>@SegmentName(o.Key)</span>
+                                    </div>
+                                </td>
+                                <td><MudText Typo="Typo.caption" Color="Color.Secondary">@ContentType(o.Key)</MudText></td>
+                                <td style="text-align:right; white-space:nowrap;">@HumanSize(o.Size)</td>
+                                <td style="white-space:nowrap;">@FormatModified(o.LastModified)</td>
+                                <td style="text-align:right; white-space:nowrap;">
+                                    @if (IsImage(o.Key) || IsText(o.Key))
+                                    {
+                                        <MudTooltip Text="@L["Admin.Data.Preview"]">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Visibility" Size="Size.Small"
+                                                           OnClick="@(() => PreviewAsync(o))" />
+                                        </MudTooltip>
+                                    }
+                                    @{
+                                        var url = R2.DownloadUrl(o.Key, _bucket);
+                                    }
+                                    @if (url is not null)
+                                    {
+                                        <MudTooltip Text="@L["Admin.Data.Download"]">
+                                            <MudIconButton Icon="@Icons.Material.Filled.Download" Size="Size.Small"
+                                                           Href="@url" Target="_blank" />
+                                        </MudTooltip>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            </MudPaper>
+        }
 
         @if (_nextToken is not null)
         {
@@ -144,10 +267,16 @@ else
     }
 }
 
-@* ── Preview dialog ──────────────────────────────────────────────────── *@
+@* ── Detail dialog ───────────────────────────────────────────────────────
+   Images render from a presigned URL. JSON gets two render modes: a structured key-value table
+   (recursive — nested objects/arrays indent) and the raw pretty-printed text. Any value containing
+   Arabic text is flipped to RTL individually, so Arabic content reads correctly even in the English UI. *@
 <MudDialog @bind-Visible="_previewOpen" Options="@(new DialogOptions { MaxWidth = MaxWidth.Medium, FullWidth = true, CloseButton = true })">
     <TitleContent>
-        <MudText Typo="Typo.h6">@(_previewKey is null ? "" : SegmentName(_previewKey))</MudText>
+        <div class="d-flex align-center gap-2" style="min-width:0;">
+            <MudIcon Icon="@(_previewKey is null ? Icons.Material.Filled.InsertDriveFile : FileIcon(_previewKey))" Size="Size.Small" />
+            <MudText Typo="Typo.h6" Style="word-break:break-word;">@(_previewKey is null ? "" : SegmentName(_previewKey))</MudText>
+        </div>
     </TitleContent>
     <DialogContent>
         @if (_previewLoading)
@@ -166,7 +295,63 @@ else
             {
                 <MudAlert Severity="Severity.Warning" Dense="true" Variant="Variant.Outlined" Class="mb-2">@L["Admin.Data.PreviewTruncated"]</MudAlert>
             }
-            <pre style="white-space:pre-wrap; word-break:break-word; max-height:60vh; overflow:auto; font-size:0.8rem; margin:0;">@_previewText</pre>
+
+            @if (_previewRows.Count > 0)
+            {
+                <div class="d-flex justify-end mb-2">
+                    <MudToggleGroup T="bool" Value="_detailFormatted" ValueChanged="@(v => _detailFormatted = v)"
+                                    Color="Color.Primary" Size="Size.Small" CheckMark="false"
+                                    SelectionMode="SelectionMode.SingleSelection">
+                        <MudToggleItem Value="true">@L["Admin.Data.Detail.Formatted"]</MudToggleItem>
+                        <MudToggleItem Value="false">@L["Admin.Data.Detail.Raw"]</MudToggleItem>
+                    </MudToggleGroup>
+                </div>
+            }
+
+            @if (_previewRows.Count > 0 && _detailFormatted)
+            {
+                <MudSimpleTable Dense="true" Bordered="true" Style="max-height:60vh; overflow:auto;">
+                    <thead>
+                        <tr>
+                            <th>@L["Admin.Data.Col.Field"]</th>
+                            <th>@L["Admin.Data.Col.Value"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in _previewRows)
+                        {
+                            <tr>
+                                <td style="@($"padding-inline-start:{8 + row.Depth * 18}px; white-space:nowrap; vertical-align:top;")">
+                                    @if (row.IsContainer)
+                                    {
+                                        <MudText Typo="Typo.body2" Style="font-weight:600;">@row.Key</MudText>
+                                    }
+                                    else
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@row.Key</MudText>
+                                    }
+                                </td>
+                                <td dir="@(ContainsRtl(row.Value) ? "rtl" : "ltr")"
+                                    style="word-break:break-word; vertical-align:top;">
+                                    @if (row.IsContainer)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary">@row.Value</MudText>
+                                    }
+                                    else
+                                    {
+                                        @row.Value
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+            }
+            else
+            {
+                <pre dir="@(ContainsRtl(_previewText) ? "rtl" : "ltr")"
+                     style="white-space:pre-wrap; word-break:break-word; max-height:60vh; overflow:auto; font-size:0.8rem; margin:0;">@RawText()</pre>
+            }
         }
         else
         {
@@ -208,24 +393,75 @@ else
     private bool _loading;
     private string? _error;
 
+    // "table" or "cards" — how the current folder's contents are laid out.
+    private string _view = "cards";
+    // Case-insensitive name filter applied to the current listing (folders + objects), client-side.
+    private string? _filter;
+
     private readonly List<string> _prefixes = new();
     private readonly List<R2Object> _objects = new();
     private string? _nextToken;
 
-    // Preview dialog state.
+    // Per-bucket reachability strip.
+    private bool _healthLoading;
+    private List<R2BucketHealth> _health = new();
+
+    // Detail dialog state.
     private bool _previewOpen;
     private bool _previewLoading;
     private string? _previewKey;
     private string? _previewImageUrl;
-    private string? _previewText;
+    private string? _previewText;          // raw text as read from R2 (JSON or plain)
     private bool _previewTruncated;
+    private bool _detailFormatted = true;  // formatted key-value table vs raw text, for JSON objects
+    private List<JsonRow> _previewRows = new();
+
+    /// <summary>One flattened JSON line: indentation <paramref name="Depth"/>, the key/field, the scalar value
+    /// (null for containers), and whether it is an object/array header rather than a leaf value.</summary>
+    private sealed record JsonRow(int Depth, string Key, string? Value, bool IsContainer);
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender && R2.IsConfigured)
         {
+            await ProbeBucketsAsync();
             await ReloadAsync();
         }
+    }
+
+    // Probe all four buckets so the health strip reflects what's actually reachable / populated right now.
+    private async Task ProbeBucketsAsync()
+    {
+        _healthLoading = true;
+        StateHasChanged();
+        var probes = await Task.WhenAll(Buckets.Select(b => R2.ProbeBucketAsync(b)));
+        _health = probes.ToList();
+        _healthLoading = false;
+        StateHasChanged();
+    }
+
+    private static Color HealthColor(R2BucketHealth h) =>
+        !h.Reachable ? Color.Error : h.HasObjects ? Color.Success : Color.Default;
+
+    private static string HealthIcon(R2BucketHealth h) =>
+        !h.Reachable ? Icons.Material.Filled.Error
+        : h.HasObjects ? Icons.Material.Filled.CheckCircle
+        : Icons.Material.Filled.RadioButtonUnchecked;
+
+    private string HealthTooltip(R2BucketHealth h)
+    {
+        if (!h.Reachable)
+        {
+            return $"{h.BucketName}: {L["Admin.Data.Health.Unreachable"]} — {h.Error}";
+        }
+        var state = h.HasObjects ? L["Admin.Data.Health.HasData"] : L["Admin.Data.Health.Empty"];
+        return $"{h.BucketName}: {state}";
+    }
+
+    private async Task SetViewAsync(string view)
+    {
+        _view = view;
+        await Task.CompletedTask;
     }
 
     // Switch the active bucket and browse it from the root.
@@ -233,6 +469,7 @@ else
     {
         _bucket = bucket;
         _prefix = "";
+        _filter = null;
         await ReloadAsync();
     }
 
@@ -240,6 +477,7 @@ else
     private async Task NavigateAsync(string prefix)
     {
         _prefix = prefix;
+        _filter = null;
         await ReloadAsync();
     }
 
@@ -293,12 +531,25 @@ else
         }
     }
 
+    // ── Client-side filtering of the current listing by last-segment name ────────────────────────────────
+    private List<string> FilteredPrefixes() =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _prefixes
+            : _prefixes.Where(p => SegmentName(p).Contains(_filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
+    private List<R2Object> FilteredObjects() =>
+        string.IsNullOrWhiteSpace(_filter)
+            ? _objects
+            : _objects.Where(o => SegmentName(o.Key).Contains(_filter, StringComparison.OrdinalIgnoreCase)).ToList();
+
     private async Task PreviewAsync(R2Object o)
     {
         _previewKey = o.Key;
         _previewImageUrl = null;
         _previewText = null;
         _previewTruncated = false;
+        _previewRows = new();
+        _detailFormatted = true;
         _previewOpen = true;
 
         if (IsImage(o.Key))
@@ -317,8 +568,14 @@ else
             var content = await R2.ReadTextAsync(o.Key, bucket: _bucket);
             if (content is not null)
             {
-                _previewText = TryPrettyJson(content.Text, o.Key);
+                _previewText = content.Text;
                 _previewTruncated = content.Truncated;
+                // Build the structured rows up front so the toggle is instant; empty list => not parseable as
+                // JSON, so the dialog stays in raw mode without offering a (useless) formatted view.
+                if (o.Key.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                {
+                    _previewRows = FlattenJson(content.Text);
+                }
             }
         }
         catch (Exception ex)
@@ -329,22 +586,114 @@ else
         StateHasChanged();
     }
 
-    // Pretty-print JSON for readability; leave other text as-is. Best-effort — malformed JSON shows raw.
-    private static string TryPrettyJson(string text, string key)
+    // The raw view: pretty-print JSON for readability, leave other text as-is. Best-effort.
+    private string RawText()
     {
-        if (!key.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        if (_previewText is null)
         {
-            return text;
+            return "";
         }
+        if (_previewKey is not null && _previewKey.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(_previewText);
+                return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+            }
+            catch
+            {
+                return _previewText;
+            }
+        }
+        return _previewText;
+    }
+
+    // ── JSON → flat indented rows ────────────────────────────────────────────────────────────────────────
+    // Walks the document depth-first: objects/arrays emit a header row then recurse one level deeper; scalars
+    // emit a key→value row. Returns empty when the text isn't valid JSON, which signals "raw only" to the UI.
+    private static List<JsonRow> FlattenJson(string text)
+    {
+        var rows = new List<JsonRow>();
         try
         {
             using var doc = JsonDocument.Parse(text);
-            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+            Walk(key: null, doc.RootElement, depth: 0, rows);
         }
         catch
         {
-            return text;
+            return new List<JsonRow>();
         }
+        return rows;
+    }
+
+    private static void Walk(string? key, JsonElement el, int depth, List<JsonRow> rows)
+    {
+        switch (el.ValueKind)
+        {
+            case JsonValueKind.Object:
+                var objChildDepth = depth;
+                if (key is not null)
+                {
+                    rows.Add(new JsonRow(depth, key, null, IsContainer: true));
+                    objChildDepth = depth + 1;
+                }
+                foreach (var prop in el.EnumerateObject())
+                {
+                    Walk(prop.Name, prop.Value, objChildDepth, rows);
+                }
+                break;
+
+            case JsonValueKind.Array:
+                var len = el.GetArrayLength();
+                var arrChildDepth = depth;
+                if (key is not null)
+                {
+                    rows.Add(new JsonRow(depth, key, $"[{len}]", IsContainer: true));
+                    arrChildDepth = depth + 1;
+                }
+                var i = 0;
+                foreach (var item in el.EnumerateArray())
+                {
+                    Walk($"[{i}]", item, arrChildDepth, rows);
+                    i++;
+                }
+                break;
+
+            default:
+                rows.Add(new JsonRow(depth, key ?? "", Scalar(el), IsContainer: false));
+                break;
+        }
+    }
+
+    private static string Scalar(JsonElement el) => el.ValueKind switch
+    {
+        JsonValueKind.String => el.GetString() ?? "",
+        JsonValueKind.Null => "null",
+        JsonValueKind.True => "true",
+        JsonValueKind.False => "false",
+        _ => el.GetRawText()
+    };
+
+    // True when the string holds any Arabic-script character, so its cell can be flipped to RTL individually.
+    private static bool ContainsRtl(string? s)
+    {
+        if (string.IsNullOrEmpty(s))
+        {
+            return false;
+        }
+        foreach (var ch in s)
+        {
+            // Arabic, Arabic Supplement/Extended-A, and the presentation-forms blocks.
+            if ((ch >= '؀' && ch <= 'ۿ') ||
+                (ch >= 'ݐ' && ch <= 'ݿ') ||
+                (ch >= 'ࢠ' && ch <= 'ࣿ') ||
+                (ch >= 'ﭐ' && ch <= '﷿') ||
+                (ch >= 'ﹰ' && ch <= '﻿'))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     private IEnumerable<(string Label, string Prefix)> Breadcrumbs()
@@ -371,6 +720,9 @@ else
         return key.EndsWith('/') ? name + "/" : name;
     }
 
+    private static string FormatModified(DateTimeOffset modified) =>
+        modified.ToLocalTime().ToString("yyyy-MM-dd HH:mm", CultureInfo.InvariantCulture);
+
     private static string Ext(string key)
     {
         var name = key.TrimEnd('/');
@@ -380,7 +732,7 @@ else
 
     private static bool IsImage(string key) => Ext(key) is "png" or "jpg" or "jpeg" or "webp" or "gif" or "svg" or "bmp";
 
-    private static bool IsText(string key) => Ext(key) is "json" or "txt" or "csv" or "xml" or "html" or "htm" or "md" or "log";
+    private static bool IsText(string key) => Ext(key) is "json" or "txt" or "csv" or "xml" or "html" or "htm" or "md" or "log" or "jsonl";
 
     private static string FileIcon(string key) =>
         IsImage(key) ? Icons.Material.Filled.Image
@@ -388,10 +740,18 @@ else
         : IsText(key) ? Icons.Material.Filled.Article
         : Icons.Material.Filled.InsertDriveFile;
 
+    // A short human label for a card chip ("JSON", "PNG", "FILE"), distinct from the full MIME type column.
+    private static string TypeLabel(string key)
+    {
+        var e = Ext(key);
+        return e.Length == 0 ? "FILE" : e.ToUpperInvariant();
+    }
+
     private static string ContentType(string key) => Ext(key) switch
     {
         "" => "—",
         "json" => "application/json",
+        "jsonl" => "application/x-ndjson",
         "png" => "image/png",
         "jpg" or "jpeg" => "image/jpeg",
         "webp" => "image/webp",

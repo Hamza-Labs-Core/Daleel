@@ -32,10 +32,33 @@ public sealed record R2Listing(
 /// <summary>Small text/JSON object content pulled inline for preview, flagged when it was truncated.</summary>
 public sealed record R2ObjectText(string Text, string ContentType, bool Truncated);
 
+/// <summary>
+/// Live reachability of one bucket, for the admin diagnostics strip. <paramref name="Reachable"/> is true when
+/// a list call returned without error (the bucket exists and the credentials can read it); <paramref name="Error"/>
+/// carries the failure message otherwise (e.g. <c>NoSuchBucket</c> when the bucket was never created in Cloudflare).
+/// <paramref name="HasObjects"/> distinguishes "reachable but empty" (nothing has been written yet) from
+/// "reachable with data". This is what makes an otherwise-silent misconfiguration — uploads failing because the
+/// per-concern bucket doesn't exist — visible without trawling container logs.
+/// </summary>
+public sealed record R2BucketHealth(
+    R2Bucket Bucket,
+    string BucketName,
+    bool Reachable,
+    bool HasObjects,
+    string? PublicUrl,
+    string? Error);
+
 public interface IR2StorageService
 {
     /// <summary>True when R2 credentials are present and uploads will be attempted.</summary>
     bool IsConfigured { get; }
+
+    /// <summary>
+    /// Probes one bucket with a single-key list to report whether it is reachable (exists + credentials can
+    /// read it) and whether it holds any objects. Surfaces the underlying error instead of swallowing it, so a
+    /// missing/misnamed bucket that silently fails every write shows up in the admin diagnostics. Never throws.
+    /// </summary>
+    Task<R2BucketHealth> ProbeBucketAsync(R2Bucket bucket, CancellationToken ct = default);
 
     /// <summary>
     /// Downloads <paramref name="sourceUrl"/> and uploads it to the <see cref="R2Bucket.Images"/> bucket
@@ -83,6 +106,11 @@ public interface IR2StorageService
 public sealed class NullR2StorageService : IR2StorageService
 {
     public bool IsConfigured => false;
+
+    // R2 is not configured at all: report every bucket as unreachable with a clear reason rather than an error.
+    public Task<R2BucketHealth> ProbeBucketAsync(R2Bucket bucket, CancellationToken ct = default) =>
+        Task.FromResult(new R2BucketHealth(bucket, "—", Reachable: false, HasObjects: false, PublicUrl: null,
+            Error: "R2 is not configured"));
 
     public Task<string?> StoreImageAsync(string? sourceUrl, string keyPrefix, CancellationToken ct = default) =>
         Task.FromResult(sourceUrl);
@@ -302,8 +330,37 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
         catch (Exception ex)
         {
             // Best-effort: a failed upload must never break the spec pipeline — the DB copy remains canonical.
-            _logger.LogDebug(ex, "R2 JSON store failed for {Key}", key);
+            // Logged at Warning (not Debug) so a genuine R2 problem — most often a per-concern bucket that was
+            // never created in Cloudflare, which fails EVERY specs/data write — is visible without a live probe.
+            _logger.LogWarning(ex, "R2 JSON store failed for {Bucket}/{Key}", BucketName(bucket), key);
             return null;
+        }
+    }
+
+    public async Task<R2BucketHealth> ProbeBucketAsync(R2Bucket bucket, CancellationToken ct = default)
+    {
+        var config = _options.For(bucket);
+        try
+        {
+            // One key is enough to prove the bucket exists and is readable; KeyCount tells empty from populated.
+            var response = await _s3.ListObjectsV2Async(new ListObjectsV2Request
+            {
+                BucketName = config.BucketName,
+                MaxKeys = 1
+            }, ct).ConfigureAwait(false);
+
+            var hasObjects = (response.KeyCount > 0) || (response.S3Objects is { Count: > 0 });
+            return new R2BucketHealth(bucket, config.BucketName, Reachable: true, hasObjects, config.PublicUrl, Error: null);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "R2 probe failed for bucket {Bucket}", config.BucketName);
+            return new R2BucketHealth(bucket, config.BucketName, Reachable: false, HasObjects: false,
+                config.PublicUrl, ex.Message);
         }
     }
 

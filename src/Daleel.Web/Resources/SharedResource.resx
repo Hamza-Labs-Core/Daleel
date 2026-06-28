@@ -549,6 +549,19 @@
   <data name="Admin.Data.Bucket.Images" xml:space="preserve"><value>Images</value></data>
   <data name="Admin.Data.Bucket.Specs" xml:space="preserve"><value>Specs</value></data>
   <data name="Admin.Data.Bucket.Data" xml:space="preserve"><value>Data</value></data>
+  <data name="Admin.Data.View.Table" xml:space="preserve"><value>Table</value></data>
+  <data name="Admin.Data.View.Cards" xml:space="preserve"><value>Cards</value></data>
+  <data name="Admin.Data.Search" xml:space="preserve"><value>Filter by name</value></data>
+  <data name="Admin.Data.NoMatch" xml:space="preserve"><value>No objects match your filter.</value></data>
+  <data name="Admin.Data.Detail.Formatted" xml:space="preserve"><value>Formatted</value></data>
+  <data name="Admin.Data.Detail.Raw" xml:space="preserve"><value>Raw JSON</value></data>
+  <data name="Admin.Data.Col.Field" xml:space="preserve"><value>Field</value></data>
+  <data name="Admin.Data.Col.Value" xml:space="preserve"><value>Value</value></data>
+  <data name="Admin.Data.Health.Probing" xml:space="preserve"><value>Checking buckets…</value></data>
+  <data name="Admin.Data.Health.Recheck" xml:space="preserve"><value>Re-check bucket health</value></data>
+  <data name="Admin.Data.Health.Unreachable" xml:space="preserve"><value>unreachable</value></data>
+  <data name="Admin.Data.Health.HasData" xml:space="preserve"><value>reachable, has data</value></data>
+  <data name="Admin.Data.Health.Empty" xml:space="preserve"><value>reachable, empty</value></data>
   <data name="Admin.Nav.Dashboard" xml:space="preserve"><value>Dashboard</value></data>
   <data name="Admin.Nav.Users" xml:space="preserve"><value>Users</value></data>
   <data name="Admin.Nav.Plans" xml:space="preserve"><value>Plans</value></data>

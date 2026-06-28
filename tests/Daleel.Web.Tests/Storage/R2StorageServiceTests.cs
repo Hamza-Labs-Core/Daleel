@@ -133,6 +133,18 @@ public class R2StorageServiceTests
     }
 
     [Fact]
+    public async Task NullService_Probe_ReportsUnreachableWithReason()
+    {
+        var svc = new NullR2StorageService();
+        var health = await svc.ProbeBucketAsync(R2Bucket.Specs);
+
+        health.Bucket.Should().Be(R2Bucket.Specs);
+        health.Reachable.Should().BeFalse();
+        health.HasObjects.Should().BeFalse();
+        health.Error.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
     public void DownloadUrl_OnConfiguredService_IsPresignedAndScopedToKey()
     {
         using var svc = MakeService();
