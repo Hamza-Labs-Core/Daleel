@@ -50,7 +50,11 @@ jobs:
         # containers on process exit instead — the documented mitigation (see PostgresTestServer).
         env:
           TESTCONTAINERS_RYUK_DISABLED: "true"
-        run: dotnet test Daleel.sln -c Release --no-restore --verbosity normal
+        # --blame-hang-timeout fails a stuck test fast and names it in the log, instead of the whole
+        # job silently burning the 20-min ceiling and being killed with no clue which test hung (a
+        # sync-over-async thread-pool starvation deadlock in the Postgres tests once jammed it for
+        # 1h52m). dump-type none keeps the log clean — we only need the offending test name.
+        run: dotnet test Daleel.sln -c Release --no-restore --verbosity normal --blame-hang-timeout 5m --blame-hang-dump-type none
 
   docker:
     name: Docker build & push

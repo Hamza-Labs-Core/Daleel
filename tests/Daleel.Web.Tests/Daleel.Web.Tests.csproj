@@ -10,6 +10,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Run these tests serially. They start a shared Postgres container via a blocking
+         sync-over-async call and each opens its own connection; running collections in parallel
+         starved the thread pool on low-core CI runners and deadlocked the whole run for hours.
+         See TestThreadPoolInitializer.cs. -->
+    <None Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Tests run against real PostgreSQL via Testcontainers (a throwaway postgres:16-alpine container,
          one per test run, with a fresh database per test for isolation) — the same engine production
          uses. Elsa's Postgres EF provider backs the workflow-instance persistence round-trip test. -->
