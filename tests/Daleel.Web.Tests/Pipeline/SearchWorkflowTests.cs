@@ -96,6 +96,8 @@ public class SearchWorkflowTests
         services.AddScoped<SearchPipelineState>();
         services.AddScoped<SearchPipelineServices>();
         services.AddSingleton(cache);
+        // CheckCache scores a hit's completeness before replaying it — the activity resolves this from context.
+        services.AddSingleton<ICacheQualityValidator, CacheQualityValidator>();
         // Enrichment + deep-dive only resolve these for product queries; register no-ops for completeness.
         services.AddSingleton<IBrandProfileService, NoopBrandProfiles>();
         services.AddSingleton<IStoreProfileService, NoopStoreProfiles>();

@@ -79,16 +79,47 @@ public sealed class CheckCacheActivity : CodeActivity
             }
 
             var cached = JsonSerializer.Deserialize<CachedSearchResult>(payload);
-            if (cached is not null)
+            if (cached is null)
             {
-                state.FromCache = true;
-                state.ResultJson = cached.ResultJson;
-                state.ResultType = cached.ResultType;
-                state.FilteredCount = cached.FilteredCount;
-                state.FilteredCategories = cached.FilteredCategories ?? string.Empty;
-                state.RecordEvent(EventCategory.Cache, "cache.hit", "cache");
-                services.Report(SearchStep.CheckingVault, "Progress.Msg.CacheHit");
+                state.RecordEvent(EventCategory.Cache, "cache.miss", "cache");
+                return;
             }
+
+            // Smart cache validation: a hit isn't automatically good enough. Score the stored report for
+            // completeness and let the verdict decide — replay it, replay-then-refill-in-background, or
+            // (when it's too thin) discard it and fall through to a full live search.
+            var validator = context.GetRequiredService<ICacheQualityValidator>();
+            var quality = ScoreQuality(validator, cached.ResultJson);
+
+            if (quality.Decision == CacheDecision.Miss)
+            {
+                // Too incomplete to count as a hit — fall through to a full live search, exactly like a
+                // miss. FromCache stays false, so every downstream activity runs.
+                state.RecordEvent(EventCategory.Cache, "cache.stale", "cache", success: false,
+                    metadata: QualityMetadata(quality));
+                return;
+            }
+
+            state.FromCache = true;
+            state.ResultJson = cached.ResultJson;
+            state.ResultType = cached.ResultType;
+            state.FilteredCount = cached.FilteredCount;
+            state.FilteredCategories = cached.FilteredCategories ?? string.Empty;
+            state.CacheQuality = quality;
+
+            if (quality.Decision == CacheDecision.ServeAndEnrich)
+            {
+                // Show the cached report immediately; the runner reads CacheQuality back and kicks off a
+                // background pass that re-scrapes ONLY the missing pieces, then streams the refreshed result.
+                state.RecordEvent(EventCategory.Cache, "cache.partial", "cache",
+                    metadata: QualityMetadata(quality));
+            }
+            else
+            {
+                state.RecordEvent(EventCategory.Cache, "cache.hit", "cache",
+                    metadata: QualityMetadata(quality));
+            }
+            services.Report(SearchStep.CheckingVault, "Progress.Msg.CacheHit");
         }
         catch (OperationCanceledException)
         {
@@ -99,6 +130,34 @@ public sealed class CheckCacheActivity : CodeActivity
             // Cache hiccup or corrupt payload ⇒ treat as a miss and run the search live.
         }
     }
+
+    /// <summary>
+    /// Scores the cached report for completeness. Must use <see cref="ResultSerialization"/> (not raw
+    /// <c>JsonSerializer</c>) so the answer's enum fields deserialize the same way they were written. A
+    /// corrupt or unscoreable payload defaults to <see cref="CacheQualityReport.Complete"/> — better to
+    /// replay a hit than to needlessly re-run a search over a scoring hiccup.
+    /// </summary>
+    private static CacheQualityReport ScoreQuality(ICacheQualityValidator validator, string resultJson)
+    {
+        try
+        {
+            return ResultSerialization.Deserialize<AgentAnswer>(resultJson) is { } answer
+                ? validator.Evaluate(answer)
+                : CacheQualityReport.Complete;
+        }
+        catch
+        {
+            return CacheQualityReport.Complete;
+        }
+    }
+
+    /// <summary>Flattens a quality verdict into event metadata for the analytics/event store.</summary>
+    private static Dictionary<string, object?> QualityMetadata(CacheQualityReport quality) => new()
+    {
+        ["score"] = quality.Score,
+        ["decision"] = quality.Decision.ToString(),
+        ["missing"] = string.Join("; ", quality.Missing)
+    };
 }
 
 /// <summary>
@@ -122,7 +181,7 @@ public sealed class AnalyzeMarketActivity : CodeActivity
         var category = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
         // "Analyzing AC market requirements…" — surface the up-front reasoning to the user.
         services.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
-        services.Log($"Analyzing {category} market requirements…");
+        services.Report(SearchStep.Analyzing, "Progress.Msg.AnalyzingCategory", category);
 
         var intel = await services.Agent.AnalyzeCategoryAsync(category, state.GeoProfile, context.CancellationToken);
         state.Intelligence = intel;
@@ -132,7 +191,8 @@ public sealed class AnalyzeMarketActivity : CodeActivity
             // "Looking for electronics and HVAC stores…"
             if (intel.RelevantStoreTypes.Count > 0)
             {
-                services.Log($"Looking for {string.Join(", ", intel.RelevantStoreTypes.Take(3))}…");
+                services.Report(SearchStep.Analyzing, "Progress.Msg.LookingForStores",
+                    string.Join(", ", intel.RelevantStoreTypes.Take(3)));
             }
 
             // "Extracting BTU, energy rating, cooling specs…"
@@ -149,7 +209,8 @@ public sealed class AnalyzeMarketActivity : CodeActivity
 
                 if (keySpecs.Count > 0)
                 {
-                    services.Log($"Extracting {string.Join(", ", keySpecs.Take(4))}…");
+                    services.Report(SearchStep.Analyzing, "Progress.Msg.ExtractingSpecs",
+                        string.Join(", ", keySpecs.Take(4)));
                 }
             }
 
@@ -276,7 +337,7 @@ public sealed class DispatchBrandWorkflowsActivity : CodeActivity
         var enriched = merged.Count(b => b.Reputation is not null);
         if (enriched > 0)
         {
-            services.Log($"Enriched {enriched} brand(s).");
+            services.Report(SearchStep.BuildingProfiles, "Progress.Msg.EnrichedBrandsCount", enriched);
         }
     }
 }
@@ -328,7 +389,7 @@ public sealed class DispatchStoreWorkflowsActivity : CodeActivity
         var verified = merged.Count(s => s.Rating is not null);
         if (verified > 0)
         {
-            services.Log($"Verified {verified} store(s) on Google Maps.");
+            services.Report(SearchStep.FindingStores, "Progress.Msg.VerifiedStoresCount", verified);
         }
     }
 }
@@ -353,7 +414,7 @@ public sealed class DispatchItemWorkflowsActivity : CodeActivity
         var dispatched = products.Models.Take(MaxItems).ToList();
         var rest = products.Models.Skip(MaxItems).ToList();
 
-        services.Log($"Deep-diving {dispatched.Count} product(s) in parallel…");
+        services.Report(SearchStep.ComparingPrices, "Progress.Msg.DeepDiving", dispatched.Count);
         var results = await SubWorkflowDispatcher
             .RunManyAsync<ItemDeepDiveWorkflow, ItemDeepDiveState, ProductModel>(
                 scopeFactory, dispatched,
@@ -453,6 +514,16 @@ public sealed class CacheResultsActivity : CodeActivity
             return;
         }
 
+        // Never cache an empty product search. A zero-result payload is too often a transient/upstream
+        // failure (provider outage, geo-filter bug) rather than a true "nothing exists" — persisting it
+        // would serve the stale empty for the whole TTL and hide the recovery. A non-product "ask" answer
+        // (Products is null) is a legitimate result and is still cached.
+        if (IsEmptyProductResult(state.Answer))
+        {
+            state.RecordEvent(EventCategory.Cache, "cache.skip-empty", "cache");
+            return;
+        }
+
         services.Report(SearchStep.ComparingPrices, "Progress.Msg.Saving");
         state.ResultJson = ResultSerialization.Serialize(state.Answer);
         state.ResultType = "ask";
@@ -477,6 +548,14 @@ public sealed class CacheResultsActivity : CodeActivity
             }
         }
     }
+
+    /// <summary>
+    /// True for a product search that came back with nothing. A non-product "ask" answer (Products is
+    /// null) is a legitimate result, not an empty one, so it is still cacheable.
+    /// </summary>
+    private static bool IsEmptyProductResult(AgentAnswer answer) =>
+        answer.Products is { } products
+        && products.Models.Count == 0 && products.Brands.Count == 0 && products.Stores.Count == 0;
 }
 
 /// <summary>Step 11 — terminal marker; outputs are already on the state (cache hit or fresh run).</summary>

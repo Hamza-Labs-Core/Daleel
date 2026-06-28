@@ -16,7 +16,16 @@ namespace Daleel.Web.Conversation;
 public sealed record SearchRunResult(
     string ResultJson, string ResultType, int FilteredCount, string FilteredCategories,
     int ApiCalls = 0, decimal EstimatedCost = 0m, int ResultCount = 0, string Providers = "",
-    int Credits = 0);
+    int Credits = 0)
+{
+    /// <summary>
+    /// The completeness verdict when this result was served from cache (null on a fresh run). A
+    /// <see cref="CacheDecision.ServeAndEnrich"/> verdict tells the worker to run a background partial
+    /// re-enrichment for just the missing pieces; <see cref="CacheDecision.ServeAsIs"/> means the hit was
+    /// complete and needs no follow-up.
+    /// </summary>
+    public Daleel.Web.Pipeline.CacheQualityReport? CacheQuality { get; init; }
+}
 
 /// <summary>
 /// Runs the actual agent query for a job. Abstracted from <c>SearchJobService</c> so the worker can
@@ -33,6 +42,18 @@ public interface ISearchRunner
     /// </summary>
     Task<SearchRunResult?> EnrichAsync(
         SearchJob job, SearchRunResult baseResult, Action<string> progress, CancellationToken ct) =>
+        Task.FromResult<SearchRunResult?>(null);
+
+    /// <summary>
+    /// Partial re-enrichment of a cache hit that scored below the full-quality bar: re-scrapes only the
+    /// pieces the <paramref name="report"/> flagged as missing (thin product specs/prices/images, brands
+    /// without a logo/description, unverified stores), updates the cache, and returns the refreshed result
+    /// to stream to the UI — or null when nothing could be improved. Default is a no-op so legacy/test
+    /// runners opt out.
+    /// </summary>
+    Task<SearchRunResult?> ReEnrichAsync(
+        SearchJob job, SearchRunResult baseResult, Daleel.Web.Pipeline.CacheQualityReport report,
+        Action<string> progress, CancellationToken ct) =>
         Task.FromResult<SearchRunResult?>(null);
 }
 

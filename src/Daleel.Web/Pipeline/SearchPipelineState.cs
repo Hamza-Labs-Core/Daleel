@@ -34,7 +34,10 @@ public sealed class SearchPipelineState
     public string Geo { get; set; } = "jordan";
     public string Language { get; set; } = "en";
     public string ResultKey { get; set; } = string.Empty;
-    public TimeSpan CacheTtl { get; set; } = TimeSpan.FromDays(30);
+    // 24h, not 30 days: this caches product/price/availability data, which goes stale fast, and a long
+    // TTL lets any bad entry (a transient empty, a since-fixed bug) linger for far too long. Quality
+    // re-validation on read (CheckCacheActivity) and the empty-skip on write keep even this window honest.
+    public TimeSpan CacheTtl { get; set; } = TimeSpan.FromHours(24);
 
     /// <summary>Correlation id (the SearchJob id) stamped onto every recorded pipeline event.</summary>
     public string? SearchId { get; set; }
@@ -74,6 +77,14 @@ public sealed class SearchPipelineState
 
     /// <summary>True when CheckCache served a stored report; downstream activities then no-op.</summary>
     public bool FromCache { get; set; }
+
+    /// <summary>
+    /// The completeness verdict on a served cache hit (null on a fresh run or a quality-rejected hit
+    /// that ran live). When <see cref="FromCache"/> is true, the runner surfaces this on the run result
+    /// so a <see cref="CacheDecision.ServeAndEnrich"/> hit triggers a background partial re-enrichment.
+    /// </summary>
+    [JsonIgnore]
+    public CacheQualityReport? CacheQuality { get; set; }
     public string ResultJson { get; set; } = string.Empty;
     public string ResultType { get; set; } = "ask";
     public int FilteredCount { get; set; }

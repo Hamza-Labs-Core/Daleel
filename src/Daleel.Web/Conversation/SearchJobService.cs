@@ -139,13 +139,27 @@ public sealed class SearchJobService : BackgroundService
 
             await _broadcaster.CompletedAsync(job.UserId, job.Id, "completed", result.ResultJson, result.ResultType, null);
 
-            // Progressive enrichment: base results are already on screen — now deep-dive each item
-            // (official-brand-site specs via Context.dev) and stream the refreshed result so the UI
-            // fills specs in place. DETACHED on purpose: it must never block this worker from picking
-            // up the next queued search, so a slow/hanging scrape can't make subsequent searches
-            // "stuck". Runs in its own DI scope with a hard timeout; failures are swallowed (the base
-            // result is already delivered).
-            _ = EnrichInBackgroundAsync(job.Id, job.UserId, result);
+            // Post-result follow-up depends on where this result came from. DETACHED on purpose: it must
+            // never block this worker from picking up the next queued search, so a slow/hanging scrape
+            // can't make subsequent searches "stuck". Each runs in its own DI scope with a hard timeout;
+            // failures are swallowed (the base result is already delivered).
+            if (result.CacheQuality is { } quality)
+            {
+                // Served from cache. A below-threshold hit was shown immediately; now re-scrape ONLY the
+                // pieces the quality validator flagged as missing and stream the refilled result. A
+                // complete (ServeAsIs) hit needs nothing further.
+                if (quality.Decision == CacheDecision.ServeAndEnrich)
+                {
+                    _ = ReEnrichInBackgroundAsync(job.Id, job.UserId, result, quality);
+                }
+            }
+            else
+            {
+                // Fresh run: progressive enrichment — base results are already on screen, now deep-dive
+                // each item (official-brand-site specs via Context.dev) and stream the refreshed result
+                // so the UI fills specs in place.
+                _ = EnrichInBackgroundAsync(job.Id, job.UserId, result);
+            }
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
         {
@@ -220,6 +234,61 @@ public sealed class SearchJobService : BackgroundService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Background enrichment failed for job {JobId}", jobId);
+        }
+    }
+
+    /// <summary>
+    /// Runs the smart-cache partial re-enrichment OFF the worker loop, in its own DI scope and under the
+    /// same hard timeout as the item deep-dive, then streams the refilled result. Fire-and-forget: never
+    /// awaited by the job processor, so it can't block the queue; all failures are logged and swallowed.
+    /// The base (cached) result is already on screen — this only refills the gaps the quality validator
+    /// found and re-renders in place via <c>Enriched</c>.
+    /// </summary>
+    private async Task ReEnrichInBackgroundAsync(
+        int jobId, string userId, SearchRunResult baseResult, CacheQualityReport quality)
+    {
+        using var timeout = new CancellationTokenSource(EnrichTimeout);
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var sp = scope.ServiceProvider;
+            var runner = sp.GetRequiredService<ISearchRunner>();
+            var db = sp.GetRequiredService<DaleelDbContext>();
+            var convos = sp.GetRequiredService<IConversationStore>();
+
+            var job = await db.SearchJobs.FirstOrDefaultAsync(j => j.Id == jobId, timeout.Token);
+            if (job is null)
+            {
+                return;
+            }
+
+            // Like the item deep-dive, this runs AFTER the result is on screen, so its progress must NOT
+            // be broadcast as normal progress (that would flip the UI back to "running"); only log it.
+            void Progress(string message) => _logger.LogDebug("Re-enrich job {JobId}: {Message}", jobId, message);
+
+            _logger.LogInformation(
+                "Cache hit for job {JobId} scored {Score}/100 — re-enriching: {Missing}",
+                jobId, quality.Score, string.Join("; ", quality.Missing));
+
+            var enriched = await runner.ReEnrichAsync(job, baseResult, quality, Progress, timeout.Token);
+            if (enriched is null)
+            {
+                return; // nothing could be improved — no UI update
+            }
+
+            job.ResultJson = enriched.ResultJson;
+            await db.SaveChangesAsync(timeout.Token);
+            await convos.CompleteAsync(
+                userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+            await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
+        }
+        catch (OperationCanceledException)
+        {
+            // Timed out or cancelled — the cached result is already on screen; nothing to undo.
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Background cache re-enrichment failed for job {JobId}", jobId);
         }
     }
 

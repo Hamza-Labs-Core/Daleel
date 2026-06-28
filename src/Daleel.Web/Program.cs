@@ -406,6 +406,9 @@ builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>(
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
+// Smart cache: scores a cache hit's completeness so CheckCache can serve, serve-and-refill, or reject it.
+// Stateless + side-effect-free, so a singleton is fine (resolved by the Elsa activity from its context).
+builder.Services.AddSingleton<Daleel.Web.Pipeline.ICacheQualityValidator, Daleel.Web.Pipeline.CacheQualityValidator>();
 // Transient: injected into the interactive Home component (and resolved per-use by the background worker),
 // so it must not share a circuit-scoped DbContext with concurrently-rendering components.
 builder.Services.AddTransient<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
