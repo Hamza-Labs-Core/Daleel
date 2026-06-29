@@ -36,17 +36,15 @@ public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
     private const int CrawlTimeoutMs = 20_000;
 
     private readonly IBrandModelRepository _models;
-    private readonly IR2StorageService _images;
     private readonly IAgentFactory _factory;
     private readonly ProfileOptions _options;
     private readonly ILogger<BrandCatalogSearcher> _logger;
 
     public BrandCatalogSearcher(
-        IBrandModelRepository models, IR2StorageService images, IAgentFactory factory,
+        IBrandModelRepository models, IAgentFactory factory,
         ProfileOptions options, ILogger<BrandCatalogSearcher> logger)
     {
         _models = models;
-        _images = images;
         _factory = factory;
         _options = options;
         _logger = logger;
@@ -140,7 +138,11 @@ public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
     private async Task<BrandModel?> UpsertModelAsync(
         Brand brand, BrandRegion region, CatalogProduct product, DateTimeOffset now, CancellationToken ct)
     {
-        var imageUrl = await StoreImageSafe(product.ImageUrl, $"brands/{brand.Id}", ct).ConfigureAwait(false);
+        // Product images are the original source URL — rendered directly by the UI (external https images
+        // are CSP-allowed and hot-linked). We no longer copy product shots into R2: the "hosted" URL relied
+        // on the images bucket's public host matching the write target, and any mismatch silently 404'd every
+        // image. Keeping the source URL mirrors the live search path and removes that failure mode entirely.
+        var imageUrl = string.IsNullOrWhiteSpace(product.ImageUrl) ? null : product.ImageUrl!.Trim();
 
         // The region-specific SKU/name is recorded as an alias so a store quoting that local model number
         // still resolves to this row. The canonical ModelName stays the product's display name.
@@ -198,12 +200,5 @@ public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
         }
 
         return specs.Count == 0 ? null : JsonSerializer.Serialize(specs);
-    }
-
-    private async Task<string?> StoreImageSafe(string? url, string prefix, CancellationToken ct)
-    {
-        try { return await _images.StoreImageAsync(url, prefix, ct).ConfigureAwait(false); }
-        catch (OperationCanceledException) { throw; }
-        catch { return url; }
     }
 }

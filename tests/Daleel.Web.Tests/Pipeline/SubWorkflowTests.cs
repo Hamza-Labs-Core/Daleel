@@ -80,33 +80,33 @@ public class SubWorkflowTests
     }
 
     [Fact]
-    public async Task BrandResearchWorkflow_StoresLogoToR2_AndRewritesResultUrl()
+    public async Task BrandResearchWorkflow_KeepsSourceLogo_EvenWhenR2Configured()
     {
-        // Configured R2 that hosts whatever it's handed: the download step must persist the brand logo and
-        // repoint the result at the hosted copy (so the brand card stops hot-linking the source).
+        // Policy: images are source URLs, never re-hosted in R2. Even with a fully-configured R2 that WOULD
+        // host whatever it's handed, the logo must stay the original source URL — the step never uploads it.
+        // (Re-hosting depended on the images bucket's public host matching the write target; a mismatch 404'd
+        // every "hosted" image, so we hot-link the source instead.)
         using var provider = BuildProvider(s => s.AddSingleton<IR2StorageService>(new FakeImageR2()));
 
         var state = await RunBrandAsync(
             provider, new BrandInfo { Name = "Samsung", LogoUrl = "https://cdn.samsung.com/logo.png" });
 
-        state.Result.LogoUrl.Should().Be(
-            $"https://images.test/brands/{state.Result.Id}/logo.png",
-            "a successful R2 store rewrites the result to the hosted copy");
+        state.Result.LogoUrl.Should().Be("https://cdn.samsung.com/logo.png",
+            "the logo is rendered from its source URL and never copied into R2");
         state.Events.Should().Contain(e => e.EventType == "brand.images" && e.Success);
     }
 
     [Fact]
-    public async Task BrandResearchWorkflow_WithoutR2_KeepsSourceLogo_AndRecordsNotStored()
+    public async Task BrandResearchWorkflow_WithoutR2_KeepsSourceLogo()
     {
-        // Default provider wires the NullR2StorageService (IsConfigured == false): the logo URL must survive
-        // untouched and the event must record that nothing was stored.
+        // With no R2 at all the behaviour is identical — the logo URL survives untouched.
         using var provider = BuildProvider(_ => { });
 
         var state = await RunBrandAsync(
             provider, new BrandInfo { Name = "Samsung", LogoUrl = "https://cdn.samsung.com/logo.png" });
 
         state.Result.LogoUrl.Should().Be("https://cdn.samsung.com/logo.png");
-        state.Events.Should().Contain(e => e.EventType == "brand.images" && !e.Success);
+        state.Events.Should().Contain(e => e.EventType == "brand.images");
     }
 
     // ── Store ──────────────────────────────────────────────────────────────────────

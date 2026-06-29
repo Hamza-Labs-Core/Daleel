@@ -32,18 +32,16 @@ public sealed class BrandCatalogService : IBrandCatalogService
 
     private readonly IBrandRepository _brands;
     private readonly IBrandModelRepository _models;
-    private readonly IR2StorageService _images;
     private readonly IAgentFactory _factory;
     private readonly ProfileOptions _options;
     private readonly ILogger<BrandCatalogService> _logger;
 
     public BrandCatalogService(
-        IBrandRepository brands, IBrandModelRepository models, IR2StorageService images,
+        IBrandRepository brands, IBrandModelRepository models,
         IAgentFactory factory, ProfileOptions options, ILogger<BrandCatalogService> logger)
     {
         _brands = brands;
         _models = models;
-        _images = images;
         _factory = factory;
         _options = options;
         _logger = logger;
@@ -103,8 +101,12 @@ public sealed class BrandCatalogService : IBrandCatalogService
 
             ct.ThrowIfCancellationRequested();
 
-            // Host the product image in R2 (no-op/pass-through when R2 isn't configured).
-            var imageUrl = await StoreImageSafe(product.ImageUrl, $"brands/{brand.Id}", ct).ConfigureAwait(false);
+            // Product images are the original source URL — pulled from the catalogue/search results and
+            // rendered directly (the UI hot-links external https images; CSP allows them). We deliberately do
+            // NOT copy product shots into R2: that depended on the images bucket's public host being bound to
+            // the exact bucket we write to, and a mismatch silently 404'd every "hosted" image. Keeping the
+            // source URL matches the live search path and removes that whole failure mode.
+            var imageUrl = string.IsNullOrWhiteSpace(product.ImageUrl) ? null : product.ImageUrl!.Trim();
 
             try
             {
@@ -161,13 +163,6 @@ public sealed class BrandCatalogService : IBrandCatalogService
         }
 
         return specs.Count == 0 ? null : JsonSerializer.Serialize(specs);
-    }
-
-    private async Task<string?> StoreImageSafe(string? url, string prefix, CancellationToken ct)
-    {
-        try { return await _images.StoreImageAsync(url, prefix, ct).ConfigureAwait(false); }
-        catch (OperationCanceledException) { throw; }
-        catch { return url; }
     }
 
     private static string? DomainOf(string? url)

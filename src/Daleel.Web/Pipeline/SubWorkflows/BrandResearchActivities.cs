@@ -159,15 +159,16 @@ public sealed class SaveBrandProfileActivity : CodeActivity
 }
 
 /// <summary>
-/// Step 5 — download the brand logo and store it in the Cloudflare R2 <see cref="R2Bucket.Images"/> bucket,
-/// then point the result at the stable hosted copy so the brand card stops hot-linking the source. The store
-/// is best-effort: it degrades to the original URL when R2 is unconfigured, the images bucket has no public
-/// host, or the fetch/upload fails — the sub-workflow never fails over a logo.
+/// Step 5 — keep the brand logo as its original source URL so the brand card renders it directly. We
+/// deliberately do NOT copy the logo into Cloudflare R2: the "hosted" URL was only valid when the images
+/// bucket's public host was bound to the exact bucket we wrote to, and any mismatch silently 404'd every
+/// stored image. Hot-linking the source (external https logos are CSP-allowed) is the policy across the app —
+/// images are source URLs, never re-hosted — and removes that whole failure mode.
 /// </summary>
-[Activity("Daleel", "Brand", "Download the brand logo to the R2 images bucket when configured")]
+[Activity("Daleel", "Brand", "Locate the brand logo and keep its source URL (no R2 upload)")]
 public sealed class DownloadBrandImagesActivity : CodeActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -175,54 +176,24 @@ public sealed class DownloadBrandImagesActivity : CodeActivity
         var logoUrl = state.Result.LogoUrl;
         if (string.IsNullOrWhiteSpace(logoUrl))
         {
-            return; // no brand logo located — nothing to store
+            return ValueTask.CompletedTask; // no brand logo located — nothing to record
         }
 
-        var r2 = context.GetRequiredService<IR2StorageService>();
-        if (!r2.IsConfigured)
-        {
-            RecordImages(state, success: false, reason: "r2-not-configured");
-            services.Report(SearchStep.BuildingProfiles, "Progress.Msg.LocatedLogoNoStorage", state.Brand.Name);
-            return;
-        }
-
-        // Mirror how product shots are keyed (brands/{id}/…) so a brand's logo and product images share a
-        // folder and re-running enrichment overwrites in place rather than piling up duplicates.
-        var stored = await SafeStoreImage(r2, logoUrl, $"brands/{state.Result.Id}", context.CancellationToken);
-
-        // StoreImageAsync hands back the ORIGINAL url unchanged when it could not host the image (no images
-        // public host, an SSRF-blocked target, or a fetch/upload failure). A *changed* url is the signal that
-        // a real hosted copy now exists — only then do we rewrite the result and claim success.
-        var hosted = !string.IsNullOrWhiteSpace(stored)
-                     && !string.Equals(stored, logoUrl, StringComparison.OrdinalIgnoreCase);
-        if (hosted)
-        {
-            state.Result = state.Result with { LogoUrl = stored };
-        }
-
-        RecordImages(state, success: hosted, reason: hosted ? null : "images-host-unset-or-fetch-failed");
-        services.Report(SearchStep.BuildingProfiles,
-            hosted ? "Progress.Msg.StoredLogo" : "Progress.Msg.LocatedLogoNoHost", state.Brand.Name);
+        // The logo URL is already on the result from profile research; we keep it verbatim and render it
+        // directly. Record that a logo was located (sourced, not R2-hosted) for the admin event stream.
+        RecordImages(state, located: true);
+        services.Report(SearchStep.BuildingProfiles, "Progress.Msg.LocatedLogoNoStorage", state.Brand.Name);
+        return ValueTask.CompletedTask;
     }
 
-    private static void RecordImages(BrandResearchState state, bool success, string? reason) =>
-        state.RecordEvent(EventCategory.Profile, "brand.images", "r2",
-            success: success,
+    private static void RecordImages(BrandResearchState state, bool located) =>
+        state.RecordEvent(EventCategory.Profile, "brand.images", "source",
+            success: located,
             metadata: new Dictionary<string, object?>
             {
                 ["name"] = state.Brand.Name,
-                ["images"] = 1,
-                ["stored"] = success,
-                ["reason"] = reason
+                ["images"] = located ? 1 : 0,
+                ["stored"] = false,
+                ["reason"] = "source-url-direct"
             });
-
-    private static async Task<string?> SafeStoreImage(
-        IR2StorageService r2, string url, string prefix, CancellationToken ct)
-    {
-        // StoreImageAsync is already best-effort (never throws), but guard anyway so a logo store can never
-        // fail the brand sub-workflow.
-        try { return await r2.StoreImageAsync(url, prefix, ct).ConfigureAwait(false); }
-        catch (OperationCanceledException) { throw; }
-        catch { return url; }
-    }
 }
