@@ -152,6 +152,56 @@ public class ConversationBackendTests : IDisposable
         (await db.SearchJobs.FindAsync(result.JobId!.Value))!.Status.Should().Be(JobStatus.Queued);
     }
 
+    [Fact]
+    public async Task Reconcile_FailsOrphanedRunningJobs_AndInterruptsTheirConversations()
+    {
+        // A zombie left behind by a container restart: a job stuck "running" with the user's conversation
+        // still spinning, plus unrelated rows that must be left untouched.
+        await using (var seed = NewDb())
+        {
+            seed.SearchJobs.Add(new SearchJob { Id = 0, UserId = "u1", Query = "best AC", Status = JobStatus.Running, CreatedAt = DateTimeOffset.UtcNow, StartedAt = DateTimeOffset.UtcNow });
+            seed.SearchJobs.Add(new SearchJob { UserId = "u2", Query = "done", Status = JobStatus.Completed, CreatedAt = DateTimeOffset.UtcNow });
+            seed.SearchJobs.Add(new SearchJob { UserId = "u3", Query = "queued", Status = JobStatus.Queued, CreatedAt = DateTimeOffset.UtcNow });
+            seed.UserConversations.Add(new UserConversation { UserId = "u1", CurrentStatus = "running", CurrentQuery = "best AC", StartedAt = DateTimeOffset.UtcNow });
+            seed.UserConversations.Add(new UserConversation { UserId = "u2", CurrentStatus = "completed" });
+            await seed.SaveChangesAsync();
+        }
+
+        await using (var db = NewDb())
+        {
+            await OrphanedJobReconciler.ReconcileAsync(db, NullLogger.Instance);
+        }
+
+        await using var check = NewDb();
+        var jobs = await check.SearchJobs.ToListAsync();
+        var orphan = jobs.Single(j => j.UserId == "u1");
+        orphan.Status.Should().Be(JobStatus.Failed);
+        orphan.Error.Should().Be(OrphanedJobReconciler.OrphanReason);
+        orphan.CompletedAt.Should().NotBeNull();
+        // Terminal and queued jobs are untouched.
+        jobs.Single(j => j.UserId == "u2").Status.Should().Be(JobStatus.Completed);
+        jobs.Single(j => j.UserId == "u3").Status.Should().Be(JobStatus.Queued);
+
+        var convos = await check.UserConversations.ToListAsync();
+        convos.Single(c => c.UserId == "u1").CurrentStatus.Should().Be(OrphanedJobReconciler.InterruptedStatus);
+        convos.Single(c => c.UserId == "u2").CurrentStatus.Should().Be("completed");
+    }
+
+    [Fact]
+    public async Task Reconcile_CleanBoot_IsNoOp()
+    {
+        await using (var seed = NewDb())
+        {
+            seed.SearchJobs.Add(new SearchJob { UserId = "u1", Query = "done", Status = JobStatus.Completed, CreatedAt = DateTimeOffset.UtcNow });
+            await seed.SaveChangesAsync();
+        }
+
+        await using var db = NewDb();
+        await OrphanedJobReconciler.ReconcileAsync(db, NullLogger.Instance);
+
+        (await db.SearchJobs.SingleAsync()).Status.Should().Be(JobStatus.Completed);
+    }
+
     public void Dispose()
     {
         _provider.Dispose();

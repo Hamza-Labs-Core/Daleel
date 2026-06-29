@@ -547,6 +547,13 @@ static void EnsureDatabase(WebApplication app)
     var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
     db.Database.Migrate();
 
+    // Crash recovery: fail any jobs left "running" by a previous container's death (deploy/crash/OOM) before
+    // the worker starts. This runs here in EnsureDatabase — synchronously, before app.Run() starts the hosted
+    // SearchJobService — so no new job is picked up until the orphaned zombies are reconciled. See
+    // OrphanedJobReconciler.
+    Daleel.Web.Conversation.OrphanedJobReconciler
+        .ReconcileAsync(db, app.Logger).GetAwaiter().GetResult();
+
     // Seed admin-editable system settings (idempotent).
     scope.ServiceProvider.GetRequiredService<ISystemConfigService>().SeedDefaultsAsync().GetAwaiter().GetResult();
 

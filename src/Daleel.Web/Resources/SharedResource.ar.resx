@@ -82,6 +82,8 @@
   <data name="Search.Cancel" xml:space="preserve"><value>إلغاء</value></data>
   <data name="Search.Cancelled" xml:space="preserve"><value>تم إلغاء البحث</value></data>
   <data name="Search.CancelledHint" xml:space="preserve"><value>تم إيقاف بحثك. عدّل العبارة وحاول مرة أخرى متى شئت.</value></data>
+  <data name="Search.Interrupted" xml:space="preserve"><value>تمت مقاطعة البحث</value></data>
+  <data name="Search.InterruptedHint" xml:space="preserve"><value>أُعيد تشغيل الخادم أثناء تنفيذ بحثك. يرجى المحاولة مرة أخرى.</value></data>
   <data name="Search.Recent" xml:space="preserve"><value>المحادثات الأخيرة</value></data>
   <data name="Search.ViewAll" xml:space="preserve"><value>عرض الكل</value></data>
 

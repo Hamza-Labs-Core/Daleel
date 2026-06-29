@@ -115,6 +115,20 @@
             </MudPaper>
         }
 
+        @* A search whose worker was killed by a container restart: the startup reconciler (OrphanedJobReconciler)
+           flips the conversation to "interrupted", so a reconnecting tab stops spinning and shows a retry prompt
+           instead of waiting forever for a completion that will never arrive. *@
+        @if (_status == "interrupted")
+        {
+            <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
+                <MudIcon Icon="@Icons.Material.Filled.RestartAlt" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                <MudText Typo="Typo.subtitle1" Align="Align.Center">@L["Search.Interrupted"]</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary" Align="Align.Center" Class="mt-1">
+                    @L["Search.InterruptedHint"]
+                </MudText>
+            </MudPaper>
+        }
+
         @* Results render as a structured product list (with stores/brands/reviews secondary).
            No text-summary paragraph — the data speaks for itself. *@
         @* @key on the query makes the whole block remount when a new search completes, so the
@@ -168,7 +182,7 @@
     private bool _geoTried;
     private string? _geoMarket;
     private string? _query;
-    private string? _status; // idle | running | completed | error
+    private string? _status; // idle | running | completed | error | cancelled | interrupted
     private string? _error;
     private int? _jobId;
     private bool _running => _status == "running";
@@ -270,7 +284,9 @@
         // most recent search instead of a blank hero / empty state. A running search is left untouched
         // (the guard above), and an idle/errored/cancelled conversation no longer hides good prior
         // results — those live in history and are the "last search" the user expects to see on load.
-        if (_status is not "running" && _answer is null)
+        // "interrupted" is excluded alongside "running": a restart-killed search must show the interrupt
+        // notice + retry prompt, not silently fall back to re-displaying the user's last saved result.
+        if (_status is not "running" and not "interrupted" && _answer is null)
         {
             var lastWithResult = _recent.FirstOrDefault(h => !string.IsNullOrEmpty(h.ResultJson));
             if (lastWithResult is not null)

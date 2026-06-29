@@ -82,6 +82,8 @@
   <data name="Search.Cancel" xml:space="preserve"><value>Cancel</value></data>
   <data name="Search.Cancelled" xml:space="preserve"><value>Search cancelled</value></data>
   <data name="Search.CancelledHint" xml:space="preserve"><value>Your search was stopped. Edit the query and try again whenever you're ready.</value></data>
+  <data name="Search.Interrupted" xml:space="preserve"><value>Search was interrupted</value></data>
+  <data name="Search.InterruptedHint" xml:space="preserve"><value>The server restarted while your search was running. Please try again.</value></data>
   <data name="Search.Recent" xml:space="preserve"><value>Recent</value></data>
   <data name="Search.ViewAll" xml:space="preserve"><value>View all</value></data>
 
