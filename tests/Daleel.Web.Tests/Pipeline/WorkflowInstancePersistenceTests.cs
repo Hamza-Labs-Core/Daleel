@@ -151,6 +151,51 @@ public class WorkflowInstancePersistenceTests
         state.Strategy.Should().BeNull();
     }
 
+    [Fact]
+    public async Task CancelCheckDurableReadFailure_DoesNotFaultTheRun_CooperativeCheckIsBestEffort()
+    {
+        // Regression guard for the "every search returns no results" outage: the per-activity cancel check
+        // is the BEST-EFFORT cooperative layer. If its durable CancelRequested read fails (a transient DB
+        // blip, pool exhaustion, or — the real cause here — a not-yet-migrated CancelRequested column on a
+        // freshly-deployed instance), that failure must NOT throw out of the first activity and fault the
+        // whole run before any products exist to salvage. It must degrade to "not cancelled, keep running".
+        //
+        // We reproduce a failing durable read by registering a DaleelDbContext whose schema is NEVER
+        // created: every `SELECT CancelRequested FROM SearchJobs` throws "relation does not exist". With the
+        // guard hardened, ParseQuery's body still runs (Strategy is populated by the planner); without it,
+        // the run faults on step 1 and Strategy stays null.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<DaleelDbContext>(o => o.UseNpgsql(_connectionString), ServiceLifetime.Transient);
+        services.AddElsa(elsa => elsa.AddActivitiesFrom<SearchWorkflow>());
+        services.AddScoped<SearchPipelineState>();
+        services.AddScoped<SearchPipelineServices>();
+        services.AddSingleton<ICacheStore, InMemoryCache>();
+        services.AddSingleton(new ProfileOptions());
+        // No ISearchJobQueue registered, so the in-memory fast path is skipped and the durable DB read runs.
+        using var provider = services.BuildServiceProvider();
+
+        // Deliberately do NOT create the DaleelDbContext schema — the SearchJobs table does not exist, so the
+        // cancel-check query throws on every activity.
+        using var scope = provider.CreateScope();
+        var state = scope.ServiceProvider.GetRequiredService<SearchPipelineState>();
+        var pipeServices = scope.ServiceProvider.GetRequiredService<SearchPipelineServices>();
+        pipeServices.Agent = new AgentService(new FixedLlm(StrategyJson), new AgentOptions { DefaultGeo = "jordan" });
+        state.Query = "tell me about tea";
+        state.Geo = "jordan";
+        state.ResultKey = "k1";
+        state.SearchId = "12345"; // a real (parseable) job id, so the durable read is attempted and fails
+        state.StartedAt = DateTimeOffset.UtcNow;
+
+        var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
+        var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: default);
+
+        // The cooperative check swallowed its DB failure, so the first activity's body executed: the planner
+        // was invoked and produced a strategy. A run is no longer sunk by a failing durable cancel read.
+        state.Strategy.Should().NotBeNull(
+            "a failed best-effort cancel read must degrade to 'keep running', never fault the search");
+    }
+
     private sealed class ThrowingLlm : ILlmClient
     {
         public string Provider => "throwing";

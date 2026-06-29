@@ -59,13 +59,34 @@ public abstract class CancellableActivity : CodeActivity
 
         // Authoritative path: the durable flag. Also catches a cancel applied on another context — the
         // periodic sweep, or a cancel that landed before the worker registered this run's token source.
+        //
+        // This whole check is the BEST-EFFORT cooperative layer (the worker's pre-commit re-check and the
+        // periodic JobReconciliationService sweep are the hard backstops). So a FAILED durable read must
+        // never fault the run: a transient DB blip, pool exhaustion, or a not-yet-migrated CancelRequested
+        // column on a freshly-deployed instance would otherwise throw out of the FIRST activity — before any
+        // products exist to salvage — turning every search into a hard "no results". Degrade to "not
+        // cancelled, keep running" on any non-cancellation failure; only a genuine cancel/deadline
+        // (OperationCanceledException, from context.CancellationToken) propagates and stops the run.
         if (context.GetService<DaleelDbContext>() is { } db)
         {
-            var requested = await db.SearchJobs
-                .Where(j => j.Id == jobId)
-                .Select(j => j.CancelRequested)
-                .FirstOrDefaultAsync(context.CancellationToken)
-                .ConfigureAwait(false);
+            bool requested;
+            try
+            {
+                requested = await db.SearchJobs
+                    .Where(j => j.Id == jobId)
+                    .Select(j => j.CancelRequested)
+                    .FirstOrDefaultAsync(context.CancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw; // a real user cancel / cost-cap / workflow-deadline must stop the run
+            }
+            catch
+            {
+                return; // cooperative check is best-effort — a durable-read failure must not fault the search
+            }
+
             if (requested)
             {
                 throw Cancelled(jobId);
