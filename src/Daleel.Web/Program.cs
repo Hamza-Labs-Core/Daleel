@@ -431,6 +431,10 @@ builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 builder.Services.AddSingleton<Daleel.Core.Caching.ICacheStore, Daleel.Web.Data.PostgresCacheStore>();
 builder.Services.AddHostedService<Daleel.Web.Services.CacheCleanupService>();
 
+// Admin-triggered, irreversible bulk wipes (search cache, catalogue, workflow history) behind the
+// /admin/cleardata page. Transient: it gets its own DaleelDbContext, never sharing the circuit's.
+builder.Services.AddTransient<Daleel.Web.Services.IClearDataService, Daleel.Web.Services.ClearDataService>();
+
 // IP rate limiting (in-memory fixed-window — no Redis at this scale).
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<IIpRateLimiter, IpRateLimiter>();

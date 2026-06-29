@@ -1,0 +1,147 @@
+@page "/admin/cleardata"
+@using Daleel.Web.Services
+@attribute [Authorize(Roles = "Admin")]
+@inject IClearDataService Clear
+@inject IDialogService Dialogs
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
+
+<PageTitle>دليل · Admin · Clear Data</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">@L["Admin.ClearData.Title"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Admin.ClearData.Subtitle"]</MudText>
+
+<MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-4" Icon="@Icons.Material.Filled.Warning">
+    @L["Admin.ClearData.Warning"]
+</MudAlert>
+
+<MudGrid Spacing="3">
+    @* ── Search cache ─────────────────────────────────────────────────── *@
+    <MudItem xs="12" md="6">
+        @RenderCard(
+            Icons.Material.Filled.CleaningServices, Color.Default,
+            L["Admin.ClearData.Cache.Title"], L["Admin.ClearData.Cache.Desc"],
+            L["Admin.ClearData.Cache.Button"], Color.Primary, ClearCacheAsync)
+    </MudItem>
+
+    @* ── Brands / stores / items ─────────────────────────────────────── *@
+    <MudItem xs="12" md="6">
+        @RenderCard(
+            Icons.Material.Filled.Inventory2, Color.Warning,
+            L["Admin.ClearData.Products.Title"], L["Admin.ClearData.Products.Desc"],
+            L["Admin.ClearData.Products.Button"], Color.Warning, ClearProductsAsync)
+    </MudItem>
+
+    @* ── Workflow history ─────────────────────────────────────────────── *@
+    <MudItem xs="12" md="6">
+        @RenderCard(
+            Icons.Material.Filled.AccountTree, Color.Default,
+            L["Admin.ClearData.Workflows.Title"], L["Admin.ClearData.Workflows.Desc"],
+            L["Admin.ClearData.Workflows.Button"], Color.Primary, ClearWorkflowsAsync)
+    </MudItem>
+
+    @* ── Everything ───────────────────────────────────────────────────── *@
+    <MudItem xs="12" md="6">
+        @RenderCard(
+            Icons.Material.Filled.DeleteForever, Color.Error,
+            L["Admin.ClearData.All.Title"], L["Admin.ClearData.All.Desc"],
+            L["Admin.ClearData.All.Button"], Color.Error, ClearAllAsync)
+    </MudItem>
+</MudGrid>
+
+@code {
+    // Disables every button while one operation runs, so an admin can't fire two destructive wipes at once.
+    private bool _busy;
+
+    // A single card template reused for all four operations: icon + title + description, then the action
+    // button (disabled and spinner-labelled while any op is in flight).
+    private RenderFragment RenderCard(
+        string icon, Color iconColor, string title, string description,
+        string buttonText, Color buttonColor, Func<Task> action) => __builder =>
+    {
+        <MudCard Outlined="true" Style="height:100%;" Class="d-flex flex-column">
+            <MudCardContent Class="flex-grow-1">
+                <div class="d-flex align-center gap-2 mb-2">
+                    <MudIcon Icon="@icon" Color="@iconColor" />
+                    <MudText Typo="Typo.h6">@title</MudText>
+                </div>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">@description</MudText>
+            </MudCardContent>
+            <MudCardActions>
+                <MudButton Variant="Variant.Filled" Color="@buttonColor"
+                           StartIcon="@Icons.Material.Filled.Delete" Disabled="_busy"
+                           OnClick="@(() => action())">
+                    @(_busy ? L["Admin.ClearData.Busy"] : buttonText)
+                </MudButton>
+            </MudCardActions>
+        </MudCard>
+    };
+
+    private async Task ClearCacheAsync() =>
+        await RunAsync("Admin.ClearData.Confirm.Cache", async () =>
+        {
+            var n = await Clear.ClearSearchCacheAsync();
+            Snackbar.Add(L["Admin.ClearData.Success.Cache", n], Severity.Success);
+        });
+
+    private async Task ClearProductsAsync() =>
+        await RunAsync("Admin.ClearData.Confirm.Products", async () =>
+        {
+            var r = await Clear.ClearProductsAsync();
+            Snackbar.Add(L["Admin.ClearData.Success.Products", r.Total], Severity.Success);
+        });
+
+    private async Task ClearWorkflowsAsync() =>
+        await RunAsync("Admin.ClearData.Confirm.Workflows", async () =>
+        {
+            var n = await Clear.ClearWorkflowHistoryAsync();
+            if (n is null)
+            {
+                Snackbar.Add(L["Admin.ClearData.WorkflowsNotConfigured"], Severity.Info);
+            }
+            else
+            {
+                Snackbar.Add(L["Admin.ClearData.Success.Workflows", n], Severity.Success);
+            }
+        });
+
+    private async Task ClearAllAsync() =>
+        await RunAsync("Admin.ClearData.Confirm.All", async () =>
+        {
+            var r = await Clear.ClearAllAsync();
+            Snackbar.Add(L["Admin.ClearData.Success.All", r.Total], Severity.Success);
+        });
+
+    // Confirm → run → report. The confirmation dialog gates every action (Settings.razor pattern); the busy
+    // flag is held across the whole operation and any thrown error is surfaced as a snackbar rather than
+    // bubbling into a circuit error.
+    private async Task RunAsync(string confirmKey, Func<Task> action)
+    {
+        var ok = await Dialogs.ShowMessageBox(
+            title: L["Admin.ClearData.Confirm.Title"],
+            message: L[confirmKey],
+            yesText: L["Admin.ClearData.Confirm.Yes"],
+            cancelText: L["Search.Cancel"]);
+        if (ok != true)
+        {
+            return;
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            await action();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(L["Admin.ClearData.Error", ex.Message], Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+}

@@ -626,4 +626,33 @@
   <data name="Email.Search.ViewReport" xml:space="preserve"><value>عرض التقرير الكامل</value></data>
   <data name="Email.Search.FooterReason" xml:space="preserve"><value>تصلك هذه الرسالة لأن إشعارات البريد الإلكتروني مُفعّلة في حساب دليل الخاص بك.</value></data>
   <data name="Email.Search.FooterManage" xml:space="preserve"><value>يمكنك إدارة تفضيلات البريد الإلكتروني من إعدادات حسابك.</value></data>
+  <data name="Admin.Nav.ClearData" xml:space="preserve"><value>مسح البيانات</value></data>
+  <data name="Admin.ClearData.Title" xml:space="preserve"><value>إدارة البيانات</value></data>
+  <data name="Admin.ClearData.Subtitle" xml:space="preserve"><value>حذف البيانات المُخزّنة مؤقتًا والكتالوج المُجمّع وسجلّ سير العمل بشكل نهائي.</value></data>
+  <data name="Admin.ClearData.Warning" xml:space="preserve"><value>هذه العمليات تحذف البيانات نهائيًا ولا يمكن التراجع عنها.</value></data>
+  <data name="Admin.ClearData.Cache.Title" xml:space="preserve"><value>ذاكرة البحث المؤقتة</value></data>
+  <data name="Admin.ClearData.Cache.Desc" xml:space="preserve"><value>حذف جميع نتائج البحث المُخزّنة مؤقتًا (طبقتا ذاكرة المزوّد والنتائج). ستُعرض عمليات البحث الجديدة من جديد.</value></data>
+  <data name="Admin.ClearData.Cache.Button" xml:space="preserve"><value>مسح ذاكرة البحث</value></data>
+  <data name="Admin.ClearData.Products.Title" xml:space="preserve"><value>العلامات التجارية والمتاجر والعناصر</value></data>
+  <data name="Admin.ClearData.Products.Desc" xml:space="preserve"><value>حذف جميع العلامات التجارية والمتاجر والمنتجات والأسعار المُجمّعة وملفات المنتجات من الكتالوج.</value></data>
+  <data name="Admin.ClearData.Products.Button" xml:space="preserve"><value>مسح جميع المنتجات</value></data>
+  <data name="Admin.ClearData.Workflows.Title" xml:space="preserve"><value>سجلّ سير العمل</value></data>
+  <data name="Admin.ClearData.Workflows.Desc" xml:space="preserve"><value>حذف كامل سجلّ تشغيل سير العمل في Elsa.</value></data>
+  <data name="Admin.ClearData.Workflows.Button" xml:space="preserve"><value>مسح سجلّ سير العمل</value></data>
+  <data name="Admin.ClearData.All.Title" xml:space="preserve"><value>كل شيء</value></data>
+  <data name="Admin.ClearData.All.Desc" xml:space="preserve"><value>تنفيذ كل ما سبق: مسح ذاكرة البحث المؤقتة وكامل الكتالوج وسجلّ سير العمل.</value></data>
+  <data name="Admin.ClearData.All.Button" xml:space="preserve"><value>مسح جميع البيانات</value></data>
+  <data name="Admin.ClearData.Confirm.Title" xml:space="preserve"><value>تأكيد الحذف</value></data>
+  <data name="Admin.ClearData.Confirm.Cache" xml:space="preserve"><value>هل تريد حذف جميع نتائج البحث المُخزّنة مؤقتًا نهائيًا؟ لا يمكن التراجع عن هذا الإجراء.</value></data>
+  <data name="Admin.ClearData.Confirm.Products" xml:space="preserve"><value>هل تريد حذف جميع العلامات التجارية والمتاجر والمنتجات والأسعار والملفات نهائيًا؟ لا يمكن التراجع عن هذا الإجراء.</value></data>
+  <data name="Admin.ClearData.Confirm.Workflows" xml:space="preserve"><value>هل تريد حذف كامل سجلّ تشغيل سير العمل نهائيًا؟ لا يمكن التراجع عن هذا الإجراء.</value></data>
+  <data name="Admin.ClearData.Confirm.All" xml:space="preserve"><value>هل تريد حذف كل شيء نهائيًا — الذاكرة المؤقتة والكتالوج وسجلّ سير العمل؟ لا يمكن التراجع عن هذا الإجراء.</value></data>
+  <data name="Admin.ClearData.Confirm.Yes" xml:space="preserve"><value>حذف</value></data>
+  <data name="Admin.ClearData.Success.Cache" xml:space="preserve"><value>تم مسح ذاكرة البحث: تمت إزالة {0} عنصر.</value></data>
+  <data name="Admin.ClearData.Success.Products" xml:space="preserve"><value>تم مسح الكتالوج: تمت إزالة {0} صف.</value></data>
+  <data name="Admin.ClearData.Success.Workflows" xml:space="preserve"><value>تم مسح سجلّ سير العمل: تمت إزالة {0} نسخة.</value></data>
+  <data name="Admin.ClearData.Success.All" xml:space="preserve"><value>تم مسح جميع البيانات: تمت إزالة {0} صف.</value></data>
+  <data name="Admin.ClearData.WorkflowsNotConfigured" xml:space="preserve"><value>تخزين سجلّ سير العمل غير مُهيّأ — لا يوجد ما يُمسح.</value></data>
+  <data name="Admin.ClearData.Error" xml:space="preserve"><value>فشلت العملية: {0}</value></data>
+  <data name="Admin.ClearData.Busy" xml:space="preserve"><value>جارٍ العمل…</value></data>
 </root>

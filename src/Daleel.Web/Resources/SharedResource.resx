@@ -625,4 +625,33 @@
   <data name="Email.Search.ViewReport" xml:space="preserve"><value>View Full Report</value></data>
   <data name="Email.Search.FooterReason" xml:space="preserve"><value>You're receiving this because email notifications are on for your Daleel account.</value></data>
   <data name="Email.Search.FooterManage" xml:space="preserve"><value>Manage email preferences in your account settings.</value></data>
+  <data name="Admin.Nav.ClearData" xml:space="preserve"><value>Clear Data</value></data>
+  <data name="Admin.ClearData.Title" xml:space="preserve"><value>Data Management</value></data>
+  <data name="Admin.ClearData.Subtitle" xml:space="preserve"><value>Permanently delete cached data, the harvested catalogue, and workflow history.</value></data>
+  <data name="Admin.ClearData.Warning" xml:space="preserve"><value>These operations permanently delete data and cannot be undone.</value></data>
+  <data name="Admin.ClearData.Cache.Title" xml:space="preserve"><value>Search Cache</value></data>
+  <data name="Admin.ClearData.Cache.Desc" xml:space="preserve"><value>Delete all cached search results (provider and result cache layers). New searches will be served fresh.</value></data>
+  <data name="Admin.ClearData.Cache.Button" xml:space="preserve"><value>Clear Search Cache</value></data>
+  <data name="Admin.ClearData.Products.Title" xml:space="preserve"><value>Brands, Stores &amp; Items</value></data>
+  <data name="Admin.ClearData.Products.Desc" xml:space="preserve"><value>Delete all brands, stores, products, scraped prices and product profiles from the catalogue.</value></data>
+  <data name="Admin.ClearData.Products.Button" xml:space="preserve"><value>Clear All Products</value></data>
+  <data name="Admin.ClearData.Workflows.Title" xml:space="preserve"><value>Workflow History</value></data>
+  <data name="Admin.ClearData.Workflows.Desc" xml:space="preserve"><value>Delete all Elsa workflow run history.</value></data>
+  <data name="Admin.ClearData.Workflows.Button" xml:space="preserve"><value>Clear Workflow History</value></data>
+  <data name="Admin.ClearData.All.Title" xml:space="preserve"><value>Everything</value></data>
+  <data name="Admin.ClearData.All.Desc" xml:space="preserve"><value>Run all of the above: clear the search cache, the entire catalogue, and workflow history.</value></data>
+  <data name="Admin.ClearData.All.Button" xml:space="preserve"><value>Clear All Data</value></data>
+  <data name="Admin.ClearData.Confirm.Title" xml:space="preserve"><value>Confirm deletion</value></data>
+  <data name="Admin.ClearData.Confirm.Cache" xml:space="preserve"><value>Permanently delete all cached search results? This cannot be undone.</value></data>
+  <data name="Admin.ClearData.Confirm.Products" xml:space="preserve"><value>Permanently delete all brands, stores, products, prices and profiles? This cannot be undone.</value></data>
+  <data name="Admin.ClearData.Confirm.Workflows" xml:space="preserve"><value>Permanently delete all workflow run history? This cannot be undone.</value></data>
+  <data name="Admin.ClearData.Confirm.All" xml:space="preserve"><value>Permanently delete EVERYTHING — cache, catalogue and workflow history? This cannot be undone.</value></data>
+  <data name="Admin.ClearData.Confirm.Yes" xml:space="preserve"><value>Delete</value></data>
+  <data name="Admin.ClearData.Success.Cache" xml:space="preserve"><value>Search cache cleared: {0} entry(ies) removed.</value></data>
+  <data name="Admin.ClearData.Success.Products" xml:space="preserve"><value>Catalogue cleared: {0} row(s) removed.</value></data>
+  <data name="Admin.ClearData.Success.Workflows" xml:space="preserve"><value>Workflow history cleared: {0} instance(s) removed.</value></data>
+  <data name="Admin.ClearData.Success.All" xml:space="preserve"><value>All data cleared: {0} row(s) removed.</value></data>
+  <data name="Admin.ClearData.WorkflowsNotConfigured" xml:space="preserve"><value>Workflow history persistence is not configured — nothing to clear.</value></data>
+  <data name="Admin.ClearData.Error" xml:space="preserve"><value>Operation failed: {0}</value></data>
+  <data name="Admin.ClearData.Busy" xml:space="preserve"><value>Working…</value></data>
 </root>
