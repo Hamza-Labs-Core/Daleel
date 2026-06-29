@@ -21,33 +21,42 @@
     <LandingPage />
 </NotAuthorized>
 <Authorized>
-<MudGrid Spacing="3">
-    <!-- Conversation history sidebar -->
-    <MudItem xs="12" md="3">
-        <MudPaper Class="pa-3" Outlined="true" Elevation="0" Style="position:sticky;top:80px;">
-            <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Search.Recent"]</MudText>
-            @if (_recent.Count == 0)
-            {
-                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Home.NoSearches"]</MudText>
-            }
-            else
-            {
-                <MudList T="string" Dense="true">
-                    @foreach (var h in _recent)
-                    {
-                        <MudListItem T="string" Icon="@Icons.Material.Filled.ChatBubbleOutline"
-                                     OnClick="@(() => Prefill(h.Query))">
-                            <MudText Typo="Typo.body2" dir="@Catalog.Dir(h.Query)" Style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">@h.Query</MudText>
-                        </MudListItem>
-                    }
-                </MudList>
-                <MudButton Href="/history" Size="Size.Small" Variant="Variant.Text" Class="mt-1">@L["Search.ViewAll"]</MudButton>
-            }
-        </MudPaper>
-    </MudItem>
+<div class="daleel-workspace">
+    <!-- Prominent search bar, anchored at the top of the workspace. Recent searches now live in the
+         left-nav "Recent" submenu (NavMenu), so the page content stays focused on the search + results.
+         The market isn't a control here: it's detected from the query text itself (GeoProfiles.DetectInText,
+         e.g. "AC in Dubai" → UAE). When the query names no market we ask inline (below) instead of
+         silently defaulting to one. AutoGrow keeps the field a compact single line that expands as the
+         user types a longer query, rather than starting as a giant textarea. -->
+    <MudPaper Class="pa-2 mb-4" Outlined="true" Elevation="0" Style="border-radius:14px;">
+        <div class="d-flex align-center gap-2">
+            <MudTextField @bind-Value="_input" Placeholder="@(L["Search.Placeholder"])"
+                          Variant="Variant.Outlined" Margin="Margin.Dense"
+                          AutoGrow="true" Lines="1" MaxLines="6"
+                          Immediate="true" OnKeyDown="OnKey" Class="mt-0" Style="flex:1 1 auto;"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                          Disabled="_running" />
+            <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary" Size="Size.Large"
+                           OnClick="SubmitAsync" Disabled="@(_running || string.IsNullOrWhiteSpace(_input))" />
+        </div>
+    </MudPaper>
 
-    <!-- Main conversation column -->
-    <MudItem xs="12" md="9">
+    @* When the query text doesn't name a market we never assume one — we ask, inline, right under the
+       input, before the search runs. Picking a market here runs the pending query against it. *@
+    @if (_awaitingMarket)
+    {
+        <MudPaper Class="pa-3 mb-4" Outlined="true" Elevation="0" Style="border-radius:14px;">
+            <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Market.Prompt"]</MudText>
+            <div class="d-flex gap-2" style="flex-wrap:wrap;">
+                @foreach (var geo in Catalog.Geos)
+                {
+                    <MudButton Variant="Variant.Outlined" Color="Color.Primary"
+                               OnClick="@(() => RunPendingSearchAsync(geo.Key))">@geo.Display</MudButton>
+                }
+            </div>
+        </MudPaper>
+    }
+
         @if (_query is null && _status is "idle" or null)
         {
             <div class="daleel-hero">
@@ -137,36 +146,7 @@
                 <SourceChips Sources="_answer.Research.Sources" />
             </div>
         }
-
-        @* When the query text doesn't name a market we never assume one — we ask, inline, right above the
-           input, before the search runs. Picking a market here runs the pending query against it. *@
-        @if (_awaitingMarket)
-        {
-            <MudPaper Class="pa-3 mt-4" Outlined="true" Elevation="0" Style="border-radius:14px;">
-                <MudText Typo="Typo.subtitle2" Class="mb-2">@L["Market.Prompt"]</MudText>
-                <div class="d-flex gap-2" style="flex-wrap:wrap;">
-                    @foreach (var geo in Catalog.Geos)
-                    {
-                        <MudButton Variant="Variant.Outlined" Color="Color.Primary"
-                                   OnClick="@(() => RunPendingSearchAsync(geo.Key))">@geo.Display</MudButton>
-                    }
-                </div>
-            </MudPaper>
-        }
-
-        <!-- Chat input. The market isn't a control here: it's detected from the query text itself
-             (GeoProfiles.DetectInText, e.g. "AC in Dubai" → UAE). When the query names no market we ask
-             inline (above) instead of silently defaulting to one. -->
-        <MudPaper Class="pa-3 mt-4" Outlined="true" Elevation="0" Style="position:sticky;bottom:12px;border-radius:14px;">
-            <div class="d-flex align-center gap-2" style="flex-wrap:wrap;">
-                <MudTextField @bind-Value="_input" Placeholder="@(L["Search.Placeholder"])" Variant="Variant.Text"
-                              Immediate="true" OnKeyDown="OnKey" Class="mt-0" Style="flex:1 1 200px;" Disabled="_running" />
-                <MudIconButton Icon="@Icons.Material.Filled.Send" Color="Color.Primary"
-                               OnClick="SubmitAsync" Disabled="@(_running || string.IsNullOrWhiteSpace(_input))" />
-            </div>
-        </MudPaper>
-    </MudItem>
-</MudGrid>
+</div>
 </Authorized>
 </AuthorizeView>
 

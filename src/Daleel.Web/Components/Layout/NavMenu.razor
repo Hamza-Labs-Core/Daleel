@@ -1,7 +1,11 @@
 @* Primary navigation. Labels are localized (English / Arabic) via the shared resource catalogue.
    The brand wordmark lives in the top app bar (MainLayout); repeating it here was redundant, so the
    drawer starts straight at the navigation links. *@
+@implements IDisposable
 @inject IStringLocalizer<SharedResource> L
+@inject ICurrentUser CurrentUser
+@inject ISearchHistoryRepository History
+@inject IConversationNotifier Notifier
 
 @* Search-related destinations are gated behind sign-in: anonymous visitors only have the landing
    home, pricing and settings, so the drawer stays uncluttered for them. *@
@@ -14,7 +18,28 @@
                but kept out of the drawer to keep it focused (re-hidden per feedback; see commit 60dad39). *@
             <MudNavLink Href="/brand" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Verified">@L["Nav.Brand"]</MudNavLink>
             <MudDivider Class="my-2" />
-            <MudNavLink Href="/history" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.History">@L["Nav.History"]</MudNavLink>
+
+            @* Recent searches live here, in a collapsible submenu, instead of taking up a column on the
+               home page. Clicking an entry opens its saved result via /?historyId= (Home.LoadHistoryResultAsync).
+               The list is loaded on init and refreshed whenever a search completes (Notifier.Completed),
+               so it stays current without a page reload. Expanded by default so it's visible at a glance. *@
+            <MudNavGroup Title="@L["Search.Recent"]" Icon="@Icons.Material.Filled.History" Expanded="true">
+                @if (_recent.Count == 0)
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="px-4 py-2 d-block">@L["Home.NoSearches"]</MudText>
+                }
+                else
+                {
+                    @foreach (var h in _recent)
+                    {
+                        <MudNavLink Href="@($"/?historyId={h.Id}")" Icon="@Icons.Material.Filled.ChatBubbleOutline">
+                            <span dir="@Catalog.Dir(h.Query)" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">@h.Query</span>
+                        </MudNavLink>
+                    }
+                    <MudNavLink Href="/history" Icon="@Icons.Material.Filled.ListAlt">@L["Search.ViewAll"]</MudNavLink>
+                }
+            </MudNavGroup>
+
             <MudTooltip Text="Your bookmarked reports — saved searches you can revisit anytime" Placement="Placement.End">
                 <MudNavLink Href="/saved" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Bookmarks">@L["Nav.Saved"]</MudNavLink>
             </MudTooltip>
@@ -49,3 +74,42 @@
         </AuthorizeView>
     </div>
 </MudNavMenu>
+
+@code {
+    private string? _userId;
+    private List<SearchHistoryEntry> _recent = new();
+
+    protected override void OnInitialized() => Notifier.Completed += OnCompleted;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        _userId = await CurrentUser.GetUserIdAsync();
+        if (_userId is not null)
+        {
+            await LoadRecentAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadRecentAsync()
+    {
+        if (_userId is null) return;
+        _recent = (await History.ListAsync(_userId, page: 1, pageSize: 8)).Items.ToList();
+    }
+
+    // A search just finished anywhere in the app — refresh the recent list so the drawer reflects it
+    // without a reload. Guarded to this user; ignores other users' fan-out signals.
+    private void OnCompleted(string userId, int jobId, string status, string? resultJson, string? resultType, string? error)
+    {
+        if (userId != _userId) return;
+        InvokeAsync(async () =>
+        {
+            await LoadRecentAsync();
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose() => Notifier.Completed -= OnCompleted;
+}
