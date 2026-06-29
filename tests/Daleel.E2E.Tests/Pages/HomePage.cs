@@ -20,16 +20,18 @@ public sealed class HomePage : PageObject
     public ILocator SearchInput => Page.Locator(".mud-input-control textarea, .mud-input-control input[type='text']").Last;
     public ILocator SendButton => Page.Locator("button[aria-label*='end' i], .mud-icon-button").Last;
 
-    // SearchProgress component hooks.
+    // SearchProgress component hooks. A single always-visible vertical stepper (.daleel-stepper-v),
+    // whose discrete stages are .daleel-step-v rows — no text feed, nothing behind an expander.
     public ILocator ProgressPulse => Page.Locator(".daleel-status-pulse");
-    public ILocator Stepper => Page.Locator(".daleel-stepper");
-    public ILocator Steps => Page.Locator(".daleel-step");
+    public ILocator Stepper => Page.Locator(".daleel-stepper-v");
+    public ILocator Steps => Page.Locator(".daleel-step-v");
     public ILocator ProgressBar => Page.Locator(".mud-progress-linear").First;
     public ILocator CancelButton => Page.GetByRole(AriaRole.Button, new() { Name = "Cancel" });
 
     // Results.
     public ILocator ResultCards => Page.Locator(".mud-card");
-    public ILocator RecentSidebar => Page.GetByText("Recent");
+    // Recent searches now live in the left-nav "Recent" submenu, not on the page.
+    public ILocator RecentNav => Page.GetByText("Recent");
 
     /// <summary>Types a query into the chat box and submits it with Enter.</summary>
     public async Task SearchAsync(string query)

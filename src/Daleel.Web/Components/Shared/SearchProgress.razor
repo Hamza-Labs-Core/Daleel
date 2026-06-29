@@ -1,12 +1,12 @@
-@* Polished, animated search-progress UI. Renders a horizontal stepper that tracks the Elsa search
-   workflow stage-by-stage, a proportional progress bar, and a live activity feed of localized
-   status lines. Driven entirely by the encoded progress strings streamed from SearchPipelineState —
-   each message decodes into a SearchProgressSignal (step + localization key + args); anything that
-   isn't an encoded signal is shown as a plain feed line. See SearchProgressSignal.
-
-   Layout is responsive: at ≥ sm widths the full horizontal stepper is shown; on phones it collapses
-   to a prominent current-stage header plus a tap-to-expand "N of M complete" step list, so the
-   eight stages never get crushed into an unreadable row. *@
+@* Polished, animated search-progress UI. ONE always-visible vertical stepper that tracks the Elsa
+   search workflow stage-by-stage, with a proportional bar and a *live detail line* under each stage.
+   Driven entirely by the encoded progress strings streamed from the pipeline — each message decodes
+   into a SearchProgressSignal (step + localization key + args) and is localized in the viewer's
+   culture. The latest message for a stage becomes that stage's detail line, so instead of a generic
+   "Verifying stores" the user sees the real thing happening now: "Looking up Amazon…", "Finding brand
+   site for Apple…", "Comparing prices across 5 stores for Galaxy S24…". There is no separate text feed
+   and nothing is hidden behind an expander — the stepper itself is the live narrative. See
+   SearchProgressSignal. *@
 @inject IStringLocalizer<SharedResource> L
 
 <MudPaper Class="pa-3 pa-sm-4 mb-3 daleel-card daleel-progress" Outlined="true" Elevation="0" aria-live="polite">
@@ -41,92 +41,46 @@
                        Class="daleel-progress-bar mb-3" Style="height:6px;"
                        aria-label="@L["Progress.StepCount", _current + 1, Steps.Length]" />
 
-    @* ── Desktop / tablet: full horizontal stepper ─────────────────────────────────── *@
-    <div class="daleel-stepper daleel-stepper-wide" role="list">
+    @* ── Always-visible vertical stepper: every stage, with its live detail line ─────── *@
+    <div class="daleel-stepper-v" role="list">
         @for (var i = 0; i < Steps.Length; i++)
         {
-            // Capture the step into a per-iteration local. `i` is a single shared loop variable, so any
-            // RenderFragment (e.g. a component's child content) that closes over it would read i ==
-            // Steps.Length after the loop ends and throw IndexOutOfRangeException. `step` is safe to capture.
+            // Capture per-iteration locals. `i` is a single shared loop variable, so any RenderFragment
+            // (e.g. a component's child content) closing over it would read i == Steps.Length after the
+            // loop and throw IndexOutOfRangeException. These locals are safe to capture.
             var step = Steps[i];
             var state = StateOf(i);
-            <div class="daleel-step @state" role="listitem" title="@L[step.LabelKey]">
+            var detail = _detail[i];
+            var showSpinner = state == "active" && Active;
+            <div class="daleel-step-row daleel-step-v @state" role="listitem">
                 <div class="daleel-step-icon">
                     @if (state == "done")
                     {
                         <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="daleel-step-check" />
+                    }
+                    else if (showSpinner)
+                    {
+                        <MudProgressCircular Indeterminate="true" Size="Size.Small" Color="Color.Primary"
+                                             Style="width:18px;height:18px;" />
                     }
                     else
                     {
                         <MudIcon Icon="@step.Icon" Size="Size.Small" />
                     }
                 </div>
-                <div class="daleel-step-label">@L[step.LabelKey]</div>
+                <div class="daleel-step-v-body">
+                    <MudText Typo="Typo.body2" Class="daleel-step-row-label">@L[step.LabelKey]</MudText>
+                    @* The live detail line — the most recent real event for this stage. Shown when we have
+                       one; the active stage's line carries the dir of its (possibly Arabic) subject. *@
+                    @if (!string.IsNullOrWhiteSpace(detail))
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary"
+                                 Class="daleel-step-detail" dir="@Catalog.Dir(detail!)">@detail</MudText>
+                    }
+                </div>
             </div>
         }
     </div>
-
-    @* ── Phone: compact "N of M complete" summary that expands into a vertical step list ── *@
-    <div class="daleel-stepper-compact">
-        <div class="daleel-compact-summary" @onclick="ToggleExpanded" role="button" tabindex="0"
-             aria-expanded="@(_expanded ? "true" : "false")" @onkeydown="OnSummaryKey">
-            <MudIcon Icon="@Icons.Material.Filled.Checklist" Size="Size.Small" Class="me-2" Color="Color.Primary" />
-            <MudText Typo="Typo.body2" Class="daleel-compact-count">
-                @L["Progress.StepsComplete", _completed, Steps.Length]
-            </MudText>
-            <MudSpacer />
-            <MudIcon Icon="@Icons.Material.Filled.ExpandMore" Size="Size.Small"
-                     Class="@($"daleel-compact-chevron {(_expanded ? "expanded" : "")}")" />
-        </div>
-
-        <MudCollapse Expanded="_expanded">
-            <div class="daleel-step-list" role="list">
-                @for (var i = 0; i < Steps.Length; i++)
-                {
-                    // Same loop-variable capture guard as the wide stepper — and it actually matters here:
-                    // the label lives in <MudText>, a component whose child content is a RenderFragment
-                    // invoked after the loop, so closing over `i` directly would index Steps out of bounds.
-                    var step = Steps[i];
-                    var state = StateOf(i);
-                    <div class="daleel-step-row @state" role="listitem">
-                        <div class="daleel-step-icon">
-                            @if (state == "done")
-                            {
-                                <MudIcon Icon="@Icons.Material.Filled.Check" Size="Size.Small" Class="daleel-step-check" />
-                            }
-                            else
-                            {
-                                <MudIcon Icon="@step.Icon" Size="Size.Small" />
-                            }
-                        </div>
-                        <MudText Typo="Typo.body2" Class="daleel-step-row-label">@L[step.LabelKey]</MudText>
-                    </div>
-                }
-            </div>
-        </MudCollapse>
-    </div>
-
-    @* ── Live activity feed (newest at the bottom) ─────────────────────────────── *@
-    @if (_feed.Count > 0)
-    {
-        <MudTimeline TimelinePosition="TimelinePosition.Start" TimelineOrientation="TimelineOrientation.Vertical"
-                     Class="daleel-feed mt-3">
-            @foreach (var line in _feed)
-            {
-                @* Key by the stable stream id (not the text) so a brand-new line animates in while the
-                   existing lines keep their elements — and duplicate texts never collide on a key. *@
-                <MudTimelineItem @key="line.Id" Size="Size.Small"
-                                 Color="@(line.IsLast ? Color.Primary : Color.Default)"
-                                 Variant="@(line.IsLast ? Variant.Filled : Variant.Outlined)">
-                    <MudText Typo="Typo.body2"
-                             Color="@(line.IsLast ? Color.Default : Color.Secondary)"
-                             dir="@Catalog.Dir(line.Text)">
-                        <span class="daleel-feed-line">@line.Text</span>
-                    </MudText>
-                </MudTimelineItem>
-            }
-        </MudTimeline>
-    }
 </MudPaper>
 
 @code {
@@ -139,17 +93,11 @@
     /// <summary>Invoked when the user hits Cancel. When unset, the Cancel button is hidden.</summary>
     [Parameter] public EventCallback OnCancel { get; set; }
 
-    // How many recent lines to keep in the live feed — enough to show momentum, not a wall of text.
-    private const int FeedWindow = 5;
-
     private int _current;       // index into Steps of the furthest stage reached
     private int _percent;       // progress-bar fill (0–100)
-    private int _completed;     // count of fully-completed steps (for the compact mobile summary)
-    private bool _expanded;     // mobile: is the full step list expanded? (pure view state)
-    private readonly List<FeedLine> _feed = new();
-
-    // Id is the line's stable position in the full message stream, used as the @key.
-    private readonly record struct FeedLine(int Id, string Text, bool IsLast);
+    // The latest localized detail line per stage, e.g. _detail[FindingStores] = "Looking up Amazon…".
+    // Null/empty for stages that haven't reported anything specific yet.
+    private string?[] _detail = Array.Empty<string?>();
 
     // Stepper definition. The order matches the pipeline's real execution order, so the stepper only
     // ever moves forward. Icons/labels follow the product spec.
@@ -172,58 +120,31 @@
     private string StateOf(int i)
         => !Active || i < _current ? "done" : i == _current ? "active" : "pending";
 
-    private void ToggleExpanded() => _expanded = !_expanded;
-
-    // Keep the summary keyboard-operable (it's a div-as-button): Enter/Space toggle, like a real button.
-    private void OnSummaryKey(KeyboardEventArgs e)
-    {
-        if (e.Key is "Enter" or " " or "Spacebar")
-        {
-            ToggleExpanded();
-        }
-    }
-
-    // Recompute step + feed from the message list on every render trigger. Cheap (≤ a few dozen lines)
-    // and keeps this component a pure projection of its inputs — no event wiring of its own.
+    // Recompute step + per-stage detail from the message list on every render trigger. Cheap (≤ a few
+    // dozen lines) and keeps this component a pure projection of its inputs — no event wiring of its own.
     protected override void OnParametersSet()
     {
         var reached = 0;
-        _feed.Clear();
-        var lines = new List<(int Id, string Text)>();
+        var detail = new string?[Steps.Length];
 
-        // The message index is a stable, monotonic id for each line in the stream.
-        for (var id = 0; id < Messages.Count; id++)
+        foreach (var msg in Messages)
         {
-            var msg = Messages[id];
-            string text;
             if (SearchProgressSignal.TryDecode(msg, out var sig))
             {
-                reached = Math.Max(reached, (int)sig.Step);
-                text = Localize(sig);
+                var stepIndex = Math.Clamp((int)sig.Step, 0, Steps.Length - 1);
+                reached = Math.Max(reached, stepIndex);
+                var text = Localize(sig);
+                // Latest message for a stage wins — that's the real-time "what's happening now" line.
+                if (!string.IsNullOrWhiteSpace(text)) detail[stepIndex] = text;
             }
-            else
-            {
-                // A plain (non-encoded) line — the agent's own diagnostics. Show it as-is, no step move.
-                text = msg;
-            }
-
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                lines.Add((id, text));
-            }
+            // Plain (non-encoded) lines are the agent's own diagnostics; they don't belong to a stage and
+            // are no longer surfaced — the stepper's per-stage detail is the user-facing narrative.
         }
 
+        _detail = detail;
         _current = Math.Clamp(reached, 0, Steps.Length - 1);
         // +1 so the very first stage already shows a sliver of fill; Done lands on a full bar.
         _percent = (int)Math.Round((_current + 1) / (double)Steps.Length * 100);
-        // Completed = stages strictly behind the current one while running; all of them once settled.
-        _completed = Active ? _current : Steps.Length;
-
-        var start = Math.Max(0, lines.Count - FeedWindow);
-        for (var i = start; i < lines.Count; i++)
-        {
-            _feed.Add(new FeedLine(lines[i].Id, lines[i].Text, IsLast: i == lines.Count - 1));
-        }
     }
 
     // Resolve a signal's text in the viewer's culture. An arg of the form "$Resource.Key" is itself a

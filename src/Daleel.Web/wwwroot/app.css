@@ -602,6 +602,46 @@ html, body {
 }
 .daleel-step-row.done .daleel-step-row-label { color: var(--mud-palette-text-primary, #424242); }
 
+/* ── Always-visible vertical stepper with a live detail line under each stage ──
+   One tracker, never hidden behind an expander. Each row reuses the .daleel-step-row icon/label
+   state styling above and adds a connector down the icon gutter plus a per-stage detail subline. */
+.daleel-stepper-v { padding: 2px 2px 0; }
+.daleel-step-v {
+    align-items: flex-start;
+    position: relative;
+    gap: 12px;
+    padding: 6px 0;
+}
+/* Connector line down the icon gutter, linking each stage to the next; brand-coloured once done. */
+.daleel-step-v::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: 14px;   /* ≈ centre of the 30px icon */
+    top: 34px;
+    bottom: -6px;
+    width: 2px;
+    background: var(--mud-palette-lines-default, #e0e0e0);
+    transition: background-color .4s ease;
+    z-index: 0;
+}
+.daleel-step-v:last-child::before { display: none; }
+.daleel-step-v.done::before { background: var(--mud-palette-primary, #594ae2); }
+.daleel-step-v .daleel-step-icon { z-index: 1; }
+.daleel-step-v-body {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    padding-top: 3px;
+}
+.daleel-step-detail {
+    margin-top: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    animation: log-in .28s ease both;
+}
+.daleel-step-v.pending .daleel-step-row-label { color: var(--mud-palette-text-disabled, #b0b0b0); }
+
 /* ── Mobile: swap the horizontal stepper for the compact list ── */
 @media (max-width: 600px) {
     .daleel-stepper-wide { display: none; }
@@ -617,7 +657,7 @@ html, body {
     .daleel-step.active .daleel-step-icon,
     .daleel-step-row.active .daleel-step-icon,
     .daleel-step-check,
-    .daleel-feed-line,
+    .daleel-step-detail,
     .daleel-results-reveal > * {
         animation: none;
         opacity: 1;
