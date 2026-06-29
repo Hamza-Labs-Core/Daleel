@@ -16,9 +16,9 @@ namespace Daleel.Web.Pipeline.SubWorkflows;
 
 /// <summary>Step 1 — find the brand's saved profile (its local site + reputation), DB-first.</summary>
 [Activity("Daleel", "Brand", "Search the brand's local site: serve the saved profile when fresh")]
-public sealed class SearchBrandSiteActivity : CodeActivity
+public sealed class SearchBrandSiteActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -45,9 +45,9 @@ public sealed class SearchBrandSiteActivity : CodeActivity
 
 /// <summary>Step 2 — scrape the brand's catalogue (models, specs, images) via Context.dev.</summary>
 [Activity("Daleel", "Brand", "Scrape the brand catalogue + synthesize a reputation profile via Context.dev")]
-public sealed class ScrapeBrandCatalogActivity : CodeActivity
+public sealed class ScrapeBrandCatalogActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -84,9 +84,9 @@ public sealed class ScrapeBrandCatalogActivity : CodeActivity
 
 /// <summary>Step 3 — fold the synthesized 0–10 profile onto the UI's 1–5 reputation shape.</summary>
 [Activity("Daleel", "Brand", "Synthesize: map the researched profile onto the brand's reputation")]
-public sealed class SynthesizeBrandProfileActivity : CodeActivity
+public sealed class SynthesizeBrandProfileActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -123,9 +123,9 @@ public sealed class SynthesizeBrandProfileActivity : CodeActivity
 
 /// <summary>Step 4 — persist a freshly-researched profile so the next search reuses it.</summary>
 [Activity("Daleel", "Brand", "Save the brand profile to the database")]
-public sealed class SaveBrandProfileActivity : CodeActivity
+public sealed class SaveBrandProfileActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -166,9 +166,9 @@ public sealed class SaveBrandProfileActivity : CodeActivity
 /// images are source URLs, never re-hosted — and removes that whole failure mode.
 /// </summary>
 [Activity("Daleel", "Brand", "Locate the brand logo and keep its source URL (no R2 upload)")]
-public sealed class DownloadBrandImagesActivity : CodeActivity
+public sealed class DownloadBrandImagesActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<BrandResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();

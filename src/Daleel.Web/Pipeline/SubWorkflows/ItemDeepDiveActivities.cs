@@ -21,7 +21,7 @@ namespace Daleel.Web.Pipeline.SubWorkflows;
 
 /// <summary>Step 1 — find and scrape this item's detail page for specs (DB-first reuse).</summary>
 [Activity("Daleel", "Item", "Scrape product pages: reuse a saved deep-dive or fetch official specs")]
-public sealed class ScrapeProductPagesActivity : CodeActivity
+public sealed class ScrapeProductPagesActivity : CancellableActivity
 {
     /// <summary>An item with fewer than this many specs is "thin" and worth a scrape.</summary>
     private const int ThinSpecThreshold = 3;
@@ -29,7 +29,7 @@ public sealed class ScrapeProductPagesActivity : CodeActivity
     /// <summary>Cap on a saved detail blob (entity column is 8000).</summary>
     private const int MaxDetailChars = 4000;
 
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -82,9 +82,9 @@ public sealed class ScrapeProductPagesActivity : CodeActivity
 
 /// <summary>Step 2 — merge the scraped/reused spec markdown into the item's specs.</summary>
 [Activity("Daleel", "Item", "Extract specs: fold the scraped detail into the model's specs")]
-public sealed class ExtractSpecsActivity : CodeActivity
+public sealed class ExtractSpecsActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         if (string.IsNullOrWhiteSpace(state.Details))
@@ -104,9 +104,9 @@ public sealed class ExtractSpecsActivity : CodeActivity
 /// (the offers were aggregated upstream — this is the durable record of that comparison, not a new crawl).
 /// </summary>
 [Activity("Daleel", "Item", "Compare prices: aggregate the item's offers across stores")]
-public sealed class ComparePricesActivity : CodeActivity
+public sealed class ComparePricesActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -184,9 +184,9 @@ public sealed class ComparePricesActivity : CodeActivity
 
 /// <summary>Step 4 — record the user reviews/ratings already gathered for this item.</summary>
 [Activity("Daleel", "Item", "Collect reviews: record the item's gathered reviews and ratings")]
-public sealed class CollectReviewsActivity : CodeActivity
+public sealed class CollectReviewsActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var social = state.Result.BrandReputation?.Social;
@@ -213,9 +213,9 @@ public sealed class CollectReviewsActivity : CodeActivity
 /// "not yet available" placeholder despite the deep-dive having enriched it in-memory.
 /// </summary>
 [Activity("Daleel", "Item", "Save the enriched item profile to the database")]
-public sealed class SaveItemProfileActivity : CodeActivity
+public sealed class SaveItemProfileActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -281,9 +281,9 @@ public sealed class SaveItemProfileActivity : CodeActivity
 /// unidentified item simply continues with its as-extracted specs.
 /// </summary>
 [Activity("Daleel", "Item", "Identify product: text/vision match against the brand-model database")]
-public sealed class IdentifyProductActivity : CodeActivity
+public sealed class IdentifyProductActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -326,9 +326,9 @@ public sealed class IdentifyProductActivity : CodeActivity
 /// DB only ever stores R2 URLs, never the raw blobs.
 /// </summary>
 [Activity("Daleel", "Item", "Save raw specs: route each source's specs + image to its R2 bucket")]
-public sealed class SaveRawSpecsActivity : CodeActivity
+public sealed class SaveRawSpecsActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var r2 = context.GetRequiredService<IR2StorageService>();
@@ -399,9 +399,9 @@ public sealed class SaveRawSpecsActivity : CodeActivity
 /// against the category schema. Folds the clean sheet onto the result, replacing any raw dump.
 /// </summary>
 [Activity("Daleel", "Item", "Merge & clean specs: dedupe, normalize units, resolve conflicts")]
-public sealed class MergeAndCleanSpecsActivity : CodeActivity
+public sealed class MergeAndCleanSpecsActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -440,12 +440,12 @@ public sealed class MergeAndCleanSpecsActivity : CodeActivity
 /// raw data never reaches the UI.
 /// </summary>
 [Activity("Daleel", "Item", "Save final specs: canonical sheet to DB + R2 (final-specs/)")]
-public sealed class SaveFinalSpecsActivity : CodeActivity
+public sealed class SaveFinalSpecsActivity : CancellableActivity
 {
     /// <summary>The BrandModel.FinalSpecsJson column cap (mirrors the entity configuration).</summary>
     private const int MaxFinalSpecsChars = 8000;
 
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var services = context.GetRequiredService<SubWorkflowServices>();

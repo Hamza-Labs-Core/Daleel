@@ -13,7 +13,7 @@ namespace Daleel.Web.Pipeline.SubWorkflows;
 /// reads the finished <c>Result</c> + <c>Events</c> back off the instance after the child workflow
 /// completes and merges the events into the parent run's buffer.
 /// </summary>
-public abstract class SubWorkflowState
+public abstract class SubWorkflowState : ISearchScopedState
 {
     /// <summary>Market key (e.g. "jordan") the parent search resolved.</summary>
     public string Geo { get; set; } = "jordan";

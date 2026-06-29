@@ -17,9 +17,9 @@ namespace Daleel.Web.Pipeline.SubWorkflows;
 
 /// <summary>Step 1 — scrape the store's site for listings/contact, DB-first.</summary>
 [Activity("Daleel", "Store", "Scrape the store site: serve the saved profile when fresh, else research")]
-public sealed class ScrapeStoreSiteActivity : CodeActivity
+public sealed class ScrapeStoreSiteActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -72,9 +72,9 @@ public sealed class ScrapeStoreSiteActivity : CodeActivity
 
 /// <summary>Step 2 — cross-reference Google Maps for verified location, rating and review count.</summary>
 [Activity("Daleel", "Store", "Verify on Google Maps: fold in verified rating, reviews and coordinates")]
-public sealed class VerifyOnMapsActivity : CodeActivity
+public sealed class VerifyOnMapsActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -106,9 +106,9 @@ public sealed class VerifyOnMapsActivity : CodeActivity
 
 /// <summary>Step 3 — fold the store's contact details (phone, address) onto the result.</summary>
 [Activity("Daleel", "Store", "Extract contact info: phone and address from the verified profile")]
-public sealed class ExtractContactInfoActivity : CodeActivity
+public sealed class ExtractContactInfoActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
         if (state.Saved is not { } saved)
@@ -128,9 +128,9 @@ public sealed class ExtractContactInfoActivity : CodeActivity
 
 /// <summary>Step 4 — persist the verified store profile and finalize its website link.</summary>
 [Activity("Daleel", "Store", "Save the verified store profile to the database")]
-public sealed class SaveStoreProfileActivity : CodeActivity
+public sealed class SaveStoreProfileActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -181,12 +181,12 @@ public sealed class SaveStoreProfileActivity : CodeActivity
 /// this store". Records how many priced products were found.
 /// </summary>
 [Activity("Daleel", "Store", "Scrape prices: harvest the store's catalogue prices via Context.dev")]
-public sealed class ScrapePricesActivity : CodeActivity
+public sealed class ScrapePricesActivity : CancellableActivity
 {
     /// <summary>Catalogue products harvested per store — bounded so one store can't flood the run.</summary>
     private const int MaxProducts = 12;
 
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();

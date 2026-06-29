@@ -3,6 +3,8 @@ using System.Text.Json;
 using Daleel.Agent;
 using Daleel.Core.Caching;
 using Daleel.Core.Llm;
+using Daleel.Web.Conversation;
+using Daleel.Web.Data;
 using Daleel.Web.Pipeline;
 using Daleel.Web.Profiles;
 using Elsa.EntityFrameworkCore.Extensions;
@@ -95,6 +97,66 @@ public class WorkflowInstancePersistenceTests
         summary!.Query.Should().Be("tell me about tea");
         summary.Geo.Should().Be("jordan");
         summary.ResultType.Should().Be("ask");
+    }
+
+    [Fact]
+    public async Task CancelRequestedFlag_ShortCircuitsTheWorkflow_BeforeTheFirstStepRuns()
+    {
+        // Proves the structural guarantee: because every activity inherits CancellableActivity, the very
+        // first step's base-class check sees the durable CancelRequested flag and throws — the workflow
+        // never reaches any activity body, with no per-activity opt-in required.
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddDbContext<DaleelDbContext>(o => o.UseNpgsql(_connectionString), ServiceLifetime.Transient);
+        services.AddElsa(elsa => elsa.AddActivitiesFrom<SearchWorkflow>());
+        services.AddScoped<SearchPipelineState>();
+        services.AddScoped<SearchPipelineServices>();
+        services.AddSingleton<ICacheStore, InMemoryCache>();
+        services.AddSingleton(new ProfileOptions());
+        services.AddSingleton<ISearchJobQueue, SearchJobQueue>();
+        using var provider = services.BuildServiceProvider();
+
+        // Build the app schema and seed a job that's already been cancelled.
+        int jobId;
+        await using (var db = provider.GetRequiredService<DaleelDbContext>())
+        {
+            await db.Database.EnsureCreatedAsync();
+            var job = new SearchJob
+            {
+                UserId = "u1", Query = "tea", Status = JobStatus.Running, CancelRequested = true,
+                CreatedAt = DateTimeOffset.UtcNow, StartedAt = DateTimeOffset.UtcNow
+            };
+            db.SearchJobs.Add(job);
+            await db.SaveChangesAsync();
+            jobId = job.Id;
+        }
+
+        using var scope = provider.CreateScope();
+        var state = scope.ServiceProvider.GetRequiredService<SearchPipelineState>();
+        var pipeServices = scope.ServiceProvider.GetRequiredService<SearchPipelineServices>();
+        // The agent must never be called: if the guard fails to fire, ParseQuery would invoke it.
+        pipeServices.Agent = new AgentService(new ThrowingLlm(), new AgentOptions { DefaultGeo = "jordan" });
+        state.Query = "tell me about tea";
+        state.Geo = "jordan";
+        state.ResultKey = "k1";
+        state.SearchId = jobId.ToString();
+        state.StartedAt = DateTimeOffset.UtcNow;
+
+        var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
+        var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: default);
+
+        // The run did not finish, and the first activity's body never ran (Strategy is still null — the
+        // planner was never invoked, which is also why the ThrowingLlm never threw).
+        run.WorkflowState.SubStatus.Should().NotBe(WorkflowSubStatus.Finished);
+        state.Strategy.Should().BeNull();
+    }
+
+    private sealed class ThrowingLlm : ILlmClient
+    {
+        public string Provider => "throwing";
+        public Task<LlmResponse> CompleteAsync(
+            string systemPrompt, IReadOnlyList<LlmMessage> messages, CancellationToken ct = default) =>
+            throw new InvalidOperationException("The agent must not be called once a search is cancelled.");
     }
 
     private sealed class FixedLlm : ILlmClient

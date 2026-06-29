@@ -23,13 +23,12 @@ namespace Daleel.Web.Pipeline;
 
 /// <summary>Step 1 — normalize the query: resolve the market and run the LLM planner into a strategy.</summary>
 [Activity("Daleel", "Search", "Plan: resolve market + expand the query into a bilingual search strategy")]
-public sealed class ParseQueryActivity : CodeActivity
+public sealed class ParseQueryActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
-        CancellationGuard.ThrowIfCancelRequested(context);
         services.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
         // The query itself is the strongest market signal ("AC in Dubai" → UAE), so it overrides the
         // stored/auto-detected default. Fall back to the request's geo when the query names no market.
@@ -63,9 +62,9 @@ public sealed class ParseQueryActivity : CodeActivity
 
 /// <summary>Step 2 — replay a stored report for an identical recent search, short-circuiting the rest.</summary>
 [Activity("Daleel", "Search", "Check the result cache and short-circuit on a hit")]
-public sealed class CheckCacheActivity : CodeActivity
+public sealed class CheckCacheActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -173,9 +172,9 @@ public sealed class CheckCacheActivity : CodeActivity
 /// (schema-aware) and onto the final result. No-ops on a cache hit or a non-product query.
 /// </summary>
 [Activity("Daleel", "Search", "Analyze the category: product type, relevant stores, expected brands, comparison specs")]
-public sealed class AnalyzeMarketActivity : CodeActivity
+public sealed class AnalyzeMarketActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -184,7 +183,6 @@ public sealed class AnalyzeMarketActivity : CodeActivity
             return;
         }
 
-        CancellationGuard.ThrowIfCancelRequested(context);
         var category = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
         // "Analyzing AC market requirements…" — surface the up-front reasoning to the user.
         services.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
@@ -235,9 +233,9 @@ public sealed class AnalyzeMarketActivity : CodeActivity
 
 /// <summary>Step 3 — fan out to every configured provider in parallel (web/shopping/places/social/scrape).</summary>
 [Activity("Daleel", "Search", "Gather sources: run the strategy across all providers in parallel")]
-public sealed class GatherSourcesActivity : CodeActivity
+public sealed class GatherSourcesActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -246,7 +244,6 @@ public sealed class GatherSourcesActivity : CodeActivity
             return;
         }
 
-        CancellationGuard.ThrowIfCancelRequested(context);
         services.Report(SearchStep.SearchingWeb, "Progress.Msg.Expanding");
         state.Bundle = await services.Agent.GatherAsync(state.Strategy, state.GeoProfile, context.CancellationToken);
 
@@ -258,9 +255,9 @@ public sealed class GatherSourcesActivity : CodeActivity
 
 /// <summary>Step 4 — the LLM structured pass: analyst summary plus product extraction for product queries.</summary>
 [Activity("Daleel", "Search", "Extract products: LLM analyst summary + structured product projection")]
-public sealed class ExtractProductsActivity : CodeActivity
+public sealed class ExtractProductsActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -269,7 +266,6 @@ public sealed class ExtractProductsActivity : CodeActivity
             return;
         }
 
-        CancellationGuard.ThrowIfCancelRequested(context);
         services.Report(SearchStep.ExtractingProducts, "Progress.Msg.Reading", state.Bundle.Sources.Count);
         var system = state.IsProductQuery ? PromptTemplates.ProductAnalystSystem : null;
         state.Summary = await services.Agent.AnalyzeAsync(
@@ -341,12 +337,12 @@ public sealed class ExtractProductsActivity : CodeActivity
 
 /// <summary>Step 5 — research every found brand in parallel (one <see cref="BrandResearchWorkflow"/> each).</summary>
 [Activity("Daleel", "Search", "Dispatch a brand-research sub-workflow per brand, in parallel")]
-public sealed class DispatchBrandWorkflowsActivity : CodeActivity
+public sealed class DispatchBrandWorkflowsActivity : CancellableActivity
 {
     /// <summary>Cap so a brand-heavy query can't fan out into unbounded research cost.</summary>
     private const int MaxBrands = 15;
 
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -355,7 +351,6 @@ public sealed class DispatchBrandWorkflowsActivity : CodeActivity
             return;
         }
 
-        CancellationGuard.ThrowIfCancelRequested(context);
         var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
         var dispatched = products.Brands.Take(MaxBrands).ToList();
         var rest = products.Brands.Skip(MaxBrands).ToList();
@@ -394,12 +389,12 @@ public sealed class DispatchBrandWorkflowsActivity : CodeActivity
 
 /// <summary>Step 6 — research every found store in parallel (one <see cref="StoreResearchWorkflow"/> each).</summary>
 [Activity("Daleel", "Search", "Dispatch a store-research sub-workflow per store, in parallel")]
-public sealed class DispatchStoreWorkflowsActivity : CodeActivity
+public sealed class DispatchStoreWorkflowsActivity : CancellableActivity
 {
     /// <summary>Cap so a store-heavy query can't fan out into unbounded research cost.</summary>
     private const int MaxStores = 10;
 
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -408,7 +403,6 @@ public sealed class DispatchStoreWorkflowsActivity : CodeActivity
             return;
         }
 
-        CancellationGuard.ThrowIfCancelRequested(context);
         var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
         var dispatched = products.Stores.Take(MaxStores).ToList();
         var rest = products.Stores.Skip(MaxStores).ToList();
@@ -447,12 +441,12 @@ public sealed class DispatchStoreWorkflowsActivity : CodeActivity
 
 /// <summary>Step 7 — deep-dive every found product/model in parallel (one <see cref="ItemDeepDiveWorkflow"/> each).</summary>
 [Activity("Daleel", "Search", "Dispatch an item deep-dive sub-workflow per product/model, in parallel")]
-public sealed class DispatchItemWorkflowsActivity : CodeActivity
+public sealed class DispatchItemWorkflowsActivity : CancellableActivity
 {
     /// <summary>Cap so a model-heavy query can't fan out into unbounded scrape cost.</summary>
     private const int MaxItems = 20;
 
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -461,7 +455,6 @@ public sealed class DispatchItemWorkflowsActivity : CodeActivity
             return;
         }
 
-        CancellationGuard.ThrowIfCancelRequested(context);
         var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
         var dispatched = products.Models.Take(MaxItems).ToList();
         var rest = products.Models.Skip(MaxItems).ToList();
@@ -497,9 +490,9 @@ public sealed class DispatchItemWorkflowsActivity : CodeActivity
 
 /// <summary>Step 8 — assemble the final answer object from the summary, bundle and (enriched) products.</summary>
 [Activity("Daleel", "Search", "Aggregate: assemble the final ranked answer + result count")]
-public sealed class AggregateResultsActivity : CodeActivity
+public sealed class AggregateResultsActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -532,9 +525,9 @@ public sealed class AggregateResultsActivity : CodeActivity
 
 /// <summary>Step 9 — record the halal-filter outcome (filtering itself happens at the gather chokepoint).</summary>
 [Activity("Daleel", "Search", "Moderate: record the halal content-filter audit outcome")]
-public sealed class ModerateContentActivity : CodeActivity
+public sealed class ModerateContentActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -555,9 +548,9 @@ public sealed class ModerateContentActivity : CodeActivity
 
 /// <summary>Step 10 — serialize the report and store it under the result key for the next identical search.</summary>
 [Activity("Daleel", "Search", "Cache: serialize + persist the completed report")]
-public sealed class CacheResultsActivity : CodeActivity
+public sealed class CacheResultsActivity : CancellableActivity
 {
-    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
@@ -612,9 +605,9 @@ public sealed class CacheResultsActivity : CodeActivity
 
 /// <summary>Step 11 — terminal marker; outputs are already on the state (cache hit or fresh run).</summary>
 [Activity("Daleel", "Search", "Return: finalize and surface the result")]
-public sealed class ReturnResultsActivity : CodeActivity
+public sealed class ReturnResultsActivity : CancellableActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();

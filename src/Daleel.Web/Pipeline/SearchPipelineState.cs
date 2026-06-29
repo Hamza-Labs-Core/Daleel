@@ -27,7 +27,7 @@ namespace Daleel.Web.Pipeline;
 /// mid-run suspend/resume.
 /// </para>
 /// </remarks>
-public sealed class SearchPipelineState
+public sealed class SearchPipelineState : ISearchScopedState
 {
     // ── Inputs (seeded before the run) ───────────────────────────────────────────
     public string Query { get; set; } = string.Empty;
