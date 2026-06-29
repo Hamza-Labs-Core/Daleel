@@ -431,7 +431,15 @@
         if (userId != _userId || jobId != _jobId) return;
         InvokeAsync(async () =>
         {
-            _status = status == "completed" ? "completed" : "error";
+            // Map the broadcast status to a UI state. "cancelled" is distinct from a hard error so a tab
+            // that didn't initiate the cancel (a second device, or a sweep-forced cancel) shows the
+            // cancelled notice rather than the generic "no results" error panel.
+            _status = status switch
+            {
+                "completed" => "completed",
+                "cancelled" => "cancelled",
+                _ => "error"
+            };
             _error = error;
             _answer = status == "completed" && resultJson is not null
                 ? ResultSerialization.Deserialize<AgentAnswer>(resultJson)

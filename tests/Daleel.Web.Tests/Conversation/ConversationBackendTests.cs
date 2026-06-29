@@ -202,6 +202,96 @@ public class ConversationBackendTests : IDisposable
         (await db.SearchJobs.SingleAsync()).Status.Should().Be(JobStatus.Completed);
     }
 
+    private JobReconciliationService Reconciler() => new(
+        _provider.GetRequiredService<IServiceScopeFactory>(), Queue, _broadcaster,
+        NullLogger<JobReconciliationService>.Instance);
+
+    [Fact]
+    public async Task Cancel_QueuedJob_SetsFlagAndMarksCancelled()
+    {
+        var jobId = await SeedJobAsync("u1"); // seeded as Queued, never registered as running
+
+        await using (var db = NewDb())
+        {
+            var ok = await new ConversationService(db, new QuotaService(db), Queue).CancelAsync("u1", jobId);
+            ok.Should().BeTrue();
+        }
+
+        await using var check = NewDb();
+        var job = await check.SearchJobs.FindAsync(jobId);
+        job!.CancelRequested.Should().BeTrue();           // durable source of truth set
+        job.Status.Should().Be(JobStatus.Cancelled);      // queued ⇒ marked cancelled outright
+        job.CompletedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void Queue_RequestCancel_FlagsOnlyRunningJobs_AndClearsOnUnregister()
+    {
+        var q = new SearchJobQueue();
+
+        // Not running: cancel is a no-op and no cooperative flag is left behind (so it can't leak).
+        q.RequestCancel(5).Should().BeFalse();
+        q.IsCancelRequested(5).Should().BeFalse();
+
+        using var cts = new CancellationTokenSource();
+        q.Register(5, cts);
+        q.RequestCancel(5).Should().BeTrue();
+        q.IsCancelRequested(5).Should().BeTrue();
+        cts.IsCancellationRequested.Should().BeTrue();    // token signalled too
+
+        q.Unregister(5);
+        q.IsCancelRequested(5).Should().BeFalse();        // flag cleared with the registration
+    }
+
+    [Fact]
+    public async Task Sweep_ForceCancels_CancelRequestedRunningJob()
+    {
+        var now = DateTimeOffset.UtcNow;
+        int jobId;
+        await using (var seed = NewDb())
+        {
+            var job = new SearchJob { UserId = "u1", Query = "x", Status = JobStatus.Running, CancelRequested = true, CreatedAt = now, StartedAt = now };
+            seed.SearchJobs.Add(job);
+            seed.UserConversations.Add(new UserConversation { UserId = "u1", CurrentStatus = "running", CurrentJobId = 0, StartedAt = now });
+            await seed.SaveChangesAsync();
+            jobId = job.Id;
+        }
+
+        await Reconciler().SweepAsync(CancellationToken.None);
+
+        await using var check = NewDb();
+        var swept = await check.SearchJobs.FindAsync(jobId);
+        swept!.Status.Should().Be(JobStatus.Cancelled);
+        swept.CompletedAt.Should().NotBeNull();
+        (await check.UserConversations.FindAsync("u1"))!.CurrentStatus.Should().Be("cancelled");
+        _broadcaster.Completed.Should().Contain(c => c.JobId == jobId && c.Status == JobStatus.Cancelled);
+    }
+
+    [Fact]
+    public async Task Sweep_Fails_HungRunningJob_ButLeavesYoungOneAlone()
+    {
+        var now = DateTimeOffset.UtcNow;
+        int hungId, youngId;
+        await using (var seed = NewDb())
+        {
+            var hung = new SearchJob { UserId = "u1", Query = "old", Status = JobStatus.Running, StartedAt = now - TimeSpan.FromMinutes(20), CreatedAt = now - TimeSpan.FromMinutes(20) };
+            var young = new SearchJob { UserId = "u2", Query = "new", Status = JobStatus.Running, StartedAt = now - TimeSpan.FromMinutes(2), CreatedAt = now - TimeSpan.FromMinutes(2) };
+            seed.SearchJobs.AddRange(hung, young);
+            await seed.SaveChangesAsync();
+            hungId = hung.Id;
+            youngId = young.Id;
+        }
+
+        await Reconciler().SweepAsync(CancellationToken.None);
+
+        await using var check = NewDb();
+        var hungJob = await check.SearchJobs.FindAsync(hungId);
+        hungJob!.Status.Should().Be(JobStatus.Failed);
+        hungJob.Error.Should().Contain("time limit");
+        // A healthy in-flight job under the 12-minute threshold is untouched.
+        (await check.SearchJobs.FindAsync(youngId))!.Status.Should().Be(JobStatus.Running);
+    }
+
     public void Dispose()
     {
         _provider.Dispose();

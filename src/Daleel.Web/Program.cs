@@ -434,6 +434,10 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.ICacheQualityValidator, Daleel
 builder.Services.AddTransient<Daleel.Web.Conversation.IConversationStore, Daleel.Web.Conversation.ConversationStore>();
 builder.Services.AddTransient<Daleel.Web.Conversation.IConversationService, Daleel.Web.Conversation.ConversationService>();
 builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
+// Periodic safety sweep (every 5 min): force-cancels jobs whose durable CancelRequested flag is set but
+// are still "running", and fails jobs wedged past the 12-minute hung threshold. Complements the boot-time
+// OrphanedJobReconciler so a job can never spin forever between restarts. See JobReconciliationService.
+builder.Services.AddHostedService<Daleel.Web.Conversation.JobReconciliationService>();
 
 // Search cache: Postgres-backed store (singleton — opens its own DbContext scope per call, since the
 // agent runs providers in parallel) plus a weekly background sweep of expired entries.

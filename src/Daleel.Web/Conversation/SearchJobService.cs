@@ -130,6 +130,25 @@ public sealed class SearchJobService : BackgroundService
             var result = await runner.RunAsync(job, Progress, cts.Token);
             sw.Stop();
 
+            // Force-cancel backstop: the durable CancelRequested flag is the source of truth. If the user
+            // cancelled while the run was in flight and the workflow ignored the cooperative token (or the
+            // periodic sweep already flipped the row), discard the freshly-built result and finalize as
+            // cancelled — don't complete, don't charge credits, don't enrich. ReloadAsync refreshes the flag
+            // and status, which were written on a different DbContext (the UI's, or the sweep's).
+            await db.Entry(job).ReloadAsync(stoppingToken);
+            if (job.CancelRequested || job.Status == JobStatus.Cancelled)
+            {
+                await FinishAsync(db, convos, job, JobStatus.Cancelled, "cancelled", error: null, stoppingToken);
+                await _broadcaster.CompletedAsync(job.UserId, job.Id, "cancelled", null, null, "Search cancelled.");
+                await systemLog.LogAsync(
+                    SystemEventCategory.Search, "search.cancelled", $"Search cancelled: {job.Query}",
+                    severity: SystemEventSeverity.Warning, source: "search-worker",
+                    correlationId: correlationId, userHash: userHash,
+                    details: new Dictionary<string, object?> { ["query"] = job.Query, ["forced"] = true },
+                    ct: CancellationToken.None);
+                return;
+            }
+
             job.Status = JobStatus.Completed;
             job.ResultJson = result.ResultJson;
             job.ProgressMessage = "✅ Report ready!";

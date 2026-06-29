@@ -87,14 +87,25 @@ public sealed class ConversationService : IConversationService
             return false; // not found or not the caller's job — no cross-user cancellation
         }
 
-        // Interrupt it if running; if still queued, mark cancelled so the worker skips it.
-        if (!_queue.RequestCancel(jobId) && job.Status == JobStatus.Queued)
+        if (job.Status is JobStatus.Completed or JobStatus.Cancelled or JobStatus.Failed)
+        {
+            return true; // already terminal — nothing to cancel, but report success (idempotent)
+        }
+
+        // Raise the durable cancel flag — the source of truth. The cooperative token is unreliable (the
+        // workflow can ignore it), so this persisted flag is what actually stops the run: the pipeline
+        // activities poll it and bail, the worker re-checks it before committing a result, and the periodic
+        // sweep force-cancels the job if it's still "running". A queued job is marked cancelled outright so
+        // the worker skips it when dequeued.
+        job.CancelRequested = true;
+        var wasRunning = _queue.RequestCancel(jobId);
+        if (!wasRunning && job.Status == JobStatus.Queued)
         {
             job.Status = JobStatus.Cancelled;
             job.CompletedAt = DateTimeOffset.UtcNow;
-            await _db.SaveChangesAsync(ct);
         }
 
+        await _db.SaveChangesAsync(ct);
         return true;
     }
 }

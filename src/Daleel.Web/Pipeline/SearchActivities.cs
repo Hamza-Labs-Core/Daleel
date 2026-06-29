@@ -29,6 +29,7 @@ public sealed class ParseQueryActivity : CodeActivity
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
+        CancellationGuard.ThrowIfCancelRequested(context);
         services.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
         // The query itself is the strongest market signal ("AC in Dubai" → UAE), so it overrides the
         // stored/auto-detected default. Fall back to the request's geo when the query names no market.
@@ -183,6 +184,7 @@ public sealed class AnalyzeMarketActivity : CodeActivity
             return;
         }
 
+        CancellationGuard.ThrowIfCancelRequested(context);
         var category = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
         // "Analyzing AC market requirements…" — surface the up-front reasoning to the user.
         services.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
@@ -244,6 +246,7 @@ public sealed class GatherSourcesActivity : CodeActivity
             return;
         }
 
+        CancellationGuard.ThrowIfCancelRequested(context);
         services.Report(SearchStep.SearchingWeb, "Progress.Msg.Expanding");
         state.Bundle = await services.Agent.GatherAsync(state.Strategy, state.GeoProfile, context.CancellationToken);
 
@@ -266,6 +269,7 @@ public sealed class ExtractProductsActivity : CodeActivity
             return;
         }
 
+        CancellationGuard.ThrowIfCancelRequested(context);
         services.Report(SearchStep.ExtractingProducts, "Progress.Msg.Reading", state.Bundle.Sources.Count);
         var system = state.IsProductQuery ? PromptTemplates.ProductAnalystSystem : null;
         state.Summary = await services.Agent.AnalyzeAsync(
@@ -351,6 +355,7 @@ public sealed class DispatchBrandWorkflowsActivity : CodeActivity
             return;
         }
 
+        CancellationGuard.ThrowIfCancelRequested(context);
         var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
         var dispatched = products.Brands.Take(MaxBrands).ToList();
         var rest = products.Brands.Skip(MaxBrands).ToList();
@@ -403,6 +408,7 @@ public sealed class DispatchStoreWorkflowsActivity : CodeActivity
             return;
         }
 
+        CancellationGuard.ThrowIfCancelRequested(context);
         var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
         var dispatched = products.Stores.Take(MaxStores).ToList();
         var rest = products.Stores.Skip(MaxStores).ToList();
@@ -455,6 +461,7 @@ public sealed class DispatchItemWorkflowsActivity : CodeActivity
             return;
         }
 
+        CancellationGuard.ThrowIfCancelRequested(context);
         var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
         var dispatched = products.Models.Take(MaxItems).ToList();
         var rest = products.Models.Skip(MaxItems).ToList();

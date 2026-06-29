@@ -39,6 +39,16 @@ public sealed class SearchJob
     public string? ResultJson { get; set; }
     public string? Error { get; set; }
 
+    /// <summary>
+    /// Durable "cancel requested" flag — the source of truth for cancellation, set the moment the user
+    /// hits Cancel. The cooperative <see cref="System.Threading.CancellationToken"/> is unreliable (the
+    /// Elsa workflow / provider calls can ignore it), so this persisted flag is what actually stops a run:
+    /// pipeline activities check it and bail, the worker re-checks it before committing a result (so a
+    /// workflow that ran to completion anyway has its output discarded), and the periodic reconciliation
+    /// sweep force-cancels any still-"running" job that carries it.
+    /// </summary>
+    public bool CancelRequested { get; set; }
+
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset? StartedAt { get; set; }
     public DateTimeOffset? CompletedAt { get; set; }
