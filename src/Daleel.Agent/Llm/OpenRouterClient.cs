@@ -28,6 +28,13 @@ public sealed class OpenRouterClient : HttpProviderBase, ILlmClient
     private const string DefaultReferer = "https://github.com/Hamza-Labs-Core/Daleel";
     private const string DefaultTitle = "Daleel";
 
+    /// <summary>
+    /// Hard per-call timeout for a single chat-completions attempt. A hung gateway/model must not be
+    /// able to stall the pipeline indefinitely — this bounds every attempt deterministically, above
+    /// and beyond the coarser <see cref="HttpClient.Timeout"/> backstop.
+    /// </summary>
+    public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(60);
+
     private readonly string _apiKey;
     private readonly string _model;
     private readonly string _referer;
@@ -46,7 +53,7 @@ public sealed class OpenRouterClient : HttpProviderBase, ILlmClient
         string title = DefaultTitle,
         HttpClient? httpClient = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null)
-        : base(ConfigureClient(httpClient), maxRetries: 2, delay)
+        : base(ConfigureClient(httpClient), maxRetries: 2, delay, perAttemptTimeout: CallTimeout)
     {
         _apiKey = apiKey
                   ?? Environment.GetEnvironmentVariable("OPENROUTER_API_KEY")

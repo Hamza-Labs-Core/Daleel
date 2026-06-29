@@ -21,20 +21,31 @@ public abstract class HttpProviderBase
     protected HttpClient Http { get; }
     private readonly int _maxRetries;
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
+    private readonly TimeSpan? _perAttemptTimeout;
 
     protected static readonly JsonSerializerOptions Json = new()
     {
         PropertyNameCaseInsensitive = true
     };
 
+    /// <param name="perAttemptTimeout">
+    /// Hard wall-clock cap on each individual send attempt (connect + send + read the buffered
+    /// response). Enforced with a per-attempt linked <see cref="CancellationTokenSource"/> so it is
+    /// independent of the fragile <see cref="HttpClient.Timeout"/> — a stalled connect callback,
+    /// pooled-connection reuse, or a slow-trickle keep-alive response can't defeat it. A timed-out
+    /// attempt is treated as transient and retried; null leaves attempts unbounded (the historical
+    /// behaviour, used by the slower scrape providers).
+    /// </param>
     protected HttpProviderBase(
         HttpClient http,
         int maxRetries = 2,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        TimeSpan? perAttemptTimeout = null)
     {
         Http = http ?? throw new ArgumentNullException(nameof(http));
         _maxRetries = Math.Max(0, maxRetries);
         _delay = delay ?? Task.Delay;
+        _perAttemptTimeout = perAttemptTimeout;
     }
 
     /// <summary>Sends a request with retry, returning the parsed JSON document.</summary>
@@ -74,10 +85,18 @@ public abstract class HttpProviderBase
             }
 
             HttpResponseMessage? response = null;
+            // Bound each attempt: a linked CTS that auto-cancels after the per-attempt timeout (if any),
+            // while still honouring a genuine outer cancellation (cost cap, user cancel, workflow deadline).
+            using var attemptCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            if (_perAttemptTimeout is { } perAttempt)
+            {
+                attemptCts.CancelAfter(perAttempt);
+            }
+
             try
             {
                 using var request = requestFactory();
-                response = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                response = await Http.SendAsync(request, attemptCts.Token).ConfigureAwait(false);
 
                 if (response.IsSuccessStatusCode)
                 {
@@ -100,10 +119,15 @@ public abstract class HttpProviderBase
                 response?.Dispose();
                 last = ex;
             }
-            catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+            // A per-attempt timeout surfaces as a cancellation on attemptCts while the OUTER token is
+            // still live — treat it as a transient timeout and retry. A real outer cancellation falls
+            // through (this filter is false) and propagates.
+            catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
             {
                 response?.Dispose();
-                last = ex;
+                last = _perAttemptTimeout is { } t
+                    ? new ProviderException($"{ProviderName}: attempt timed out after {t.TotalSeconds:0}s.", ex)
+                    : ex;
             }
         }
 

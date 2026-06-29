@@ -27,6 +27,13 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     /// <summary>TTL for both cache layers — a cached search stays valid for 30 days.</summary>
     private static readonly TimeSpan CacheTtl = TimeSpan.FromDays(30);
 
+    /// <summary>
+    /// Hard wall-clock ceiling on a single search run. The per-LLM-call (60s) and per-entity sub-workflow
+    /// (30s) timeouts bound the individual awaits; this is the last-resort backstop that auto-cancels a run
+    /// which is wedged for any other reason, so a stuck pipeline can never hang indefinitely.
+    /// </summary>
+    private static readonly TimeSpan WorkflowTimeout = TimeSpan.FromMinutes(10);
+
     private readonly IAgentFactory _agents;
     private readonly ISystemConfigService _config;
     private readonly IApiCallLogRepository _apiLog;
@@ -107,7 +114,21 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             bufferedEvents = state.Events;
 
             var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
-            var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: capTrip.Token).ConfigureAwait(false);
+
+            // Global workflow deadline: links off capTrip (so cost-cap and user cancellation still flow in)
+            // and additionally auto-cancels after WorkflowTimeout. Every activity sees this as
+            // context.CancellationToken, so a wedged step is forcibly unwound instead of hanging forever.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(capTrip.Token);
+            deadline.CancelAfter(WorkflowTimeout);
+            var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: deadline.Token).ConfigureAwait(false);
+
+            // Distinguish a timeout (deadline fired on its own) from a cost-cap/user cancel for diagnostics.
+            if (deadline.IsCancellationRequested && !capTrip.IsCancellationRequested)
+            {
+                _logger.LogError(
+                    "Search workflow for job {JobId} exceeded the {Minutes}-minute deadline and was cancelled",
+                    job.Id, WorkflowTimeout.TotalMinutes);
+            }
 
             // Persist the run as an Elsa workflow instance so the admin workflows page can list/replay it.
             // Persistence is optional and Postgres-only: when it isn't configured, IWorkflowInstanceManager

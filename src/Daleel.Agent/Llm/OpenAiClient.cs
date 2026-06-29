@@ -18,12 +18,15 @@ public sealed class OpenAiClient : HttpProviderBase, ILlmClient
     public string Provider => "openai";
     protected override string ProviderName => Provider;
 
+    /// <summary>Hard per-call timeout for a single chat-completions attempt; see <see cref="OpenRouterClient.CallTimeout"/>.</summary>
+    public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(60);
+
     public OpenAiClient(
         string? apiKey = null,
         string model = "gpt-4o",
         HttpClient? httpClient = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null)
-        : base(ConfigureClient(httpClient), maxRetries: 2, delay)
+        : base(ConfigureClient(httpClient), maxRetries: 2, delay, perAttemptTimeout: CallTimeout)
     {
         _apiKey = apiKey
                   ?? Environment.GetEnvironmentVariable("OPENAI_API_KEY")

@@ -21,13 +21,16 @@ public sealed class AnthropicClient : HttpProviderBase, ILlmClient
     public string Provider => "anthropic";
     protected override string ProviderName => Provider;
 
+    /// <summary>Hard per-call timeout for a single messages attempt; see <see cref="OpenRouterClient.CallTimeout"/>.</summary>
+    public static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(60);
+
     public AnthropicClient(
         string? apiKey = null,
         string model = "claude-opus-4-8",
         int maxTokens = 4096,
         HttpClient? httpClient = null,
         Func<TimeSpan, CancellationToken, Task>? delay = null)
-        : base(ConfigureClient(httpClient), maxRetries: 2, delay)
+        : base(ConfigureClient(httpClient), maxRetries: 2, delay, perAttemptTimeout: CallTimeout)
     {
         _apiKey = apiKey
                   ?? Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")

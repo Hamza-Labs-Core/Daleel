@@ -57,6 +57,9 @@ public sealed class VisionMatcher : IVisionMatcher, IDisposable
     private const string Referer = "https://github.com/Hamza-Labs-Core/Daleel";
     private const string Title = "Daleel";
 
+    /// <summary>Hard per-call timeout for a single vision comparison; a hung model degrades to NoMatch.</summary>
+    private static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(60);
+
     private const string SystemPrompt =
         "You are a product-identification expert comparing two product photographs. Decide whether both " +
         "images show the SAME physical product (same brand, same model line, same variant). Ignore " +
@@ -116,6 +119,10 @@ public sealed class VisionMatcher : IVisionMatcher, IDisposable
             }
         };
 
+        // Bound the call deterministically: linked CTS that auto-cancels after CallTimeout but still
+        // honours a genuine outer cancellation.
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(CallTimeout);
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, Endpoint)
@@ -126,7 +133,7 @@ public sealed class VisionMatcher : IVisionMatcher, IDisposable
             req.Headers.Add("HTTP-Referer", Referer);
             req.Headers.Add("X-Title", Title);
 
-            using var resp = await _http.SendAsync(req, ct).ConfigureAwait(false);
+            using var resp = await _http.SendAsync(req, timeoutCts.Token).ConfigureAwait(false);
             if (!resp.IsSuccessStatusCode)
             {
                 _logger.LogDebug("Vision match HTTP {Status} comparing {Store} vs {Brand}",
@@ -134,12 +141,19 @@ public sealed class VisionMatcher : IVisionMatcher, IDisposable
                 return VisionMatchResult.NoMatch;
             }
 
-            var body = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var body = await resp.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
             return Parse(body);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            throw;
+            throw; // genuine outer cancellation (cost cap / user / workflow deadline) propagates
+        }
+        catch (OperationCanceledException ex)
+        {
+            // Per-call timeout: degrade to NoMatch like any other vision failure.
+            _logger.LogDebug(ex, "Vision match timed out after {Seconds}s comparing {Store} vs {Brand}",
+                CallTimeout.TotalSeconds, storeImageUrl, brandImageUrl);
+            return VisionMatchResult.NoMatch;
         }
         catch (Exception ex)
         {
