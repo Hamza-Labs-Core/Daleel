@@ -1,0 +1,375 @@
+@page "/admin/timeline"
+@using System.Globalization
+@using System.Text.Json
+@using Daleel.Web.Events
+@attribute [Authorize(Roles = "Admin")]
+@implements IDisposable
+@inject ISystemEventLog Log
+@inject IStringLocalizer<SharedResource> L
+@inject IJSRuntime JS
+
+<PageTitle>دليل · Admin · Event timeline</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">@L["Admin.Timeline.Title"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Admin.Timeline.Subtitle"]</MudText>
+
+@if (!Log.IsEnabled)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+        @L["Admin.Usage.NotConfiguredBefore"] <code>POSTGRES_CONNECTION_STRING</code>
+        @L["Admin.Usage.NotConfiguredOr"] <code>DATABASE_URL</code>@L["Admin.Usage.NotConfiguredAfter"]
+    </MudAlert>
+}
+else
+{
+    @* ── Filter bar ──────────────────────────────────────────────────────────── *@
+    <MudPaper Outlined="true" Elevation="0" Class="pa-3 mb-4">
+        <div class="d-flex flex-wrap align-center gap-3">
+            @* Time range presets *@
+            <MudToggleGroup T="string" Value="_range" ValueChanged="SetRangeAsync" Color="Color.Primary"
+                            Size="Size.Small" Outlined="true" CheckMark="false">
+                <MudToggleItem Value="@("hour")">@L["Admin.Timeline.Range.Hour"]</MudToggleItem>
+                <MudToggleItem Value="@("today")">@L["Admin.Timeline.Range.Today"]</MudToggleItem>
+                <MudToggleItem Value="@("7d")">@L["Admin.Timeline.Range.Week"]</MudToggleItem>
+                <MudToggleItem Value="@("30d")">@L["Admin.Timeline.Range.Month"]</MudToggleItem>
+                <MudToggleItem Value="@("all")">@L["Admin.Timeline.Range.All"]</MudToggleItem>
+            </MudToggleGroup>
+
+            <MudTextField T="string" @bind-Value="_text" Immediate="false" DebounceInterval="350"
+                          OnDebounceIntervalElapsed="@(_ => ReloadAsync())"
+                          Placeholder="@L["Admin.Timeline.SearchPlaceholder"]" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Adornment="Adornment.Start"
+                          AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:280px;" Clearable="true" />
+
+            <MudSpacer />
+
+            @* Auto-refresh + export *@
+            <MudTooltip Text="@L["Admin.Timeline.AutoRefreshHint"]">
+                <MudSwitch T="bool" Value="_autoRefresh" ValueChanged="ToggleAutoRefresh" Color="Color.Primary"
+                           Label="@L["Admin.Timeline.AutoRefresh"]" Class="ma-0" />
+            </MudTooltip>
+            <MudButton StartIcon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="ReloadAsync">
+                @L["Admin.Timeline.Refresh"]
+            </MudButton>
+            <MudButton StartIcon="@Icons.Material.Filled.Download" Size="Size.Small" Variant="Variant.Outlined"
+                       OnClick="ExportAsync" Disabled="_exporting">@L["Admin.Timeline.Export"]</MudButton>
+        </div>
+
+        <div class="d-flex flex-wrap align-center gap-4 mt-3">
+            @* Category chips (multi-select) *@
+            <div class="d-flex flex-wrap align-center gap-1">
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mr-1">@L["Admin.Timeline.Category"]:</MudText>
+                <MudChipSet T="string" SelectedValues="_categories" SelectedValuesChanged="OnCategoriesChanged"
+                            SelectionMode="SelectionMode.MultiSelection" Size="Size.Small" Variant="Variant.Outlined">
+                    @foreach (var c in SystemEventCategory.All)
+                    {
+                        <MudChip T="string" Value="@c" Color="@CategoryColor(c)" Text="@CategoryLabel(c)" />
+                    }
+                </MudChipSet>
+            </div>
+
+            @* Severity chips (multi-select) *@
+            <div class="d-flex flex-wrap align-center gap-1">
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mr-1">@L["Admin.Timeline.Severity"]:</MudText>
+                <MudChipSet T="string" SelectedValues="_severities" SelectedValuesChanged="OnSeveritiesChanged"
+                            SelectionMode="SelectionMode.MultiSelection" Size="Size.Small" Variant="Variant.Outlined">
+                    @foreach (var s in SystemEventSeverity.All)
+                    {
+                        <MudChip T="string" Value="@s" Color="@SeverityColor(s)" Text="@SeverityLabel(s)" />
+                    }
+                </MudChipSet>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_correlationId))
+            {
+                <MudChip T="string" Color="Color.Tertiary" Variant="Variant.Filled" Size="Size.Small"
+                         OnClose="ClearCorrelation" Icon="@Icons.Material.Filled.Tag">
+                    @L["Admin.Timeline.Run"] #@_correlationId
+                </MudChip>
+            }
+        </div>
+    </MudPaper>
+
+    @* ── Event grid (server-paged, expandable rows) ──────────────────────────── *@
+    <MudDataGrid T="SystemEvent" @ref="_grid" ServerData="LoadAsync" Dense="true" Hover="true"
+                 Filterable="false" SortMode="SortMode.None" Groupable="false" Elevation="0"
+                 Class="border-solid border mud-border-lines-default rounded">
+        <Columns>
+            <HierarchyColumn T="SystemEvent" />
+            <TemplateColumn Title="@L["Admin.Timeline.Col.Severity"]" HeaderStyle="width:48px;">
+                <CellTemplate>
+                    <MudTooltip Text="@SeverityLabel(context.Item.Severity)">
+                        <MudIcon Icon="@SeverityIcon(context.Item.Severity)" Color="@SeverityColor(context.Item.Severity)" Size="Size.Small" />
+                    </MudTooltip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@L["Admin.Timeline.Col.Time"]" HeaderStyle="width:150px;">
+                <CellTemplate>
+                    <MudText Typo="Typo.caption" Style="font-variant-numeric:tabular-nums;">
+                        @context.Item.Timestamp.ToLocalTime().ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                    </MudText>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@L["Admin.Timeline.Col.Category"]" HeaderStyle="width:110px;">
+                <CellTemplate>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@CategoryColor(context.Item.Category)" Class="ma-0">
+                        @CategoryLabel(context.Item.Category)
+                    </MudChip>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@L["Admin.Timeline.Col.Event"]">
+                <CellTemplate>
+                    <div class="d-flex flex-column">
+                        <MudText Typo="Typo.body2">@context.Item.Summary</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-family:monospace;">@context.Item.EventType</MudText>
+                    </div>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@L["Admin.Timeline.Col.Source"]" HeaderStyle="width:150px;">
+                <CellTemplate>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@context.Item.Source</MudText>
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@L["Admin.Timeline.Col.Run"]" HeaderStyle="width:90px;">
+                <CellTemplate>
+                    @if (!string.IsNullOrEmpty(context.Item.CorrelationId))
+                    {
+                        <MudLink Typo="Typo.caption" Style="font-family:monospace;cursor:pointer;"
+                                 OnClick="@(() => FilterByRunAsync(context.Item.CorrelationId!))">#@context.Item.CorrelationId</MudLink>
+                    }
+                    else
+                    {
+                        <span>—</span>
+                    }
+                </CellTemplate>
+            </TemplateColumn>
+            <TemplateColumn Title="@L["Admin.Timeline.Col.User"]" HeaderStyle="width:120px;">
+                <CellTemplate>
+                    <MudText Typo="Typo.caption" Style="font-family:monospace;">@(string.IsNullOrEmpty(context.Item.UserHash) ? "—" : context.Item.UserHash)</MudText>
+                </CellTemplate>
+            </TemplateColumn>
+        </Columns>
+        <ChildRowContent>
+            <MudCard Elevation="0" Class="ma-2">
+                <MudCardContent Class="pa-3">
+                    <MudText Typo="Typo.overline" Color="Color.Secondary" Class="mb-1">@L["Admin.Timeline.Details"]</MudText>
+                    <pre style="white-space:pre-wrap;word-break:break-word;margin:0;font-size:0.8rem;">@PrettyJson(context.Item.DetailsJson)</pre>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2 d-block">
+                        @context.Item.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture)
+                        @if (!string.IsNullOrEmpty(context.Item.UserHash))
+                        {
+                            <span> · @L["Admin.Timeline.Col.User"]: <code>@context.Item.UserHash</code></span>
+                        }
+                    </MudText>
+                </MudCardContent>
+            </MudCard>
+        </ChildRowContent>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Color="Color.Secondary" Class="pa-3">@L["Admin.Timeline.Empty"]</MudText>
+        </NoRecordsContent>
+        <PagerContent>
+            <MudDataGridPager T="SystemEvent" PageSizeOptions="@(new[] { 25, 50, 100, 200 })" />
+        </PagerContent>
+    </MudDataGrid>
+}
+
+@code {
+    private MudDataGrid<SystemEvent>? _grid;
+
+    // Filter state
+    private string _range = "today";
+    private string? _text;
+    private string? _correlationId;
+    private IReadOnlyCollection<string> _categories = Array.Empty<string>();
+    private IReadOnlyCollection<string> _severities = Array.Empty<string>();
+
+    // Live updates
+    private bool _autoRefresh;
+    private Timer? _timer;
+    private bool _exporting;
+    private const int AutoRefreshSeconds = 5;
+
+    // ── Data source: MudDataGrid calls this on first render and on every ReloadServerData() ──────────
+    private async Task<GridData<SystemEvent>> LoadAsync(GridState<SystemEvent> state)
+    {
+        var query = new SystemEventQuery
+        {
+            Since = RangeStart(_range),
+            Categories = _categories,
+            Severities = _severities,
+            Text = _text,
+            CorrelationId = _correlationId,
+            Page = state.Page + 1,   // GridState.Page is 0-based; the store is 1-based
+            PageSize = state.PageSize
+        };
+        var page = await Log.QueryAsync(query);
+        return new GridData<SystemEvent> { Items = page.Items, TotalItems = page.Total };
+    }
+
+    private Task ReloadAsync() => _grid?.ReloadServerData() ?? Task.CompletedTask;
+
+    private async Task SetRangeAsync(string range)
+    {
+        _range = range;
+        await ReloadAsync();
+    }
+
+    private async Task OnCategoriesChanged(IReadOnlyCollection<string> values)
+    {
+        _categories = values ?? Array.Empty<string>();
+        await ReloadAsync();
+    }
+
+    private async Task OnSeveritiesChanged(IReadOnlyCollection<string> values)
+    {
+        _severities = values ?? Array.Empty<string>();
+        await ReloadAsync();
+    }
+
+    private async Task FilterByRunAsync(string correlationId)
+    {
+        _correlationId = correlationId;
+        await ReloadAsync();
+    }
+
+    private async Task ClearCorrelation()
+    {
+        _correlationId = null;
+        await ReloadAsync();
+    }
+
+    // ── Auto-refresh: a server-side timer re-pulls the newest page over the Blazor circuit ───────────
+    private void ToggleAutoRefresh(bool on)
+    {
+        _autoRefresh = on;
+        _timer?.Dispose();
+        _timer = null;
+        if (on)
+        {
+            _timer = new Timer(
+                _ => _ = InvokeAsync(ReloadAsync), null,
+                TimeSpan.FromSeconds(AutoRefreshSeconds), TimeSpan.FromSeconds(AutoRefreshSeconds));
+        }
+    }
+
+    // ── Export: pull the matching events (newest first, bounded) and download as JSON ────────────────
+    private async Task ExportAsync()
+    {
+        _exporting = true;
+        try
+        {
+            var rows = new List<SystemEvent>();
+            const int pageSize = 500;
+            for (var page = 1; rows.Count < PostgresSystemEventLog.WindowCap; page++)
+            {
+                var result = await Log.QueryAsync(new SystemEventQuery
+                {
+                    Since = RangeStart(_range), Categories = _categories, Severities = _severities,
+                    Text = _text, CorrelationId = _correlationId, Page = page, PageSize = pageSize
+                });
+                rows.AddRange(result.Items);
+                if (result.Items.Count < pageSize || rows.Count >= result.Total)
+                {
+                    break;
+                }
+            }
+
+            var json = JsonSerializer.Serialize(
+                rows.Select(e => new
+                {
+                    e.Timestamp, e.Category, e.EventType, e.Severity, e.Source,
+                    e.Summary, e.CorrelationId, e.UserHash,
+                    Details = ParseDetails(e.DetailsJson)
+                }),
+                new JsonSerializerOptions { WriteIndented = true });
+
+            var name = $"daleel-events-{DateTime.UtcNow:yyyyMMdd-HHmmss}.json";
+            await JS.InvokeVoidAsync("daleel.download", name, json, "application/json");
+        }
+        finally
+        {
+            _exporting = false;
+        }
+    }
+
+    // Window start for each preset (UTC). "all" reaches back to the epoch (store's cap bounds it).
+    private static DateTimeOffset? RangeStart(string range) => range switch
+    {
+        "hour" => DateTimeOffset.UtcNow.AddHours(-1),
+        "today" => new DateTimeOffset(DateTime.UtcNow.Date, TimeSpan.Zero),
+        "7d" => DateTimeOffset.UtcNow.AddDays(-7),
+        "30d" => DateTimeOffset.UtcNow.AddDays(-30),
+        _ => null
+    };
+
+    // ── Presentation helpers ─────────────────────────────────────────────────────────────────────
+    private static Color SeverityColor(string s) => s switch
+    {
+        SystemEventSeverity.Error => Color.Error,
+        SystemEventSeverity.Warning => Color.Warning,
+        _ => Color.Info
+    };
+
+    private static string SeverityIcon(string s) => s switch
+    {
+        SystemEventSeverity.Error => Icons.Material.Filled.Error,
+        SystemEventSeverity.Warning => Icons.Material.Filled.Warning,
+        _ => Icons.Material.Filled.Info
+    };
+
+    private string SeverityLabel(string s) => L[$"Admin.Timeline.Severity.{Capitalize(s)}"];
+
+    // Each category gets a stable colour so the feed is scannable at a glance.
+    private static Color CategoryColor(string c) => c switch
+    {
+        SystemEventCategory.Search => Color.Primary,
+        SystemEventCategory.Workflow => Color.Secondary,
+        SystemEventCategory.Brand => Color.Tertiary,
+        SystemEventCategory.Store => Color.Info,
+        SystemEventCategory.Item => Color.Success,
+        SystemEventCategory.Cache => Color.Dark,
+        SystemEventCategory.Llm => Color.Warning,
+        SystemEventCategory.User => Color.Primary,
+        SystemEventCategory.Maintenance => Color.Secondary,
+        SystemEventCategory.Error => Color.Error,
+        _ => Color.Default
+    };
+
+    private string CategoryLabel(string c) => L[$"Admin.Timeline.Category.{Capitalize(c)}"];
+
+    private static string Capitalize(string s) =>
+        string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    // Pretty-print the jsonb detail for the expandable row; fall back to the raw string if it won't parse.
+    private static string PrettyJson(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json == "{}")
+        {
+            return "(no details)";
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return JsonSerializer.Serialize(doc.RootElement, new JsonSerializerOptions { WriteIndented = true });
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    private static object? ParseDetails(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<JsonElement>(json);
+        }
+        catch
+        {
+            return json;
+        }
+    }
+
+    public void Dispose() => _timer?.Dispose();
+}

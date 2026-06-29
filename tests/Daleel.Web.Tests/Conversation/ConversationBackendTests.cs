@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Daleel.Web.Conversation;
 using Daleel.Web.Data;
+using Daleel.Web.Events;
 using Daleel.Web.Tests.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -30,6 +31,9 @@ public class ConversationBackendTests : IDisposable
         services.AddScoped<IQuotaService>(sp => new QuotaService(sp.GetRequiredService<DaleelDbContext>()));
         services.AddScoped<ISearchRunner, FakeRunner>();
         services.AddSingleton<ISearchJobQueue, SearchJobQueue>();
+        // The worker records lifecycle events to the unified timeline; the no-op log keeps tests telemetry-free
+        // (the same fallback production uses when Postgres isn't configured).
+        services.AddSingleton<ISystemEventLog, NullSystemEventLog>();
         _provider = services.BuildServiceProvider();
 
         using var scope = _provider.CreateScope();

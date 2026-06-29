@@ -479,6 +479,43 @@
   <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>أو اضبط</value></data>
   <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>على الخادم.</value></data>
 
+  <data name="Admin.Timeline.Title" xml:space="preserve"><value>سجل الأحداث</value></data>
+  <data name="Admin.Timeline.Subtitle" xml:space="preserve"><value>سجل موحّد وقابل للبحث لكل ما يجري في النظام.</value></data>
+  <data name="Admin.Timeline.Range.Hour" xml:space="preserve"><value>آخر ساعة</value></data>
+  <data name="Admin.Timeline.Range.Today" xml:space="preserve"><value>اليوم</value></data>
+  <data name="Admin.Timeline.Range.Week" xml:space="preserve"><value>٧ أيام</value></data>
+  <data name="Admin.Timeline.Range.Month" xml:space="preserve"><value>٣٠ يوماً</value></data>
+  <data name="Admin.Timeline.Range.All" xml:space="preserve"><value>الكل</value></data>
+  <data name="Admin.Timeline.SearchPlaceholder" xml:space="preserve"><value>ابحث في الملخّص أو النوع أو الخطأ…</value></data>
+  <data name="Admin.Timeline.AutoRefresh" xml:space="preserve"><value>مباشر</value></data>
+  <data name="Admin.Timeline.AutoRefreshHint" xml:space="preserve"><value>تحديث السجل تلقائياً كل بضع ثوانٍ.</value></data>
+  <data name="Admin.Timeline.Refresh" xml:space="preserve"><value>تحديث</value></data>
+  <data name="Admin.Timeline.Export" xml:space="preserve"><value>تصدير JSON</value></data>
+  <data name="Admin.Timeline.Category" xml:space="preserve"><value>النوع</value></data>
+  <data name="Admin.Timeline.Severity" xml:space="preserve"><value>الخطورة</value></data>
+  <data name="Admin.Timeline.Run" xml:space="preserve"><value>التشغيل</value></data>
+  <data name="Admin.Timeline.Details" xml:space="preserve"><value>التفاصيل</value></data>
+  <data name="Admin.Timeline.Empty" xml:space="preserve"><value>لا توجد أحداث مطابقة لعوامل التصفية.</value></data>
+  <data name="Admin.Timeline.Col.Severity" xml:space="preserve"><value>الخطورة</value></data>
+  <data name="Admin.Timeline.Col.Time" xml:space="preserve"><value>الوقت</value></data>
+  <data name="Admin.Timeline.Col.Category" xml:space="preserve"><value>النوع</value></data>
+  <data name="Admin.Timeline.Col.Event" xml:space="preserve"><value>الحدث</value></data>
+  <data name="Admin.Timeline.Col.Source" xml:space="preserve"><value>المصدر</value></data>
+  <data name="Admin.Timeline.Col.Run" xml:space="preserve"><value>التشغيل</value></data>
+  <data name="Admin.Timeline.Col.User" xml:space="preserve"><value>المستخدم</value></data>
+  <data name="Admin.Timeline.Severity.Info" xml:space="preserve"><value>معلومة</value></data>
+  <data name="Admin.Timeline.Severity.Warning" xml:space="preserve"><value>تحذير</value></data>
+  <data name="Admin.Timeline.Severity.Error" xml:space="preserve"><value>خطأ</value></data>
+  <data name="Admin.Timeline.Category.Search" xml:space="preserve"><value>بحث</value></data>
+  <data name="Admin.Timeline.Category.Workflow" xml:space="preserve"><value>سير العمل</value></data>
+  <data name="Admin.Timeline.Category.Brand" xml:space="preserve"><value>علامة تجارية</value></data>
+  <data name="Admin.Timeline.Category.Store" xml:space="preserve"><value>متجر</value></data>
+  <data name="Admin.Timeline.Category.Item" xml:space="preserve"><value>منتج</value></data>
+  <data name="Admin.Timeline.Category.Cache" xml:space="preserve"><value>ذاكرة مؤقتة</value></data>
+  <data name="Admin.Timeline.Category.Llm" xml:space="preserve"><value>نموذج ذكاء</value></data>
+  <data name="Admin.Timeline.Category.User" xml:space="preserve"><value>مستخدم</value></data>
+  <data name="Admin.Timeline.Category.Maintenance" xml:space="preserve"><value>مهام خلفية</value></data>
+  <data name="Admin.Timeline.Category.Error" xml:space="preserve"><value>خطأ</value></data>
   <data name="Admin.Usage.Title" xml:space="preserve"><value>استخدام المزوّدين والتكلفة</value></data>
   <data name="Admin.Usage.Subtitle" xml:space="preserve"><value>كل إجراء خارجي قام به مسار البحث — استدعاءات المزوّدين وعمليات الكشط وإكمالات نماذج الذكاء الاصطناعي وعمليات البحث في الذاكرة المؤقتة والملفات — مع تكلفة تقديرية لكل مزوّد. مصدرها مخزن الأحداث في PostgreSQL.</value></data>
   <data name="Admin.Usage.NotConfiguredBefore" xml:space="preserve"><value>مخزن الأحداث غير مُهيّأ. اضبط</value></data>
@@ -598,6 +635,7 @@
   <data name="Admin.Nav.Plans" xml:space="preserve"><value>الباقات</value></data>
   <data name="Admin.Nav.Analytics" xml:space="preserve"><value>التحليلات</value></data>
   <data name="Admin.Nav.Usage" xml:space="preserve"><value>الاستخدام</value></data>
+  <data name="Admin.Nav.Timeline" xml:space="preserve"><value>سجل الأحداث</value></data>
   <data name="Admin.Nav.Workflows" xml:space="preserve"><value>سير العمل</value></data>
   <data name="Admin.Nav.Data" xml:space="preserve"><value>البيانات</value></data>
   <data name="Admin.Nav.Moderation" xml:space="preserve"><value>الإشراف</value></data>

@@ -16,9 +16,36 @@ public sealed class EventStoreDbContext : DbContext
 
     public DbSet<PipelineEvent> Events => Set<PipelineEvent>();
 
+    /// <summary>The unified admin activity timeline (search/workflow/brand/store/item/cache/llm/user/…).</summary>
+    public DbSet<SystemEvent> SystemEvents => Set<SystemEvent>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.Entity<SystemEvent>(e =>
+        {
+            e.ToTable("system_events");
+
+            // The timeline's hot query shapes: newest-first time scans, per-category/severity narrowing,
+            // and the per-run / per-user drill-downs.
+            e.HasIndex(x => x.Timestamp);
+            e.HasIndex(x => new { x.Category, x.Timestamp });
+            e.HasIndex(x => new { x.Severity, x.Timestamp });
+            e.HasIndex(x => x.CorrelationId);
+            e.HasIndex(x => x.UserHash);
+
+            e.Property(x => x.Category).HasMaxLength(32);
+            e.Property(x => x.EventType).HasMaxLength(64);
+            e.Property(x => x.Severity).HasMaxLength(16);
+            e.Property(x => x.Source).HasMaxLength(96);
+            e.Property(x => x.Summary).HasMaxLength(512);
+            e.Property(x => x.CorrelationId).HasMaxLength(64);
+            e.Property(x => x.UserHash).HasMaxLength(64);
+
+            // Free-form detail as native jsonb so it stays queryable in Postgres later.
+            e.Property(x => x.DetailsJson).HasColumnType("jsonb");
+        });
 
         builder.Entity<PipelineEvent>(e =>
         {

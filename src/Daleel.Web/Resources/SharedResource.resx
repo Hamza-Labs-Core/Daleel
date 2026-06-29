@@ -479,6 +479,43 @@
   <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>page, or set</value></data>
   <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>on the server.</value></data>
 
+  <data name="Admin.Timeline.Title" xml:space="preserve"><value>Event timeline</value></data>
+  <data name="Admin.Timeline.Subtitle" xml:space="preserve"><value>A unified, searchable feed of everything happening across the system.</value></data>
+  <data name="Admin.Timeline.Range.Hour" xml:space="preserve"><value>Last hour</value></data>
+  <data name="Admin.Timeline.Range.Today" xml:space="preserve"><value>Today</value></data>
+  <data name="Admin.Timeline.Range.Week" xml:space="preserve"><value>7 days</value></data>
+  <data name="Admin.Timeline.Range.Month" xml:space="preserve"><value>30 days</value></data>
+  <data name="Admin.Timeline.Range.All" xml:space="preserve"><value>All</value></data>
+  <data name="Admin.Timeline.SearchPlaceholder" xml:space="preserve"><value>Search summary, type, error…</value></data>
+  <data name="Admin.Timeline.AutoRefresh" xml:space="preserve"><value>Live</value></data>
+  <data name="Admin.Timeline.AutoRefreshHint" xml:space="preserve"><value>Auto-refresh the feed every few seconds.</value></data>
+  <data name="Admin.Timeline.Refresh" xml:space="preserve"><value>Refresh</value></data>
+  <data name="Admin.Timeline.Export" xml:space="preserve"><value>Export JSON</value></data>
+  <data name="Admin.Timeline.Category" xml:space="preserve"><value>Type</value></data>
+  <data name="Admin.Timeline.Severity" xml:space="preserve"><value>Severity</value></data>
+  <data name="Admin.Timeline.Run" xml:space="preserve"><value>Run</value></data>
+  <data name="Admin.Timeline.Details" xml:space="preserve"><value>Details</value></data>
+  <data name="Admin.Timeline.Empty" xml:space="preserve"><value>No events match these filters.</value></data>
+  <data name="Admin.Timeline.Col.Severity" xml:space="preserve"><value>Sev</value></data>
+  <data name="Admin.Timeline.Col.Time" xml:space="preserve"><value>Time</value></data>
+  <data name="Admin.Timeline.Col.Category" xml:space="preserve"><value>Type</value></data>
+  <data name="Admin.Timeline.Col.Event" xml:space="preserve"><value>Event</value></data>
+  <data name="Admin.Timeline.Col.Source" xml:space="preserve"><value>Source</value></data>
+  <data name="Admin.Timeline.Col.Run" xml:space="preserve"><value>Run</value></data>
+  <data name="Admin.Timeline.Col.User" xml:space="preserve"><value>User</value></data>
+  <data name="Admin.Timeline.Severity.Info" xml:space="preserve"><value>Info</value></data>
+  <data name="Admin.Timeline.Severity.Warning" xml:space="preserve"><value>Warning</value></data>
+  <data name="Admin.Timeline.Severity.Error" xml:space="preserve"><value>Error</value></data>
+  <data name="Admin.Timeline.Category.Search" xml:space="preserve"><value>Search</value></data>
+  <data name="Admin.Timeline.Category.Workflow" xml:space="preserve"><value>Workflow</value></data>
+  <data name="Admin.Timeline.Category.Brand" xml:space="preserve"><value>Brand</value></data>
+  <data name="Admin.Timeline.Category.Store" xml:space="preserve"><value>Store</value></data>
+  <data name="Admin.Timeline.Category.Item" xml:space="preserve"><value>Item</value></data>
+  <data name="Admin.Timeline.Category.Cache" xml:space="preserve"><value>Cache</value></data>
+  <data name="Admin.Timeline.Category.Llm" xml:space="preserve"><value>LLM</value></data>
+  <data name="Admin.Timeline.Category.User" xml:space="preserve"><value>User</value></data>
+  <data name="Admin.Timeline.Category.Maintenance" xml:space="preserve"><value>Background</value></data>
+  <data name="Admin.Timeline.Category.Error" xml:space="preserve"><value>Error</value></data>
   <data name="Admin.Usage.Title" xml:space="preserve"><value>Provider usage &amp; cost</value></data>
   <data name="Admin.Usage.Subtitle" xml:space="preserve"><value>Every external action the search pipeline took — provider calls, scrapes, LLM completions, cache and profile lookups — with an estimated cost per provider. Sourced from the PostgreSQL event store.</value></data>
   <data name="Admin.Usage.NotConfiguredBefore" xml:space="preserve"><value>The event store isn't configured. Set</value></data>
@@ -598,6 +635,7 @@
   <data name="Admin.Nav.Plans" xml:space="preserve"><value>Plans</value></data>
   <data name="Admin.Nav.Analytics" xml:space="preserve"><value>Analytics</value></data>
   <data name="Admin.Nav.Usage" xml:space="preserve"><value>Usage</value></data>
+  <data name="Admin.Nav.Timeline" xml:space="preserve"><value>Timeline</value></data>
   <data name="Admin.Nav.Workflows" xml:space="preserve"><value>Workflows</value></data>
   <data name="Admin.Nav.Data" xml:space="preserve"><value>Data</value></data>
   <data name="Admin.Nav.Moderation" xml:space="preserve"><value>Moderation</value></data>

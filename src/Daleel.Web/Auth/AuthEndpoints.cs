@@ -1,4 +1,5 @@
 using Daleel.Web.Data;
+using Daleel.Web.Events;
 using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -33,7 +34,8 @@ public static class AuthEndpoints
             IAntiforgery antiforgery,
             SignInManager<ApplicationUser> signInManager,
             UserManager<ApplicationUser> userManager,
-            IAnalyticsService analytics) =>
+            IAnalyticsService analytics,
+            ISystemEventLog systemLog) =>
         {
             var safeReturn = SafeLocalPath(returnUrl);
 
@@ -72,6 +74,10 @@ public static class AuthEndpoints
                 user.LastActiveAt = DateTime.UtcNow;
                 await userManager.UpdateAsync(user);
                 await analytics.RecordLoginAsync(user.Id, "Password", http.Connection.RemoteIpAddress?.ToString());
+                await systemLog.LogAsync(
+                    SystemEventCategory.User, "user.login", "User signed in",
+                    source: "auth", userHash: Anonymizer.HashUserId(user.Id),
+                    details: new Dictionary<string, object?> { ["provider"] = "Password" });
                 // The 302 carries the freshly-written auth cookie back to the browser.
                 return Results.LocalRedirect(safeReturn);
             }
@@ -90,6 +96,7 @@ public static class AuthEndpoints
             UserManager<ApplicationUser> userManager,
             SignInManager<ApplicationUser> signInManager,
             IAnalyticsService analytics,
+            ISystemEventLog systemLog,
             IConfiguration config) =>
         {
             var safeReturn = SafeLocalPath(returnUrl);
@@ -146,6 +153,10 @@ public static class AuthEndpoints
 
             await signInManager.SignInAsync(user, isPersistent: true);
             await analytics.RecordLoginAsync(user.Id, "Password", http.Connection.RemoteIpAddress?.ToString());
+            await systemLog.LogAsync(
+                SystemEventCategory.User, "user.registered", "New account registered",
+                source: "auth", userHash: Anonymizer.HashUserId(user.Id),
+                details: new Dictionary<string, object?> { ["isAdmin"] = isAdmin });
             return Results.LocalRedirect(safeReturn);
         }).DisableAntiforgery();
 

@@ -33,6 +33,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private readonly IFilteredContentLogRepository _filteredLog;
     private readonly ICacheStore _cache;
     private readonly IEventStore _eventStore;
+    private readonly ISystemEventLog _systemLog;
     private readonly ISearchEmailNotifier _emailNotifier;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WorkflowSearchRunner> _logger;
@@ -40,7 +41,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     public WorkflowSearchRunner(
         IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
         IFilteredContentLogRepository filteredLog, ICacheStore cache, IEventStore eventStore,
-        ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
+        ISystemEventLog systemLog, ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
         ILogger<WorkflowSearchRunner> logger)
     {
         _agents = agents;
@@ -49,6 +50,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         _filteredLog = filteredLog;
         _cache = cache;
         _eventStore = eventStore;
+        _systemLog = systemLog;
         _emailNotifier = emailNotifier;
         _scopeFactory = scopeFactory;
         _logger = logger;
@@ -204,7 +206,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private async Task PersistEventsAsync(
         SearchJob job, JobApiCallCollector collector, IReadOnlyList<PipelineEvent> buffered, CancellationToken ct)
     {
-        if (!_eventStore.IsEnabled)
+        if (!_eventStore.IsEnabled && !_systemLog.IsEnabled)
         {
             return;
         }
@@ -214,9 +216,23 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         events.AddRange(collector.Calls.Select(c => PipelineEventFactory.FromApiCall(c, searchId)));
         events.AddRange(buffered);
 
-        if (events.Count > 0)
+        if (events.Count == 0)
         {
-            await _eventStore.RecordBatchAsync(events, CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+
+        // The cost dashboard's provider-shaped firehose.
+        await _eventStore.RecordBatchAsync(events, CancellationToken.None).ConfigureAwait(false);
+
+        // Bridge the same run into the unified admin timeline, re-bucketed into user-facing categories and
+        // tagged with the (hashed) owner so the timeline's per-user filter works for search activity.
+        if (_systemLog.IsEnabled)
+        {
+            var userHash = Anonymizer.HashUserId(job.UserId);
+            var timeline = events
+                .Select(e => SystemEventProjection.FromPipelineEvent(e, userHash))
+                .ToList();
+            await _systemLog.PublishManyAsync(timeline, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

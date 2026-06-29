@@ -123,6 +123,10 @@ var eventStoreConn = Daleel.Web.Events.PostgresConnection.Resolve(builder.Config
 builder.Services.AddDbContextFactory<Daleel.Web.Events.EventStoreDbContext>(
     o => o.UseNpgsql(eventStoreConn));
 builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.PostgresEventStore>();
+// The unified admin activity timeline shares the same daleel_events database + factory. It records the
+// cross-system feed (search lifecycle, pipeline actions bridged from the firehose, logins, errors) the
+// /admin/timeline page reads. Best-effort like the cost event store above.
+builder.Services.AddSingleton<Daleel.Web.Events.ISystemEventLog, Daleel.Web.Events.PostgresSystemEventLog>();
 
 // ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
 // ASP.NET encrypts the Identity auth cookie with Data Protection keys. By default those keys live in

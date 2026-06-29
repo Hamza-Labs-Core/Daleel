@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Daleel.Web.Data;
+using Daleel.Web.Events;
 using Daleel.Web.Pipeline;
 using Microsoft.EntityFrameworkCore;
 
@@ -59,12 +60,17 @@ public sealed class SearchJobService : BackgroundService
         var analytics = scope.ServiceProvider.GetRequiredService<IAnalyticsService>();
         var history = scope.ServiceProvider.GetRequiredService<ISearchHistoryRepository>();
         var quota = scope.ServiceProvider.GetRequiredService<IQuotaService>();
+        var systemLog = scope.ServiceProvider.GetRequiredService<ISystemEventLog>();
 
         var job = await db.SearchJobs.FirstOrDefaultAsync(j => j.Id == jobId, stoppingToken);
         if (job is null || job.Status is JobStatus.Cancelled or JobStatus.Completed)
         {
             return;
         }
+
+        // The unified timeline's correlation id is the job id; the actor is the hashed (never raw) user.
+        var correlationId = job.Id.ToString();
+        var userHash = Anonymizer.HashUserId(job.UserId);
 
         using var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         _queue.Register(job.Id, cts);
@@ -75,6 +81,13 @@ public sealed class SearchJobService : BackgroundService
         job.ProgressMessage = "🔍 Generating search strategy…"; // plain English for the server-side job row
         await db.SaveChangesAsync(stoppingToken);
         await convos.SetRunningAsync(job.UserId, job.Id, job.Query, now, stoppingToken);
+        await systemLog.LogAsync(
+            SystemEventCategory.Search, "search.started", $"Search started: {job.Query}",
+            source: "search-worker", correlationId: correlationId, userHash: userHash,
+            details: new Dictionary<string, object?>
+            {
+                ["query"] = job.Query, ["queryType"] = job.QueryType, ["geo"] = job.Geo, ["model"] = job.Model
+            }, ct: stoppingToken);
         // Broadcast a structured signal so every device localizes the first line and the stepper lights
         // up step 1 immediately (before the first activity reports in).
         await _broadcaster.ProgressAsync(
@@ -138,6 +151,17 @@ public sealed class SearchJobService : BackgroundService
             }, stoppingToken);
 
             await _broadcaster.CompletedAsync(job.UserId, job.Id, "completed", result.ResultJson, result.ResultType, null);
+            await systemLog.LogAsync(
+                SystemEventCategory.Search, "search.completed",
+                $"Search completed: {job.Query} ({result.ResultCount} result(s))",
+                source: "search-worker", correlationId: correlationId, userHash: userHash,
+                details: new Dictionary<string, object?>
+                {
+                    ["query"] = job.Query, ["resultCount"] = result.ResultCount,
+                    ["apiCalls"] = result.ApiCalls, ["providers"] = result.Providers,
+                    ["filteredCount"] = result.FilteredCount, ["durationMs"] = sw.ElapsedMilliseconds,
+                    ["servedFromCache"] = result.CacheQuality is not null
+                }, ct: stoppingToken);
 
             // Post-result follow-up depends on where this result came from. DETACHED on purpose: it must
             // never block this worker from picking up the next queued search, so a slow/hanging scrape
@@ -165,6 +189,11 @@ public sealed class SearchJobService : BackgroundService
         {
             await FinishAsync(db, convos, job, JobStatus.Cancelled, "cancelled", error: null, stoppingToken);
             await _broadcaster.CompletedAsync(job.UserId, job.Id, "cancelled", null, null, "Search cancelled.");
+            await systemLog.LogAsync(
+                SystemEventCategory.Search, "search.cancelled", $"Search cancelled: {job.Query}",
+                severity: SystemEventSeverity.Warning, source: "search-worker",
+                correlationId: correlationId, userHash: userHash,
+                details: new Dictionary<string, object?> { ["query"] = job.Query }, ct: CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -175,6 +204,16 @@ public sealed class SearchJobService : BackgroundService
             await FinishAsync(db, convos, job, JobStatus.Failed, "error", ex.Message, stoppingToken);
             await _broadcaster.CompletedAsync(job.UserId, job.Id, "failed", null, null,
                 "Search failed. Please try again.");
+            // The full message is operator-only telemetry (the user saw a generic line), so it's safe in
+            // the admin timeline's detail payload.
+            await systemLog.LogAsync(
+                SystemEventCategory.Search, "search.failed", $"Search failed: {job.Query}",
+                severity: SystemEventSeverity.Error, source: "search-worker",
+                correlationId: correlationId, userHash: userHash,
+                details: new Dictionary<string, object?>
+                {
+                    ["query"] = job.Query, ["error"] = ex.Message, ["exceptionType"] = ex.GetType().Name
+                }, ct: CancellationToken.None);
         }
         finally
         {
