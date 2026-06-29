@@ -15,8 +15,11 @@ services:
     expose:
       - "8080"
     volumes:
-      # Persisted app data — Data-Protection key ring + local-fallback logs. The database itself lives
-      # in Postgres now, not here.
+      # Persisted app data — survives container restarts/redeploys. Holds:
+      #   • /app/data/logs  — the always-on Serilog file sink (daleel-YYYYMMDD.jsonl, full trail).
+      #   • /app/data/...   — the Data-Protection key ring.
+      # The database itself lives in Postgres now, not here. Errors are ALSO mirrored to the R2
+      # daleel-logs bucket (Warning+) when R2_* is configured — see SerilogConfiguration.cs.
       - daleel_data:/app/data
     depends_on:
       # PostgreSQL is REQUIRED: the app creates/migrates its `daleel` database at startup, so wait for
