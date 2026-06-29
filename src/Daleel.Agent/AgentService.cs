@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Daleel.Core.Analysis;
 using Daleel.Core.Arabic;
 using Daleel.Core.Geo;
+using Daleel.Core.Intelligence;
 using Daleel.Core.Llm;
 using Daleel.Core.Models;
 using Daleel.Core.Moderation;
@@ -257,16 +258,75 @@ public sealed partial class AgentService
             sb.AppendLine("# Web results");
             foreach (var r in bundle.WebResults.Take(20))
             {
-                sb.Append("- ").Append(r.Title).Append(" — ").Append(r.Snippet);
-                if (!string.IsNullOrWhiteSpace(r.Url)) sb.Append(" (").Append(r.Url).Append(')');
-                // Surface the result's thumbnail so the extractor can attach a real image URL to the
-                // product. Without this the LLM has no image to return — a common cause of missing
-                // product images in the grid.
-                if (!string.IsNullOrWhiteSpace(r.ImageUrl)) sb.Append(" [image: ").Append(r.ImageUrl).Append(']');
-                sb.AppendLine();
+                AppendWebResult(sb, r);
             }
         }
 
+        AppendNonWebContext(sb, bundle);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Flattens a bundle for the LLM extraction pass, CLASSIFYING every web result first (via
+    /// <see cref="ResultClassifier"/>) so the extractor can tell a real buyable listing from an article
+    /// about products. Real product/store/brand/marketplace hits are grouped under one heading; editorial
+    /// sources (reviews, blogs, buying-guides) are grouped under a clearly-marked "reference only" heading
+    /// — they feed product/brand discovery but must never be emitted as purchasable items. The shopping
+    /// hits, store data, social posts and scraped pages are appended exactly as in <see cref="BuildContext"/>.
+    /// </summary>
+    private static string BuildExtractionContext(ResearchBundle bundle)
+    {
+        var sb = new StringBuilder();
+
+        if (bundle.WebResults.Count > 0)
+        {
+            var classified = bundle.WebResults
+                .Take(24)
+                .Select(r => (r, type: ResultClassifier.Classify(r.Url, r.Title, r.Snippet)))
+                .ToList();
+
+            var listings = classified.Where(c => c.type != ResultType.ReviewArticle).Select(c => c.r).ToList();
+            var articles = classified.Where(c => c.type == ResultType.ReviewArticle).Select(c => c.r).ToList();
+
+            if (listings.Count > 0)
+            {
+                sb.AppendLine("# Product & store listings (real items/sellers — extract products from these)");
+                foreach (var r in listings)
+                {
+                    AppendWebResult(sb, r);
+                }
+            }
+
+            if (articles.Count > 0)
+            {
+                sb.AppendLine("# Reference articles (background SOURCES only — mine for which products/brands exist; " +
+                    "NEVER list an article, review or round-up itself as a product)");
+                foreach (var r in articles)
+                {
+                    AppendWebResult(sb, r);
+                }
+            }
+        }
+
+        AppendNonWebContext(sb, bundle);
+        return sb.ToString();
+    }
+
+    /// <summary>Appends one web result as a context bullet (title — snippet (url) [image]).</summary>
+    private static void AppendWebResult(StringBuilder sb, SearchResult r)
+    {
+        sb.Append("- ").Append(r.Title).Append(" — ").Append(r.Snippet);
+        if (!string.IsNullOrWhiteSpace(r.Url)) sb.Append(" (").Append(r.Url).Append(')');
+        // Surface the result's thumbnail so the extractor can attach a real image URL to the
+        // product. Without this the LLM has no image to return — a common cause of missing
+        // product images in the grid.
+        if (!string.IsNullOrWhiteSpace(r.ImageUrl)) sb.Append(" [image: ").Append(r.ImageUrl).Append(']');
+        sb.AppendLine();
+    }
+
+    /// <summary>Appends the non-web sections (shopping, stores, social, pages) shared by both context builders.</summary>
+    private static void AppendNonWebContext(StringBuilder sb, ResearchBundle bundle)
+    {
         if (bundle.ShoppingResults.Count > 0)
         {
             sb.AppendLine("# Shopping results");
@@ -308,8 +368,6 @@ public sealed partial class AgentService
             sb.AppendLine($"# Page: {page.Url}");
             sb.AppendLine(Truncate(page.Content, 2000));
         }
-
-        return sb.ToString();
     }
 
     private static SentimentSummary SentimentFromPosts(IReadOnlyList<SocialPost> posts, string subject)

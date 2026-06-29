@@ -133,4 +133,55 @@ public class ProductDetailDbServiceTests
         model.LowestPrice.Should().Be(900m);
         model.Offers.Should().ContainSingle().Which.IsLowest.Should().BeTrue();
     }
+
+    [Fact]
+    public async Task GetAsync_PrefersCanonicalFinalSpecs_OverRawHarvestedSpecs()
+    {
+        using var ctx = new PostgresTestContext();
+        var brands = new BrandRepository(ctx.Db);
+        var models = new BrandModelRepository(ctx.Db);
+        var now = DateTimeOffset.UtcNow;
+
+        var brand = await brands.UpsertAsync(new Brand { Name = "Samsung", LastRefreshed = now });
+        var model = await models.UpsertAsync(new BrandModel
+        {
+            BrandId = brand.Id, ModelName = "Galaxy S24",
+            // Raw harvested specs (messy) and the canonical merged sheet the deep-dive produced.
+            SpecsJson = """{ "ram": "8GB (raw)" }""",
+            FinalSpecsJson = """{ "ram": "8 GB", "storage": "256 GB" }""",
+            LastRefreshed = now
+        });
+
+        var view = await Service(ctx).GetAsync(model.Id.ToString(), "ignored", "jordan");
+
+        view.Should().NotBeNull();
+        view!.Specs.Should().ContainKey("ram").WhoseValue.Should().Be("8 GB", "the UI reads the canonical FinalSpecsJson, not the raw SpecsJson");
+        view.Specs.Should().ContainKey("storage").WhoseValue.Should().Be("256 GB");
+    }
+
+    [Fact]
+    public async Task GetAsync_BuildsSpecTable_FromProfileSpecsJson_WhenNoCatalogueRowExists()
+    {
+        using var ctx = new PostgresTestContext();
+        var profiles = new ProductProfileRepository(ctx.Db);
+        var now = DateTimeOffset.UtcNow;
+
+        // The per-item deep-dive persists the canonical sheet to the profile for an item with no harvested
+        // BrandModel — this is what stops the "Details not yet available" placeholder for in-pipeline items.
+        await profiles.UpsertAsync(new ProductProfile
+        {
+            Name = "Samsung AR24", Brand = "Samsung", Model = "AR24",
+            Details = "A Wind-Free split AC.",
+            SpecsJson = """{ "cooling": "24000 BTU", "energy": "A++" }""",
+            LastRefreshed = now
+        });
+
+        var view = await Service(ctx).GetAsync("p_hash", "Samsung AR24", "jordan");
+
+        view.Should().NotBeNull("an enriched profile alone is enough to render the page");
+        view!.HasCatalogueProfile.Should().BeFalse("no harvested BrandModel backs this item");
+        view.Description.Should().Be("A Wind-Free split AC.");
+        view.Specs.Should().ContainKey("cooling").WhoseValue.Should().Be("24000 BTU");
+        view.Specs.Should().ContainKey("energy").WhoseValue.Should().Be("A++");
+    }
 }

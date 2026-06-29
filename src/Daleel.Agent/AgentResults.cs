@@ -20,10 +20,19 @@ public sealed class AgentOptions
     public int DeepResultsPerQuery { get; init; } = 100;
 
     /// <summary>Max web/shopping queries to actually execute from a plan (cost guard).</summary>
-    public int MaxQueriesPerKind { get; init; } = 4;
+    /// <remarks>
+    /// A broad query set is what gives "best &lt;category&gt;" searches their coverage — each diverse query
+    /// (per-brand, per-tier, buying-guide) surfaces a different slice of the catalogue. Kept generous; total
+    /// cost stays bounded by the per-job API-call cap.
+    /// </remarks>
+    public int MaxQueriesPerKind { get; init; } = 6;
 
-    /// <summary>Max URLs to deep-read per run.</summary>
-    public int MaxUrlsToRead { get; init; } = 3;
+    /// <summary>
+    /// Max URLs to deep-read per run. For research-style queries the buying-guide / round-up articles ARE the
+    /// product source, so reading more of them directly widens how many distinct models the extractor can
+    /// surface; bounded by the per-job API-call cap.
+    /// </summary>
+    public int MaxUrlsToRead { get; init; } = 6;
 
     /// <summary>
     /// Max store/marketplace pages to deep-extract priced listings from per run. Higher than

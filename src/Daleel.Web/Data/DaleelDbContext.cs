@@ -124,6 +124,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Brand).HasMaxLength(200);
             e.Property(x => x.Model).HasMaxLength(200);
             e.Property(x => x.Details).HasMaxLength(8000);
+            e.Property(x => x.SpecsJson).HasMaxLength(8000);
             e.Property(x => x.SourceUrl).HasMaxLength(1000);
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
         });

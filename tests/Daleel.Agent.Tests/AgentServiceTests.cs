@@ -246,6 +246,53 @@ public class AgentServiceTests
     }
 
     [Fact]
+    public async Task AskAsync_ProductQuery_LlmExtraction_SurfacesArticleNamedModelsButNeverTheArticleItself()
+    {
+        // Research-style queries ("best <category>") are answered mostly by buying-guide articles that name
+        // models without an in-context price or seller link. Those models MUST still surface as items (with
+        // empty offers) so the shopper sees the option exists — dropping them is what made article-heavy
+        // searches return only 2-3 results. A model with a real priced+linked offer keeps that offer. The
+        // ARTICLE itself is never a product: it arrives as a Review source, not as a product DTO.
+        var search = new FakeSearchProvider(
+            new SearchResult
+            {
+                Title = "Best ACs in Jordan 2026 - Buying Guide", Snippet = "our editor's top picks",
+                Url = "https://blog.example.com/best-acs", Kind = SearchKind.Web
+            });
+
+        const string productsJson = """
+            { "products": [
+              { "name": "Editor Pick AC", "brand": "Acme", "model": "ED-1",
+                "offers": [] },
+              { "name": "Bare Mention AC", "brand": "Acme", "model": "BM-2",
+                "offers": [ { "source": "SomeBlog" } ] },
+              { "name": "Samsung WindFree", "brand": "Samsung", "model": "AR18TXHQ",
+                "offers": [ { "source": "Smart Buy", "price": 320, "currency": "JOD", "url": "https://shop.jo/ar18" } ] }
+            ] }
+            """;
+
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.PlannerSystem ? StrategyJson
+            : system == PromptTemplates.ProductExtractionSystem ? productsJson
+            : "summary");
+
+        var agent = new AgentService(llm,
+            new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
+
+        var answer = await agent.AskAsync("best ACs in Jordan", "jordan");
+        var products = answer.Products!;
+
+        // All three named models surface — the article-only mentions as name-only items, the priced one with its offer.
+        products.Models.Should().HaveCount(3);
+        products.Models.Should().Contain(m => m.Model == "AR18TXHQ" && m.Offers.Any(o => o.Price == 320));
+        products.Models.Should().Contain(m => m.Model == "ED-1");
+        products.Models.Should().Contain(m => m.Model == "BM-2");
+        // The buying-guide article is surfaced as a review source, never as a product.
+        products.Models.Should().NotContain(m => m.Name.Contains("Buying Guide"));
+        products.Reviews.Should().Contain(r => r.Title.Contains("Best ACs"));
+    }
+
+    [Fact]
     public async Task AskAsync_ProductQuery_LlmExtraction_RetriesOnceThenRecovers()
     {
         // Models sometimes answer the first extraction call with prose instead of JSON. The pass

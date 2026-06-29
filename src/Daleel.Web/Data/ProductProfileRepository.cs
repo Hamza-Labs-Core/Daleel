@@ -65,13 +65,17 @@ public sealed class ProductProfileRepository : IProductProfileRepository
 
     public Task<int> CountAsync(CancellationToken ct = default) => _db.ProductProfiles.CountAsync(ct);
 
+    // Coalesce nullable fields onto the existing row rather than blind-overwriting (mirrors
+    // BrandModelRepository): a deep-dive that re-saves only to add the canonical SpecsJson must not wipe a
+    // Details/SourceUrl that an earlier, fresher scrape persisted.
     private static void ApplyUpdates(ProductProfile existing, ProductProfile profile)
     {
         existing.Name = profile.Name;
-        existing.Brand = profile.Brand;
-        existing.Model = profile.Model;
-        existing.Details = profile.Details;
-        existing.SourceUrl = profile.SourceUrl;
+        existing.Brand = profile.Brand ?? existing.Brand;
+        existing.Model = profile.Model ?? existing.Model;
+        existing.Details = profile.Details ?? existing.Details;
+        existing.SpecsJson = profile.SpecsJson ?? existing.SpecsJson;
+        existing.SourceUrl = profile.SourceUrl ?? existing.SourceUrl;
         existing.LastRefreshed = profile.LastRefreshed;
     }
 }

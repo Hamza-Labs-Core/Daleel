@@ -27,6 +27,14 @@ public sealed class ProductProfile
     /// <summary>The scraped detail (markdown specs/description) distilled from the offer page.</summary>
     public string? Details { get; set; }
 
+    /// <summary>
+    /// The canonical, merged-and-cleaned spec sheet for this item, serialized as a JSON object
+    /// (key → value). Written by the per-item deep-dive for <em>every</em> enriched item (not only
+    /// freshly-scraped ones), so the dedicated product page can render a clean spec table even when no
+    /// harvested <see cref="BrandModel"/> backs the listing. Null when the item produced no structured specs.
+    /// </summary>
+    public string? SpecsJson { get; set; }
+
     /// <summary>The page the details were scraped from.</summary>
     public string? SourceUrl { get; set; }
 

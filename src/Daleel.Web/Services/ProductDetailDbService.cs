@@ -93,7 +93,16 @@ public sealed class ProductDetailDbService : IProductDetailDbService
             return null;
         }
 
-        var specs = ParseSpecs(brandModel?.SpecsJson);
+        // Specs come from the canonical merged sheet the deep-dive produces (FinalSpecsJson — "what the UI
+        // reads"), falling back to the raw harvested SpecsJson, then to the per-item profile's saved sheet
+        // for listings with no harvested catalogue row. The deep-dive now persists the latter for every
+        // enriched item, so an item profiled in-pipeline always has a spec table here.
+        var specs = ParseSpecs(brandModel?.FinalSpecsJson ?? brandModel?.SpecsJson);
+        if (specs.Count == 0 && profile?.SpecsJson is { } profileSpecs)
+        {
+            specs = ParseSpecs(profileSpecs);
+        }
+
         var description = profile?.Details;
         // A harvested "description" spec is prose, not a spec row: surface it as the description (when the
         // deep-dive profile didn't supply one) and keep it out of the specs table.
@@ -172,7 +181,13 @@ public sealed class ProductDetailDbService : IProductDetailDbService
         var profile = await _profiles.GetByKeyAsync(key, ct);
         var latest = await _prices.LatestForProductAsync(key, ct);
 
-        var specs = WithoutKey(ParseSpecs(brandModel?.SpecsJson), "description");
+        var specs = WithoutKey(
+            ParseSpecs(brandModel?.FinalSpecsJson ?? brandModel?.SpecsJson), "description");
+        if (specs.Count == 0 && profile?.SpecsJson is { } profileSpecs)
+        {
+            specs = WithoutKey(ParseSpecs(profileSpecs), "description");
+        }
+
         if (specs.Count == 0 && latest.Count == 0)
         {
             return null; // nothing profiled — the compare page shows "specs not yet profiled".

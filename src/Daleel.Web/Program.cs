@@ -124,8 +124,8 @@ builder.Services.AddDbContextFactory<Daleel.Web.Events.EventStoreDbContext>(
     o => o.UseNpgsql(eventStoreConn));
 builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.PostgresEventStore>();
 // The unified admin activity timeline shares the same daleel_events database + factory. It records the
-// cross-system feed (search lifecycle, pipeline actions bridged from the firehose, logins, errors) the
-// /admin/timeline page reads. Best-effort like the cost event store above.
+// cross-system feed (search lifecycle, pipeline actions bridged from the firehose, logins, background
+// sweeps, errors) the /admin/timeline page reads. Best-effort like the cost event store above.
 builder.Services.AddSingleton<Daleel.Web.Events.ISystemEventLog, Daleel.Web.Events.PostgresSystemEventLog>();
 
 // ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
@@ -434,6 +434,11 @@ builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 // agent runs providers in parallel) plus a weekly background sweep of expired entries.
 builder.Services.AddSingleton<Daleel.Core.Caching.ICacheStore, Daleel.Web.Data.PostgresCacheStore>();
 builder.Services.AddHostedService<Daleel.Web.Services.CacheCleanupService>();
+
+// Saved-catalogue hygiene: every 6 hours, sweep the brand/store/product tables and drop rows that are
+// too thin (no price/source/name) or were misclassified during a search (an article saved as a product).
+// Idempotent — a clean table is a no-op — so it's safe to run repeatedly.
+builder.Services.AddHostedService<Daleel.Web.Services.DataCleanupService>();
 
 // Admin-triggered, irreversible bulk wipes (search cache, catalogue, workflow history) behind the
 // /admin/cleardata page. Transient: it gets its own DaleelDbContext, never sharing the circuit's.

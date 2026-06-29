@@ -540,7 +540,9 @@ public sealed partial class AgentService
             (IReadOnlyList<ProductListing>)Array.Empty<ProductListing>(),
             (IReadOnlyDictionary<string, ModelInsight>)new Dictionary<string, ModelInsight>(StringComparer.Ordinal));
 
-        var context = BuildContext(bundle);
+        // Classifying context: real product/store listings are separated from editorial articles, so the
+        // extractor mines articles for which products exist without ever listing an article as an item.
+        var context = BuildExtractionContext(bundle);
         if (context.Length == 0)
         {
             return empty;
@@ -590,19 +592,21 @@ public sealed partial class AgentService
                 }
             }
 
-            var added = 0;
-            foreach (var o in p.Offers ?? new List<ExtractedOfferDto>())
-            {
-                var url = string.IsNullOrWhiteSpace(o.Url) ? null : o.Url!.Trim();
-                // Honour the same locality rule as the deterministic path: drop a linked offer
-                // we can confirm is non-local (keep link-less offers — the prompt asks local-only).
-                if (url is not null && !includeIntl &&
-                    !LocalityClassifier.IsLocal(url, geo.CountryCode, geo.Country))
-                {
-                    continue;
-                }
+            // Keep every offer that is local (or intl-allowed); a bare source name with no price and no
+            // link still counts as an offer here — it tells the shopper a seller exists even before the
+            // deep-dive scrapes a price. Non-local linked offers are dropped, honouring the same locality
+            // rule as the deterministic path. The ARTICLE the model was found in is never a product: the
+            // LLM is instructed to mine articles for which products exist but never to output the article
+            // itself, and review/buying-guide hits arrive separately as Reviews, not as product DTOs.
+            var localOffers = (p.Offers ?? new List<ExtractedOfferDto>())
+                .Select(o => (o, url: string.IsNullOrWhiteSpace(o.Url) ? null : o.Url!.Trim()))
+                .Where(t => t.url is null || includeIntl ||
+                            LocalityClassifier.IsLocal(t.url, geo.CountryCode, geo.Country))
+                .Select(t => (t.o, t.url, price: ParsePrice(t.o.Price)))
+                .ToList();
 
-                var price = ParsePrice(o.Price);
+            foreach (var (o, url, price) in localOffers)
+            {
                 listings.Add(new ProductListing
                 {
                     Name = name!.Trim(),
@@ -619,12 +623,14 @@ public sealed partial class AgentService
                     Specs = specs,
                     Condition = ListingExtractor.NormalizeCondition(o.Condition),
                 });
-                added++;
             }
 
-            // A product whose only offers were non-local is dropped; one with no offers at all is
-            // still surfaced (brand/name/specs visible) so the shopper knows the option exists.
-            if (added == 0 && (p.Offers is null || p.Offers.Count == 0))
+            // A model with no usable offers (none at all, or all of them non-local) is still surfaced as a
+            // name-only item — brand/model/specs/image visible — so a shopper researching "best <category>"
+            // sees the option exists even when no in-context seller carried a price or a local link. The
+            // deep-dive enrichment fills the price/source afterwards; dropping it here is what made
+            // article-heavy queries return only 2-3 items.
+            if (localOffers.Count == 0)
             {
                 listings.Add(new ProductListing
                 {

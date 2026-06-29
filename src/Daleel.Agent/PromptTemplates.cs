@@ -204,15 +204,19 @@ public static class PromptTemplates
     public const string ProductExtractionSystem =
         "You are Daleel, a precise product-extraction engine for a shopping assistant. Given the raw " +
         "research context for a buy-intent query (search results, shopping hits, store listings, social " +
-        "posts), you EXTRACT the concrete products being sold and their prices. You never write prose, " +
-        "advice, or summaries — only structured data. CRITICAL RULES: (1) Extract ONLY products that are " +
-        "actually evidenced in the context (a name, a price, a seller, or a link); never invent products, " +
-        "prices, models, or links. (2) Output ONE entry per distinct MODEL, with every place it is sold " +
-        "gathered into that entry's offers array — never repeat the same model once per store. (3) Prices " +
-        "are numbers only (strip currency symbols/thousands separators); omit a price you cannot find rather " +
-        "than guessing. (4) Keep brand names, model numbers and product names in their ORIGINAL form (do not " +
-        "translate them). (5) Prefer sellers in the target country; include an offer's link verbatim when the " +
-        "context provides one. You ALWAYS reply with a single JSON object only." +
+        "posts, AND review/buying-guide ARTICLES), you first CLASSIFY each source — a real product/store " +
+        "listing, an article/review/blog about products, a store page, or an irrelevant page — then EXTRACT " +
+        "the concrete products being sold and their prices. You never write prose, advice, or summaries — " +
+        "only structured data. CRITICAL RULES: (1) Output every distinct PRODUCT MODEL the context names — a " +
+        "model named in a buying guide with no price and no seller still counts; include it with an empty " +
+        "offers array. Never invent products, prices, models, or links. (2) Articles, reviews and round-ups " +
+        "are SOURCES, not items: mine them for which products and brands exist, but NEVER output the article " +
+        "itself as a product. (3) Output ONE entry per distinct " +
+        "MODEL, with every place it is sold gathered into that entry's offers array — never repeat the same " +
+        "model once per store. (4) Prices are numbers only (strip currency symbols/thousands separators); omit " +
+        "a price you cannot find rather than guessing. (5) Keep brand names, model numbers and product names in " +
+        "their ORIGINAL form (do not translate them). (6) Prefer sellers in the target country; include an " +
+        "offer's link verbatim when the context provides one. You ALWAYS reply with a single JSON object only." +
         HalalGuard;
 
     /// <summary>System prompt for distilling per-model pros/cons from reviews.</summary>
@@ -315,8 +319,15 @@ public static class PromptTemplates
         sb.Append("Extract the concrete products a shopper in ").Append(geo.Country)
           .AppendLine(" could buy, drawn ONLY from the context below. Prefer local sellers; quote real prices and links.");
         sb.AppendLine("Be COMPREHENSIVE: extract EVERY distinct model the context evidences — span MULTIPLE brands and " +
-            "MULTIPLE models per brand (budget through premium), not just the few most prominent. A model mentioned " +
-            "with a name but no price still counts: include it with an empty offers array so the shopper sees it exists.");
+            "MULTIPLE models per brand (budget through premium), not just the few most prominent.");
+        sb.AppendLine("CLASSIFY before you extract. The context mixes two kinds of source: (a) real PRODUCT/STORE " +
+            "listings — a concrete item sold by a real store/marketplace, with a price or a buy link — and (b) ARTICLES, " +
+            "reviews, blogs and buying-guides ABOUT products. NEVER output an article, review or round-up ITSELF as a " +
+            "product (its title is not a product). But DO mine articles for the models they name: a model named in a " +
+            "buying guide with a name but NO price and NO seller still counts — include it with an empty offers array so " +
+            "the shopper sees it exists. Attach real prices and seller links to a model's offers whenever the context " +
+            "provides them; leave offers empty when it does not. The goal is BREADTH: surface every distinct model the " +
+            "context names, not only the few that happen to carry an in-context price.");
         // Schema-aware extraction: when the up-front category analysis identified the specs that matter for
         // this product type, tell the extractor to fill those exact keys (so the compare table and detail
         // views line up across products) instead of returning arbitrary free-form spec keys.
