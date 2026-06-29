@@ -18,7 +18,7 @@
 {
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
         <MudText>@L["History.SignInPrompt"]</MudText>
-        <MudButton Href="/login" Variant="Variant.Text" Color="Color.Primary" Class="mt-2">@L["Nav.Login"]</MudButton>
+        <MudButton Href="/login" data-enhance-nav="false" Variant="Variant.Text" Color="Color.Primary" Class="mt-2">@L["Nav.Login"]</MudButton>
     </MudAlert>
 }
 else if (_authenticated)

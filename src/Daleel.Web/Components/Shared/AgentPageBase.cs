@@ -272,7 +272,9 @@ public abstract class AgentPageBase : ComponentBase
         if (result == true)
         {
             var returnUrl = "/" + Nav.ToBaseRelativePath(Nav.Uri);
-            Nav.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}");
+            // forceLoad: true — /login's antiforgery cookie must be set on a full document load, not an
+            // enhanced-navigation fetch, or the first sign-in POST fails antiforgery (see RedirectToLogin).
+            Nav.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
         }
     }
 

@@ -5,6 +5,11 @@
     protected override void OnInitialized()
     {
         var returnUrl = "/" + Nav.ToBaseRelativePath(Nav.Uri);
-        Nav.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: false);
+        // forceLoad: true — /login is a static-SSR page whose antiforgery Set-Cookie rides the SAME
+        // response that renders the form. Reaching it via Blazor enhanced navigation (a fetch) applies
+        // the form's token to the DOM but does NOT reliably commit that Set-Cookie to the jar (notably
+        // iOS Safari), so the first POST fails antiforgery ("session expired", works on retry). A full
+        // document load guarantees the cookie is set before the user submits.
+        Nav.NavigateTo($"/login?returnUrl={Uri.EscapeDataString(returnUrl)}", forceLoad: true);
     }
 }

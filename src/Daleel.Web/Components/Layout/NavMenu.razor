@@ -44,7 +44,7 @@
                 <MudNavLink Href="/logout" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Logout">@L["Nav.Logout"]</MudNavLink>
             </Authorized>
             <NotAuthorized>
-                <MudNavLink Href="/login" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Login">@L["Nav.Login"]</MudNavLink>
+                <MudNavLink Href="/login" data-enhance-nav="false" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Login">@L["Nav.Login"]</MudNavLink>
             </NotAuthorized>
         </AuthorizeView>
     </div>

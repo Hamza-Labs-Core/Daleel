@@ -482,7 +482,9 @@
             yesText: L["Nav.Login"], cancelText: L["Search.Cancel"]);
         if (ok == true)
         {
-            Nav.NavigateTo("/login?returnUrl=%2F");
+            // forceLoad: true — see RedirectToLogin: /login's antiforgery cookie must be set on a full
+            // document load, not an enhanced-navigation fetch, or the first sign-in POST fails.
+            Nav.NavigateTo("/login?returnUrl=%2F", forceLoad: true);
         }
     }
 
