@@ -264,6 +264,11 @@ builder.Services.AddTransient<IStoreRepository, StoreRepository>();
 builder.Services.AddTransient<IProductProfileRepository, ProductProfileRepository>();
 builder.Services.AddTransient<IBrandModelRepository, BrandModelRepository>();
 builder.Services.AddTransient<IScrapedPriceRepository, ScrapedPriceRepository>();
+// Entity-document persistence: Postgres index row + R2 daleel-data JSON document (the source of truth)
+// for products/services/places. Transient so each save gets its own DbContext (same circuit-safety rule
+// as the profile repositories above).
+builder.Services.AddTransient<IEntityRecordRepository, EntityRecordRepository>();
+builder.Services.AddTransient<Daleel.Web.Persistence.ISearchEntityStore, Daleel.Web.Persistence.SearchEntityStore>();
 
 // Real-time translation (DeepL) with a permanent Postgres cache. Optional: when DEEPL_API_KEY is unset the
 // service reports Enabled=false and every <TranslatedText> is a transparent pass-through, so the app runs

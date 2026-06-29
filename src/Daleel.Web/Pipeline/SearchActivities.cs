@@ -4,6 +4,7 @@ using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
 using Daleel.Web.Events;
+using Daleel.Web.Persistence;
 using Daleel.Web.Pipeline.SubWorkflows;
 using Daleel.Web.Profiles;
 using Daleel.Web.Services;
@@ -11,6 +12,7 @@ using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Daleel.Web.Pipeline;
 
@@ -285,7 +287,44 @@ public sealed class ExtractProductsActivity : CodeActivity
             if (state.Products is { } p)
             {
                 services.Report(SearchStep.ExtractingProducts, "Progress.Msg.Extracted", p.ProductCount, p.BrandCount);
+                // Persist each surfaced entity as a self-contained JSON document in R2 (source of truth)
+                // with a thin Postgres index row. Best-effort: persistence must never fail the search.
+                await PersistEntitiesAsync(context, state, p);
             }
+        }
+    }
+
+    /// <summary>
+    /// Projects the extracted models into <see cref="Daleel.Core.Persistence.EntityDocument"/>s (one per
+    /// model, intent-tagged, with every relation ID embedded) and writes each to R2 + the Postgres index
+    /// via <see cref="ISearchEntityStore"/>. Wholly best-effort: any failure is logged and swallowed so a
+    /// persistence hiccup never sinks the user's search.
+    /// </summary>
+    private static async Task PersistEntitiesAsync(
+        ActivityExecutionContext context, SearchPipelineState state, ProductSearchResult products)
+    {
+        if (products.Models.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var store = context.GetRequiredService<ISearchEntityStore>();
+            var documents = EntityDocumentMapper.ToDocuments(
+                products, state.Intent, state.SearchId, DateTimeOffset.UtcNow);
+            var saved = await store.SaveAllAsync(documents, context.CancellationToken);
+            state.RecordEvent(EventCategory.Profile, "entities.persisted", "r2",
+                metadata: new Dictionary<string, object?> { ["count"] = saved, ["intent"] = state.Intent.ToString() });
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            context.GetRequiredService<ILogger<ExtractProductsActivity>>()
+                .LogWarning(ex, "Entity persistence failed.");
         }
     }
 }

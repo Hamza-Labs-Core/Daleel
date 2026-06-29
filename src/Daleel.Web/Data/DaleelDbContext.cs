@@ -42,6 +42,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ProductProfile> ProductProfiles => Set<ProductProfile>();
     public DbSet<BrandModel> BrandModels => Set<BrandModel>();
     public DbSet<ScrapedPrice> ScrapedPrices => Set<ScrapedPrice>();
+
+    /// <summary>Index over the R2-stored entity documents (products/services/places). See <see cref="EntityRecord"/>.</summary>
+    public DbSet<EntityRecord> EntityRecords => Set<EntityRecord>();
     public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
     public DbSet<TranslationCacheEntry> TranslationCache => Set<TranslationCacheEntry>();
 
@@ -160,6 +163,43 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany()
                 .HasForeignKey(x => x.BrandId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<EntityRecord>(e =>
+        {
+            // Thin index over the R2 entity documents. The PK is the entity's stable id (a string), and
+            // every column here exists to FIND or TRAVERSE — never to hold rich content (that lives in R2).
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Id).HasMaxLength(64);
+            e.Property(x => x.Intent).HasMaxLength(32);
+            e.Property(x => x.Name).HasMaxLength(400);
+            e.Property(x => x.NameKey).HasMaxLength(400);
+            e.Property(x => x.Geo).HasMaxLength(64);
+            e.Property(x => x.SearchId).HasMaxLength(64);
+            e.Property(x => x.ProductKey).HasMaxLength(300);
+            e.Property(x => x.ParentProductKey).HasMaxLength(300);
+            e.Property(x => x.R2Key).HasMaxLength(512);
+            e.Property(x => x.R2Url).HasMaxLength(1000);
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+
+            // Lookup/traversal indexes: by search run, by intent+name, by relation, by recency.
+            e.HasIndex(x => x.SearchId);
+            e.HasIndex(x => new { x.Intent, x.NameKey });
+            e.HasIndex(x => x.BrandId);
+            e.HasIndex(x => x.StoreId);
+            e.HasIndex(x => x.ProductKey);
+            e.HasIndex(x => x.LastRefreshed);
+
+            // Relations exist for the graph, but an entity outlives its brand/store: SetNull on delete so
+            // pruning a brand/store unlinks the index row rather than deleting it (the R2 doc still stands).
+            e.HasOne(x => x.Brand)
+                .WithMany()
+                .HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Store)
+                .WithMany()
+                .HasForeignKey(x => x.StoreId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         builder.Entity<VisionMatchCache>(e =>

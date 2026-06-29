@@ -53,6 +53,25 @@ public static class StableId
     /// <summary>Stable id for a store, keyed on its name (used when no database id exists yet).</summary>
     public static string ForStore(string? name) => Hash("s", name);
 
+    /// <summary>Stable id for a hireable service provider, keyed on its name.</summary>
+    public static string ForService(string? name) => Hash("sv", NormalizeIdentity(name));
+
+    /// <summary>Stable id for a physical place/venue, keyed on its name.</summary>
+    public static string ForPlace(string? name) => Hash("pl", NormalizeIdentity(name));
+
+    /// <summary>
+    /// Stable id for any intent-classified entity surfaced by a search. Products keep the existing
+    /// <see cref="ForProduct"/> identity (brand+model) so they route/persist consistently; services and
+    /// places hash their name. This is the id an <c>EntityDocument</c> (and its Postgres index row) carry.
+    /// </summary>
+    public static string ForEntity(SearchIntentType intent, string? brand, string? model, string? name) =>
+        intent switch
+        {
+            SearchIntentType.Service => ForService(name),
+            SearchIntentType.Place => ForPlace(name),
+            _ => ForProduct(brand, model, name)
+        };
+
     /// <summary>
     /// Lower-cased, trimmed value hashed to 8 bytes of SHA-256 (16 hex chars) and prefixed with the
     /// entity kind. 64 bits is far more than enough to avoid collisions within a single result set,
