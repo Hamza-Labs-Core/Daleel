@@ -61,6 +61,14 @@ public sealed class SearchPipelineState
     public SearchStrategy? Strategy { get; set; }
 
     /// <summary>
+    /// What KIND of thing the user wants — product, service, or place — as classified by the planner
+    /// (copied off <see cref="Strategy"/> in <c>ParseQueryActivity</c>). Drives which extraction prompt
+    /// the agent runs. Defaults to <see cref="SearchIntentType.Product"/> so an unclassified run behaves
+    /// exactly as before.
+    /// </summary>
+    public SearchIntentType Intent { get; set; } = SearchIntentType.Product;
+
+    /// <summary>
     /// The up-front category "thinking" produced by <c>AnalyzeMarketActivity</c> before sources are
     /// gathered: product type, relevant store types, expected brands, the comparison schema and a
     /// price expectation. Threaded into extraction (schema-aware) and the final result. Null for

@@ -1,6 +1,7 @@
 using System.Text;
 using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
+using Daleel.Core.Models;
 
 namespace Daleel.Agent;
 
@@ -70,6 +71,7 @@ public static class PromptTemplates
         Reply with exactly this JSON object:
         {
           "queryType": "ProductResearch|BrandLookup|StoreFinder|DealHunter|OpinionAggregation|Comparison|General",
+          "intent": "Product|Service|Place",
           "subject": "the product/brand/topic",
           "webQueries": ["bilingual web search strings"],
           "shoppingQueries": ["shopping/marketplace search strings"],
@@ -79,6 +81,11 @@ public static class PromptTemplates
           "reasoning": "one sentence on the plan"
         }
         Generate queries in BOTH the market's primary language and English. No prose outside the JSON.
+
+        Set "intent" to what KIND of thing the user wants (independent of queryType):
+        - "Product" — a buyable item (AC, phone, car, furniture). DEFAULT when unsure.
+        - "Service" — something to hire/book (plumber, lawyer, cleaning, car repair, course).
+        - "Place" — a physical venue to visit (restaurant, café, gym, clinic, hotel, salon).
         """;
 
     /// <summary>Plan a free-form natural-language question.</summary>
@@ -88,7 +95,8 @@ public static class PromptTemplates
         sb.AppendLine(MarketContext(geo));
         sb.Append("User question: ").AppendLine(question);
         sb.AppendLine();
-        sb.AppendLine("Classify the question and design the search strategy.");
+        sb.AppendLine("Classify the question — both its queryType (task shape) AND its intent " +
+            "(is the user after a product to buy, a service to hire, or a place to visit?) — and design the search strategy.");
         sb.AppendLine(StrategySchema);
         return sb.ToString();
     }
@@ -219,6 +227,60 @@ public static class PromptTemplates
         "offer's link verbatim when the context provides one. You ALWAYS reply with a single JSON object only." +
         HalalGuard;
 
+    /// <summary>
+    /// System prompt for the structured SERVICE-extraction pass. Same parser discipline as
+    /// <see cref="ProductExtractionSystem"/>, but the "products" are service providers: the
+    /// <c>offers</c> array carries PRICING TIERS (tier name + price) and the <c>specs</c> object
+    /// carries availability, contact and coverage details. Reuses the product JSON shape so the
+    /// downstream aggregator is unchanged.
+    /// </summary>
+    public const string ServiceExtractionSystem =
+        "You are Daleel, a precise SERVICE-extraction engine for a local-services assistant. Given the raw " +
+        "research context for a hire-intent query (search results, provider sites, directory listings, social " +
+        "posts AND review/round-up ARTICLES), you first CLASSIFY each source — a real service PROVIDER, an " +
+        "article/review about providers, a directory page, or an irrelevant page — then EXTRACT the concrete " +
+        "providers a customer could hire and their pricing. You never write prose — only structured data. " +
+        "CRITICAL RULES: (1) Output one entry per distinct PROVIDER (the \"name\"/\"brand\"), even one named in a " +
+        "round-up with no price — include it with an empty offers array. Never invent providers or prices. " +
+        "(2) Model PRICING TIERS as offers: each offer's \"source\" is the tier/package name (e.g. 'Basic visit', " +
+        "'Hourly rate') and \"price\" its number; omit a price you cannot find. (3) Put availability, contact " +
+        "(phone/booking link), service area/coverage, and any rating into the \"specs\" object as key/value " +
+        "strings (e.g. \"availability\": \"24/7\", \"phone\": \"...\", \"area\": \"Amman\"). (4) Mine review/round-up " +
+        "articles for which providers exist, but NEVER output an article itself as a provider. (5) Prefer providers " +
+        "operating in the target country; include a verbatim link when the context provides one. You ALWAYS reply " +
+        "with a single JSON object only." +
+        HalalGuard;
+
+    /// <summary>
+    /// System prompt for the structured PLACE-extraction pass. The "products" are physical venues: the
+    /// <c>offers</c> array is normally empty (a place isn't purchased) and the <c>specs</c> object carries
+    /// the location, opening hours, contact, address and Google-Maps link. Reuses the product JSON shape so
+    /// the downstream aggregator is unchanged; the venue's rating/reviews/coordinates also surface through
+    /// the Places provider's <c>StoreInfo</c>.
+    /// </summary>
+    public const string PlaceExtractionSystem =
+        "You are Daleel, a precise PLACE-extraction engine for a local-discovery assistant. Given the raw " +
+        "research context for a visit-intent query (search results, map/place listings, directory pages, social " +
+        "posts AND review/round-up ARTICLES), you first CLASSIFY each source — a real physical VENUE, an " +
+        "article/review about venues, a directory page, or an irrelevant page — then EXTRACT the concrete places " +
+        "a visitor could go to. You never write prose — only structured data. CRITICAL RULES: (1) Output one entry " +
+        "per distinct VENUE (the \"name\"), even one named in a round-up — include it. Never invent venues. " +
+        "(2) Leave \"offers\" empty unless the context states an explicit entry/menu price; a place is visited, not " +
+        "bought. (3) Put the venue's details into the \"specs\" object as key/value strings: \"address\", \"area\", " +
+        "\"hours\", \"phone\", \"rating\", and \"mapUrl\" (a Google-Maps or maps link if present in context). " +
+        "(4) Mine review/round-up articles for which venues exist, but NEVER output an article itself as a venue. " +
+        "(5) Only include venues physically in the target market; include a verbatim link/photo URL when the " +
+        "context provides one. You ALWAYS reply with a single JSON object only." +
+        HalalGuard;
+
+    /// <summary>Picks the extraction system prompt that matches the classified intent (Product is the default).</summary>
+    public static string ExtractionSystem(SearchIntentType intent) => intent switch
+    {
+        SearchIntentType.Service => ServiceExtractionSystem,
+        SearchIntentType.Place => PlaceExtractionSystem,
+        _ => ProductExtractionSystem
+    };
+
     /// <summary>System prompt for distilling per-model pros/cons from reviews.</summary>
     public const string ModelDetailSystem =
         "You are Daleel, a product analyst. Given reviews, specs and listings for a single product model, you " +
@@ -311,8 +373,21 @@ public static class PromptTemplates
     /// the gathered context. The JSON shape feeds straight into the listing aggregator, so a model's
     /// <c>offers</c> become its <see cref="Daleel.Core.Models.PriceOffer"/>s in the product grid.
     /// </summary>
-    public static string ExtractProducts(string query, GeoProfile geo, string gatheredContext, ProductSchema? schema = null)
+    public static string ExtractProducts(string query, GeoProfile geo, string gatheredContext,
+        ProductSchema? schema = null, SearchIntentType intent = SearchIntentType.Product)
     {
+        // Service and Place searches reuse the SAME JSON shape (the "products" array, whose specs object
+        // is free-form and whose offers double as pricing tiers) so the downstream aggregator is unchanged
+        // — only the extraction GUIDANCE differs by intent.
+        if (intent == SearchIntentType.Service)
+        {
+            return ExtractServices(query, geo, gatheredContext);
+        }
+        if (intent == SearchIntentType.Place)
+        {
+            return ExtractPlaces(query, geo, gatheredContext);
+        }
+
         var sb = new StringBuilder();
         sb.AppendLine(MarketContext(geo));
         sb.Append("Buy-intent query: ").AppendLine(query);
@@ -377,6 +452,120 @@ public static class PromptTemplates
             url when the context provides one. Fill pros/cons/summary ONLY from opinions or specs actually in the
             context (empty arrays / null when there's nothing to say) — never invent products, prices, models, links,
             or opinions. Use an empty products array if the context has no concrete products. Respond ONLY with valid JSON.
+            """);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds the SERVICE-intent extraction prompt. Returns the SAME JSON shape as
+    /// <see cref="ExtractProducts"/> — providers map onto "products", pricing tiers onto "offers",
+    /// and availability/contact/area onto the free-form "specs" object — so the existing
+    /// <c>ExtractedProductsDto</c> and the listing aggregator handle it unchanged.
+    /// </summary>
+    private static string ExtractServices(string query, GeoProfile geo, string gatheredContext)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(MarketContext(geo));
+        sb.Append("Hire-intent query: ").AppendLine(query);
+        sb.Append("Extract the concrete service PROVIDERS a customer in ").Append(geo.Country)
+          .AppendLine(" could hire, drawn ONLY from the context below. Prefer providers operating locally.");
+        sb.AppendLine("Be COMPREHENSIVE: extract EVERY distinct provider the context evidences (a provider named in a " +
+            "round-up with no price still counts — include it with an empty offers array). Never invent providers.");
+        sb.AppendLine("CLASSIFY before you extract: real provider listings/directory pages vs. ARTICLES about providers. " +
+            "Mine articles for which providers exist, but NEVER output an article itself as a provider.");
+        sb.AppendLine("Gathered research context (search results, directory/provider pages, social posts, reviews):");
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine(gatheredContext);
+        sb.AppendLine("----------------------------------------");
+        sb.Append("Prices are in ").Append(geo.Currency).AppendLine(" unless the context states otherwise.");
+        sb.AppendLine("""
+            Reply with exactly this JSON object:
+            {
+              "products": [
+                {
+                  "name": "provider/business name as written",
+                  "brand": "parent company or chain if any, else null",
+                  "model": null,
+                  "imageUrl": "logo/photo link if present, else null",
+                  "specs": {
+                    "availability": "e.g. 24/7, Mon–Fri 9–5, by appointment",
+                    "phone": "contact number if present, else omit",
+                    "bookingUrl": "booking/contact link if present, else omit",
+                    "area": "service area / coverage, e.g. Greater Amman",
+                    "rating": "e.g. 4.6 (120 reviews) if present"
+                  },
+                  "offers": [
+                    {
+                      "source": "pricing tier/package name, e.g. 'Call-out fee' or 'Hourly rate'",
+                      "price": 25,
+                      "currency": "JOD",
+                      "url": "link to this offer/booking if present, else null",
+                      "condition": null
+                    }
+                  ],
+                  "pros": ["short strength drawn from reviews in the context", "..."],
+                  "cons": ["short weakness drawn from reviews in the context", "..."],
+                  "summary": "one-line verdict grounded in the context, else null"
+                }
+              ]
+            }
+            One entry per distinct provider; model pricing tiers as offers (tier name in "source"); put contact,
+            availability, area and rating in "specs". Fill pros/cons/summary ONLY from the context (empty / null
+            otherwise) — never invent providers, prices, contacts or opinions. Use an empty products array if the
+            context names no real providers. Respond ONLY with valid JSON.
+            """);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds the PLACE-intent extraction prompt. Returns the SAME JSON shape as
+    /// <see cref="ExtractProducts"/> — venues map onto "products" with location/hours/contact/map carried in
+    /// the free-form "specs" object and "offers" normally empty — so the downstream aggregator is unchanged.
+    /// The venue's coordinates/rating/reviews also arrive separately via the Places provider's StoreInfo.
+    /// </summary>
+    private static string ExtractPlaces(string query, GeoProfile geo, string gatheredContext)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine(MarketContext(geo));
+        sb.Append("Visit-intent query: ").AppendLine(query);
+        sb.Append("Extract the concrete physical PLACES a visitor in ").Append(geo.Country)
+          .AppendLine(" could go to, drawn ONLY from the context below. Only include venues physically in this market.");
+        sb.AppendLine("Be COMPREHENSIVE: extract EVERY distinct venue the context evidences (a venue named in a " +
+            "round-up still counts — include it). Never invent venues.");
+        sb.AppendLine("CLASSIFY before you extract: real venue/map listings vs. ARTICLES about venues. Mine articles " +
+            "for which venues exist, but NEVER output an article itself as a venue.");
+        sb.AppendLine("Gathered research context (search results, map/place listings, social posts, reviews):");
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine(gatheredContext);
+        sb.AppendLine("----------------------------------------");
+        sb.AppendLine("""
+            Reply with exactly this JSON object:
+            {
+              "products": [
+                {
+                  "name": "venue name as written",
+                  "brand": "chain/franchise if any, else null",
+                  "model": null,
+                  "imageUrl": "photo link if present, else null",
+                  "specs": {
+                    "address": "street address if present",
+                    "area": "neighbourhood/district, e.g. Abdoun",
+                    "hours": "opening hours if present, e.g. 'Daily 10:00–23:00'",
+                    "phone": "contact number if present, else omit",
+                    "rating": "e.g. 4.5 (300 reviews) if present",
+                    "mapUrl": "Google-Maps / maps link if present, else omit"
+                  },
+                  "offers": [],
+                  "pros": ["short strength drawn from reviews in the context", "..."],
+                  "cons": ["short weakness drawn from reviews in the context", "..."],
+                  "summary": "one-line verdict grounded in the context, else null"
+                }
+              ]
+            }
+            One entry per distinct venue; leave "offers" empty unless the context states an explicit price; put
+            address, hours, contact, rating and map link in "specs". Fill pros/cons/summary ONLY from the context
+            (empty / null otherwise) — never invent venues, addresses, hours or opinions. Use an empty products array
+            if the context names no real venues. Respond ONLY with valid JSON.
             """);
         return sb.ToString();
     }

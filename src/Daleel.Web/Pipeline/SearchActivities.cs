@@ -35,6 +35,9 @@ public sealed class ParseQueryActivity : CodeActivity
         services.Report(SearchStep.Analyzing, "Progress.Msg.Market", state.GeoProfile.Country);
         state.Strategy = await services.Agent.PlanAsync(
             PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken);
+        // Carry the planner's thing-type classification onto the run state so the extraction activity
+        // can pick the product / service / place prompt without reaching back into the strategy.
+        state.Intent = state.Strategy.Intent;
 
         var subject = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
         // The query-type noun is itself translatable: passing it as a "$"-prefixed resource key tells
@@ -266,15 +269,18 @@ public sealed class ExtractProductsActivity : CodeActivity
         state.Summary = await services.Agent.AnalyzeAsync(
             state.Query, state.GeoProfile, state.Bundle, context.CancellationToken, system);
 
-        if (state.IsProductQuery)
+        // Run the structured extraction pass for buy-intent product queries AND for any service/place
+        // intent (those reuse the same structured shape via an intent-specific extraction prompt).
+        if (state.IsProductQuery || state.Intent != SearchIntentType.Product)
         {
             services.Report(SearchStep.ExtractingProducts, "Progress.Msg.Identifying");
             var subject = state.Strategy!.Subject is { Length: > 0 } s ? s : state.Query;
             // Pass the up-front category intelligence so extraction is schema-aware (fills the spec
-            // keys that matter for this product type) and the schema rides along onto the result.
+            // keys that matter for this product type) and the schema rides along onto the result. The
+            // intent selects the product / service / place extraction prompt.
             state.Products = await services.Agent.BuildProductSearchResultAsync(
                 subject, state.GeoProfile, state.Bundle, state.Summary, context.CancellationToken,
-                intelligence: state.Intelligence);
+                intelligence: state.Intelligence, intent: state.Intent);
 
             if (state.Products is { } p)
             {

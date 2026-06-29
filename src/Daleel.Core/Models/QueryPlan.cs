@@ -35,8 +35,15 @@ public enum QueryType
 /// </summary>
 public record SearchStrategy
 {
-    /// <summary>The classified query type.</summary>
+    /// <summary>The classified query type (task shape).</summary>
     public QueryType QueryType { get; init; } = QueryType.General;
+
+    /// <summary>
+    /// The classified intent — what KIND of thing the user wants (product / service / place).
+    /// Orthogonal to <see cref="QueryType"/>; drives which extraction prompt runs. Defaults to
+    /// <see cref="SearchIntentType.Product"/> when the planner can't tell.
+    /// </summary>
+    public SearchIntentType Intent { get; init; } = SearchIntentType.Product;
 
     /// <summary>The product/brand/subject the query is about, as the LLM understood it.</summary>
     public string Subject { get; init; } = string.Empty;

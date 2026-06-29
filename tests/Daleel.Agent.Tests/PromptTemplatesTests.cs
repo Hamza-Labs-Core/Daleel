@@ -1,5 +1,6 @@
 using Daleel.Agent;
 using Daleel.Core.Geo;
+using Daleel.Core.Models;
 using FluentAssertions;
 using Xunit;
 
@@ -60,6 +61,61 @@ public class PromptTemplatesTests
         prompt.Should().Contain("\"pros\"");
         prompt.Should().Contain("\"cons\"");
         prompt.Should().Contain("\"summary\"");
+    }
+
+    [Fact]
+    public void StrategySchema_AsksPlannerToClassifyIntent()
+    {
+        var prompt = PromptTemplates.PlanFreeform("plumber in Amman", GeoProfiles.Jordan);
+
+        // The planner must emit an intent and be told what the three values mean.
+        prompt.Should().Contain("\"intent\"");
+        prompt.Should().Contain("Product|Service|Place");
+        prompt.Should().Contain("Service");
+        prompt.Should().Contain("Place");
+    }
+
+    [Fact]
+    public void ExtractProducts_ServiceIntent_AsksForProvidersTiersAndContact()
+    {
+        var prompt = PromptTemplates.ExtractProducts(
+            "plumber in Amman", GeoProfiles.Jordan, "Aqua Plumbing 24/7 callout 25 JOD",
+            intent: SearchIntentType.Service);
+
+        // Service-shaped guidance: providers, pricing tiers, availability/contact — same JSON shape.
+        prompt.Should().Contain("PROVIDERS");
+        prompt.Should().Contain("pricing tier");
+        prompt.Should().Contain("availability");
+        prompt.Should().Contain("\"products\"");
+        prompt.Should().Contain("Aqua Plumbing 24/7 callout 25 JOD");
+        prompt.Should().Contain("never invent");
+    }
+
+    [Fact]
+    public void ExtractProducts_PlaceIntent_AsksForVenuesHoursAddressAndMap()
+    {
+        var prompt = PromptTemplates.ExtractProducts(
+            "best shawarma in Amman", GeoProfiles.Jordan, "Reem 4.7 stars, Abdoun",
+            intent: SearchIntentType.Place);
+
+        // Place-shaped guidance: venues with hours/address/map, offers normally empty.
+        prompt.Should().Contain("PLACES");
+        prompt.Should().Contain("hours");
+        prompt.Should().Contain("address");
+        prompt.Should().Contain("mapUrl");
+        prompt.Should().Contain("Reem 4.7 stars, Abdoun");
+    }
+
+    [Theory]
+    [InlineData(SearchIntentType.Product)]
+    [InlineData(SearchIntentType.Service)]
+    [InlineData(SearchIntentType.Place)]
+    public void ExtractionSystem_PicksAPromptForEveryIntent(SearchIntentType intent)
+    {
+        var system = PromptTemplates.ExtractionSystem(intent);
+        system.Should().NotBeNullOrWhiteSpace();
+        // Every extraction system prompt enforces JSON-only structured output.
+        system.Should().Contain("single JSON object only");
     }
 
     [Fact]

@@ -419,6 +419,7 @@ public sealed partial class AgentService
     private sealed class StrategyDto
     {
         [JsonPropertyName("queryType")] public string? QueryTypeRaw { get; set; }
+        [JsonPropertyName("intent")] public string? IntentRaw { get; set; }
         [JsonPropertyName("subject")] public string? Subject { get; set; }
         [JsonPropertyName("webQueries")] public List<string>? WebQueries { get; set; }
         [JsonPropertyName("shoppingQueries")] public List<string>? ShoppingQueries { get; set; }
@@ -430,6 +431,9 @@ public sealed partial class AgentService
         public SearchStrategy ToStrategy() => new()
         {
             QueryType = Enum.TryParse<QueryType>(QueryTypeRaw, ignoreCase: true, out var qt) ? qt : Core.Models.QueryType.General,
+            // Default to Product when the planner omits or garbles the intent, so the pipeline behaves
+            // exactly as it did before intent classification existed.
+            Intent = Enum.TryParse<SearchIntentType>(IntentRaw, ignoreCase: true, out var it) ? it : SearchIntentType.Product,
             Subject = Subject ?? string.Empty,
             WebQueries = WebQueries ?? new List<string>(),
             ShoppingQueries = ShoppingQueries ?? new List<string>(),

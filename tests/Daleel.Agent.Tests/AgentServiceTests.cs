@@ -36,6 +36,21 @@ public class AgentServiceTests
         strategy.QueryType.Should().Be(QueryType.ProductResearch);
         strategy.WebQueries.Should().HaveCount(2);
         strategy.PlacesQueries.Should().Contain("متاجر مكيفات");
+        // No "intent" in this JSON → defaults to Product (back-compat with pre-intent planners).
+        strategy.Intent.Should().Be(SearchIntentType.Product);
+    }
+
+    [Fact]
+    public async Task PlanAsync_ParsesIntentFromLlmJson()
+    {
+        const string serviceJson = """
+            { "queryType": "StoreFinder", "intent": "Service", "subject": "plumber",
+              "webQueries": ["plumber Amman"], "shoppingQueries": [], "socialQueries": [],
+              "placesQueries": [], "urlsToRead": [], "reasoning": "hire a plumber" }
+            """;
+        var agent = new AgentService(new FakeLlmClient(_ => serviceJson));
+        var strategy = await agent.PlanAsync("plumber in Amman");
+        strategy.Intent.Should().Be(SearchIntentType.Service);
     }
 
     [Fact]
@@ -45,6 +60,8 @@ public class AgentServiceTests
         var strategy = await agent.PlanAsync("x");
         strategy.QueryType.Should().Be(QueryType.General);
         strategy.WebQueries.Should().BeEmpty();
+        // Unparseable planner output falls back to the safe Product default.
+        strategy.Intent.Should().Be(SearchIntentType.Product);
     }
 
     [Fact]
