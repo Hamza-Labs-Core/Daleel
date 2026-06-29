@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Daleel.Core.Models;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
 using Daleel.Web.Identification;
@@ -7,6 +8,7 @@ using Daleel.Web.Storage;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
+using Microsoft.Extensions.Logging;
 
 namespace Daleel.Web.Pipeline.SubWorkflows;
 
@@ -96,11 +98,15 @@ public sealed class ExtractSpecsActivity : CodeActivity
     }
 }
 
-/// <summary>Step 3 — compare the item's prices across every store that offers it (in-memory).</summary>
+/// <summary>
+/// Step 3 — compare the item's prices across every store that offers it, and persist each priced offer as
+/// a <see cref="ScrapedPrice"/> observation so the per-product price history/comparison reads it back
+/// (the offers were aggregated upstream — this is the durable record of that comparison, not a new crawl).
+/// </summary>
 [Activity("Daleel", "Item", "Compare prices: aggregate the item's offers across stores")]
 public sealed class ComparePricesActivity : CodeActivity
 {
-    protected override ValueTask ExecuteAsync(ActivityExecutionContext context)
+    protected override async ValueTask ExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
@@ -112,14 +118,67 @@ public sealed class ComparePricesActivity : CodeActivity
             .Count();
 
         services.Report(SearchStep.ComparingPrices, "Progress.Msg.ComparingItemPrices", stores, state.Model.Name);
+
+        var persisted = await PersistOfferPricesAsync(context, state, offers);
         state.RecordEvent(EventCategory.Extract, "item.compare", "pipeline",
             metadata: new Dictionary<string, object?>
             {
                 ["item"] = state.Model.Name,
                 ["stores"] = stores,
-                ["offers"] = offers.Count
+                ["offers"] = offers.Count,
+                ["priced"] = persisted
             });
-        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Writes one <see cref="ScrapedPrice"/> row per priced offer (keyed by the item's normalized product
+    /// key so observations across stores collapse into one comparison) and returns how many were saved.
+    /// Best-effort: a DB failure is logged and never fails the deep-dive.
+    /// </summary>
+    private static async Task<int> PersistOfferPricesAsync(
+        ActivityExecutionContext context, ItemDeepDiveState state, IReadOnlyList<PriceOffer> offers)
+    {
+        // ScrapeProductPagesActivity (step 1) already computed the normalized brand+model key; without it
+        // there's no stable identity to file the prices under.
+        if (state.Key.Length == 0)
+        {
+            return 0;
+        }
+
+        var now = context.GetRequiredService<ProfileOptions>().Now();
+        var rows = offers
+            .Where(o => o.Price is not null && !string.IsNullOrWhiteSpace(o.Source))
+            .Select(o => new ScrapedPrice
+            {
+                ProductName = state.Model.Name,
+                ProductKey = state.Key,
+                StoreName = o.Source,
+                Price = o.Price,
+                Currency = o.Currency,
+                SourceUrl = o.Url,
+                Provider = "pipeline",
+                ScrapedAt = now
+            })
+            .ToList();
+        if (rows.Count == 0)
+        {
+            return 0;
+        }
+
+        var repo = context.GetRequiredService<IScrapedPriceRepository>();
+        var logger = context.GetRequiredService<ILogger<ComparePricesActivity>>();
+        try
+        {
+            await repo.AddRangeAsync(rows, context.CancellationToken);
+            return rows.Count;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Failed to persist {Count} compared prices for item {Item}", rows.Count, state.Model.Name);
+            return 0;
+        }
     }
 }
 
@@ -145,7 +204,14 @@ public sealed class CollectReviewsActivity : CodeActivity
     }
 }
 
-/// <summary>Step 5 — persist a freshly-scraped deep-dive so the next search reuses it.</summary>
+/// <summary>
+/// Step 5 — persist the enriched item to the database so the dedicated product page (which reads ONLY
+/// from saved data) can render it. Persists for <em>every</em> enriched item, not only freshly-scraped
+/// ones: the canonical merged spec sheet is saved as <see cref="ProductProfile.SpecsJson"/> and any
+/// scraped markdown as <see cref="ProductProfile.Details"/>. Without this an item that already had specs
+/// (so no fresh scrape ran) was never written to the durable store, and its detail page showed the
+/// "not yet available" placeholder despite the deep-dive having enriched it in-memory.
+/// </summary>
 [Activity("Daleel", "Item", "Save the enriched item profile to the database")]
 public sealed class SaveItemProfileActivity : CodeActivity
 {
@@ -153,13 +219,35 @@ public sealed class SaveItemProfileActivity : CodeActivity
     {
         var state = context.GetRequiredService<ItemDeepDiveState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
-        if (state.ReusedFromCache || string.IsNullOrWhiteSpace(state.Details) || state.Key.Length == 0)
+        if (state.Key.Length == 0)
         {
-            return; // reused from cache or nothing fresh to persist
+            return; // not enough identity to key a profile
+        }
+
+        // The canonical merged sheet is preferred; fall back to the item's as-extracted specs. The raw
+        // markdown blob is archived under Details, never duplicated into the structured spec sheet.
+        var specs = state.MergedSpecs is { Count: > 0 } merged
+            ? new Dictionary<string, string>(merged)
+            : new Dictionary<string, string>(state.Result.Specs);
+        specs.Remove("details");
+        var specsJson = specs.Count > 0 ? JsonSerializer.Serialize(specs) : null;
+
+        // Nothing worth persisting: no fresh scrape AND no structured specs to save.
+        if (string.IsNullOrWhiteSpace(state.Details) && specsJson is null)
+        {
+            return;
+        }
+
+        // A reused-from-cache item already has its Details persisted; only re-save when THIS run produced
+        // canonical specs the saved row may predate (the coalescing upsert won't wipe the existing Details).
+        if (state.ReusedFromCache && specsJson is null)
+        {
+            return;
         }
 
         var repo = context.GetRequiredService<IProductProfileRepository>();
         var options = context.GetRequiredService<ProfileOptions>();
+        var logger = context.GetRequiredService<ILogger<SaveItemProfileActivity>>();
         await SafeUpsert(repo, new ProductProfile
         {
             Name = state.Model.Name,
@@ -167,17 +255,23 @@ public sealed class SaveItemProfileActivity : CodeActivity
             Model = state.Model.Model,
             NameKey = state.Key,
             Details = state.Details,
+            SpecsJson = specsJson,
             SourceUrl = state.SourceUrl,
             LastRefreshed = options.Now()
-        }, context.CancellationToken);
+        }, logger, state.Model.Name, context.CancellationToken);
         services.Report(SearchStep.ComparingPrices, "Progress.Msg.SavedDeepDive", state.Model.Name);
     }
 
-    private static async Task SafeUpsert(IProductProfileRepository repo, ProductProfile profile, CancellationToken ct)
+    private static async Task SafeUpsert(
+        IProductProfileRepository repo, ProductProfile profile, ILogger logger, string item, CancellationToken ct)
     {
         try { await repo.UpsertAsync(profile, ct); }
         catch (OperationCanceledException) { throw; }
-        catch { /* best-effort: saving a deep-dive must never fail the search */ }
+        catch (Exception ex)
+        {
+            // best-effort: saving a deep-dive must never fail the search, but the failure must be visible.
+            logger.LogWarning(ex, "Failed to persist deep-dive ProductProfile for item {Item}", item);
+        }
     }
 }
 
@@ -371,16 +465,31 @@ public sealed class SaveFinalSpecsActivity : CodeActivity
         }
 
         var r2 = context.GetRequiredService<IR2StorageService>();
+        var logger = context.GetRequiredService<ILogger<SaveFinalSpecsActivity>>();
         state.FinalSpecsR2Url = await ItemSpecPipeline.SafeStoreJson(
             r2, $"final-specs/{brandKey}/{modelKey}.json", json, R2Bucket.Specs, ct);
 
-        // Persist the canonical sheet onto the identified brand model so the model DB carries it directly.
-        if (state.IdentifiedBrandModelId is { } id && json.Length <= MaxFinalSpecsChars)
+        // Persist the canonical sheet onto a brand model so the model DB carries it directly. When the
+        // listing matched an existing catalogue model we update that row; otherwise we CREATE the model
+        // (a store-discovered item the catalogue crawler hadn't harvested yet) so its specs are still
+        // queryable by brand/model and not lost just because there was no pre-existing match.
+        if (json.Length <= MaxFinalSpecsChars)
         {
-            var models = context.GetRequiredService<IBrandModelRepository>();
-            try { await models.SaveFinalSpecsAsync(id, json, state.FinalSpecsR2Url, ct); }
-            catch (OperationCanceledException) { throw; }
-            catch { /* best-effort: the R2 copy + in-memory result remain authoritative */ }
+            if (state.IdentifiedBrandModelId is { } id)
+            {
+                var models = context.GetRequiredService<IBrandModelRepository>();
+                try { await models.SaveFinalSpecsAsync(id, json, state.FinalSpecsR2Url, ct); }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    // best-effort: the R2 copy + in-memory result remain authoritative.
+                    logger.LogWarning(ex, "Failed to save final specs onto brand model {BrandModelId}", id);
+                }
+            }
+            else
+            {
+                await CreateBrandModelAsync(context, state, json, logger, ct);
+            }
         }
 
         services.Report(SearchStep.ComparingPrices, "Progress.Msg.SavedFinalSpecs",
@@ -392,6 +501,58 @@ public sealed class SaveFinalSpecsActivity : CodeActivity
                 ["specs"] = merged.Count,
                 ["brandModelId"] = state.IdentifiedBrandModelId
             });
+    }
+
+    /// <summary>
+    /// Creates a <see cref="BrandModel"/> for an item that wasn't matched to a pre-existing catalogue row,
+    /// get-or-creating its owning <see cref="Brand"/> first (a BrandModel must hang off a brand). Carries
+    /// the canonical spec sheet so the model DB is queryable for store-discovered items the catalogue
+    /// crawler hasn't harvested yet. Best-effort: needs a brand + model name to anchor the row, and any DB
+    /// failure is logged rather than failing the deep-dive.
+    /// </summary>
+    private static async Task CreateBrandModelAsync(
+        ActivityExecutionContext context, ItemDeepDiveState state, string json, ILogger logger, CancellationToken ct)
+    {
+        var brandName = state.Model.Brand;
+        var modelName = string.IsNullOrWhiteSpace(state.Model.Model) ? state.Model.Name : state.Model.Model;
+        if (string.IsNullOrWhiteSpace(brandName) || string.IsNullOrWhiteSpace(modelName))
+        {
+            // No brand (or no model name) to anchor a per-brand model row. The ProductProfile + R2 copy
+            // already hold the specs, so the detail page still renders — we just skip the catalogue row.
+            logger.LogDebug(
+                "Skipping BrandModel creation for item {Item}: missing brand/model identity", state.Model.Name);
+            return;
+        }
+
+        try
+        {
+            var now = context.GetRequiredService<ProfileOptions>().Now();
+            var brands = context.GetRequiredService<IBrandRepository>();
+            var brand = await brands.GetByNameAsync(brandName, ct)
+                ?? await brands.UpsertAsync(
+                    new Brand { Name = brandName, NameKey = Brand.Normalize(brandName), LastRefreshed = now }, ct);
+
+            var models = context.GetRequiredService<IBrandModelRepository>();
+            var saved = await models.UpsertAsync(new BrandModel
+            {
+                BrandId = brand.Id,
+                ModelName = modelName,
+                ModelKey = BrandModel.Normalize(modelName),
+                Category = state.Category,
+                ImageUrl = state.Model.ImageUrl,
+                FinalSpecsJson = json,
+                FinalSpecsR2Url = state.FinalSpecsR2Url,
+                LastRefreshed = now,
+                DiscoveredAt = now
+            }, ct);
+            // Reflect the freshly-created id so the recorded event reports the model it persisted to.
+            state.IdentifiedBrandModelId = saved.Id;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to create BrandModel for item {Item}", state.Model.Name);
+        }
     }
 }
 

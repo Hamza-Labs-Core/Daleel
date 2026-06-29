@@ -169,6 +169,94 @@ public class SubWorkflowTests
         (await productRepo.CountAsync()).Should().Be(1, "a reused profile is not re-written");
     }
 
+    [Fact]
+    public async Task ItemDeepDiveWorkflow_PersistsCanonicalSpecs_EvenWithoutAFreshScrape()
+    {
+        // An item that already carries specs is never scraped (so the old save step bailed and wrote
+        // nothing) — yet its detail page reads only from the DB. The deep-dive must now persist the merged
+        // canonical sheet so the page renders instead of showing "Details not yet available".
+        var productRepo = new InMemoryProductRepo();
+        using var provider = BuildProvider(s => s.AddSingleton<IProductProfileRepository>(productRepo));
+
+        var model = new ProductModel
+        {
+            Name = "Samsung AR24", Brand = "Samsung", Model = "AR24",
+            Specs = new Dictionary<string, string>
+            {
+                ["cooling"] = "24000 BTU", ["energy"] = "A++", ["type"] = "Split"
+            }
+        };
+        var state = await RunItemAsync(provider, model);
+
+        state.ReusedFromCache.Should().BeFalse("nothing was saved before this run");
+        state.MergedSpecs.Should().NotBeNull("the spec pipeline merged the store specs into a canonical sheet");
+
+        var saved = await productRepo.GetByKeyAsync(ProductProfile.KeyFor("Samsung", "AR24", "Samsung AR24"));
+        saved.Should().NotBeNull("every enriched item is persisted so its detail page reads from the DB");
+        saved!.SpecsJson.Should().NotBeNullOrEmpty();
+        saved.SpecsJson.Should().Contain("24000 BTU");
+        (await productRepo.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ItemDeepDiveWorkflow_PersistsOfferPrices_ToScrapedPriceSeries()
+    {
+        // The offers were aggregated upstream; the deep-dive must durably record each priced one as a
+        // ScrapedPrice observation (keyed by the item's normalized product key) so the per-product price
+        // comparison reads it back — not just emit a telemetry event and discard them.
+        var priceRepo = new InMemoryScrapedPriceRepo();
+        using var provider = BuildProvider(s => s.AddSingleton<IScrapedPriceRepository>(priceRepo));
+
+        var model = new ProductModel
+        {
+            Name = "Samsung AR24", Brand = "Samsung", Model = "AR24",
+            Specs = new Dictionary<string, string> { ["cooling"] = "24000 BTU" },
+            Offers = new[]
+            {
+                new PriceOffer { Source = "ABC Store", Price = 599m, Currency = "JOD", Url = "https://abc.com/ar24" },
+                new PriceOffer { Source = "XYZ Store", Price = 575m, Currency = "JOD", Url = "https://xyz.com/ar24" },
+                new PriceOffer { Source = "NoPriceStore", Price = null } // availability-only → must be skipped
+            }
+        };
+        var state = await RunItemAsync(provider, model);
+
+        var key = ProductProfile.KeyFor("Samsung", "AR24", "Samsung AR24");
+        var saved = await priceRepo.LatestForProductAsync(key);
+        saved.Should().HaveCount(2, "each priced offer is one observation; the price-less offer is skipped");
+        saved.Select(p => p.StoreName).Should().BeEquivalentTo(new[] { "ABC Store", "XYZ Store" });
+        saved.Should().OnlyContain(p => p.ProductKey == key && p.Provider == "pipeline");
+        state.Events.Should().Contain(e => e.EventType == "item.compare");
+    }
+
+    [Fact]
+    public async Task ItemDeepDiveWorkflow_CreatesBrandModel_WhenUnidentified()
+    {
+        // The listing matched no pre-existing catalogue model (NoOp identifier), but its merged canonical
+        // sheet must still be persisted to a BrandModel — created on the fly — so the model DB is queryable
+        // for store-discovered items the catalogue crawler hasn't harvested yet.
+        var modelRepo = new InMemoryBrandModelRepo();
+        using var provider = BuildProvider(s => s.AddSingleton<IBrandModelRepository>(modelRepo));
+
+        var model = new ProductModel
+        {
+            Name = "Samsung AR24", Brand = "Samsung", Model = "AR24",
+            Specs = new Dictionary<string, string>
+            {
+                ["cooling"] = "24000 BTU", ["energy"] = "A++", ["type"] = "Split"
+            }
+        };
+        var state = await RunItemAsync(provider, model);
+
+        state.MergedSpecs.Should().NotBeNull("the spec pipeline produced a canonical sheet to persist");
+        state.IdentifiedBrandModelId.Should().NotBeNull("creating the BrandModel backfills the id onto the state");
+
+        var created = await modelRepo.GetByIdAsync(state.IdentifiedBrandModelId!.Value);
+        created.Should().NotBeNull("an unidentified item still gets a BrandModel so its specs are queryable");
+        created!.ModelName.Should().Be("AR24");
+        created.FinalSpecsJson.Should().Contain("24000 BTU");
+        (await modelRepo.CountAsync()).Should().Be(1);
+    }
+
     // ── Dispatcher fan-out (nested runner in child scopes, in parallel) ──────────────
 
     [Fact]
@@ -270,6 +358,8 @@ public class SubWorkflowTests
         services.AddSingleton<IBrandRepository>(new InMemoryBrandRepo());
         services.AddSingleton<IStoreRepository>(new InMemoryStoreRepo());
         services.AddSingleton<IProductProfileRepository>(new InMemoryProductRepo());
+        services.AddSingleton<IScrapedPriceRepository>(new InMemoryScrapedPriceRepo());
+        services.AddSingleton<IBrandModelRepository>(new InMemoryBrandModelRepo());
         services.AddSingleton<IAgentFactory>(new FakeAgentFactory());
         // Smart-identification dependencies the item deep-dive now resolves. A no-op identifier keeps these
         // sequencing tests focused on the original behavior; the identifier itself is covered separately.
@@ -406,6 +496,150 @@ public class SubWorkflowTests
         }
 
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(_store.Count);
+    }
+
+    private sealed class InMemoryScrapedPriceRepo : IScrapedPriceRepository
+    {
+        private readonly List<ScrapedPrice> _rows = new();
+
+        public Task AddAsync(ScrapedPrice price, CancellationToken ct = default)
+        {
+            lock (_rows) { _rows.Add(price); }
+            return Task.CompletedTask;
+        }
+
+        public Task AddRangeAsync(IReadOnlyCollection<ScrapedPrice> prices, CancellationToken ct = default)
+        {
+            lock (_rows) { _rows.AddRange(prices); }
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<ScrapedPrice>> LatestForProductAsync(string productKey, CancellationToken ct = default)
+        {
+            lock (_rows)
+            {
+                var latest = _rows
+                    .Where(p => p.ProductKey == productKey)
+                    .GroupBy(p => p.StoreName, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.OrderByDescending(p => p.ScrapedAt).First())
+                    .ToList();
+                return Task.FromResult<IReadOnlyList<ScrapedPrice>>(latest);
+            }
+        }
+
+        public Task<IReadOnlyList<ScrapedPrice>> LatestForStoreAsync(string storeName, CancellationToken ct = default)
+        {
+            lock (_rows)
+            {
+                var latest = _rows
+                    .Where(p => string.Equals(p.StoreName, storeName, StringComparison.OrdinalIgnoreCase))
+                    .GroupBy(p => p.ProductKey, StringComparer.OrdinalIgnoreCase)
+                    .Select(g => g.OrderByDescending(p => p.ScrapedAt).First())
+                    .ToList();
+                return Task.FromResult<IReadOnlyList<ScrapedPrice>>(latest);
+            }
+        }
+
+        public Task<IReadOnlyList<ScrapedPrice>> HistoryForProductAsync(string productKey, int max = 500, CancellationToken ct = default)
+        {
+            lock (_rows)
+            {
+                var history = _rows
+                    .Where(p => p.ProductKey == productKey)
+                    .OrderByDescending(p => p.ScrapedAt)
+                    .Take(max)
+                    .ToList();
+                return Task.FromResult<IReadOnlyList<ScrapedPrice>>(history);
+            }
+        }
+
+        public Task<int> CountAsync(CancellationToken ct = default)
+        {
+            lock (_rows) { return Task.FromResult(_rows.Count); }
+        }
+    }
+
+    private sealed class InMemoryBrandModelRepo : IBrandModelRepository
+    {
+        private readonly List<BrandModel> _models = new();
+        private int _nextId;
+
+        public Task<BrandModel> UpsertAsync(BrandModel model, CancellationToken ct = default)
+        {
+            var key = string.IsNullOrEmpty(model.ModelKey) ? BrandModel.Normalize(model.ModelName) : model.ModelKey;
+            model.ModelKey = key;
+            lock (_models)
+            {
+                var existing = _models.FirstOrDefault(m => m.BrandId == model.BrandId && m.ModelKey == key);
+                if (existing is not null)
+                {
+                    existing.FinalSpecsJson = model.FinalSpecsJson ?? existing.FinalSpecsJson;
+                    existing.FinalSpecsR2Url = model.FinalSpecsR2Url ?? existing.FinalSpecsR2Url;
+                    existing.Category = model.Category ?? existing.Category;
+                    existing.ImageUrl = model.ImageUrl ?? existing.ImageUrl;
+                    existing.LastRefreshed = model.LastRefreshed;
+                    return Task.FromResult(existing);
+                }
+
+                model.Id = ++_nextId;
+                _models.Add(model);
+                return Task.FromResult(model);
+            }
+        }
+
+        public Task<IReadOnlyList<BrandModel>> ListByBrandAsync(int brandId, CancellationToken ct = default)
+        {
+            lock (_models)
+            {
+                return Task.FromResult<IReadOnlyList<BrandModel>>(_models.Where(m => m.BrandId == brandId).ToList());
+            }
+        }
+
+        public Task<BrandModel?> GetByBrandAndKeyAsync(int brandId, string modelKey, CancellationToken ct = default)
+        {
+            lock (_models)
+            {
+                return Task.FromResult(_models.FirstOrDefault(m => m.BrandId == brandId && m.ModelKey == modelKey));
+            }
+        }
+
+        public Task<BrandModel?> GetByIdAsync(int id, CancellationToken ct = default)
+        {
+            lock (_models) { return Task.FromResult(_models.FirstOrDefault(m => m.Id == id)); }
+        }
+
+        public Task SaveFinalSpecsAsync(int id, string? finalSpecsJson, string? finalSpecsR2Url, CancellationToken ct = default)
+        {
+            lock (_models)
+            {
+                var existing = _models.FirstOrDefault(m => m.Id == id);
+                if (existing is not null)
+                {
+                    existing.FinalSpecsJson = finalSpecsJson ?? existing.FinalSpecsJson;
+                    existing.FinalSpecsR2Url = finalSpecsR2Url ?? existing.FinalSpecsR2Url;
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public Task<BrandModel?> FindByProductKeyAsync(string productKey, CancellationToken ct = default)
+        {
+            lock (_models)
+            {
+                return Task.FromResult(_models.FirstOrDefault(m => ProductProfile.Normalize(m.ModelName) == productKey));
+            }
+        }
+
+        public Task<int> CountForBrandAsync(int brandId, CancellationToken ct = default)
+        {
+            lock (_models) { return Task.FromResult(_models.Count(m => m.BrandId == brandId)); }
+        }
+
+        public Task<int> CountAsync(CancellationToken ct = default)
+        {
+            lock (_models) { return Task.FromResult(_models.Count); }
+        }
     }
 
     // A no-op identifier: every listing is "unidentified", so the spec pipeline runs on store specs only —

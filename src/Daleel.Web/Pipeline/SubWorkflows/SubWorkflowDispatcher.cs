@@ -1,5 +1,6 @@
 using Elsa.Workflows;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Daleel.Web.Pipeline.SubWorkflows;
 
@@ -133,10 +134,17 @@ public static class SubWorkflowDispatcher
         {
             throw; // a real cap-trip / user cancel must stop the whole job
         }
-        catch
+        catch (Exception ex)
         {
             // Per-entity timeout or sub-workflow fault: keep the partial state, let the entity flow through
-            // un-enriched, and report the fault so the dispatcher can spot a systematic failure.
+            // un-enriched, and report the fault so the dispatcher can spot a systematic failure. Log it so a
+            // recurring per-entity fault (e.g. every item timing out) is visible instead of silently dropped.
+            var timedOut = timeoutCts.IsCancellationRequested;
+            scope.ServiceProvider.GetService<ILoggerFactory>()
+                ?.CreateLogger(typeof(SubWorkflowDispatcher))
+                .Log(timedOut ? LogLevel.Warning : LogLevel.Error, ex,
+                    "{Workflow} sub-workflow {Outcome} for an entity; flowing through un-enriched",
+                    typeof(TWorkflow).Name, timedOut ? "timed out" : "faulted");
             return (state, true);
         }
 

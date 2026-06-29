@@ -3,6 +3,7 @@ using Daleel.Web.Data;
 using Daleel.Web.Events;
 using Daleel.Web.Pipeline;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 
 namespace Daleel.Web.Conversation;
 
@@ -17,17 +18,34 @@ public sealed class SearchJobService : BackgroundService
     private readonly ISearchJobQueue _queue;
     private readonly IConversationBroadcaster _broadcaster;
     private readonly ILogger<SearchJobService> _logger;
+    private readonly TimeSpan _enrichTimeout;
 
     public SearchJobService(
         IServiceScopeFactory scopeFactory,
         ISearchJobQueue queue,
         IConversationBroadcaster broadcaster,
-        ILogger<SearchJobService> logger)
+        ILogger<SearchJobService> logger,
+        IConfiguration config)
     {
         _scopeFactory = scopeFactory;
         _queue = queue;
         _broadcaster = broadcaster;
         _logger = logger;
+        _enrichTimeout = ResolveEnrichTimeout(config);
+    }
+
+    /// <summary>
+    /// Hard ceiling on the detached enrichment pass so a hung scrape can't leak a worker. Configurable via
+    /// <c>Enrichment:TimeoutSeconds</c> (default <see cref="DefaultEnrichTimeoutSeconds"/>); generous because
+    /// the deep-dive also harvests store catalogues for live prices (a slow site crawl). Clamped to a sane
+    /// floor so a misconfiguration can't make it effectively zero.
+    /// </summary>
+    private const int DefaultEnrichTimeoutSeconds = 180;
+
+    private static TimeSpan ResolveEnrichTimeout(IConfiguration config)
+    {
+        var seconds = config.GetValue<int?>("Enrichment:TimeoutSeconds") ?? DefaultEnrichTimeoutSeconds;
+        return TimeSpan.FromSeconds(Math.Max(30, seconds));
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -222,19 +240,13 @@ public sealed class SearchJobService : BackgroundService
     }
 
     /// <summary>
-    /// Hard ceiling on the detached enrichment pass so a hung scrape can't leak a worker. Generous
-    /// because the deep-dive now also harvests store catalogues for live prices (a slow site crawl).
-    /// </summary>
-    private static readonly TimeSpan EnrichTimeout = TimeSpan.FromSeconds(90);
-
-    /// <summary>
     /// Runs the post-result item deep-dive OFF the worker loop, in its own DI scope and under a hard
     /// timeout, then streams the enriched result. Fire-and-forget: never awaited by the job processor,
-    /// so it can't block the queue; all failures are logged and swallowed.
+    /// so it can't block the queue; all failures are logged (never silently swallowed).
     /// </summary>
     private async Task EnrichInBackgroundAsync(int jobId, string userId, SearchRunResult baseResult)
     {
-        using var timeout = new CancellationTokenSource(EnrichTimeout);
+        using var timeout = new CancellationTokenSource(_enrichTimeout);
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -268,7 +280,13 @@ public sealed class SearchJobService : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            // Timed out or cancelled — the base result is already on screen; nothing to undo.
+            // Timed out — the base result is already on screen so there's nothing to undo, but abandoning
+            // the deep-dive silently hid that the enriched specs/prices were never persisted. Surface it so
+            // a chronically-too-short timeout (or a hung scrape) is diagnosable and the limit can be tuned.
+            _logger.LogWarning(
+                "Background enrichment for job {JobId} timed out after {TimeoutSeconds:n0}s and was abandoned; " +
+                "the base result stands but the deep-dive did not complete. Raise Enrichment:TimeoutSeconds if this recurs.",
+                jobId, _enrichTimeout.TotalSeconds);
         }
         catch (Exception ex)
         {
@@ -286,7 +304,7 @@ public sealed class SearchJobService : BackgroundService
     private async Task ReEnrichInBackgroundAsync(
         int jobId, string userId, SearchRunResult baseResult, CacheQualityReport quality)
     {
-        using var timeout = new CancellationTokenSource(EnrichTimeout);
+        using var timeout = new CancellationTokenSource(_enrichTimeout);
         try
         {
             using var scope = _scopeFactory.CreateScope();
@@ -323,7 +341,12 @@ public sealed class SearchJobService : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            // Timed out or cancelled — the cached result is already on screen; nothing to undo.
+            // Timed out — the cached result is already on screen so there's nothing to undo, but log it so an
+            // abandoned partial re-enrichment (the gaps the validator flagged stay unfilled) is diagnosable.
+            _logger.LogWarning(
+                "Background cache re-enrichment for job {JobId} timed out after {TimeoutSeconds:n0}s and was abandoned; " +
+                "the cached result stands but the flagged gaps were not refilled. Raise Enrichment:TimeoutSeconds if this recurs.",
+                jobId, _enrichTimeout.TotalSeconds);
         }
         catch (Exception ex)
         {

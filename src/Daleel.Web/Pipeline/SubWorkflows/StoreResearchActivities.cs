@@ -6,6 +6,7 @@ using Daleel.Web.Services;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
+using Microsoft.Extensions.Logging;
 
 namespace Daleel.Web.Pipeline.SubWorkflows;
 
@@ -174,8 +175,10 @@ public sealed class SaveStoreProfileActivity : CodeActivity
 
 /// <summary>
 /// Step 5 — harvest the store's product catalogue WITH PRICING from its website
-/// (Context.dev <c>/v1/brand/ai/products</c>). Best-effort and bounded by the sub-workflow timeout: any
-/// failure just means "no live prices for this store". Records how many priced products were found.
+/// (Context.dev <c>/v1/brand/ai/products</c>) and persist each priced product to the
+/// <see cref="ScrapedPrice"/> time series so the store page and per-product price comparison can read it
+/// back. Best-effort and bounded by the sub-workflow timeout: any failure just means "no live prices for
+/// this store". Records how many priced products were found.
 /// </summary>
 [Activity("Daleel", "Store", "Scrape prices: harvest the store's catalogue prices via Context.dev")]
 public sealed class ScrapePricesActivity : CodeActivity
@@ -188,6 +191,7 @@ public sealed class ScrapePricesActivity : CodeActivity
         var state = context.GetRequiredService<StoreResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
         var factory = context.GetRequiredService<IAgentFactory>();
+        var logger = context.GetRequiredService<ILogger<ScrapePricesActivity>>();
 
         var key = factory.Resolve("CONTEXT_DEV_API_KEY");
         var domain = DomainOf(state.Result.Url);
@@ -198,8 +202,11 @@ public sealed class ScrapePricesActivity : CodeActivity
 
         services.Report(SearchStep.FindingStores, "Progress.Msg.ReadingStoreCatalog", state.Store.Name);
         var provider = new ContextDevProvider(key);
-        var products = await SafeCatalog(provider, domain, context.CancellationToken);
-        state.PricedProducts = products.Count(p => p.Price is not null);
+        var products = await SafeCatalog(provider, domain, logger, state.Store.Name, context.CancellationToken);
+
+        // Persist every priced product as a new observation so the data isn't discarded after the crawl.
+        var persisted = await PersistPricesAsync(context, state, products, logger);
+        state.PricedProducts = persisted;
         state.RecordEvent(EventCategory.Extract, "store.prices", "context.dev",
             metadata: new Dictionary<string, object?>
             {
@@ -215,17 +222,66 @@ public sealed class ScrapePricesActivity : CodeActivity
         }
     }
 
+    /// <summary>
+    /// Writes one <see cref="ScrapedPrice"/> row per priced catalogue product and returns how many were
+    /// saved. Best-effort: a DB failure is logged and treated as "no prices stored" so it never fails the
+    /// store sub-workflow.
+    /// </summary>
+    private static async Task<int> PersistPricesAsync(
+        ActivityExecutionContext context, StoreResearchState state,
+        IReadOnlyList<CatalogProduct> products, ILogger logger)
+    {
+        var now = context.GetRequiredService<ProfileOptions>().Now();
+        var rows = products
+            .Where(p => p.Price is not null && !string.IsNullOrWhiteSpace(p.Name))
+            .Select(p => new ScrapedPrice
+            {
+                ProductName = p.Name,
+                // Same normalized brand+model key ProductProfile/ScrapedPrice share, so a per-product page
+                // can collapse observations across stores into one comparison.
+                ProductKey = ProductProfile.KeyFor(null, null, p.Name),
+                StoreName = state.Store.Name,
+                Price = p.Price,
+                Currency = p.Currency,
+                SourceUrl = p.Url,
+                Provider = "context.dev",
+                ScrapedAt = now
+            })
+            .ToList();
+        if (rows.Count == 0)
+        {
+            return 0;
+        }
+
+        var repo = context.GetRequiredService<IScrapedPriceRepository>();
+        try
+        {
+            await repo.AddRangeAsync(rows, context.CancellationToken);
+            return rows.Count;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Failed to persist {Count} scraped prices for store {Store}", rows.Count, state.Store.Name);
+            return 0;
+        }
+    }
+
     private static async Task<IReadOnlyList<CatalogProduct>> SafeCatalog(
-        ContextDevProvider provider, string domain, CancellationToken ct)
+        ContextDevProvider provider, string domain, ILogger logger, string storeName, CancellationToken ct)
     {
         try
         {
             return await provider.ExtractProductsAsync(domain, maxProducts: MaxProducts, cancellationToken: ct);
         }
         catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
-        catch
+        catch (Exception ex)
         {
-            return Array.Empty<CatalogProduct>(); // any other failure → no live prices for this store
+            // Any other failure → no live prices for this store, but make the failure visible.
+            logger.LogWarning(ex,
+                "Catalogue price scrape failed for store {Store} (domain {Domain})", storeName, domain);
+            return Array.Empty<CatalogProduct>();
         }
     }
 

@@ -5,6 +5,7 @@ using Daleel.Web.Events;
 using Daleel.Web.Tests.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -44,7 +45,8 @@ public class ConversationBackendTests : IDisposable
     private ISearchJobQueue Queue => _provider.GetRequiredService<ISearchJobQueue>();
 
     private SearchJobService Worker() => new(
-        _provider.GetRequiredService<IServiceScopeFactory>(), Queue, _broadcaster, NullLogger<SearchJobService>.Instance);
+        _provider.GetRequiredService<IServiceScopeFactory>(), Queue, _broadcaster,
+        NullLogger<SearchJobService>.Instance, new ConfigurationBuilder().Build());
 
     private async Task<int> SeedJobAsync(string userId = "u1")
     {
