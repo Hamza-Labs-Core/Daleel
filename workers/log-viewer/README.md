@@ -39,6 +39,31 @@ secret — if it isn't set the Worker fails closed (500), never open.
 
 ## Deploy
 
+### CI/CD (automatic)
+
+Pushing changes under `workers/log-viewer/**` to `main` triggers
+[`.github/workflows/deploy-worker.yml`](../../.github/workflows/deploy-worker.yml),
+which runs `wrangler deploy` and (re)uploads the `AUTH_TOKEN` Worker secret. You
+can also run it on demand from the Actions tab (workflow_dispatch). No manual
+`wrangler deploy` is needed in normal operation.
+
+It depends on three **GitHub Actions secrets** (repo Settings → Secrets and
+variables → Actions):
+
+| Secret | What it is |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with **Workers Scripts: Edit** + **R2 Storage: Read** permissions. A *different* credential from the S3-style `R2_ACCESS_KEY`/`R2_SECRET_KEY` the .NET app uses — those cannot deploy Workers. |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID (dash → right sidebar). |
+| `LOG_VIEWER_AUTH_TOKEN` | The bearer token the Worker checks; uploaded as its `AUTH_TOKEN` secret on each deploy. Generate with `openssl rand -hex 32`. |
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN  --body '<token>' --repo Hamza-Labs-Core/Daleel
+gh secret set CLOUDFLARE_ACCOUNT_ID --body '<id>'    --repo Hamza-Labs-Core/Daleel
+gh secret set LOG_VIEWER_AUTH_TOKEN --body '<token>' --repo Hamza-Labs-Core/Daleel
+```
+
+### Manual (first-time setup / break-glass)
+
 ```bash
 cd workers/log-viewer
 npm install                 # optional; wrangler can run via npx
@@ -47,12 +72,7 @@ npx wrangler secret put AUTH_TOKEN   # paste a long random string
 npx wrangler deploy
 ```
 
-Deploying needs a Cloudflare API token / login with **Workers Scripts: Edit**
-and **Workers R2 Storage** permissions. This is a *different* credential from the
-S3-style `R2_ACCESS_KEY`/`R2_SECRET_KEY` the .NET app uses — those cannot deploy
-Workers.
-
-Generate a token: `openssl rand -hex 32`.
+Generate the auth token: `openssl rand -hex 32`.
 
 ## Local dev
 
