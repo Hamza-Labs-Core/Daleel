@@ -1,0 +1,3 @@
+# Copy to `.dev.vars` (gitignored) for local `wrangler dev`.
+# In production this value is a Worker secret set via `wrangler secret put AUTH_TOKEN`.
+AUTH_TOKEN=change-me-to-a-long-random-string
