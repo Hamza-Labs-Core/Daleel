@@ -47,39 +47,27 @@ which runs `wrangler deploy` and (re)uploads the `AUTH_TOKEN` Worker secret. You
 can also run it on demand from the Actions tab (workflow_dispatch). No manual
 `wrangler deploy` is needed in normal operation.
 
-It depends on just two **GitHub Actions secrets** (repo Settings → Secrets and
+It depends on three **GitHub Actions secrets** (repo Settings → Secrets and
 variables → Actions):
 
 | Secret | What it is |
 | --- | --- |
 | `CLOUDFLARE_API_TOKEN` | Cloudflare API token with **Workers Scripts: Edit** + **R2 Storage: Read** permissions. A *different* credential from the S3-style `R2_ACCESS_KEY`/`R2_SECRET_KEY` the .NET app uses — those cannot deploy Workers. |
 | `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID (dash → right sidebar). |
+| `LOG_VIEWER_AUTH_TOKEN` | The bearer token the Worker checks; uploaded as its `AUTH_TOKEN` secret on each deploy. Generate with `openssl rand -hex 32`. The **same** secret is rendered into the app's `.env` by `deploy.yml` so the admin panel can call the Worker — one value, one source of truth. |
 
 ```bash
-gh secret set CLOUDFLARE_API_TOKEN  --body '<token>' --repo Hamza-Labs-Core/Daleel
-gh secret set CLOUDFLARE_ACCOUNT_ID --body '<id>'    --repo Hamza-Labs-Core/Daleel
+gh secret set CLOUDFLARE_API_TOKEN  --body '<token>'                 --repo Hamza-Labs-Core/Daleel
+gh secret set CLOUDFLARE_ACCOUNT_ID --body '<id>'                    --repo Hamza-Labs-Core/Daleel
+gh secret set LOG_VIEWER_AUTH_TOKEN --body "$(openssl rand -hex 32)" --repo Hamza-Labs-Core/Daleel
 ```
 
-There is **no separate auth secret**. Auth stays on (this Worker exposes
-production logs over a public `*.workers.dev` URL and must never be open), but
-the Worker's `AUTH_TOKEN` is *derived* in CI from `CLOUDFLARE_API_TOKEN`:
-
-```
-AUTH_TOKEN = sha256("daleel-log-viewer:" + CLOUDFLARE_API_TOKEN)
-```
-
-Deterministic (same value every deploy), stored nowhere, masked in CI logs. And
-because SHA-256 is one-way, the bearer token does **not** reveal
-`CLOUDFLARE_API_TOKEN` — a leaked log-viewer token can't deploy Workers or read
-R2. To read logs, reproduce the token locally and present it as the bearer /
-Basic-auth password (see [Auth](#auth) and the examples above):
-
-```bash
-# Linux
-TOKEN=$(printf '%s' "daleel-log-viewer:$CLOUDFLARE_API_TOKEN" | sha256sum  | cut -d' ' -f1)
-# macOS
-TOKEN=$(printf '%s' "daleel-log-viewer:$CLOUDFLARE_API_TOKEN" | shasum -a 256 | cut -d' ' -f1)
-```
+Auth stays on by design: this Worker exposes production logs over a public
+`*.workers.dev` URL, so it must never be open to the world. The token lives
+**only** in GitHub secrets (and the deploy-rendered `.env`) — never commit it to
+the repo. Keep a copy in your password manager; GitHub secrets are write-only, so
+you can't read it back from the dashboard. To read logs, present it as the bearer
+/ Basic-auth password (see [Auth](#auth) and the examples above).
 
 If you truly want it unauthenticated, see the warning at the end of this section.
 
@@ -89,9 +77,7 @@ If you truly want it unauthenticated, see the warning at the end of this section
 cd workers/log-viewer
 npm install                 # optional; wrangler can run via npx
 npx wrangler login          # one-time, unless CLOUDFLARE_API_TOKEN is set
-# Set the same derived token CI would use:
-printf '%s' "daleel-log-viewer:$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1 \
-  | npx wrangler secret put AUTH_TOKEN
+npx wrangler secret put AUTH_TOKEN   # paste the LOG_VIEWER_AUTH_TOKEN value
 npx wrangler deploy
 ```
 

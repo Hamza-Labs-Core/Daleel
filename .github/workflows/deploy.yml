@@ -349,6 +349,13 @@ jobs:
             # resolve to empty, which the app treats as "absent" — harmless.
             CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
             CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
+            # Log-viewer Worker (optional). LOG_VIEWER_AUTH_TOKEN is the SAME secret the
+            # deploy-worker.yml workflow uploads as the Worker's AUTH_TOKEN, so the admin
+            # panel can call the Worker with the matching bearer. Both resolve to empty
+            # when unset — the app then simply doesn't surface the log-viewer integration.
+            # LOG_VIEWER_URL is the Worker's base URL (https://daleel-log-viewer.<sub>.workers.dev).
+            LOG_VIEWER_URL=${{ secrets.LOG_VIEWER_URL }}
+            LOG_VIEWER_AUTH_TOKEN=${{ secrets.LOG_VIEWER_AUTH_TOKEN }}
             # Cloudflare R2 object storage (optional). Shared connection: if the creds
             # are unset they resolve to empty and the app falls back to file logging at
             # /app/data/logs/ — so these are intentionally NOT in the required-secrets
