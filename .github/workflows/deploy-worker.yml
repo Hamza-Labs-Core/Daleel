@@ -11,13 +11,21 @@
 #                            https://dash.cloudflare.com/profile/api-tokens
 #   CLOUDFLARE_ACCOUNT_ID  — your Cloudflare account ID (dash → right sidebar).
 #
-# The Worker's AUTH_TOKEN (the bearer it checks on every request) is set to the
-# SAME value as CLOUDFLARE_API_TOKEN — no separate log-viewer secret to manage.
-# To read logs, present CLOUDFLARE_API_TOKEN's value as the bearer / basic-auth
-# password. Auth stays ON by design: this Worker exposes production logs over a
-# public *.workers.dev URL, so it must never be open to the world.
+# Auth stays ON (this Worker exposes production logs over a public *.workers.dev
+# URL and must never be open to the world), but there is NO separate auth secret
+# to manage. The Worker's AUTH_TOKEN is DERIVED in CI as:
 #
-# Set them with:
+#   AUTH_TOKEN = sha256("daleel-log-viewer:" + CLOUDFLARE_API_TOKEN)
+#
+# This is deterministic (same value every deploy), stored nowhere, and never
+# printed (it's masked in the logs). Because SHA-256 is one-way, the bearer token
+# does NOT reveal CLOUDFLARE_API_TOKEN, so a leaked log-viewer token can't deploy
+# Workers or read R2. Reproduce the token locally to read logs:
+#
+#   printf '%s' "daleel-log-viewer:$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1
+#   # macOS: ... | shasum -a 256 | cut -d' ' -f1
+#
+# Set the two secrets with:
 #   gh secret set CLOUDFLARE_API_TOKEN  --body '<token>' --repo Hamza-Labs-Core/Daleel
 #   gh secret set CLOUDFLARE_ACCOUNT_ID --body '<id>'    --repo Hamza-Labs-Core/Daleel
 name: Deploy log-viewer Worker
@@ -64,6 +72,17 @@ jobs:
           fi
           echo "All required secrets are present."
 
+      # Derive the Worker bearer token deterministically from CLOUDFLARE_API_TOKEN.
+      # `add-mask` registers it so it's redacted everywhere in the logs, and it's
+      # passed to later steps via $GITHUB_ENV — never echoed, stored, or uploaded.
+      - name: Derive AUTH_TOKEN
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          token=$(printf '%s' "daleel-log-viewer:$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1)
+          echo "::add-mask::$token"
+          echo "AUTH_TOKEN=$token" >> "$GITHUB_ENV"
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -73,8 +92,7 @@ jobs:
 
       # Official action: deploys, and uploads AUTH_TOKEN as a Worker secret first.
       # `secrets:` is a newline list of NAMES; each value is read from the env var
-      # of the same name. We reuse CLOUDFLARE_API_TOKEN as AUTH_TOKEN's value so
-      # there's no separate log-viewer secret — present that token to read logs.
+      # of the same name. AUTH_TOKEN comes from the derive step above (via GITHUB_ENV).
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
@@ -85,4 +103,4 @@ jobs:
           secrets: |
             AUTH_TOKEN
         env:
-          AUTH_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          AUTH_TOKEN: ${{ env.AUTH_TOKEN }}

@@ -60,12 +60,28 @@ gh secret set CLOUDFLARE_API_TOKEN  --body '<token>' --repo Hamza-Labs-Core/Dale
 gh secret set CLOUDFLARE_ACCOUNT_ID --body '<id>'    --repo Hamza-Labs-Core/Daleel
 ```
 
-The Worker's `AUTH_TOKEN` is set to the **same value as `CLOUDFLARE_API_TOKEN`**
-— there is no separate log-viewer secret. To read logs, present that token as
-the bearer / Basic-auth password (see [Auth](#auth) and the examples above).
-Auth stays on by design: this Worker exposes production logs over a public
-`*.workers.dev` URL, so it must never be open to the world. If you truly want it
-unauthenticated, see the warning at the end of this section.
+There is **no separate auth secret**. Auth stays on (this Worker exposes
+production logs over a public `*.workers.dev` URL and must never be open), but
+the Worker's `AUTH_TOKEN` is *derived* in CI from `CLOUDFLARE_API_TOKEN`:
+
+```
+AUTH_TOKEN = sha256("daleel-log-viewer:" + CLOUDFLARE_API_TOKEN)
+```
+
+Deterministic (same value every deploy), stored nowhere, masked in CI logs. And
+because SHA-256 is one-way, the bearer token does **not** reveal
+`CLOUDFLARE_API_TOKEN` — a leaked log-viewer token can't deploy Workers or read
+R2. To read logs, reproduce the token locally and present it as the bearer /
+Basic-auth password (see [Auth](#auth) and the examples above):
+
+```bash
+# Linux
+TOKEN=$(printf '%s' "daleel-log-viewer:$CLOUDFLARE_API_TOKEN" | sha256sum  | cut -d' ' -f1)
+# macOS
+TOKEN=$(printf '%s' "daleel-log-viewer:$CLOUDFLARE_API_TOKEN" | shasum -a 256 | cut -d' ' -f1)
+```
+
+If you truly want it unauthenticated, see the warning at the end of this section.
 
 ### Manual (first-time setup / break-glass)
 
@@ -73,7 +89,9 @@ unauthenticated, see the warning at the end of this section.
 cd workers/log-viewer
 npm install                 # optional; wrangler can run via npx
 npx wrangler login          # one-time, unless CLOUDFLARE_API_TOKEN is set
-npx wrangler secret put AUTH_TOKEN   # paste the CLOUDFLARE_API_TOKEN value
+# Set the same derived token CI would use:
+printf '%s' "daleel-log-viewer:$CLOUDFLARE_API_TOKEN" | sha256sum | cut -d' ' -f1 \
+  | npx wrangler secret put AUTH_TOKEN
 npx wrangler deploy
 ```
 
