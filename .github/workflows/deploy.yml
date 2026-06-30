@@ -370,7 +370,9 @@ jobs:
             # specs,data} — just create those buckets in Cloudflare and leave these
             # unset. Override a name only if your bucket is named differently. The legacy
             # R2_BUCKET_NAME still seeds the LOGS bucket when R2_BUCKET_LOGS is unset.
-            R2_BUCKET_LOGS=${{ secrets.R2_BUCKET_LOGS }}
+            # Pin the logs bucket to a literal so it never falls back to the legacy
+            # single-bucket R2_BUCKET_NAME; the secret (when set) overrides it.
+            R2_BUCKET_LOGS=${{ secrets.R2_BUCKET_LOGS || 'daleel-logs' }}
             R2_BUCKET_IMAGES=${{ secrets.R2_BUCKET_IMAGES }}
             R2_BUCKET_SPECS=${{ secrets.R2_BUCKET_SPECS }}
             R2_BUCKET_DATA=${{ secrets.R2_BUCKET_DATA }}
