@@ -8,27 +8,35 @@ using Microsoft.Extensions.Configuration;
 namespace Daleel.Web.Conversation;
 
 /// <summary>
-/// The async backend worker. Consumes queued <see cref="SearchJob"/>s, runs the agent off the HTTP
-/// thread, streams progress to the user's devices over SignalR, and persists the result + the user's
-/// active conversation. Supports cooperative cancellation.
+/// The async backend worker. Polls Postgres for queued <see cref="SearchJob"/>s, runs the agent off the
+/// HTTP thread, streams progress to the user's devices over SignalR, and persists the result + the user's
+/// active conversation. Supports cooperative cancellation via the durable <c>CancelRequested</c> flag.
+///
+/// There is NO in-memory queue or running-job registry: the only state is the <c>SearchJobs</c> table.
+/// A restarted container just resumes polling and picks up whatever is still <c>queued</c> — nothing is
+/// lost to a process death.
 /// </summary>
 public sealed class SearchJobService : BackgroundService
 {
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ISearchJobQueue _queue;
     private readonly IConversationBroadcaster _broadcaster;
     private readonly ILogger<SearchJobService> _logger;
     private readonly TimeSpan _enrichTimeout;
 
+    /// <summary>
+    /// How long to idle between polls when no job is waiting. Short enough that a freshly-queued search
+    /// starts promptly, long enough that an idle worker isn't hammering Postgres. A claim happens
+    /// immediately whenever the previous one found work, so this only bounds the empty-queue latency.
+    /// </summary>
+    private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(2);
+
     public SearchJobService(
         IServiceScopeFactory scopeFactory,
-        ISearchJobQueue queue,
         IConversationBroadcaster broadcaster,
         ILogger<SearchJobService> logger,
         IConfiguration config)
     {
         _scopeFactory = scopeFactory;
-        _queue = queue;
         _broadcaster = broadcaster;
         _logger = logger;
         _enrichTimeout = ResolveEnrichTimeout(config);
@@ -50,8 +58,32 @@ public sealed class SearchJobService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await foreach (var jobId in _queue.ReadAllAsync(stoppingToken))
+        while (!stoppingToken.IsCancellationRequested)
         {
+            int jobId;
+            try
+            {
+                if (await ClaimNextQueuedJobAsync(stoppingToken) is not { } claimed)
+                {
+                    // Nothing waiting — idle a beat, then poll again. Source of truth is the DB, so a job
+                    // queued by another process (or a restart's leftover work) is picked up next tick.
+                    await Task.Delay(PollInterval, stoppingToken);
+                    continue;
+                }
+                jobId = claimed;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                throw; // host shutdown
+            }
+            catch (Exception ex)
+            {
+                // A claim failure (transient DB blip) must never take the worker down — back off and retry.
+                _logger.LogError(ex, "Failed to claim the next queued search job");
+                await Task.Delay(PollInterval, stoppingToken);
+                continue;
+            }
+
             // One job's failure must never take down the worker loop.
             try
             {
@@ -66,6 +98,47 @@ public sealed class SearchJobService : BackgroundService
                 _logger.LogError(ex, "Search job {JobId} crashed the processor", jobId);
             }
         }
+    }
+
+    /// <summary>
+    /// Atomically claims the oldest <c>queued</c> job and flips it to <c>running</c>, returning its id (or
+    /// null when nothing is waiting). The claim is the entire job-dispatch mechanism — there is no in-memory
+    /// queue.
+    ///
+    /// <c>FOR UPDATE SKIP LOCKED</c> is the canonical Postgres work-queue claim: the row this transaction
+    /// locks is skipped by any other polling worker (or container), so the same job can never be handed to
+    /// two workers. Committing the <c>running</c> write inside the same transaction is what removes the row
+    /// from every subsequent poll. A job cancelled while still queued has <c>Status = cancelled</c> already,
+    /// so this only ever picks up genuinely pending work.
+    /// </summary>
+    private async Task<int?> ClaimNextQueuedJobAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+
+        await using var tx = await db.Database.BeginTransactionAsync(ct);
+        var job = await db.SearchJobs
+            .FromSqlRaw(
+                """
+                SELECT * FROM "SearchJobs"
+                WHERE "Status" = {0}
+                ORDER BY "CreatedAt"
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+                """,
+                JobStatus.Queued)
+            .FirstOrDefaultAsync(ct);
+
+        if (job is null)
+        {
+            await tx.RollbackAsync(ct);
+            return null;
+        }
+
+        job.Status = JobStatus.Running;
+        await db.SaveChangesAsync(ct);
+        await tx.CommitAsync(ct);
+        return job.Id;
     }
 
     /// <summary>Processes a single job. Public so tests can drive it deterministically.</summary>
@@ -89,9 +162,6 @@ public sealed class SearchJobService : BackgroundService
         // The unified timeline's correlation id is the job id; the actor is the hashed (never raw) user.
         var correlationId = job.Id.ToString();
         var userHash = Anonymizer.HashUserId(job.UserId);
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-        _queue.Register(job.Id, cts);
 
         var now = DateTimeOffset.UtcNow;
         job.Status = JobStatus.Running;
@@ -127,7 +197,7 @@ public sealed class SearchJobService : BackgroundService
                 _ = _broadcaster.ProgressAsync(job.UserId, job.Id, message);
             }
 
-            var result = await runner.RunAsync(job, Progress, cts.Token);
+            var result = await runner.RunAsync(job, Progress, stoppingToken);
             sw.Stop();
 
             // Force-cancel backstop: the durable CancelRequested flag is the source of truth. If the user
@@ -222,23 +292,43 @@ public sealed class SearchJobService : BackgroundService
                 _ = EnrichInBackgroundAsync(job.Id, job.UserId, result);
             }
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
-            await FinishAsync(db, convos, job, JobStatus.Cancelled, "cancelled", error: null, stoppingToken);
-            await _broadcaster.CompletedAsync(job.UserId, job.Id, "cancelled", null, null, "Search cancelled.");
-            await systemLog.LogAsync(
-                SystemEventCategory.Search, "search.cancelled", $"Search cancelled: {job.Query}",
-                severity: SystemEventSeverity.Warning, source: "search-worker",
-                correlationId: correlationId, userHash: userHash,
-                details: new Dictionary<string, object?> { ["query"] = job.Query }, ct: CancellationToken.None);
+            throw; // host shutdown — let the worker loop exit, don't mislabel the job as cancelled/failed
         }
         catch (Exception ex)
         {
-            // Log the full exception server-side; show the user a generic message so provider/LLM/DB
-            // detail (hostnames, partial keys in URLs, SQL text) never reaches the browser. The raw
-            // message is kept in the job row (server-only) for operator diagnostics.
+            // The run threw. Distinguish a user cancel from a genuine failure using the durable
+            // CancelRequested flag — the source of truth — not the exception type: CancellableActivity
+            // throws an OperationCanceledException the moment it sees the flag, but a deadline or provider
+            // error throws too. Reload to read the flag (written on the UI's / sweep's DbContext); the
+            // reload is best-effort so a DB blip here can't itself crash the handler.
+            try
+            {
+                await db.Entry(job).ReloadAsync(CancellationToken.None);
+            }
+            catch (Exception reloadEx)
+            {
+                _logger.LogWarning(reloadEx, "Could not reload job {JobId} to classify its failure", job.Id);
+            }
+
+            if (job.CancelRequested || job.Status == JobStatus.Cancelled)
+            {
+                await FinishAsync(db, convos, job, JobStatus.Cancelled, "cancelled", error: null, CancellationToken.None);
+                await _broadcaster.CompletedAsync(job.UserId, job.Id, "cancelled", null, null, "Search cancelled.");
+                await systemLog.LogAsync(
+                    SystemEventCategory.Search, "search.cancelled", $"Search cancelled: {job.Query}",
+                    severity: SystemEventSeverity.Warning, source: "search-worker",
+                    correlationId: correlationId, userHash: userHash,
+                    details: new Dictionary<string, object?> { ["query"] = job.Query }, ct: CancellationToken.None);
+                return;
+            }
+
+            // Genuine failure. Log the full exception server-side; show the user a generic message so
+            // provider/LLM/DB detail (hostnames, partial keys in URLs, SQL text) never reaches the browser.
+            // The raw message is kept in the job row (server-only) for operator diagnostics.
             _logger.LogError(ex, "Search job {JobId} failed", job.Id);
-            await FinishAsync(db, convos, job, JobStatus.Failed, "error", ex.Message, stoppingToken);
+            await FinishAsync(db, convos, job, JobStatus.Failed, "error", ex.Message, CancellationToken.None);
             await _broadcaster.CompletedAsync(job.UserId, job.Id, "failed", null, null,
                 "Search failed. Please try again.");
             // The full message is operator-only telemetry (the user saw a generic line), so it's safe in
@@ -251,10 +341,6 @@ public sealed class SearchJobService : BackgroundService
                 {
                     ["query"] = job.Query, ["error"] = ex.Message, ["exceptionType"] = ex.GetType().Name
                 }, ct: CancellationToken.None);
-        }
-        finally
-        {
-            _queue.Unregister(job.Id);
         }
     }
 

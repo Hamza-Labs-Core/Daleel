@@ -31,7 +31,6 @@ public class ConversationBackendTests : IDisposable
         services.AddScoped<ISearchHistoryRepository, SearchHistoryRepository>();
         services.AddScoped<IQuotaService>(sp => new QuotaService(sp.GetRequiredService<DaleelDbContext>()));
         services.AddScoped<ISearchRunner, FakeRunner>();
-        services.AddSingleton<ISearchJobQueue, SearchJobQueue>();
         // The worker records lifecycle events to the unified timeline; the no-op log keeps tests telemetry-free
         // (the same fallback production uses when Postgres isn't configured).
         services.AddSingleton<ISystemEventLog, NullSystemEventLog>();
@@ -42,10 +41,9 @@ public class ConversationBackendTests : IDisposable
     }
 
     private DaleelDbContext NewDb() => _provider.CreateScope().ServiceProvider.GetRequiredService<DaleelDbContext>();
-    private ISearchJobQueue Queue => _provider.GetRequiredService<ISearchJobQueue>();
 
     private SearchJobService Worker() => new(
-        _provider.GetRequiredService<IServiceScopeFactory>(), Queue, _broadcaster,
+        _provider.GetRequiredService<IServiceScopeFactory>(), _broadcaster,
         NullLogger<SearchJobService>.Instance, new ConfigurationBuilder().Build());
 
     private async Task<int> SeedJobAsync(string userId = "u1")
@@ -55,23 +53,6 @@ public class ConversationBackendTests : IDisposable
         db.SearchJobs.Add(job);
         await db.SaveChangesAsync();
         return job.Id;
-    }
-
-    [Fact]
-    public async Task Queue_EnqueueAndRead_Works()
-    {
-        await Queue.EnqueueAsync(7);
-        await Queue.EnqueueAsync(8);
-
-        using var cts = new CancellationTokenSource();
-        var read = new List<int>();
-        await foreach (var id in Queue.ReadAllAsync(cts.Token))
-        {
-            read.Add(id);
-            if (read.Count == 2) { cts.Cancel(); break; }
-        }
-
-        read.Should().Equal(7, 8);
     }
 
     [Fact]
@@ -98,23 +79,64 @@ public class ConversationBackendTests : IDisposable
     }
 
     [Fact]
+    public async Task Worker_Polls_ClaimsAndCompletes_QueuedJob()
+    {
+        // Proves the Postgres-polling dispatch: the worker's background loop finds a row that was simply
+        // inserted with Status=queued (no in-memory enqueue), atomically claims it, and runs it to done.
+        FakeRunner.BlockUntilCancelled = false;
+        var jobId = await SeedJobAsync("poll-user");
+
+        var worker = Worker();
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+        await worker.StartAsync(cts.Token);
+        try
+        {
+            string? status = null;
+            while (!cts.IsCancellationRequested && status != JobStatus.Completed)
+            {
+                await using var db = NewDb();
+                status = (await db.SearchJobs.FindAsync(jobId))!.Status;
+                if (status != JobStatus.Completed)
+                {
+                    await Task.Delay(100, cts.Token);
+                }
+            }
+
+            status.Should().Be(JobStatus.Completed);
+        }
+        finally
+        {
+            await worker.StopAsync(CancellationToken.None);
+        }
+    }
+
+    [Fact]
     public async Task Worker_Cancellation_MarksJobCancelled()
     {
         var jobId = await SeedJobAsync();
-        var runner = (FakeRunner)_provider.GetRequiredService<IServiceScopeFactory>()
-            .CreateScope().ServiceProvider.GetRequiredService<ISearchRunner>();
-        // All FakeRunner instances share the same static gate so the test can coordinate timing.
+        // All FakeRunner instances share the same static gate so the test can coordinate timing: the runner
+        // signals Started, then blocks until the test releases it.
         FakeRunner.BlockUntilCancelled = true;
         FakeRunner.Started = new TaskCompletionSource();
+        FakeRunner.Release = new TaskCompletionSource();
 
         var processing = Worker().ProcessAsync(jobId, CancellationToken.None);
 
-        await FakeRunner.Started.Task; // runner has begun and the job's CTS is registered
-        Queue.RequestCancel(jobId).Should().BeTrue();
+        await FakeRunner.Started.Task; // the run is in flight
+        // Cancel the durable way — the only way now that there's no in-memory CTS: flip the source-of-truth
+        // flag, then let the run finish. The worker's pre-commit re-check sees the flag and discards the
+        // result, finalizing the job as cancelled.
+        await using (var db = NewDb())
+        {
+            var job = await db.SearchJobs.FindAsync(jobId);
+            job!.CancelRequested = true;
+            await db.SaveChangesAsync();
+        }
+        FakeRunner.Release.TrySetResult();
         await processing;
 
-        await using var db = NewDb();
-        (await db.SearchJobs.FindAsync(jobId))!.Status.Should().Be(JobStatus.Cancelled);
+        await using var check = NewDb();
+        (await check.SearchJobs.FindAsync(jobId))!.Status.Should().Be(JobStatus.Cancelled);
 
         FakeRunner.BlockUntilCancelled = false;
     }
@@ -130,7 +152,7 @@ public class ConversationBackendTests : IDisposable
         }
 
         await using var db = NewDb();
-        var svc = new ConversationService(db, new QuotaService(db), Queue);
+        var svc = new ConversationService(db, new QuotaService(db));
         var result = await svc.SubmitAsync("heavy", isAdmin: false, "another search", "jordan", null);
 
         result.Accepted.Should().BeFalse();
@@ -142,7 +164,7 @@ public class ConversationBackendTests : IDisposable
     public async Task ConversationService_Submit_CreatesQueuedJob()
     {
         await using var db = NewDb();
-        var svc = new ConversationService(db, new QuotaService(db), Queue);
+        var svc = new ConversationService(db, new QuotaService(db));
 
         var result = await svc.SubmitAsync("u2", isAdmin: false, "best fridge", "jordan", "m");
 
@@ -203,7 +225,7 @@ public class ConversationBackendTests : IDisposable
     }
 
     private JobReconciliationService Reconciler() => new(
-        _provider.GetRequiredService<IServiceScopeFactory>(), Queue, _broadcaster,
+        _provider.GetRequiredService<IServiceScopeFactory>(), _broadcaster,
         NullLogger<JobReconciliationService>.Instance);
 
     [Fact]
@@ -213,7 +235,7 @@ public class ConversationBackendTests : IDisposable
 
         await using (var db = NewDb())
         {
-            var ok = await new ConversationService(db, new QuotaService(db), Queue).CancelAsync("u1", jobId);
+            var ok = await new ConversationService(db, new QuotaService(db)).CancelAsync("u1", jobId);
             ok.Should().BeTrue();
         }
 
@@ -222,25 +244,6 @@ public class ConversationBackendTests : IDisposable
         job!.CancelRequested.Should().BeTrue();           // durable source of truth set
         job.Status.Should().Be(JobStatus.Cancelled);      // queued ⇒ marked cancelled outright
         job.CompletedAt.Should().NotBeNull();
-    }
-
-    [Fact]
-    public void Queue_RequestCancel_FlagsOnlyRunningJobs_AndClearsOnUnregister()
-    {
-        var q = new SearchJobQueue();
-
-        // Not running: cancel is a no-op and no cooperative flag is left behind (so it can't leak).
-        q.RequestCancel(5).Should().BeFalse();
-        q.IsCancelRequested(5).Should().BeFalse();
-
-        using var cts = new CancellationTokenSource();
-        q.Register(5, cts);
-        q.RequestCancel(5).Should().BeTrue();
-        q.IsCancelRequested(5).Should().BeTrue();
-        cts.IsCancellationRequested.Should().BeTrue();    // token signalled too
-
-        q.Unregister(5);
-        q.IsCancelRequested(5).Should().BeFalse();        // flag cleared with the registration
     }
 
     [Fact]
@@ -302,6 +305,7 @@ public class ConversationBackendTests : IDisposable
     {
         public static bool BlockUntilCancelled;
         public static TaskCompletionSource? Started;
+        public static TaskCompletionSource? Release;
 
         public async Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct)
         {
@@ -309,7 +313,12 @@ public class ConversationBackendTests : IDisposable
             if (BlockUntilCancelled)
             {
                 Started?.TrySetResult();
-                await Task.Delay(Timeout.Infinite, ct); // throws when cancelled
+                // Block until the test releases us, mimicking a workflow that runs to completion while a
+                // cancel is being requested out-of-band (the worker's pre-commit re-check is what cancels).
+                if (Release is not null)
+                {
+                    await Release.Task;
+                }
             }
 
             return new SearchRunResult("{\"Summary\":\"FAKE-RESULT\"}", "ask", 0, string.Empty);

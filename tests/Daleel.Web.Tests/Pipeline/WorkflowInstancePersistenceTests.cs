@@ -113,7 +113,6 @@ public class WorkflowInstancePersistenceTests
         services.AddScoped<SearchPipelineServices>();
         services.AddSingleton<ICacheStore, InMemoryCache>();
         services.AddSingleton(new ProfileOptions());
-        services.AddSingleton<ISearchJobQueue, SearchJobQueue>();
         using var provider = services.BuildServiceProvider();
 
         // Build the app schema and seed a job that's already been cancelled.
@@ -172,7 +171,6 @@ public class WorkflowInstancePersistenceTests
         services.AddScoped<SearchPipelineServices>();
         services.AddSingleton<ICacheStore, InMemoryCache>();
         services.AddSingleton(new ProfileOptions());
-        // No ISearchJobQueue registered, so the in-memory fast path is skipped and the durable DB read runs.
         using var provider = services.BuildServiceProvider();
 
         // Deliberately do NOT create the DaleelDbContext schema — the SearchJobs table does not exist, so the

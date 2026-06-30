@@ -26,11 +26,10 @@ public interface ISearchScopedState
 /// <see cref="DoExecuteAsync"/> instead of overriding <c>ExecuteAsync</c>.
 ///
 /// The durable <c>SearchJob.CancelRequested</c> column is the source of truth (set the instant the user
-/// cancels, visible across the worker / sweep / UI even though they use different DbContexts); an
-/// in-process flag is consulted first as a cheap fast path that also avoids a DB round-trip once a cancel
-/// is already known. This is the cooperative layer — the worker's pre-commit re-check and the periodic
-/// <see cref="JobReconciliationService"/> sweep are the hard backstops that stop a run even if it never
-/// reaches a check here.
+/// cancels, visible across the worker / sweep / UI even though they use different DbContexts) and the ONLY
+/// thing consulted here — there is no in-memory state. This is the cooperative layer — the worker's
+/// pre-commit re-check and the periodic <see cref="JobReconciliationService"/> sweep are the hard backstops
+/// that stop a run even if it never reaches a check here.
 /// </summary>
 public abstract class CancellableActivity : CodeActivity
 {
@@ -50,15 +49,8 @@ public abstract class CancellableActivity : CodeActivity
             return; // no real run (e.g. a unit-test harness) — nothing to cancel against
         }
 
-        // Fast same-process path: a cancel for a job running on this instance is flagged in memory the
-        // instant the user hits Cancel, so we bail without touching the database.
-        if (context.GetService<ISearchJobQueue>() is { } queue && queue.IsCancelRequested(jobId))
-        {
-            throw Cancelled(jobId);
-        }
-
-        // Authoritative path: the durable flag. Also catches a cancel applied on another context — the
-        // periodic sweep, or a cancel that landed before the worker registered this run's token source.
+        // The durable flag is the source of truth: it's set the instant the user hits Cancel and is visible
+        // here whichever context wrote it (the UI's, or the periodic sweep's).
         //
         // This whole check is the BEST-EFFORT cooperative layer (the worker's pre-commit re-check and the
         // periodic JobReconciliationService sweep are the hard backstops). So a FAILED durable read must

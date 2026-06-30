@@ -378,9 +378,9 @@ builder.Services.AddSingleton<Daleel.Web.Identification.IVisionMatcher>(sp =>
         key, model, sp.GetRequiredService<ILogger<Daleel.Web.Identification.VisionMatcher>>());
 });
 
-// Async conversation backend: SignalR + a queue + a background worker run searches off the request.
+// Async conversation backend: SignalR + a Postgres-polling background worker run searches off the request.
+// There is no in-memory job queue — "queued" SearchJob rows in Postgres ARE the queue (see SearchJobService).
 builder.Services.AddSignalR();
-builder.Services.AddSingleton<Daleel.Web.Conversation.ISearchJobQueue, Daleel.Web.Conversation.SearchJobQueue>();
 builder.Services.AddSingleton<Daleel.Web.Conversation.SignalRConversationBroadcaster>();
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationBroadcaster>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());
 builder.Services.AddSingleton<Daleel.Web.Conversation.IConversationNotifier>(sp => sp.GetRequiredService<Daleel.Web.Conversation.SignalRConversationBroadcaster>());

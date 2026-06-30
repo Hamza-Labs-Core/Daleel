@@ -10,7 +10,7 @@ namespace Daleel.Web.Conversation;
 ///
 ///   • <b>Force-cancel</b> — a job whose durable <c>CancelRequested</c> flag is set but is still "running"
 ///     (the workflow ignored the cooperative token and the worker hasn't re-checked yet). The flag is the
-///     source of truth, so the sweep finalizes it as cancelled and cancels the in-memory token too.
+///     source of truth, so the sweep finalizes it as cancelled.
 ///   • <b>Hung</b> — a job "running" longer than <see cref="HungThreshold"/>. The runner self-cancels at a
 ///     10-minute deadline, so anything past 12 minutes is genuinely wedged (a non-cancellable native call,
 ///     a deadlock); it's failed so the user isn't left spinning forever.
@@ -29,18 +29,15 @@ public sealed class JobReconciliationService : BackgroundService
     public static readonly TimeSpan HungThreshold = TimeSpan.FromMinutes(12);
 
     private readonly IServiceScopeFactory _scopeFactory;
-    private readonly ISearchJobQueue _queue;
     private readonly IConversationBroadcaster _broadcaster;
     private readonly ILogger<JobReconciliationService> _logger;
 
     public JobReconciliationService(
         IServiceScopeFactory scopeFactory,
-        ISearchJobQueue queue,
         IConversationBroadcaster broadcaster,
         ILogger<JobReconciliationService> logger)
     {
         _scopeFactory = scopeFactory;
-        _queue = queue;
         _broadcaster = broadcaster;
         _logger = logger;
     }
@@ -118,9 +115,10 @@ public sealed class JobReconciliationService : BackgroundService
 
         foreach (var job in affected)
         {
-            // Interrupt the in-memory run too (best-effort; the durable status already wins) and mirror the
-            // terminal state onto the user's conversation + live UI so a watching tab stops spinning.
-            _queue.RequestCancel(job.Id);
+            // The durable terminal status (written above) is what stops the run: a still-executing worker
+            // sees CancelRequested on its next per-activity check (or its pre-commit re-check) and bails.
+            // Here we just mirror the terminal state onto the user's conversation + live UI so a watching
+            // tab stops spinning.
             var isCancel = job.Status == JobStatus.Cancelled;
             await convos.CompleteAsync(job.UserId, isCancel ? "cancelled" : "error", null, null, now, ct)
                 .ConfigureAwait(false);
