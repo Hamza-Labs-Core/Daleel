@@ -2,7 +2,12 @@
  * Daleel log-viewer Worker
  * --------------------------------------------------------------------------
  * Permanent, browser-accessible (and admin-panel-callable) read-only view over
- * the `daleel-logs` R2 bucket, where Serilog writes Warning+ JSON-Lines logs.
+ * the `daleel-logs` R2 bucket, where Serilog writes the full Information+ trail
+ * as JSON-Lines objects under the `logs/` prefix (e.g. `logs/daleel-20260630.jsonl`).
+ *
+ * That bucket ALSO holds scraped-data objects (site-data/, final-specs/, …), so
+ * every listing and search is scoped to the `logs/` prefix by default — pass an
+ * explicit `?prefix=` to widen or narrow it.
  *
  * Endpoints (all require auth — see authorize()):
  *   GET /                      -> service banner + endpoint list (JSON)
@@ -25,6 +30,10 @@
  */
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Serilog's R2 sink writes app logs under this prefix. The bucket also holds scraped-data objects, so
+// list/search default to this prefix and never scan the scraped data unless `?prefix=` overrides it.
+const LOG_PREFIX = "logs/";
 
 // Hard ceilings so a single request can never fan out into an unbounded R2 read.
 const MAX_LIST = 1000; // objects returned by /logs
@@ -129,9 +138,9 @@ function root() {
     service: "daleel-log-viewer",
     bucket: "daleel-logs",
     endpoints: {
-      "GET /logs": "list recent log objects (params: since, limit, prefix)",
+      "GET /logs": "list recent log objects (params: since, limit, prefix; default prefix logs/)",
       "GET /logs/{key}": "read one log object (params: format=raw|json, tail=N)",
-      "GET /logs/search": "search recent logs (params: q, since, limit, regex, ignoreCase)",
+      "GET /logs/search": "search recent logs (params: q, since, limit, prefix, regex, ignoreCase; default prefix logs/)",
     },
   });
 }
@@ -139,7 +148,8 @@ function root() {
 async function listLogs(url, env) {
   const since = parseSince(url.searchParams.get("since"), 7 * DAY_MS);
   const limit = clampInt(url.searchParams.get("limit"), MAX_LIST, MAX_LIST);
-  const prefix = url.searchParams.get("prefix") || undefined;
+  // Default to the app-log prefix so the scraped-data objects in this bucket don't show up.
+  const prefix = url.searchParams.get("prefix") || LOG_PREFIX;
   const cutoff = nowMs() - since;
 
   const objects = await listSince(env, cutoff, prefix, limit);
@@ -198,12 +208,14 @@ async function searchLogs(url, env) {
   const fileLimit = clampInt(url.searchParams.get("limit"), MAX_SEARCH_FILES, MAX_SEARCH_FILES);
   const ignoreCase = url.searchParams.get("ignoreCase") !== "false";
   const useRegex = url.searchParams.get("regex") === "true";
+  // Scope the grep to the app-log prefix by default so scraped-data objects are never scanned.
+  const prefix = url.searchParams.get("prefix") || LOG_PREFIX;
   const cutoff = nowMs() - since;
 
   const matcher = buildMatcher(q, { useRegex, ignoreCase });
   if (matcher.error) return json({ error: "bad_pattern", message: matcher.error }, 400);
 
-  const objects = await listSince(env, cutoff, undefined, fileLimit);
+  const objects = await listSince(env, cutoff, prefix, fileLimit);
   // Newest first so the most relevant matches surface before we hit MAX_MATCHES.
   objects.sort((a, b) => b.uploaded - a.uploaded);
 
@@ -236,6 +248,7 @@ async function searchLogs(url, env) {
 
   return json({
     query: q,
+    prefix,
     regex: useRegex,
     ignoreCase,
     since: msToSpan(since),
