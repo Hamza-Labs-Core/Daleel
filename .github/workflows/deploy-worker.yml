@@ -10,14 +10,16 @@
 #                            Workers. Create one at:
 #                            https://dash.cloudflare.com/profile/api-tokens
 #   CLOUDFLARE_ACCOUNT_ID  — your Cloudflare account ID (dash → right sidebar).
-#   LOG_VIEWER_AUTH_TOKEN  — the bearer token the Worker checks on every request.
-#                            Uploaded as the Worker's AUTH_TOKEN secret on each
-#                            deploy. Generate with: openssl rand -hex 32
+#
+# The Worker's AUTH_TOKEN (the bearer it checks on every request) is set to the
+# SAME value as CLOUDFLARE_API_TOKEN — no separate log-viewer secret to manage.
+# To read logs, present CLOUDFLARE_API_TOKEN's value as the bearer / basic-auth
+# password. Auth stays ON by design: this Worker exposes production logs over a
+# public *.workers.dev URL, so it must never be open to the world.
 #
 # Set them with:
 #   gh secret set CLOUDFLARE_API_TOKEN  --body '<token>' --repo Hamza-Labs-Core/Daleel
 #   gh secret set CLOUDFLARE_ACCOUNT_ID --body '<id>'    --repo Hamza-Labs-Core/Daleel
-#   gh secret set LOG_VIEWER_AUTH_TOKEN --body '<token>' --repo Hamza-Labs-Core/Daleel
 name: Deploy log-viewer Worker
 
 on:
@@ -49,10 +51,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          LOG_VIEWER_AUTH_TOKEN: ${{ secrets.LOG_VIEWER_AUTH_TOKEN }}
         run: |
           missing=""
-          for var in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID LOG_VIEWER_AUTH_TOKEN; do
+          for var in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID; do
             eval "val=\${$var}"
             if [ -z "$val" ]; then missing="$missing $var"; fi
           done
@@ -72,7 +73,8 @@ jobs:
 
       # Official action: deploys, and uploads AUTH_TOKEN as a Worker secret first.
       # `secrets:` is a newline list of NAMES; each value is read from the env var
-      # of the same name (here AUTH_TOKEN ← LOG_VIEWER_AUTH_TOKEN).
+      # of the same name. We reuse CLOUDFLARE_API_TOKEN as AUTH_TOKEN's value so
+      # there's no separate log-viewer secret — present that token to read logs.
       - name: Deploy Worker
         uses: cloudflare/wrangler-action@v3
         with:
@@ -83,4 +85,4 @@ jobs:
           secrets: |
             AUTH_TOKEN
         env:
-          AUTH_TOKEN: ${{ secrets.LOG_VIEWER_AUTH_TOKEN }}
+          AUTH_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
