@@ -1,0 +1,16 @@
+{
+  "name": "daleel-log-viewer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker exposing read-only HTTP access to the daleel-logs R2 bucket",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "secret": "wrangler secret put AUTH_TOKEN"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}
