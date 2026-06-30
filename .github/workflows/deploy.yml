@@ -403,6 +403,17 @@ jobs:
             # host, db, and password always match the actual container.
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=daleel_events;Username=daleel;Password=${{ secrets.POSTGRES_PASSWORD }}
+            # Pin production to the image this deploy resolved (push-to-main → `latest`).
+            # CRITICAL: this is what actually makes prod run the latest code. `deploy.sh`
+            # only `export`s DALEEL_IMAGE for its own run, but the PERSISTED .env is what
+            # `docker compose up` and the systemd unit (ExecStart=docker compose up) read on
+            # every restart/reboot. Production previously wrote NO DALEEL_IMAGE line and
+            # leaned on the compose `:latest` default — so a stale value left in this file by
+            # a QA deploy against the same box, a `workflow_dispatch` tag override, or a hand
+            # edit (this is exactly how prod got stuck on `qa-pr-8`) would silently survive
+            # forever: build/push goes green while compose keeps resolving the stale tag.
+            # Rewriting it on every deploy evicts any leftover qa-pr-N and keeps prod on latest.
+            DALEEL_IMAGE=${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
             CADDY_DOMAIN=daleel.hamzalabs.dev
             CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
             EOF

@@ -82,6 +82,12 @@ public static class SerilogConfiguration
             // Tame framework chatter so the logs stay signal-rich.
             .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+            // Elsa's bookmark-queue purger runs on a recurring schedule (~every 10s) and emits three
+            // Information lines each pass ("Purging bookmark queue items older than …", "Purged N …",
+            // "Finished purging …"). That flood rotated all useful logs out of the 30MB Docker buffer.
+            // Gate this single SourceContext (ILogger<DefaultBookmarkQueuePurger>) to Warning so the
+            // spam is dropped while the rest of Elsa stays at Information.
+            .MinimumLevel.Override("Elsa.Workflows.Runtime.DefaultBookmarkQueuePurger", LogEventLevel.Warning)
             // (3) Structured-logging enrichment: scoped properties, a per-request correlation id, and a
             // constant app tag so multi-service log aggregation can filter on it.
             .Enrich.FromLogContext()
