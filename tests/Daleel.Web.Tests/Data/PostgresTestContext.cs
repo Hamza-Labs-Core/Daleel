@@ -1,5 +1,6 @@
 using Daleel.Web.Data;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace Daleel.Web.Tests.Data;
 
@@ -16,7 +17,16 @@ public sealed class PostgresTestContext : IDisposable
 
     public PostgresTestContext()
     {
-        ConnectionString = PostgresTestServer.CreateFreshDatabase();
+        // Cap this database's connection pool. Each test gets a UNIQUE database → a UNIQUE Npgsql pool that
+        // no other test reuses, so without a cap the idle connections from every throwaway pool accumulate on
+        // the shared server (Postgres default max_connections = 100) until it refuses new clients with
+        // "53300: sorry, too many clients already" — a flake that fails whichever test is unlucky at the peak.
+        // A small cap is plenty (these tests use one connection at a time) and bounds concurrent usage.
+        ConnectionString = new NpgsqlConnectionStringBuilder(PostgresTestServer.CreateFreshDatabase())
+        {
+            MaxPoolSize = 4,
+            MinPoolSize = 0,
+        }.ConnectionString;
 
         Db = NewContext();
         Db.Database.EnsureCreated();
@@ -36,7 +46,13 @@ public sealed class PostgresTestContext : IDisposable
     public void Dispose()
     {
         Db.Dispose();
-        // The database itself is left behind; the shared container (and every database on it) is reaped
-        // by Testcontainers when the test process exits, so per-test cleanup would only add latency.
+        // Disposing the context returns its connections to this database's pool but leaves them physically
+        // open on the server. Since every test uses a distinct database (distinct pool that is never reused),
+        // those idle connections would linger and, across many parallel throwaway databases, exhaust the
+        // server's client slots ("53300: too many clients already"). Close this pool now to free the slots
+        // immediately. The database itself is left behind — the shared container is reaped by Testcontainers
+        // when the test process exits, so dropping per-test databases would only add latency.
+        using var probe = new NpgsqlConnection(ConnectionString);
+        NpgsqlConnection.ClearPool(probe);
     }
 }
