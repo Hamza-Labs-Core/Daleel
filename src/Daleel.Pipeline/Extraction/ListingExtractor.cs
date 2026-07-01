@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Daleel.Core.Arabic;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
@@ -99,21 +100,36 @@ public static class ListingExtractor
                 continue;
             }
 
-            var name = Str(item, "name", "title");
+            var rawName = Str(item, "name", "title");
+            var model = Str(item, "model");
             var price = Num(item, "price");
             var url = Str(item, "url", "link");
 
-            // A product row with neither a name nor a price nor a link is noise.
+            // Extractors occasionally drop the source URL/bare domain into the name/title field instead of
+            // the product name ("amazon.com/dp/…", "www.foo.io"). Reject a URL-shaped name in favour of the
+            // model number — mirroring the LLM path's PickName — so a raw link never surfaces as a product.
+            var name = rawName is not null && !LooksLikeUrl(rawName) ? rawName
+                     : model is not null && !LooksLikeUrl(model) ? model
+                     : null;
+
+            // A product row with no usable name (missing or only a URL) and no price and no link is noise.
             if (string.IsNullOrWhiteSpace(name) && price is null && string.IsNullOrWhiteSpace(url))
+            {
+                continue;
+            }
+
+            // A row we could only identify by a URL is not a product — skip it rather than render a
+            // nameless/link card (a common source of "links showing as product names" in the grid).
+            if (string.IsNullOrWhiteSpace(name))
             {
                 continue;
             }
 
             listings.Add(new ProductListing
             {
-                Name = name ?? string.Empty,
+                Name = name,
                 Brand = Str(item, "brand"),
-                Model = Str(item, "model"),
+                Model = model,
                 Price = price,
                 Currency = Str(item, "currency") ?? (price is not null ? defaultCurrency : null),
                 Url = url,
@@ -317,6 +333,16 @@ public static class ListingExtractor
         if (s.Contains("new") || s.Contains("جديد")) return "new";
         return raw.Trim();
     }
+
+    // A URL / bare domain sometimes lands in the name field instead of the product name:
+    // "https://x.com/p", "www.foo.io", "amazon.com/dp/B0…". The final label must be all letters (a TLD)
+    // so real model numbers like "GX-3.5" or "A2.1" are NOT mistaken for domains. Mirrors the guard in
+    // AgentService.Products so the deterministic and LLM extraction paths reject links the same way.
+    private static readonly Regex UrlLikeName = new(
+        @"^\s*(https?://|www\.)|^\s*([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24}(/\S*)?\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private static bool LooksLikeUrl(string text) => UrlLikeName.IsMatch(text.Trim());
 
     // Cheap brand guess: the first token of a shopping title is usually the brand.
     private static string? GuessBrand(string? title)

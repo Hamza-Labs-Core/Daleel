@@ -72,6 +72,28 @@ public class ListingExtractorTests
     }
 
     [Fact]
+    public void FromExtractedJson_RejectsUrlShapedName_FallsBackToModel()
+    {
+        // Extractors sometimes drop the source URL/bare domain into the name field. A URL-shaped name must
+        // never surface as the product name — fall back to the model number instead ("links as names" bug).
+        var json = Json("""
+        {
+          "products": [
+            { "name": "https://amazon.com/dp/B0ABC", "model": "AR24TXHQ", "price": 450, "url": "https://amazon.com/dp/B0ABC" },
+            { "name": "www.opensooq.com/split-ac", "price": 300, "url": "https://opensooq.com/x" }
+          ]
+        }
+        """);
+
+        var listings = ListingExtractor.FromExtractedJson(json, "X", ResultType.Marketplace);
+
+        // First row falls back to the model number; second row has only a URL for a name → dropped entirely.
+        listings.Should().ContainSingle();
+        listings[0].Name.Should().Be("AR24TXHQ");
+        listings.Should().NotContain(l => l.Name.Contains("http") || l.Name.Contains("www."));
+    }
+
+    [Fact]
     public void FromShopping_MapsHitsToListings()
     {
         var hits = new[]

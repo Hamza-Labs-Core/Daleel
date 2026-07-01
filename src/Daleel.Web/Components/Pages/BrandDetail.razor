@@ -30,7 +30,9 @@ else
     <div class="d-flex align-center gap-3 mb-2">
         @if (LogoSrc is { } logo)
         {
-            <img src="@logo" alt="@_brand.Name" loading="lazy"
+            @* referrerpolicy="no-referrer": hotlink-protected logo hosts 403 cross-origin requests that
+               carry a Referer, so send none — matching SafeImage's handling of external product images. *@
+            <img src="@logo" alt="@_brand.Name" loading="lazy" referrerpolicy="no-referrer"
                  style="height:56px;width:56px;object-fit:contain;border-radius:10px;"
                  onerror="this.style.display='none'" />
         }
@@ -124,7 +126,7 @@ else
                             }
                         </div>
                         <MudCardContent Class="pa-2">
-                            <MudText Typo="Typo.body2" Style="font-weight:500;" dir="@Catalog.Dir(m.ModelName)">@m.ModelName</MudText>
+                            <TranslatedText Text="@m.ModelName" Typo="Typo.body2" Style="font-weight:500;" />
                             @if (m.LocalPrice is { } lp)
                             {
                                 <MudText Typo="Typo.caption" Color="Color.Primary">@lp.ToString("0.##") @m.Currency</MudText>

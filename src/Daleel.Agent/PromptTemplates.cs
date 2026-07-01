@@ -403,6 +403,16 @@ public static class PromptTemplates
             "the shopper sees it exists. Attach real prices and seller links to a model's offers whenever the context " +
             "provides them; leave offers empty when it does not. The goal is BREADTH: surface every distinct model the " +
             "context names, not only the few that happen to carry an in-context price.");
+        // A tighter, deterministic article guard on top of the classification rule above: an article's HEADLINE
+        // (often phrased as a list/opinion and living under a blog/news URL path) is the single most common thing
+        // the extractor wrongly emits as a product. Name the tells explicitly so it never leaks into "products".
+        sb.AppendLine("HARD RULE — an item is an ARTICLE (a SOURCE, never a product) when ANY of these hold, no matter " +
+            "how product-like its title reads: its URL path contains /blog, /news, /article, /review, /guide, /best, " +
+            "/top, /vs, or a date; OR its title is a list/opinion headline (starts with or contains 'Best', 'Top', " +
+            "'أفضل', 'مراجعة', 'Review', 'Guide', 'How to', 'vs', a year, or a ranked count like '10 '). Mine such a " +
+            "source for the models it names, but NEVER output its headline as a product's \"name\".");
+        sb.AppendLine("A product's \"name\" is ALWAYS a real product/model name — NEVER a URL, domain, link, store name, " +
+            "or article headline. If the only label you can find for an item is a URL or a headline, drop the item.");
         // Schema-aware extraction: when the up-front category analysis identified the specs that matter for
         // this product type, tell the extractor to fill those exact keys (so the compare table and detail
         // views line up across products) instead of returning arbitrary free-form spec keys.
