@@ -73,6 +73,15 @@ public sealed class CheckCacheActivity : CancellableActivity
             return;
         }
 
+        // Admin kill-switch: when the search cache is disabled at /admin/settings, skip the check so
+        // every search runs fresh. FromCache stays false, so all downstream activities execute live.
+        var config = context.GetRequiredService<Daleel.Web.Data.ISystemConfigService>();
+        if (!await config.GetBoolAsync("cache.search_enabled", true, context.CancellationToken))
+        {
+            state.RecordEvent(EventCategory.Cache, "cache.bypass", "cache");
+            return;
+        }
+
         services.Report(SearchStep.CheckingVault, "Progress.Msg.Vault");
         try
         {

@@ -46,7 +46,7 @@
                 <MudCardContent>
                     <div class="d-flex align-center gap-2 mb-1">
                         <MudIcon Icon="@Icons.Material.Filled.Store" Color="Color.Warning" />
-                        <MudText Typo="Typo.h6" dir="@Catalog.Dir(s.Name)">@s.Name</MudText>
+                        <TranslatedText Text="@s.Name" Typo="Typo.h6" />
                         <MudSpacer />
                         @if (s.Rating is { } rating)
                         {

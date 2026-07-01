@@ -61,6 +61,8 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "ratelimit.search_per_hour", Value = "5", Type = "int" },
         new SystemConfig { Key = "feature.export_enabled", Value = "true", Type = "bool" },
         new SystemConfig { Key = "feature.api_access_enabled", Value = "false", Type = "bool" },
+        // When false, the search pipeline skips the cache check entirely and every search runs fresh.
+        new SystemConfig { Key = "cache.search_enabled", Value = "true", Type = "bool" },
         new SystemConfig { Key = "limit.saved_results_free", Value = "10", Type = "int" },
         new SystemConfig { Key = "model.default_free", Value = "openai/gpt-4o-mini", Type = "string" },
         new SystemConfig { Key = "model.default_pro", Value = "anthropic/claude-sonnet-4", Type = "string" },
