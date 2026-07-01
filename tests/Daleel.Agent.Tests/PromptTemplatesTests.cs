@@ -50,13 +50,17 @@ public class PromptTemplatesTests
     }
 
     [Fact]
-    public void ExtractProducts_AsksForBreadthAndPerModelProsConsVerdict()
+    public void ExtractProducts_AsksForBoundedBreadthAndPerModelProsConsVerdict()
     {
         var prompt = PromptTemplates.ExtractProducts("best ACs", GeoProfiles.Jordan, "context");
 
-        // Push for many brands / multiple models so the grid isn't just the top one or two.
-        prompt.Should().Contain("COMPREHENSIVE");
-        prompt.Should().Contain("EVERY distinct model");
+        // Push for many brands / multiple models so the grid isn't just the top one or two — but
+        // BOUNDED: the old "extract EVERY distinct model" instruction produced multi-minute LLM
+        // generations on article-heavy queries that blew the run's 10-minute budget, so the prompt
+        // now caps extraction at the ~20 best-evidenced models.
+        prompt.Should().Contain("~20 BEST-EVIDENCED");
+        prompt.Should().Contain("MULTIPLE brands");
+        prompt.Should().NotContain("EVERY distinct model");
         // The per-model verdict fields the UI now surfaces.
         prompt.Should().Contain("\"pros\"");
         prompt.Should().Contain("\"cons\"");

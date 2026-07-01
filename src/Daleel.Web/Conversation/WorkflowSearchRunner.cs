@@ -12,6 +12,7 @@ using Daleel.Web.Pipeline.SubWorkflows;
 using Daleel.Web.Services;
 using Elsa.Workflows;
 using Elsa.Workflows.Management;
+using Elsa.Workflows.Models;
 
 namespace Daleel.Web.Conversation;
 
@@ -120,10 +121,30 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             // context.CancellationToken, so a wedged step is forcibly unwound instead of hanging forever.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(capTrip.Token);
             deadline.CancelAfter(WorkflowTimeout);
-            var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: deadline.Token).ConfigureAwait(false);
+
+            // The deadline/cost-cap token also cancels Elsa's own workflow-state commit, so a tripped
+            // deadline makes RunAsync THROW OperationCanceledException instead of returning a faulted
+            // result — which used to bypass the salvage below entirely and turn an almost-finished run
+            // (products already extracted, only enrichment left) into a hard "no results" failure. Catch
+            // exactly that case and fall through to the same salvage a faulted run gets; a genuine job
+            // cancellation (user cancel / service shutdown, i.e. `ct`) still propagates untouched.
+            RunWorkflowResult? run = null;
+            try
+            {
+                run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                var cause = capTrip.IsCancellationRequested
+                    ? "per-job cost cap"
+                    : $"{WorkflowTimeout.TotalMinutes:0}-minute deadline";
+                _logger.LogError(
+                    "Search workflow for job {JobId} was cancelled by the {Cause}; salvaging any extracted products",
+                    job.Id, cause);
+            }
 
             // Distinguish a timeout (deadline fired on its own) from a cost-cap/user cancel for diagnostics.
-            if (deadline.IsCancellationRequested && !capTrip.IsCancellationRequested)
+            if (run is not null && deadline.IsCancellationRequested && !capTrip.IsCancellationRequested)
             {
                 _logger.LogError(
                     "Search workflow for job {JobId} exceeded the {Minutes}-minute deadline and was cancelled",
@@ -138,7 +159,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             // before the sub-status check so faulted runs are tracked too. Best-effort: instance tracking
             // must never affect the search outcome.
             var instanceManager = scope.ServiceProvider.GetService<IWorkflowInstanceManager>();
-            if (instanceManager is not null)
+            if (instanceManager is not null && run is not null)
             {
                 try
                 {
@@ -158,12 +179,15 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             // rather than discard a result we already built and show a bare "no results", recover the
             // extracted products (un-enriched is fine) and log the incident so the underlying fault stays
             // diagnosable. Only a run that produced nothing usable is surfaced as a hard failure.
-            if (run.WorkflowState.SubStatus != WorkflowSubStatus.Finished)
+            if (run is null || run.WorkflowState.SubStatus != WorkflowSubStatus.Finished)
             {
-                var reason = string.Join("; ", run.WorkflowState.Incidents.Select(i => i.Message));
+                var subStatus = run?.WorkflowState.SubStatus.ToString() ?? "Cancelled";
+                var reason = run is null
+                    ? "workflow cancelled by the run deadline or cost cap before completing"
+                    : string.Join("; ", run.WorkflowState.Incidents.Select(i => i.Message));
                 _logger.LogWarning(
                     "Search workflow for job {JobId} ended non-finished ({SubStatus}): {Reason}",
-                    job.Id, run.WorkflowState.SubStatus,
+                    job.Id, subStatus,
                     string.IsNullOrWhiteSpace(reason) ? "(no incident detail)" : reason);
 
                 if (string.IsNullOrEmpty(state.ResultJson) && SalvageResultJson(state) is { } salvaged)
@@ -179,7 +203,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 if (string.IsNullOrEmpty(state.ResultJson))
                 {
                     throw new InvalidOperationException(
-                        $"Search workflow did not finish (sub-status: {run.WorkflowState.SubStatus})" +
+                        $"Search workflow did not finish (sub-status: {subStatus})" +
                         (string.IsNullOrWhiteSpace(reason) ? "." : $": {reason}"));
                 }
             }
