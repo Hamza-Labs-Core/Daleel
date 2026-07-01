@@ -156,8 +156,14 @@ public static class PromptTemplates
             "— generate enough queries (include brand-named and 'best <category> brands' queries) that the results " +
             "span the budget, mid-range and premium ends, not just the top one or two names.");
         sb.AppendLine("Design the search to surface CONCRETE LISTINGS from whatever local sites rank in this market:");
-        sb.AppendLine("- shoppingQueries: price/marketplace-style queries in both the market language and English " +
-            "(e.g. the category + 'للبيع' / 'price' / 'سعر'), including a few brand-specific ones.");
+        // Shopping queries must be PLAIN product+price phrases: the shopping engine (Google Shopping via
+        // gl=cc) is what returns priced listings WITH thumbnails, and it returns ~nothing for site:-scoped
+        // queries. A plan whose shopping queries are all "… site:amazon.com"-shaped yields zero structured
+        // listings — and with them go the product images and prices in the result grid (QA job 2 evidence).
+        sb.AppendLine("- shoppingQueries: PLAIN price/marketplace-style queries in both the market language and English " +
+            "(e.g. the category + 'للبيع' / 'price' / 'سعر' / 'buy'), including a few brand-specific ones. " +
+            "NEVER use 'site:' operators here — the shopping engine returns nothing for them; put " +
+            "site-scoped searches in webQueries instead.");
         sb.AppendLine("- webQueries: a mix of local classifieds/marketplace pages, brand catalog pages, store " +
             "sections, and SEVERAL buying-guide / 'best <category>' / review / comparison queries (these become the " +
             "'related articles' the user reads).");

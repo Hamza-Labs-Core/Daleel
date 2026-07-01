@@ -48,7 +48,14 @@ public sealed class SearchJobService : BackgroundService
     /// the deep-dive also harvests store catalogues for live prices (a slow site crawl). Clamped to a sane
     /// floor so a misconfiguration can't make it effectively zero.
     /// </summary>
-    private const int DefaultEnrichTimeoutSeconds = 180;
+    /// <remarks>
+    /// 180s proved far too small in practice: enriching ~12 items × several Context.dev scrapes each takes
+    /// minutes, and an abandoned pass is precisely why salvaged/article-derived results kept their empty
+    /// prices and images (QA job 2, 2026-07-01). The pass is detached — it never blocks the worker loop or
+    /// the user, who already has the base result on screen — so a longer ceiling only trades idle time for
+    /// filled-in prices, specs and product images.
+    /// </remarks>
+    private const int DefaultEnrichTimeoutSeconds = 600;
 
     private static TimeSpan ResolveEnrichTimeout(IConfiguration config)
     {
