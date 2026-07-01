@@ -298,7 +298,7 @@ jobs:
             # hot-linked from source; the S3 API endpoint 403s a plain <img> GET). Specs/
             # data hosts are optional; logs are never public. Legacy R2_PUBLIC_URL seeds
             # the IMAGES host when R2_PUBLIC_URL_IMAGES is unset.
-            R2_PUBLIC_URL_IMAGES=${{ secrets.R2_PUBLIC_URL_IMAGES }}
+            R2_PUBLIC_URL_IMAGES=${{ secrets.R2_PUBLIC_URL_QA_IMAGES }}
             R2_PUBLIC_URL_SPECS=${{ secrets.R2_PUBLIC_URL_SPECS }}
             R2_PUBLIC_URL_DATA=${{ secrets.R2_PUBLIC_URL_DATA }}
             R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}
