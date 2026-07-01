@@ -25,6 +25,13 @@ public sealed record SearchRunResult(
     /// complete and needs no follow-up.
     /// </summary>
     public Daleel.Web.Pipeline.CacheQualityReport? CacheQuality { get; init; }
+
+    /// <summary>
+    /// True when the run was cut short by the per-job cost cap (the result, if any, was salvaged).
+    /// The worker must not launch the post-result background enrichment for such a job — a fresh
+    /// enrichment budget would double the admin-configured spending ceiling exactly when it fired.
+    /// </summary>
+    public bool CostCapTripped { get; init; }
 }
 
 /// <summary>

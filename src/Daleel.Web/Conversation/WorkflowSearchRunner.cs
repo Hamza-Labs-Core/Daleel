@@ -13,6 +13,7 @@ using Daleel.Web.Services;
 using Elsa.Workflows;
 using Elsa.Workflows.Management;
 using Elsa.Workflows.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace Daleel.Web.Conversation;
 
@@ -208,6 +209,18 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 }
             }
 
+            // Side-effect guard: the user's Cancel is a durable flag (there is no per-job CTS), so a
+            // cancel that landed mid-activity can reach this point with a freshly-built — or salvaged —
+            // result. The job service's post-run backstop discards the result AFTER this method returns,
+            // but the side effects below (the cache hit/miss record and the "results ready" email) would
+            // already have fired for a user who cancelled. Re-read the flag and leave via the same
+            // OperationCanceledException a cooperative cancel produces; ProcessAsync classifies it via
+            // the durable flag and finalizes the job as Cancelled — no email, no bogus cache record.
+            if (await IsCancelRequestedAsync(job.Id).ConfigureAwait(false))
+            {
+                throw new OperationCanceledException($"Search job {job.Id} was cancelled by the user.");
+            }
+
             await RecordResultCacheAsync(job, state.FromCache ? "hit" : "miss", ct).ConfigureAwait(false);
 
             var providers = string.Join(",", collector.Calls
@@ -232,7 +245,11 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             {
                 // Carries the smart-cache verdict (set only on a hit) up to the worker, which decides
                 // whether to launch a background partial re-enrichment for the missing pieces.
-                CacheQuality = state.CacheQuality
+                CacheQuality = state.CacheQuality,
+                // When the per-job cost cap cut the run short (and the result above was salvaged), the
+                // worker must NOT launch the post-result background enrichment — it would hand the very
+                // job the cap just stopped a fresh full budget, doubling the admin-configured ceiling.
+                CostCapTripped = capTrip.IsCancellationRequested && !ct.IsCancellationRequested
             };
         }
         finally
@@ -632,6 +649,30 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         catch
         {
             // best-effort: never let audit logging affect the search outcome
+        }
+    }
+
+    /// <summary>
+    /// Fresh durable read of the job's <c>CancelRequested</c> flag (written by the UI / sweep on a
+    /// different DbContext). Best-effort like the activities' cooperative check: a failed read returns
+    /// false and the worker's post-run backstop remains the hard guarantee that a cancelled job is
+    /// finalized as cancelled.
+    /// </summary>
+    private async Task<bool> IsCancelRequestedAsync(int jobId)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+            return await db.SearchJobs
+                .Where(j => j.Id == jobId)
+                .Select(j => j.CancelRequested)
+                .FirstOrDefaultAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            return false; // best-effort — the job service's flag-reload backstop still runs after us
         }
     }
 

@@ -284,6 +284,16 @@ public sealed class SearchJobService : BackgroundService
                     _ = ReEnrichInBackgroundAsync(job.Id, job.UserId, result, quality);
                 }
             }
+            else if (result.CostCapTripped)
+            {
+                // The per-job cost cap cut the base run short (the result above was salvaged). Launching
+                // the background deep-dive now would hand the very job the cap just stopped a FRESH full
+                // enrichment budget — doubling the admin-configured ceiling exactly when it fired. The
+                // user keeps the salvaged base result; enrichment is deliberately skipped.
+                _logger.LogWarning(
+                    "Skipping background enrichment for job {JobId}: the per-job cost cap tripped during the base run",
+                    job.Id);
+            }
             else
             {
                 // Fresh run: progressive enrichment — base results are already on screen, now deep-dive
