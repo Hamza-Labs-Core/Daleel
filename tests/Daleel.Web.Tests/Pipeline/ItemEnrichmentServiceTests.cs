@@ -136,7 +136,9 @@ public class ItemEnrichmentServiceTests
             Specs = new Dictionary<string, string> { ["a"] = "1", ["b"] = "2", ["c"] = "3" }, // not thin → no scrape
             Offers = Array.Empty<PriceOffer>() // priceless + imageless → everything must come from the DB
         };
-        var products = new ProductSearchResult { Models = new[] { model } };
+        // Jordan-market search: the stored JOD brand-site price is only attachable in its own market
+        // (a USA search must NOT surface a JOD offer — the currency gate blocks cross-market prices).
+        var products = new ProductSearchResult { Models = new[] { model }, Geo = "jordan" };
 
         var result = await svc.EnrichAsync(NoScrapeAgent(), products, _ => { }, "sid", default);
 

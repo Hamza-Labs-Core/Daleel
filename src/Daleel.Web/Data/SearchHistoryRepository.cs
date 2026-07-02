@@ -34,12 +34,12 @@ public interface ISearchHistoryRepository
     Task<int> TotalCountAsync(CancellationToken ct = default);
 
     /// <summary>
-    /// Replaces the stored result on the user's MOST RECENT history row for <paramref name="query"/>.
-    /// Called after background enrichment so "open from history" replays the enriched (image/price/spec
-    /// filled) result, matching what a repeat search would serve from the cache. Returns true when a
-    /// row was updated.
+    /// Replaces the stored result on ONE specific history row (owner-checked). Called after background
+    /// enrichment — targeted by the row id captured when the entry was added, never by query text,
+    /// so a late-landing enrichment can't overwrite a newer same-text row (repeat search, market
+    /// switch, or another feature's entry). Returns true when the row was updated.
     /// </summary>
-    Task<bool> UpdateLatestResultAsync(string userId, string query, string resultJson, CancellationToken ct = default);
+    Task<bool> UpdateResultAsync(string userId, int id, string resultJson, CancellationToken ct = default);
 }
 
 public sealed class SearchHistoryRepository : ISearchHistoryRepository
@@ -55,14 +55,12 @@ public sealed class SearchHistoryRepository : ISearchHistoryRepository
         return entry;
     }
 
-    public async Task<bool> UpdateLatestResultAsync(
-        string userId, string query, string resultJson, CancellationToken ct = default)
+    public async Task<bool> UpdateResultAsync(
+        string userId, int id, string resultJson, CancellationToken ct = default)
     {
-        // Owner filter first (the isolation boundary), then the newest row for this exact query.
+        // Owner filter first (the isolation boundary), then the exact row.
         var entry = await _db.SearchHistory
-            .Where(x => x.UserId == userId && x.Query == query)
-            .OrderByDescending(x => x.CreatedAt)
-            .FirstOrDefaultAsync(ct);
+            .FirstOrDefaultAsync(x => x.UserId == userId && x.Id == id, ct);
         if (entry is null)
         {
             return false;

@@ -123,7 +123,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // Phase 0 — brand-database read-through: images, brand-site prices, and specs harvested by
         // PREVIOUS searches fill this result before any network call is spent. This is what makes
         // the store/brand pipeline compound: every harvest pays off on every later search.
-        var (filled0, dbImages, dbPrices, dbSpecs) = await FillFromBrandDatabaseAsync(models, ct);
+        var (filled0, dbImages, dbPrices, dbSpecs) = await FillFromBrandDatabaseAsync(models, products.Geo, ct);
         models = filled0;
         if (dbImages + dbPrices + dbSpecs > 0)
         {
@@ -223,7 +223,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // IMMEDIATELY re-run the database read-through so this run's harvest benefits THIS result
         // (images/specs/prices from the brand's own catalogue), not only future searches.
         await HarvestBrandCatalogsAsync(products, progress, Record, ct);
-        var (harvestFilled, brandImages, brandPrices, brandSpecs) = await FillFromBrandDatabaseAsync(pricedModels, ct);
+        var (harvestFilled, brandImages, brandPrices, brandSpecs) =
+            await FillFromBrandDatabaseAsync(pricedModels, products.Geo, ct);
         pricedModels = harvestFilled;
         if (brandImages + brandPrices + brandSpecs > 0)
         {
@@ -234,13 +235,18 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // product database all failed to cover (common in markets where Google Shopping doesn't
         // operate). Capped paid lookups; a failed lookup just leaves the placeholder.
         var imagesFound = 0;
-        for (var i = 0; i < pricedModels.Count && imagesFound < MaxImageLookups; i++)
+        var imageAttempts = 0;
+        // The cap bounds paid ATTEMPTS, not successes — on a large grid of imageless obscure items,
+        // counting only hits would keep paying for lookup after failed lookup with no ceiling.
+        for (var i = 0; i < pricedModels.Count && imageAttempts < MaxImageLookups; i++)
         {
             var m = pricedModels[i];
             if (!string.IsNullOrWhiteSpace(m.ImageUrl))
             {
                 continue;
             }
+
+            imageAttempts++;
 
             var imageQuery = string.Join(' ', new[]
             {
@@ -403,7 +409,9 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                     specsFilled++;
                 }
             }
-            else if (!HasPrice(item) && BestBrowserMatch(m, browserPrices) is { } bp)
+            // Independent of the catalogue match: the chosen entry may carry NO parsed price, and an
+            // unpriced match must not block a browser-scraped line price from filling the gap.
+            if (!HasPrice(item) && BestBrowserMatch(m, browserPrices) is { } bp)
             {
                 // Browser-rendered fallback carries prices only (no image/spec data in a price line).
                 var offer = new PriceOffer
@@ -467,12 +475,18 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// image search — is the primary source. Pure local DB reads over ALL items; best-effort.
     /// </summary>
     private async Task<(List<ProductModel> Models, int Images, int Prices, int Specs)> FillFromBrandDatabaseAsync(
-        List<ProductModel> models, CancellationToken ct)
+        List<ProductModel> models, string? geo, CancellationToken ct)
     {
         var images = 0;
         var prices = 0;
         var specsFilled = 0;
         var now = _options.Now();
+
+        // BrandModel rows carry ONE LocalPrice/Currency (last harvest wins, no region column), so a
+        // Jordan harvest's JOD price must never surface as an offer on a USA search. Attach a
+        // brand-DB price only when its currency IS the search market's currency; images and specs
+        // are market-agnostic and flow regardless.
+        var marketCurrency = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo).Currency;
 
         // One lookup per distinct brand; the brand's rows are reused across all its items.
         var rowsByBrand = new Dictionary<string, IReadOnlyList<BrandModel>>(StringComparer.OrdinalIgnoreCase);
@@ -527,8 +541,10 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 images++;
             }
 
-            // A fresh harvested brand-site price becomes an offer for a still-priceless item.
-            if (!HasPrice(updated) && match.LocalPrice is not null && !match.IsStale(now, _options.Ttl))
+            // A fresh harvested brand-site price becomes an offer for a still-priceless item — but
+            // ONLY in the market it was harvested for (currency must match the search market's).
+            if (!HasPrice(updated) && match.LocalPrice is not null && !match.IsStale(now, _options.Ttl) &&
+                string.Equals(match.Currency, marketCurrency, StringComparison.OrdinalIgnoreCase))
             {
                 updated = updated with
                 {
@@ -601,32 +617,54 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     }
 
     /// <summary>
-    /// Token-matches an item against the brand's known models (model name, key, and regional
-    /// aliases), with the same strong-match bar the store-catalogue attribution uses.
+    /// Matches an item against the brand's known models. Exact normalized-key equality wins
+    /// outright; otherwise candidates are token-matched with SHORT tokens kept (2+ chars — variant
+    /// suffixes like "FE"/"5G"/"XL" must count, or "Galaxy S24" silently takes the S24 FE's price)
+    /// and a candidate is only eligible when EVERY one of its model tokens appears in the item
+    /// (a row naming a variant the item doesn't mention is a different product, not a match).
+    /// Qualification is evaluated PER CANDIDATE — not argmax-then-test, which both let a long wrong
+    /// candidate shadow a valid short one and let ties fall to arbitrary DB order.
     /// </summary>
     private static BrandModel? BestBrandModelMatch(ProductModel m, IReadOnlyList<BrandModel> rows)
     {
-        var want = Tokens($"{m.Brand} {m.Model} {m.Name}");
+        // Exact identity first: the normalized model key is precisely what the harvesters store.
+        var itemKey = BrandModel.Normalize(string.IsNullOrWhiteSpace(m.Model) ? m.Name : m.Model!);
+        if (itemKey.Length > 0 && rows.FirstOrDefault(r => r.ModelKey == itemKey) is { } exact)
+        {
+            return exact;
+        }
+
+        var want = ShortTokens($"{m.Brand} {m.Model} {m.Name}");
         BrandModel? best = null;
-        var bestScore = 0;
-        var bestHave = 0;
+        var bestShared = 0;
 
         foreach (var row in rows)
         {
             foreach (var candidate in Candidates(row))
             {
-                var have = Tokens(candidate);
-                var shared = want.Count(have.Contains);
-                if (shared > bestScore)
+                var have = ShortTokens(candidate);
+                if (have.Count == 0 || !have.IsSubsetOf(want))
+                {
+                    continue; // the row names something the item doesn't — a different variant/product
+                }
+
+                var shared = have.Count; // subset ⇒ shared == have.Count
+                if (shared < MinMatchTokens)
+                {
+                    continue;
+                }
+
+                // Among eligible candidates prefer the MOST specific one (more shared tokens), so
+                // "Galaxy S24 FE" beats bare "Galaxy S24" for an S24 FE item, never vice versa.
+                if (shared > bestShared)
                 {
                     best = row;
-                    bestScore = shared;
-                    bestHave = have.Count;
+                    bestShared = shared;
                 }
             }
         }
 
-        return IsStrongMatch(bestScore, want.Count, bestHave) ? best : null;
+        return best;
 
         static IEnumerable<string> Candidates(BrandModel row)
         {
@@ -641,6 +679,30 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 yield return alias;
             }
         }
+    }
+
+    /// <summary>
+    /// Tokenizer for brand-model matching that KEEPS 2-character tokens: variant suffixes ("FE",
+    /// "5G", "XL", "II") are exactly what distinguishes one model from another, so the general
+    /// 3-char <see cref="Tokens"/> filter would blind the matcher where precision matters most.
+    /// </summary>
+    private static HashSet<string> ShortTokens(string? text)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return set;
+        }
+
+        foreach (var t in text.Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (t.Length >= 2)
+            {
+                set.Add(t);
+            }
+        }
+
+        return set;
     }
 
     /// <summary>
