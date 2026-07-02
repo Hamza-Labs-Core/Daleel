@@ -69,6 +69,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IAgentFactory _factory;
     private readonly IBrandRepository _brands;
     private readonly IBrandModelRepository _brandModels;
+    private readonly Identification.IProductIdentifier _identifier;
     private readonly IScrapedPriceRepository _scrapedPrices;
     private readonly IBrandCatalogService _brandCatalog;
     private readonly ILogger<ItemEnrichmentService> _logger;
@@ -82,10 +83,18 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// </summary>
     private const int MaxImageLookups = 12;
 
+    /// <summary>
+    /// Cap on per-run VISION identifications (each can spend catalog crawls + up to 8 paid vision
+    /// comparisons). Runs only for items text-matching couldn't identify but that carry a photo —
+    /// the photo IS the identity signal for vaguely-titled marketplace listings.
+    /// </summary>
+    private const int MaxVisionIdentifications = 4;
+
     public ItemEnrichmentService(
         IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory,
         IScrapedPriceRepository scrapedPrices, IBrandCatalogService brandCatalog,
         IBrandRepository brands, IBrandModelRepository brandModels,
+        Identification.IProductIdentifier identifier,
         ILogger<ItemEnrichmentService> logger)
     {
         _repo = repo;
@@ -95,6 +104,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         _brandCatalog = brandCatalog;
         _brands = brands;
         _brandModels = brandModels;
+        _identifier = identifier;
         _logger = logger;
     }
 
@@ -131,6 +141,15 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             Record(EventCategory.Profile, "item.dbfill", "brand-db",
                 new Dictionary<string, object?> { ["images"] = dbImages, ["prices"] = dbPrices, ["specs"] = dbSpecs });
         }
+
+        // Phase 0.5 — VISION identification for items text-matching couldn't place: a vaguely-titled
+        // marketplace listing ("Automatic Washing Machine - Open Market") with a PHOTO is identified
+        // by comparing that photo against the brand's catalogue images (SmartProductIdentifier's
+        // text → catalogue-discovery → vision chain, memoized in VisionMatchCache). An identified
+        // item then fills image/specs/price from its canonical BrandModel row and gains the canonical
+        // model name — the strategy that works precisely where token matching fails. Capped: each
+        // identification can spend catalogue crawls plus paid vision comparisons.
+        var visionFills = await IdentifyViaVisionAsync(models, products.Geo, progress, Record, ct);
 
         // Phase 1 — price comparison + DB-first reuse (sequential: scoped DbContext isn't concurrency-safe).
         var toScrape = new List<(ProductModel m, int idx, string url, string key)>();
@@ -270,7 +289,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             progress($"Found product images for {imagesFound} item(s).");
         }
 
-        var touched = enriched.Count + priced + imagesFound
+        var touched = enriched.Count + priced + imagesFound + visionFills
                       + dbImages + dbPrices + dbSpecs
                       + storeImages + storeSpecs
                       + brandImages + brandPrices + brandSpecs;
@@ -413,11 +432,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             // unpriced match must not block a browser-scraped line price from filling the gap.
             if (!HasPrice(item) && BestBrowserMatch(m, browserPrices) is { } bp)
             {
-                // Browser-rendered fallback carries prices only (no image/spec data in a price line).
+                // Browser-rendered fallback carries prices only (no image/spec data in a price line) —
+                // and a price regex-parsed out of rendered page text is a POTENTIAL price, not a quote:
+                // mark it indicative so the UI says "≈ verify at the store" and leads there.
                 var offer = new PriceOffer
                 {
                     Source = bp.Store, SourceType = ResultType.StorePage,
-                    Price = bp.Price, Currency = bp.Currency, Url = bp.Url, IsLocal = true
+                    Price = bp.Price, Currency = bp.Currency, Url = bp.Url, IsLocal = true,
+                    IsIndicative = true
                 };
                 item = item with { Offers = item.Offers.Append(offer).ToList() };
                 priced++;
@@ -531,43 +553,10 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 continue;
             }
 
-            var updated = m;
-
-            // Brand-site catalogue image — locally accurate, and free: it's already in our DB.
-            var dbImage = match.ImageR2Urls.FirstOrDefault() ?? match.ImageUrl;
-            if (string.IsNullOrWhiteSpace(updated.ImageUrl) && !string.IsNullOrWhiteSpace(dbImage))
-            {
-                updated = updated with { ImageUrl = dbImage };
-                images++;
-            }
-
-            // A fresh harvested brand-site price becomes an offer for a still-priceless item — but
-            // ONLY in the market it was harvested for (currency must match the search market's).
-            if (!HasPrice(updated) && match.LocalPrice is not null && !match.IsStale(now, _options.Ttl) &&
-                string.Equals(match.Currency, marketCurrency, StringComparison.OrdinalIgnoreCase))
-            {
-                updated = updated with
-                {
-                    Offers = updated.Offers.Append(new PriceOffer
-                    {
-                        Source = DomainOf(match.SourceUrl) ?? m.Brand ?? "Brand site",
-                        SourceType = ResultType.BrandPage,
-                        Price = match.LocalPrice,
-                        Currency = match.Currency,
-                        Url = match.SourceUrl,
-                        IsLocal = true
-                    }).ToList()
-                };
-                prices++;
-            }
-
-            var withSpecs = MergeBrandSpecs(updated, match);
-            if (!ReferenceEquals(withSpecs, updated))
-            {
-                updated = withSpecs;
-                specsFilled++;
-            }
-
+            var (updated, filledImage, filledPrice, filledSpecs) = FillFromRow(m, match, marketCurrency, now);
+            if (filledImage) images++;
+            if (filledPrice) prices++;
+            if (filledSpecs) specsFilled++;
             if (!ReferenceEquals(updated, m))
             {
                 models[i] = updated;
@@ -575,6 +564,123 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         }
 
         return (models, images, prices, specsFilled);
+    }
+
+    /// <summary>
+    /// Vision-identifies items the text matchers couldn't place (they have a brand and a PHOTO but a
+    /// vague/listing-style title) and fills them from their identified canonical BrandModel row.
+    /// The identifier's chain is cheapest-first (text → catalogue discovery → vision compare, with
+    /// the vision verdicts memoized), so repeat searches get the same identification for free.
+    /// Best-effort per item; capped per run.
+    /// </summary>
+    private async Task<int> IdentifyViaVisionAsync(
+        List<ProductModel> models, string? geo, Action<string> progress,
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
+    {
+        var marketCurrency = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo).Currency;
+        var now = _options.Now();
+        var attempts = 0;
+        var fills = 0;
+
+        for (var i = 0; i < models.Count && attempts < MaxVisionIdentifications; i++)
+        {
+            var m = models[i];
+            // Only items where vision can actually add signal: a photo to compare, a brand to scope
+            // the catalogue, and something still missing that an identification would fill.
+            var needsHelp = !HasPrice(m) || m.Specs.Count < ThinSpecThreshold;
+            if (!needsHelp || string.IsNullOrWhiteSpace(m.Brand) || string.IsNullOrWhiteSpace(m.ImageUrl))
+            {
+                continue;
+            }
+
+            attempts++;
+            try
+            {
+                var id = await _identifier.IdentifyAsync(m, ct);
+                if (!id.Matched || id.BrandModelId is not { } rowId ||
+                    await _brandModels.GetByIdAsync(rowId, ct) is not { } row)
+                {
+                    continue;
+                }
+
+                var (filled, img, price, specs) = FillFromRow(m, row, marketCurrency, now);
+
+                // The canonical model name unlocks correct dedup/compare downstream; only fill a blank.
+                if (string.IsNullOrWhiteSpace(filled.Model) && !string.IsNullOrWhiteSpace(id.CanonicalModelName))
+                {
+                    filled = filled with { Model = id.CanonicalModelName };
+                }
+
+                if (!ReferenceEquals(filled, m))
+                {
+                    models[i] = filled;
+                    if (img || price || specs) fills++;
+                }
+
+                record(EventCategory.Extract, "item.identify", "vision",
+                    new Dictionary<string, object?>
+                    {
+                        ["item"] = m.Name, ["method"] = id.Method, ["confidence"] = id.Confidence,
+                        ["canonical"] = id.CanonicalModelName
+                    });
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "Vision identification failed for {Item}", m.Name);
+            }
+        }
+
+        if (fills > 0)
+        {
+            progress($"Identified {fills} item(s) by product photo.");
+        }
+
+        return fills;
+    }
+
+    /// <summary>
+    /// Applies one matched BrandModel row to an item: brand-catalogue image when the item has none,
+    /// a fresh brand-site price (market-currency-gated) when it is priceless, and a specs merge.
+    /// Shared by the text-match read-through and the vision-identification path.
+    /// </summary>
+    private (ProductModel Item, bool Image, bool Price, bool Specs) FillFromRow(
+        ProductModel m, BrandModel match, string marketCurrency, DateTimeOffset now)
+    {
+        var updated = m;
+        var filledImage = false;
+        var filledPrice = false;
+
+        // Brand-site catalogue image — locally accurate, and free: it's already in our DB.
+        var dbImage = match.ImageR2Urls.FirstOrDefault() ?? match.ImageUrl;
+        if (string.IsNullOrWhiteSpace(updated.ImageUrl) && !string.IsNullOrWhiteSpace(dbImage))
+        {
+            updated = updated with { ImageUrl = dbImage };
+            filledImage = true;
+        }
+
+        // A fresh harvested brand-site price becomes an offer for a still-priceless item — but
+        // ONLY in the market it was harvested for (currency must match the search market's).
+        if (!HasPrice(updated) && match.LocalPrice is not null && !match.IsStale(now, _options.Ttl) &&
+            string.Equals(match.Currency, marketCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            updated = updated with
+            {
+                Offers = updated.Offers.Append(new PriceOffer
+                {
+                    Source = DomainOf(match.SourceUrl) ?? m.Brand ?? "Brand site",
+                    SourceType = ResultType.BrandPage,
+                    Price = match.LocalPrice,
+                    Currency = match.Currency,
+                    Url = match.SourceUrl,
+                    IsLocal = true
+                }).ToList()
+            };
+            filledPrice = true;
+        }
+
+        var withSpecs = MergeBrandSpecs(updated, match);
+        var filledSpecs = !ReferenceEquals(withSpecs, updated);
+        return (withSpecs, filledImage, filledPrice, filledSpecs);
     }
 
     /// <summary>Merges the harvested row's category + SpecsJson keys into the model (existing keys win).</summary>

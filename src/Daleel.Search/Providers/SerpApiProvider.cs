@@ -259,6 +259,7 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
                     Price = price,
                     Seller = StrOrNull(item, "source") ?? StrOrNull(item, "store"),
                     Rating = DblOrNull(item, "rating"),
+                    ReviewCount = IntOrNull(item, "reviews"),
                     ImageUrl = StrOrNull(item, "thumbnail"),
                     Position = IntOrNull(item, "position")
                 });

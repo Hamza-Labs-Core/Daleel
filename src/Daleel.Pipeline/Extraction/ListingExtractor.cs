@@ -179,6 +179,8 @@ public static class ListingExtractor
                 Source = r.Seller ?? r.Source,
                 Seller = r.Seller,
                 ImageUrl = r.ImageUrl,
+                Rating = r.Rating,
+                RatingCount = r.ReviewCount,
                 SourceType = sourceType
             });
         }

@@ -92,4 +92,27 @@ public class ListingAggregatorTests
         model.Specs.Should().ContainKey("cooling_capacity");
         model.Specs.Should().ContainKey("energy_rating");
     }
+
+    [Fact]
+    public void Aggregate_WeightsRatingsByReviewCount_AndFlowsIndicative()
+    {
+        var listings = new[]
+        {
+            // 4.0★ × 300 reviews vs 5.0★ × 100 → weighted 4.25 → rounds to 4.3, count 400.
+            new ProductListing { Name = "AC", Brand = "B", Model = "M1", Source = "A", Rating = 4.0, RatingCount = 300, Price = 500, Currency = "JOD" },
+            new ProductListing { Name = "AC", Brand = "B", Model = "M1", Source = "B", Rating = 5.0, RatingCount = 100, Price = 480, Currency = "JOD", IsIndicative = true },
+        };
+
+        var model = ListingAggregator.Aggregate(listings).Single();
+
+        model.Rating.Should().Be(4.3);
+        model.RatingCount.Should().Be(400);
+
+        // The indicative (loosely-parsed) 480 is CHEAPER, but the card must lead with the cheapest
+        // EXACT price — an approximation never displaces a verified figure.
+        model.LowestOffer!.Price.Should().Be(500);
+        model.LowestOffer.IsIndicative.Should().BeFalse();
+        model.Offers.Single(o => o.Price == 480).IsIndicative.Should().BeTrue();
+        model.Offers.Single(o => o.Price == 480).Tags.Should().Contain("UNVERIFIED");
+    }
 }

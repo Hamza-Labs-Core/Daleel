@@ -911,6 +911,10 @@ public sealed partial class AgentService
         Name = r.Title,
         Price = r.Price?.Amount,
         Currency = r.Price?.Currency,
+        // A price lifted from a web result's SNIPPET is a potential price, not a quote — the page
+        // may show a range, an old price, or a different variant. Mark it indicative so the UI
+        // renders an ≈ "verify at the store" affordance instead of a firm figure.
+        IsIndicative = r.Price is not null,
         Url = r.Url,
         Source = SourceName(r),
         Seller = r.Seller,
