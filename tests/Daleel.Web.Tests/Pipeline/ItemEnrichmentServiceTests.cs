@@ -32,6 +32,8 @@ public class ItemEnrichmentServiceTests
             new StubAgentFactory(),
             new ScrapedPriceRepository(ctx.Db),
             catalog ?? new StubBrandCatalog(),
+            new BrandRepository(ctx.Db),
+            new BrandModelRepository(ctx.Db),
             NullLogger<ItemEnrichmentService>.Instance);
 
     [Fact]
@@ -99,6 +101,86 @@ public class ItemEnrichmentServiceTests
         var saved = await new ProductProfileRepository(ctx.NewContext()).GetByKeyAsync(key);
         saved.Should().NotBeNull();
         saved!.Details.Should().Contain("24000 BTU");
+    }
+
+    [Fact]
+    public async Task EnrichAsync_FillsImagePriceAndSpecs_FromBrandModelDatabase()
+    {
+        // The store/brand pipeline's whole point: what a previous search harvested into the
+        // BrandModel database must flow onto the CURRENT result's items — image, brand-site
+        // price, and specs — before any paid lookup is considered.
+        using var ctx = new PostgresTestContext();
+        var brand = new Brand { Name = "Samsung", NameKey = Brand.Normalize("Samsung") };
+        ctx.Db.Brands.Add(brand);
+        await ctx.Db.SaveChangesAsync();
+        await new BrandModelRepository(ctx.Db).UpsertAsync(new BrandModel
+        {
+            BrandId = brand.Id,
+            ModelName = "Galaxy S24 Ultra",
+            ModelKey = BrandModel.Normalize("Galaxy S24 Ultra"),
+            Category = "smartphone",
+            SpecsJson = """{"display":"6.8 inch","storage":"256 GB"}""",
+            ImageUrl = "https://samsung.com/img/s24u.jpg",
+            LocalPrice = 1099m,
+            Currency = "JOD",
+            SourceUrl = "https://samsung.com/jo/s24u",
+            IsAvailable = true,
+            DiscoveredAt = Now,
+            LastRefreshed = Now // fresh → price is trusted
+        });
+
+        var svc = Build(ctx);
+        var model = new ProductModel
+        {
+            Name = "Samsung Galaxy S24 Ultra", Brand = "Samsung", Model = "Galaxy S24 Ultra",
+            Specs = new Dictionary<string, string> { ["a"] = "1", ["b"] = "2", ["c"] = "3" }, // not thin → no scrape
+            Offers = Array.Empty<PriceOffer>() // priceless + imageless → everything must come from the DB
+        };
+        // Jordan-market search: the stored JOD brand-site price is only attachable in its own market
+        // (a USA search must NOT surface a JOD offer — the currency gate blocks cross-market prices).
+        var products = new ProductSearchResult { Models = new[] { model }, Geo = "jordan" };
+
+        var result = await svc.EnrichAsync(NoScrapeAgent(), products, _ => { }, "sid", default);
+
+        result.Products.Should().NotBeNull("the DB read-through changed the result");
+        var enriched = result.Products!.Models.Single();
+        enriched.ImageUrl.Should().Be("https://samsung.com/img/s24u.jpg", "the harvested brand image fills the gap");
+        enriched.Offers.Should().ContainSingle().Which.Price.Should().Be(1099m);
+        enriched.Offers.Single().SourceType.Should().Be(ResultType.BrandPage);
+        enriched.Specs.Should().ContainKey("display").WhoseValue.Should().Be("6.8 inch");
+        enriched.Specs.Should().ContainKey("category").WhoseValue.Should().Be("smartphone");
+    }
+
+    [Fact]
+    public async Task EnrichAsync_BrandDatabaseNeverOverwrites_ExistingImageOrPrice()
+    {
+        using var ctx = new PostgresTestContext();
+        var brand = new Brand { Name = "LG", NameKey = Brand.Normalize("LG") };
+        ctx.Db.Brands.Add(brand);
+        await ctx.Db.SaveChangesAsync();
+        await new BrandModelRepository(ctx.Db).UpsertAsync(new BrandModel
+        {
+            BrandId = brand.Id, ModelName = "DualCool Inverter", ModelKey = BrandModel.Normalize("DualCool Inverter"),
+            ImageUrl = "https://lg.com/img/dualcool.jpg", LocalPrice = 700m, Currency = "JOD",
+            IsAvailable = true, DiscoveredAt = Now, LastRefreshed = Now
+        });
+
+        var svc = Build(ctx);
+        var model = new ProductModel
+        {
+            Name = "LG DualCool Inverter", Brand = "LG", Model = "DualCool Inverter",
+            ImageUrl = "https://store.jo/original.jpg", // already has an image — must stay
+            Specs = new Dictionary<string, string> { ["a"] = "1", ["b"] = "2", ["c"] = "3" },
+            Offers = new[] { new PriceOffer { Source = "SmartBuy", Price = 650m, Url = "https://store.jo/lg" } }
+        };
+        var products = new ProductSearchResult { Models = new[] { model } };
+
+        var result = await svc.EnrichAsync(NoScrapeAgent(), products, _ => { }, "sid", default);
+
+        // The DB may still contribute specs, but the item's own image and store price always win.
+        var enriched = (result.Products?.Models ?? products.Models).Single();
+        enriched.ImageUrl.Should().Be("https://store.jo/original.jpg");
+        enriched.Offers.Should().ContainSingle().Which.Price.Should().Be(650m);
     }
 
     private static AgentService NoScrapeAgent() =>

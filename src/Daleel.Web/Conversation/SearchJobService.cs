@@ -244,7 +244,9 @@ public sealed class SearchJobService : BackgroundService
             }
 
             await convos.CompleteAsync(job.UserId, "completed", result.ResultJson, result.ResultType, job.CompletedAt.Value, stoppingToken);
-            await history.AddAsync(new SearchHistoryEntry
+            // Keep the generated Id: the background enrichers update THIS exact row when they finish,
+            // so a late-landing enrichment can never overwrite a newer same-query history entry.
+            var historyEntry = await history.AddAsync(new SearchHistoryEntry
             {
                 UserId = job.UserId, Query = job.Query, QueryType = job.QueryType,
                 Geo = job.Geo, Model = job.Model, ResultSummary = null,
@@ -288,7 +290,7 @@ public sealed class SearchJobService : BackgroundService
                 // complete (ServeAsIs) hit needs nothing further.
                 if (quality.Decision == CacheDecision.ServeAndEnrich)
                 {
-                    _ = ReEnrichInBackgroundAsync(job.Id, job.UserId, result, quality);
+                    _ = ReEnrichInBackgroundAsync(job.Id, job.UserId, historyEntry.Id, result, quality);
                 }
             }
             else if (result.CostCapTripped)
@@ -306,7 +308,7 @@ public sealed class SearchJobService : BackgroundService
                 // Fresh run: progressive enrichment — base results are already on screen, now deep-dive
                 // each item (official-brand-site specs via Context.dev) and stream the refreshed result
                 // so the UI fills specs in place.
-                _ = EnrichInBackgroundAsync(job.Id, job.UserId, result);
+                _ = EnrichInBackgroundAsync(job.Id, job.UserId, historyEntry.Id, result);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -366,7 +368,7 @@ public sealed class SearchJobService : BackgroundService
     /// timeout, then streams the enriched result. Fire-and-forget: never awaited by the job processor,
     /// so it can't block the queue; all failures are logged (never silently swallowed).
     /// </summary>
-    private async Task EnrichInBackgroundAsync(int jobId, string userId, SearchRunResult baseResult)
+    private async Task EnrichInBackgroundAsync(int jobId, string userId, int historyId, SearchRunResult baseResult)
     {
         using var timeout = new CancellationTokenSource(_enrichTimeout);
         try
@@ -398,6 +400,10 @@ public sealed class SearchJobService : BackgroundService
             await db.SaveChangesAsync(timeout.Token);
             await convos.CompleteAsync(
                 userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+            // Keep the history row in sync — without this, "open from history" replays the pre-enrichment
+            // (image/price/spec-less) result forever while a repeat search serves the enriched cache entry.
+            await sp.GetRequiredService<ISearchHistoryRepository>()
+                .UpdateResultAsync(userId, historyId, enriched.ResultJson, timeout.Token);
             await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
         }
         catch (OperationCanceledException)
@@ -424,7 +430,7 @@ public sealed class SearchJobService : BackgroundService
     /// found and re-renders in place via <c>Enriched</c>.
     /// </summary>
     private async Task ReEnrichInBackgroundAsync(
-        int jobId, string userId, SearchRunResult baseResult, CacheQualityReport quality)
+        int jobId, string userId, int historyId, SearchRunResult baseResult, CacheQualityReport quality)
     {
         using var timeout = new CancellationTokenSource(_enrichTimeout);
         try
@@ -459,6 +465,9 @@ public sealed class SearchJobService : BackgroundService
             await db.SaveChangesAsync(timeout.Token);
             await convos.CompleteAsync(
                 userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+            // Keep the history row in sync with the refilled result (see EnrichInBackgroundAsync).
+            await sp.GetRequiredService<ISearchHistoryRepository>()
+                .UpdateResultAsync(userId, historyId, enriched.ResultJson, timeout.Token);
             await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
         }
         catch (OperationCanceledException)

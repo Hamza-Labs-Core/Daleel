@@ -32,6 +32,14 @@ public interface ISearchHistoryRepository
 
     /// <summary>Aggregate count across all users — for admin stats only (no row data exposed).</summary>
     Task<int> TotalCountAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Replaces the stored result on ONE specific history row (owner-checked). Called after background
+    /// enrichment — targeted by the row id captured when the entry was added, never by query text,
+    /// so a late-landing enrichment can't overwrite a newer same-text row (repeat search, market
+    /// switch, or another feature's entry). Returns true when the row was updated.
+    /// </summary>
+    Task<bool> UpdateResultAsync(string userId, int id, string resultJson, CancellationToken ct = default);
 }
 
 public sealed class SearchHistoryRepository : ISearchHistoryRepository
@@ -45,6 +53,22 @@ public sealed class SearchHistoryRepository : ISearchHistoryRepository
         _db.SearchHistory.Add(entry);
         await _db.SaveChangesAsync(ct);
         return entry;
+    }
+
+    public async Task<bool> UpdateResultAsync(
+        string userId, int id, string resultJson, CancellationToken ct = default)
+    {
+        // Owner filter first (the isolation boundary), then the exact row.
+        var entry = await _db.SearchHistory
+            .FirstOrDefaultAsync(x => x.UserId == userId && x.Id == id, ct);
+        if (entry is null)
+        {
+            return false;
+        }
+
+        entry.ResultJson = resultJson;
+        await _db.SaveChangesAsync(ct);
+        return true;
     }
 
     public async Task<PagedResult<SearchHistoryEntry>> ListAsync(

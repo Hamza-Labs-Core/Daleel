@@ -67,6 +67,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IProductProfileRepository _repo;
     private readonly ProfileOptions _options;
     private readonly IAgentFactory _factory;
+    private readonly IBrandRepository _brands;
+    private readonly IBrandModelRepository _brandModels;
     private readonly IScrapedPriceRepository _scrapedPrices;
     private readonly IBrandCatalogService _brandCatalog;
     private readonly ILogger<ItemEnrichmentService> _logger;
@@ -83,6 +85,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     public ItemEnrichmentService(
         IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory,
         IScrapedPriceRepository scrapedPrices, IBrandCatalogService brandCatalog,
+        IBrandRepository brands, IBrandModelRepository brandModels,
         ILogger<ItemEnrichmentService> logger)
     {
         _repo = repo;
@@ -90,6 +93,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         _factory = factory;
         _scrapedPrices = scrapedPrices;
         _brandCatalog = brandCatalog;
+        _brands = brands;
+        _brandModels = brandModels;
         _logger = logger;
     }
 
@@ -109,12 +114,27 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         var now = _options.Now();
         var ttl = _options.Ttl;
-        var models = products.Models.Take(MaxItems).ToList();
+        // ALL models flow through the cheap phases (DB read-through, in-memory catalogue match);
+        // only the PAID phases (page scrapes, image search) are capped to the first MaxItems.
+        var models = products.Models.ToList();
+        var headCount = Math.Min(MaxItems, models.Count);
         var enriched = new Dictionary<int, string>();
+
+        // Phase 0 — brand-database read-through: images, brand-site prices, and specs harvested by
+        // PREVIOUS searches fill this result before any network call is spent. This is what makes
+        // the store/brand pipeline compound: every harvest pays off on every later search.
+        var (filled0, dbImages, dbPrices, dbSpecs) = await FillFromBrandDatabaseAsync(models, products.Geo, ct);
+        models = filled0;
+        if (dbImages + dbPrices + dbSpecs > 0)
+        {
+            progress($"Matched {dbImages + dbPrices + dbSpecs} detail(s) from the product database.");
+            Record(EventCategory.Profile, "item.dbfill", "brand-db",
+                new Dictionary<string, object?> { ["images"] = dbImages, ["prices"] = dbPrices, ["specs"] = dbSpecs });
+        }
 
         // Phase 1 — price comparison + DB-first reuse (sequential: scoped DbContext isn't concurrency-safe).
         var toScrape = new List<(ProductModel m, int idx, string url, string key)>();
-        for (var idx = 0; idx < models.Count; idx++)
+        for (var idx = 0; idx < headCount; idx++)
         {
             var m = models[idx];
             var stores = m.Offers.Select(o => o.Source)
@@ -192,23 +212,41 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             })
             .ToList();
 
-        // Phase 4 — fill PRICES into items that still lack one, from the found stores' catalogues
-        // (Context.dev /v1/brand/ai/products). Runs last because the catalogue crawl is the slowest call.
-        var (pricedModels, priced) = await AttachCatalogPricesAsync(agent, withSpecs, products, progress, Record, ct);
+        // Phase 4 — STORE catalogues (Context.dev /v1/brand/ai/products, browser-render fallback):
+        // every item gets matched, and a match contributes its price (when the item lacks one),
+        // its product image, and its structured specs — the store data is the primary source, not
+        // just a price gap-filler.
+        var (pricedModels, priced, storeImages, storeSpecs) =
+            await AttachCatalogDataAsync(agent, withSpecs, products, progress, Record, ct);
 
-        // Phase 4b — backfill missing product images via image search. In markets where Google
-        // Shopping doesn't operate (Jordan: SerpAPI rejects gl=jo outright) the grid's usual
-        // thumbnail source never produces anything, so items the catalogue match above didn't cover
-        // stay imageless. A product photo is market-agnostic, so a plain image search closes the
-        // gap. Capped per run and best-effort per item — a failed lookup just leaves the placeholder.
+        // Phase 5 — harvest each surfaced brand's own site into the BrandModel database, then
+        // IMMEDIATELY re-run the database read-through so this run's harvest benefits THIS result
+        // (images/specs/prices from the brand's own catalogue), not only future searches.
+        await HarvestBrandCatalogsAsync(products, progress, Record, ct);
+        var (harvestFilled, brandImages, brandPrices, brandSpecs) =
+            await FillFromBrandDatabaseAsync(pricedModels, products.Geo, ct);
+        pricedModels = harvestFilled;
+        if (brandImages + brandPrices + brandSpecs > 0)
+        {
+            progress($"Filled {brandImages + brandPrices + brandSpecs} detail(s) from brand catalogues.");
+        }
+
+        // Phase 6 — LAST-RESORT image search for whatever the store catalogues, brand sites, and
+        // product database all failed to cover (common in markets where Google Shopping doesn't
+        // operate). Capped paid lookups; a failed lookup just leaves the placeholder.
         var imagesFound = 0;
-        for (var i = 0; i < pricedModels.Count && imagesFound < MaxImageLookups; i++)
+        var imageAttempts = 0;
+        // The cap bounds paid ATTEMPTS, not successes — on a large grid of imageless obscure items,
+        // counting only hits would keep paying for lookup after failed lookup with no ceiling.
+        for (var i = 0; i < pricedModels.Count && imageAttempts < MaxImageLookups; i++)
         {
             var m = pricedModels[i];
             if (!string.IsNullOrWhiteSpace(m.ImageUrl))
             {
                 continue;
             }
+
+            imageAttempts++;
 
             var imageQuery = string.Join(' ', new[]
             {
@@ -232,39 +270,40 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             progress($"Found product images for {imagesFound} item(s).");
         }
 
-        // Phase 5 — harvest each surfaced brand's own site into the BrandModel database (specs/prices/images
-        // → R2). A pure side effect: it builds the model database for later searches and does not alter the
-        // result shown now, so it runs regardless of whether the product enrichment above changed anything.
-        await HarvestBrandCatalogsAsync(products, progress, Record, ct);
-
-        if (enriched.Count == 0 && priced == 0 && imagesFound == 0)
+        var touched = enriched.Count + priced + imagesFound
+                      + dbImages + dbPrices + dbSpecs
+                      + storeImages + storeSpecs
+                      + brandImages + brandPrices + brandSpecs;
+        if (touched == 0)
         {
             return new ItemEnrichmentResult(null, events);
         }
 
-        var rebuilt = pricedModels.Concat(products.Models.Skip(MaxItems)).ToList();
-
         progress(
             $"Deep-dived {enriched.Count} item(s) — {fresh} new, {enriched.Count - fresh} reused" +
             (priced > 0 ? $"; added live prices to {priced}." : "."));
-        return new ItemEnrichmentResult(products with { Models = rebuilt }, events);
+        return new ItemEnrichmentResult(products with { Models = pricedModels }, events);
     }
 
     /// <summary>
     /// For items that still have no price, harvest the top found stores' product catalogues and attach a
-    /// matching priced offer. Two sources: Context.dev's structured <c>/v1/brand/ai/products</c> first, then
-    /// a Cloudflare-Browser-rendered page parsed by <see cref="PriceParser"/> for the stores Context.dev
-    /// can't read. Every match is also written to the <see cref="ScrapedPrice"/> history, and a matched
-    /// product image is copied into R2. Targeted on purpose — we only fill gaps on items already shown, so a
-    /// store's full catalogue never floods the results. Best-effort: any failure leaves the item as-is.
+    /// matching priced offer — and, for EVERY strong match, the catalogue product's image and its
+    /// structured fields (description/category/sku) as specs, whether or not the item already had a
+    /// price. Two sources: Context.dev's structured <c>/v1/brand/ai/products</c> first, then a
+    /// Cloudflare-Browser-rendered page parsed by <see cref="PriceParser"/> for the stores Context.dev
+    /// can't read (prices only — the browser pass carries no images). Matched prices are also written
+    /// to the <see cref="ScrapedPrice"/> history; images stay as original source URLs (the UI renders
+    /// external image URLs directly). Best-effort: any failure leaves the item as-is.
     /// </summary>
-    private async Task<(List<ProductModel> Models, int Priced)> AttachCatalogPricesAsync(
+    private async Task<(List<ProductModel> Models, int Priced, int Images, int Specs)> AttachCatalogDataAsync(
         AgentService agent, List<ProductModel> models, ProductSearchResult products, Action<string> progress,
         Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
     {
-        if (!models.Any(m => !HasPrice(m)))
+        // The store catalogues have something to offer whenever ANY item lacks a price, an image, or
+        // meaningful specs — not only when a price is missing (the old gate starved images/specs).
+        if (!models.Any(m => !HasPrice(m) || string.IsNullOrWhiteSpace(m.ImageUrl) || m.Specs.Count < ThinSpecThreshold))
         {
-            return (models, 0);
+            return (models, 0, 0, 0);
         }
 
         var domains = products.Stores
@@ -275,7 +314,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             .ToList();
         if (domains.Count == 0)
         {
-            return (models, 0);
+            return (models, 0, 0, 0);
         }
 
         // Hard cap on the whole catalogue phase so a slow crawl (or a retry on the API's 408) can never
@@ -303,7 +342,9 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 return (domain: d, found);
             }));
 
-            pool = catalogues.SelectMany(c => c.found).Where(c => c.Price is not null).ToList();
+            // Keep EVERY catalogue product — an unpriced entry still carries the image and specs the
+            // grid needs. Only the price-attach step below cares whether the entry has a price.
+            pool = catalogues.SelectMany(c => c.found).ToList();
             // Only the domains Context.dev returned nothing priced for fall through to the browser pass.
             browserUnpriced = catalogues.Where(c => c.found.All(p => p.Price is null))
                 .Select(c => c.domain).ToList();
@@ -313,76 +354,355 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         if (pool.Count == 0 && browserPrices.Count == 0)
         {
-            return (models, 0);
+            return (models, 0, 0, 0);
         }
 
         var now = _options.Now();
         var observations = new List<ScrapedPrice>();
         var priced = 0;
+        var images = 0;
+        var specsFilled = 0;
         var updated = new List<ProductModel>(models.Count);
         foreach (var m in models)
         {
-            if (HasPrice(m))
-            {
-                updated.Add(m);
-                continue;
-            }
-
-            // Prefer the structured Context.dev match; fall back to a browser-scraped line price.
+            // EVERY item gets catalogue-matched: a priced item can still gain its image and specs.
             var match = BestCatalogMatch(m, pool);
-            var offer = match is { } c
-                ? new PriceOffer
+            var item = m;
+
+            if (match is { } c)
+            {
+                if (!HasPrice(item) && c.Price is not null)
                 {
-                    Source = DomainOf(c.Url) ?? "Store", SourceType = ResultType.StorePage,
-                    Price = c.Price, Currency = c.Currency, Url = c.Url, IsLocal = true
-                }
-                : BestBrowserMatch(m, browserPrices) is { } bp
-                    ? new PriceOffer
+                    var offer = new PriceOffer
                     {
-                        Source = bp.Store, SourceType = ResultType.StorePage,
-                        Price = bp.Price, Currency = bp.Currency, Url = bp.Url, IsLocal = true
-                    }
-                    : null;
+                        Source = DomainOf(c.Url) ?? "Store", SourceType = ResultType.StorePage,
+                        Price = c.Price, Currency = c.Currency, Url = c.Url, IsLocal = true
+                    };
+                    item = item with { Offers = item.Offers.Append(offer).ToList() };
+                    priced++;
+                    observations.Add(new ScrapedPrice
+                    {
+                        ProductName = m.Name,
+                        ProductKey = ProductProfile.KeyFor(m.Brand, m.Model, m.Name),
+                        StoreName = offer.Source,
+                        Price = offer.Price,
+                        Currency = offer.Currency,
+                        SourceUrl = offer.Url,
+                        Provider = "context.dev",
+                        ScrapedAt = now
+                    });
+                }
 
-            if (offer is null)
+                // The catalogue entry usually carries a product image — fill it in when the model has
+                // none, keeping the original source URL (the UI renders external image URLs directly).
+                if (string.IsNullOrWhiteSpace(item.ImageUrl) && c.ImageUrl is { Length: > 0 } img)
+                {
+                    item = item with { ImageUrl = img };
+                    images++;
+                }
+
+                // Structured catalogue fields become specs (existing keys always win; description capped).
+                var withCatalogSpecs = MergeCatalogSpecs(item, c);
+                if (!ReferenceEquals(withCatalogSpecs, item))
+                {
+                    item = withCatalogSpecs;
+                    specsFilled++;
+                }
+            }
+            // Independent of the catalogue match: the chosen entry may carry NO parsed price, and an
+            // unpriced match must not block a browser-scraped line price from filling the gap.
+            if (!HasPrice(item) && BestBrowserMatch(m, browserPrices) is { } bp)
             {
-                updated.Add(m);
-                continue;
+                // Browser-rendered fallback carries prices only (no image/spec data in a price line).
+                var offer = new PriceOffer
+                {
+                    Source = bp.Store, SourceType = ResultType.StorePage,
+                    Price = bp.Price, Currency = bp.Currency, Url = bp.Url, IsLocal = true
+                };
+                item = item with { Offers = item.Offers.Append(offer).ToList() };
+                priced++;
+                observations.Add(new ScrapedPrice
+                {
+                    ProductName = m.Name,
+                    ProductKey = ProductProfile.KeyFor(m.Brand, m.Model, m.Name),
+                    StoreName = offer.Source,
+                    Price = offer.Price,
+                    Currency = offer.Currency,
+                    SourceUrl = offer.Url,
+                    Provider = "cloudflare-browser",
+                    ScrapedAt = now
+                });
             }
 
-            priced++;
-            observations.Add(new ScrapedPrice
-            {
-                ProductName = m.Name,
-                ProductKey = ProductProfile.KeyFor(m.Brand, m.Model, m.Name),
-                StoreName = offer.Source,
-                Price = offer.Price,
-                Currency = offer.Currency,
-                SourceUrl = offer.Url,
-                Provider = match is not null ? "context.dev" : "cloudflare-browser",
-                ScrapedAt = now
-            });
-
-            var withOffer = m with { Offers = m.Offers.Append(offer).ToList() };
-
-            // The catalogue entry usually carries a product image — fill it in when the model has none,
-            // keeping the original source URL (the UI renders external image URLs directly).
-            if (string.IsNullOrWhiteSpace(withOffer.ImageUrl) && match is { ImageUrl: { Length: > 0 } img })
-            {
-                withOffer = withOffer with { ImageUrl = img };
-            }
-
-            updated.Add(withOffer);
+            updated.Add(item);
         }
 
         // Persist the observations as a timestamped batch — the price history the comparison view reads.
         await PersistObservations(observations, record, ct);
 
-        if (priced > 0)
+        if (priced + images + specsFilled > 0)
         {
-            progress($"Filled in live prices for {priced} item(s) from store catalogues.");
+            progress($"Store catalogues matched {priced} price(s), {images} image(s), {specsFilled} spec set(s).");
         }
-        return (updated, priced);
+        return (updated, priced, images, specsFilled);
+    }
+
+    /// <summary>Merges a catalogue product's structured fields into the model's specs (existing keys win).</summary>
+    private static ProductModel MergeCatalogSpecs(ProductModel m, CatalogProduct c)
+    {
+        Dictionary<string, string>? merged = null;
+        void Put(string key, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || m.Specs.ContainsKey(key))
+            {
+                return;
+            }
+
+            merged ??= new Dictionary<string, string>(m.Specs, StringComparer.OrdinalIgnoreCase);
+            merged[key] = value!;
+        }
+
+        Put("category", c.Category);
+        Put("sku", c.Sku);
+        Put("description", c.Description is { Length: > 500 } d ? d[..500] + "…" : c.Description);
+        return merged is null ? m : m with { Specs = merged };
+    }
+
+    /// <summary>
+    /// DB read-through over the harvested BrandModel database — the images, brand-site prices, and
+    /// specs every PREVIOUS search already paid to collect. Runs before any paid call (and again
+    /// right after this run's own brand harvest) so the app's own product database — not an external
+    /// image search — is the primary source. Pure local DB reads over ALL items; best-effort.
+    /// </summary>
+    private async Task<(List<ProductModel> Models, int Images, int Prices, int Specs)> FillFromBrandDatabaseAsync(
+        List<ProductModel> models, string? geo, CancellationToken ct)
+    {
+        var images = 0;
+        var prices = 0;
+        var specsFilled = 0;
+        var now = _options.Now();
+
+        // BrandModel rows carry ONE LocalPrice/Currency (last harvest wins, no region column), so a
+        // Jordan harvest's JOD price must never surface as an offer on a USA search. Attach a
+        // brand-DB price only when its currency IS the search market's currency; images and specs
+        // are market-agnostic and flow regardless.
+        var marketCurrency = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo).Currency;
+
+        // One lookup per distinct brand; the brand's rows are reused across all its items.
+        var rowsByBrand = new Dictionary<string, IReadOnlyList<BrandModel>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in models.Select(m => m.Brand?.Trim())
+                     .Where(b => !string.IsNullOrWhiteSpace(b))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                if (await _brands.GetByNameAsync(name!, ct) is not { } brand)
+                {
+                    continue;
+                }
+
+                var rows = await _brandModels.ListByBrandAsync(brand.Id, ct);
+                if (rows.Count > 0)
+                {
+                    rowsByBrand[name!] = rows;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogDebug(ex, "Brand-model lookup failed for {Brand}", name);
+            }
+        }
+
+        if (rowsByBrand.Count == 0)
+        {
+            return (models, 0, 0, 0);
+        }
+
+        for (var i = 0; i < models.Count; i++)
+        {
+            var m = models[i];
+            if (m.Brand is null || !rowsByBrand.TryGetValue(m.Brand.Trim(), out var rows))
+            {
+                continue;
+            }
+
+            if (BestBrandModelMatch(m, rows) is not { } match)
+            {
+                continue;
+            }
+
+            var updated = m;
+
+            // Brand-site catalogue image — locally accurate, and free: it's already in our DB.
+            var dbImage = match.ImageR2Urls.FirstOrDefault() ?? match.ImageUrl;
+            if (string.IsNullOrWhiteSpace(updated.ImageUrl) && !string.IsNullOrWhiteSpace(dbImage))
+            {
+                updated = updated with { ImageUrl = dbImage };
+                images++;
+            }
+
+            // A fresh harvested brand-site price becomes an offer for a still-priceless item — but
+            // ONLY in the market it was harvested for (currency must match the search market's).
+            if (!HasPrice(updated) && match.LocalPrice is not null && !match.IsStale(now, _options.Ttl) &&
+                string.Equals(match.Currency, marketCurrency, StringComparison.OrdinalIgnoreCase))
+            {
+                updated = updated with
+                {
+                    Offers = updated.Offers.Append(new PriceOffer
+                    {
+                        Source = DomainOf(match.SourceUrl) ?? m.Brand ?? "Brand site",
+                        SourceType = ResultType.BrandPage,
+                        Price = match.LocalPrice,
+                        Currency = match.Currency,
+                        Url = match.SourceUrl,
+                        IsLocal = true
+                    }).ToList()
+                };
+                prices++;
+            }
+
+            var withSpecs = MergeBrandSpecs(updated, match);
+            if (!ReferenceEquals(withSpecs, updated))
+            {
+                updated = withSpecs;
+                specsFilled++;
+            }
+
+            if (!ReferenceEquals(updated, m))
+            {
+                models[i] = updated;
+            }
+        }
+
+        return (models, images, prices, specsFilled);
+    }
+
+    /// <summary>Merges the harvested row's category + SpecsJson keys into the model (existing keys win).</summary>
+    private static ProductModel MergeBrandSpecs(ProductModel m, BrandModel row)
+    {
+        Dictionary<string, string>? merged = null;
+        void Put(string key, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || m.Specs.ContainsKey(key))
+            {
+                return;
+            }
+
+            merged ??= new Dictionary<string, string>(m.Specs, StringComparer.OrdinalIgnoreCase);
+            merged[key] = value!;
+        }
+
+        Put("category", row.Category);
+        if (!string.IsNullOrWhiteSpace(row.SpecsJson))
+        {
+            try
+            {
+                var specs = System.Text.Json.JsonSerializer
+                    .Deserialize<Dictionary<string, string>>(row.SpecsJson!);
+                if (specs is not null)
+                {
+                    foreach (var (k, v) in specs)
+                    {
+                        Put(k, v);
+                    }
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                // Malformed stored specs must never fault enrichment.
+            }
+        }
+
+        return merged is null ? m : m with { Specs = merged };
+    }
+
+    /// <summary>
+    /// Matches an item against the brand's known models. Exact normalized-key equality wins
+    /// outright; otherwise candidates are token-matched with SHORT tokens kept (2+ chars — variant
+    /// suffixes like "FE"/"5G"/"XL" must count, or "Galaxy S24" silently takes the S24 FE's price)
+    /// and a candidate is only eligible when EVERY one of its model tokens appears in the item
+    /// (a row naming a variant the item doesn't mention is a different product, not a match).
+    /// Qualification is evaluated PER CANDIDATE — not argmax-then-test, which both let a long wrong
+    /// candidate shadow a valid short one and let ties fall to arbitrary DB order.
+    /// </summary>
+    private static BrandModel? BestBrandModelMatch(ProductModel m, IReadOnlyList<BrandModel> rows)
+    {
+        // Exact identity first: the normalized model key is precisely what the harvesters store.
+        var itemKey = BrandModel.Normalize(string.IsNullOrWhiteSpace(m.Model) ? m.Name : m.Model!);
+        if (itemKey.Length > 0 && rows.FirstOrDefault(r => r.ModelKey == itemKey) is { } exact)
+        {
+            return exact;
+        }
+
+        var want = ShortTokens($"{m.Brand} {m.Model} {m.Name}");
+        BrandModel? best = null;
+        var bestShared = 0;
+
+        foreach (var row in rows)
+        {
+            foreach (var candidate in Candidates(row))
+            {
+                var have = ShortTokens(candidate);
+                if (have.Count == 0 || !have.IsSubsetOf(want))
+                {
+                    continue; // the row names something the item doesn't — a different variant/product
+                }
+
+                var shared = have.Count; // subset ⇒ shared == have.Count
+                if (shared < MinMatchTokens)
+                {
+                    continue;
+                }
+
+                // Among eligible candidates prefer the MOST specific one (more shared tokens), so
+                // "Galaxy S24 FE" beats bare "Galaxy S24" for an S24 FE item, never vice versa.
+                if (shared > bestShared)
+                {
+                    best = row;
+                    bestShared = shared;
+                }
+            }
+        }
+
+        return best;
+
+        static IEnumerable<string> Candidates(BrandModel row)
+        {
+            yield return row.ModelName;
+            if (!string.IsNullOrWhiteSpace(row.ModelKey))
+            {
+                yield return row.ModelKey;
+            }
+
+            foreach (var alias in row.RegionalAliases)
+            {
+                yield return alias;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tokenizer for brand-model matching that KEEPS 2-character tokens: variant suffixes ("FE",
+    /// "5G", "XL", "II") are exactly what distinguishes one model from another, so the general
+    /// 3-char <see cref="Tokens"/> filter would blind the matcher where precision matters most.
+    /// </summary>
+    private static HashSet<string> ShortTokens(string? text)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return set;
+        }
+
+        foreach (var t in text.Split(TokenSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (t.Length >= 2)
+            {
+                set.Add(t);
+            }
+        }
+
+        return set;
     }
 
     /// <summary>
