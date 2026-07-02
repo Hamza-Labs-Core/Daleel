@@ -63,6 +63,9 @@ public record SearchResult
     /// <summary>Rating 1–5, for shopping/maps results.</summary>
     public double? Rating { get; init; }
 
+    /// <summary>Review count behind <see cref="Rating"/>, when the provider reports it.</summary>
+    public int? ReviewCount { get; init; }
+
     /// <summary>Raw provider position/rank, when known.</summary>
     public int? Position { get; init; }
 }

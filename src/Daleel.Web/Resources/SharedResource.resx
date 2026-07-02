@@ -367,6 +367,7 @@
 
   <data name="Sources.Label" xml:space="preserve"><value>Sources</value></data>
 
+  <data name="ModelCard.ProductRating" xml:space="preserve"><value>Buyer rating from store listings</value></data>
   <data name="ModelCard.From" xml:space="preserve"><value>from</value></data>
   <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>Price on site</value></data>
   <data name="ModelCard.Sale" xml:space="preserve"><value>SALE</value></data>

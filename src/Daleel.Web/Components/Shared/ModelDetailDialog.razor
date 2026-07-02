@@ -26,9 +26,13 @@
             }
 
             <MudItem xs="12" sm="@(string.IsNullOrWhiteSpace(_model.ImageUrl) ? 12 : 8)">
-                @if (_model.LowestPrice is { } p && _model.LowestOffer?.Currency is { } cur)
+                @* Price and currency must come from the SAME offer (LowestOffer) — pairing LowestPrice
+                   with another offer's currency can mint a figure that exists on no offer, and an
+                   indicative (loosely-parsed) price must keep its ≈ marker here too. *@
+                @if (_model.LowestOffer is { Price: not null } lo && lo.Currency is { } cur)
                 {
-                    <MudText Typo="Typo.h5" Color="Color.Primary">@(new Money(p, cur).ToDisplay())</MudText>
+                    <MudText Typo="Typo.h5" Color="@(lo.IsIndicative ? Color.Secondary : Color.Primary)">
+                        @(lo.IsIndicative ? "≈ " : "")@(new Money(lo.Price!.Value, cur).ToDisplay())</MudText>
                     <MudText Typo="Typo.caption" Color="Color.Secondary">
                         lowest across @_model.SellerCount @(_model.SellerCount == 1 ? "seller" : "sellers")
                     </MudText>

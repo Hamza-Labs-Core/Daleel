@@ -29,9 +29,12 @@
                 @foreach (var m in Items)
                 {
                     <td style="@HeaderStyle(m)">
-                        @if (m.LowestPrice is { } p && m.LowestOffer?.Currency is { } c)
+                        @* Same-offer price+currency, with the ≈ marker for indicative figures — the
+                           compare table must never present a loosely-parsed price as firm. *@
+                        @if (m.LowestOffer is { Price: not null } lo && lo.Currency is { } c)
                         {
-                            <MudText Color="Color.Primary" Typo="Typo.body1" Style="font-weight:600;">@(new Money(p, c).ToDisplay())</MudText>
+                            <MudText Color="@(lo.IsIndicative ? Color.Secondary : Color.Primary)" Typo="Typo.body1"
+                                     Style="font-weight:600;">@(lo.IsIndicative ? "≈ " : "")@(new Money(lo.Price!.Value, c).ToDisplay())</MudText>
                         }
                         else { <span>N/A</span> }
                     </td>
@@ -103,9 +106,16 @@
     private static string? SpecValue(ProductModel m, string key) =>
         m.Specs.TryGetValue(key, out var v) ? v : null;
 
-    private decimal? MinPrice => Items.Where(i => i.LowestPrice is not null).Select(i => i.LowestPrice).DefaultIfEmpty(null).Min();
+    // "Best value" is judged on EXACT displayed prices only — an unverified (indicative) figure must
+    // never win the cheapest crown over a verified one.
+    private decimal? MinPrice => Items
+        .Where(i => i.LowestOffer is { Price: not null, IsIndicative: false })
+        .Select(i => i.LowestOffer!.Price)
+        .DefaultIfEmpty(null)
+        .Min();
 
-    private bool IsCheapest(ProductModel m) => MinPrice is { } min && m.LowestPrice == min;
+    private bool IsCheapest(ProductModel m) =>
+        MinPrice is { } min && m.LowestOffer is { Price: { } p, IsIndicative: false } && p == min;
 
     private string HeaderStyle(ProductModel m) =>
         IsCheapest(m) ? "background:var(--mud-palette-success-hover);" : string.Empty;

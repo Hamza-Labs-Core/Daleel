@@ -34,7 +34,16 @@ public class ItemEnrichmentServiceTests
             catalog ?? new StubBrandCatalog(),
             new BrandRepository(ctx.Db),
             new BrandModelRepository(ctx.Db),
+            new NoneIdentifier(),
             NullLogger<ItemEnrichmentService>.Instance);
+
+    /// <summary>Vision identification is out of scope for these tests — always "couldn't identify".</summary>
+    private sealed class NoneIdentifier : Daleel.Web.Identification.IProductIdentifier
+    {
+        public Task<Daleel.Web.Identification.ProductIdentification> IdentifyAsync(
+            ProductModel item, CancellationToken ct = default) =>
+            Task.FromResult(Daleel.Web.Identification.ProductIdentification.None);
+    }
 
     [Fact]
     public async Task EnrichAsync_NoModels_ReturnsNoChange()

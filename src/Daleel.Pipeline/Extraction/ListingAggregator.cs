@@ -32,12 +32,15 @@ public static class ListingAggregator
                 .ThenByDescending(i => i.Name.Length)
                 .First();
 
+            var (rating, ratingCount) = AggregateRating(items);
             models.Add(new ProductModel
             {
                 Name = canonical.Name,
                 Brand = items.Select(i => i.Brand).FirstOrDefault(b => !string.IsNullOrWhiteSpace(b)),
                 Model = items.Select(i => i.Model).FirstOrDefault(m => !string.IsNullOrWhiteSpace(m)),
                 ImageUrl = items.Select(i => i.ImageUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)),
+                Rating = rating,
+                RatingCount = ratingCount,
                 Specs = MergeSpecs(items),
                 Offers = offers
             });
@@ -64,6 +67,7 @@ public static class ListingAggregator
                 Seller = i.Seller,
                 OriginalPrice = i.OriginalPrice,
                 IsLocal = true, // callers locality-filter before aggregating
+                IsIndicative = i.IsIndicative,
                 FreeShipping = MentionsFreeShipping(i)
             })
             .OrderBy(o => o.Price ?? decimal.MaxValue)
@@ -84,6 +88,28 @@ public static class ListingAggregator
         }
 
         return offers;
+    }
+
+    /// <summary>
+    /// Aggregates the group's buyer ratings: a review-count-weighted average when counts are known
+    /// (a 4.6★ from 2,000 reviews outweighs a 5★ from 3), a plain average otherwise. The count is
+    /// the sum of reported counts, or null when no source reported one.
+    /// </summary>
+    private static (double? Rating, int? Count) AggregateRating(IReadOnlyList<ProductListing> items)
+    {
+        var rated = items.Where(i => i.Rating is not null).ToList();
+        if (rated.Count == 0)
+        {
+            return (null, null);
+        }
+
+        var totalCount = rated.Sum(i => i.RatingCount ?? 0);
+        var rating = totalCount > 0
+            ? rated.Sum(i => i.Rating!.Value * (i.RatingCount ?? 0)) / totalCount
+            : rated.Average(i => i.Rating!.Value);
+
+        // AwayFromZero: display-rating convention (4.25 → 4.3), not banker's rounding (→ 4.2).
+        return (Math.Round(rating, 1, MidpointRounding.AwayFromZero), totalCount > 0 ? totalCount : null);
     }
 
     private static IReadOnlyDictionary<string, string> MergeSpecs(IReadOnlyList<ProductListing> items)

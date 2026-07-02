@@ -34,6 +34,14 @@ public record PriceOffer
     /// <summary>Set by the aggregator: this is the cheapest offer for the model.</summary>
     public bool IsLowest { get; init; }
 
+    /// <summary>
+    /// True when the price is INDICATIVE — parsed loosely from a rendered page's text or a search
+    /// snippet rather than structured listing data. A potential price worth checking, not a quote:
+    /// the UI renders it with an ≈ affordance ("verify at the store") that leads to the store, while
+    /// exact prices render as firm figures leading to the listing.
+    /// </summary>
+    public bool IsIndicative { get; init; }
+
     public Money? AsMoney =>
         Price is { } p && !string.IsNullOrWhiteSpace(Currency) ? new Money(p, Currency!) : null;
 
@@ -48,6 +56,7 @@ public record PriceOffer
             if (IsLowest) tags.Add("LOWEST");
             if (IsDeal) tags.Add("SALE");
             if (FreeShipping) tags.Add("FREE SHIPPING");
+            if (IsIndicative) tags.Add("UNVERIFIED");
             return tags;
         }
     }
@@ -89,15 +98,38 @@ public record ProductModel
     /// <summary>Reputation of this model's brand in the target market, when assessed.</summary>
     public BrandReputation? BrandReputation { get; init; }
 
+    /// <summary>Aggregated buyer rating (1–5) across the model's listings, when any source carried one.</summary>
+    public double? Rating { get; init; }
+
+    /// <summary>Total review count behind <see cref="Rating"/>, when the sources reported it.</summary>
+    public int? RatingCount { get; init; }
+
     /// <summary>Every place the model is available, sorted cheapest-first.</summary>
     public IReadOnlyList<PriceOffer> Offers { get; init; } = Array.Empty<PriceOffer>();
 
-    public PriceOffer? LowestOffer => Offers.FirstOrDefault(o => o.Price is not null) ?? Offers.FirstOrDefault();
+    /// <summary>
+    /// The offer the card leads with: the cheapest EXACT price first, then the cheapest indicative
+    /// ("potential") price, then any offer at all — a verified figure always beats an approximation.
+    /// </summary>
+    public PriceOffer? LowestOffer =>
+        Offers.FirstOrDefault(o => o.Price is not null && !o.IsIndicative)
+        ?? Offers.FirstOrDefault(o => o.Price is not null)
+        ?? Offers.FirstOrDefault();
 
     /// <summary>Number of distinct sources offering the model.</summary>
     public int SellerCount => Offers.Count;
 
     public decimal? LowestPrice => Offers.Where(o => o.Price is not null).Select(o => o.Price).Min();
+
+    /// <summary>
+    /// The price the UI leads with — <see cref="LowestOffer"/>'s (exact preferred over indicative).
+    /// Every user-facing surface (card, sort, filters, detail, compare) must key off THIS, never
+    /// <see cref="LowestPrice"/>: mixing the two shows one number and sorts/links by another.
+    /// </summary>
+    public decimal? DisplayPrice => LowestOffer?.Price;
+
+    /// <summary>True when the only prices known for this model are indicative (loosely parsed).</summary>
+    public bool LowestIsIndicative => LowestOffer is { Price: not null, IsIndicative: true };
 
     public bool HasOffers => Offers.Count > 0;
 

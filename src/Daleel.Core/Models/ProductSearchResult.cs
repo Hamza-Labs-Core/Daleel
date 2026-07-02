@@ -105,6 +105,19 @@ public record ProductListing
     /// <summary>Current price amount (null when the source didn't quote one).</summary>
     public decimal? Price { get; init; }
 
+    /// <summary>
+    /// True when <see cref="Price"/> is INDICATIVE — parsed loosely (search snippet, rendered page
+    /// text) rather than from structured listing data. Flows onto the offer so the UI can render a
+    /// "potential price, verify at the store" affordance instead of a firm quote.
+    /// </summary>
+    public bool IsIndicative { get; init; }
+
+    /// <summary>Buyer rating 1–5 for this listing, when the source carried one (e.g. Google Shopping).</summary>
+    public double? Rating { get; init; }
+
+    /// <summary>Review count behind <see cref="Rating"/>, when reported.</summary>
+    public int? RatingCount { get; init; }
+
     public string? Currency { get; init; }
 
     /// <summary>Direct link to the listing.</summary>
