@@ -79,6 +79,13 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line),
             caps.MaxPerJob, capTrip);
 
+        // Ambient metering: DI-resolved components (vision identification, brand-catalogue
+        // discovery/harvest, store-catalogue crawls) make paid calls on their own HTTP clients and
+        // can't be wired by the AgentFactory — the ambient observer is how THEIR spend reaches the
+        // same collector (usage dashboard, per-job estimate, cost cap) as everything else. Flows
+        // through awaits and sub-workflow scopes; restored on dispose.
+        using var ambient = AmbientApiObserver.Begin(collector, estimator);
+
         // Background jobs resolve keys from server env only (browser BYO keys aren't available here).
         var agent = _agents.Build(new AgentRequest
         {
@@ -361,6 +368,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             line => _logger.LogInformation("Enrich job {JobId} API call · {Detail}", job.Id, line),
             caps.MaxPerJob, capTrip);
 
+        // Ambient metering (see RunAsync): routes the vision/catalogue spend made on DI-resolved
+        // components' own HTTP clients into this enrichment's collector and cost cap.
+        using var ambient = AmbientApiObserver.Begin(collector, estimator);
+
         var agent = _agents.Build(new AgentRequest
         {
             Geo = job.Geo, Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model, Language = language,
@@ -442,6 +453,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var collector = new JobApiCallCollector(
             line => _logger.LogInformation("Re-enrich job {JobId} API call · {Detail}", job.Id, line),
             caps.MaxPerJob, capTrip);
+
+        // Ambient metering (see RunAsync): routes the vision/catalogue spend made on DI-resolved
+        // components' own HTTP clients into this re-enrichment's collector and cost cap.
+        using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
         var agent = _agents.Build(new AgentRequest
         {
