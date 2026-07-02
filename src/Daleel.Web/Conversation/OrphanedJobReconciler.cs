@@ -4,10 +4,10 @@ using Microsoft.EntityFrameworkCore;
 namespace Daleel.Web.Conversation;
 
 /// <summary>
-/// Boot-time crash recovery for in-flight search work. The job queue (<see cref="SearchJobQueue"/>) and the
-/// running-job registry live only in memory, so when the container dies mid-search (deploy, crash, OOM) every
-/// job left as <see cref="JobStatus.Running"/> in Postgres is orphaned: nothing in process owns it any more,
-/// yet the row says "running" forever and the user's UI spins indefinitely.
+/// Boot-time crash recovery for in-flight search work. A job's in-flight workflow runs only in process, so
+/// when the container dies mid-search (deploy, crash, OOM) every job left as <see cref="JobStatus.Running"/>
+/// in Postgres is orphaned: nothing is executing it any more, yet the row says "running" forever and the
+/// user's UI spins indefinitely. (A "queued" job needs no recovery — the worker's poll simply claims it.)
 ///
 /// This reconciles those zombies once at startup — BEFORE <see cref="SearchJobService"/> begins consuming new
 /// work — by failing each orphaned job and flipping the matching conversation to a terminal "interrupted"

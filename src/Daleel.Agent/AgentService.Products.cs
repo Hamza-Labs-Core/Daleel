@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Llm;
@@ -561,10 +562,10 @@ public sealed partial class AgentService
         var insights = new Dictionary<string, ModelInsight>(StringComparer.Ordinal);
         foreach (var p in dto.Products)
         {
-            var name = string.IsNullOrWhiteSpace(p.Name) ? p.Model : p.Name;
+            var name = PickName(p.Name, p.Model);
             if (string.IsNullOrWhiteSpace(name))
             {
-                continue; // nothing to identify the product by
+                continue; // nothing to identify the product by (or the LLM only gave a URL)
             }
 
             var brand = string.IsNullOrWhiteSpace(p.Brand) ? null : p.Brand!.Trim();
@@ -652,6 +653,28 @@ public sealed partial class AgentService
     /// <summary>An LLM-distilled verdict for a model: short pros/cons and a one-line summary.</summary>
     private sealed record ModelInsight(
         IReadOnlyList<string> Pros, IReadOnlyList<string> Cons, string? Summary);
+
+    // A URL / bare domain the LLM sometimes drops into the name field instead of the product name:
+    // "https://x.com/p", "www.foo.io", "amazon.com/dp/B0…". The final label must be all letters (a TLD)
+    // so real model numbers like "GX-3.5" or "A2.1" are NOT mistaken for domains.
+    private static readonly Regex UrlLikeName = new(
+        @"^\s*(https?://|www\.)|^\s*([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24}(/\S*)?\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Chooses the product's display name, guarding against the LLM occasionally emitting the source URL
+    /// (or a bare domain) in the name field instead of the real product name. A URL-shaped name is rejected
+    /// in favour of the model number; if that is also missing or URL-shaped, the product is dropped rather
+    /// than surfacing a raw link to the shopper.
+    /// </summary>
+    private static string? PickName(string? name, string? model)
+    {
+        if (!string.IsNullOrWhiteSpace(name) && !LooksLikeUrl(name)) return name;
+        if (!string.IsNullOrWhiteSpace(model) && !LooksLikeUrl(model)) return model;
+        return null;
+    }
+
+    private static bool LooksLikeUrl(string text) => UrlLikeName.IsMatch(text.Trim());
 
     /// <summary>
     /// Insight-map key matching <see cref="ListingExtractor.DedupKey"/>'s identity rules

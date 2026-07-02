@@ -17,9 +17,10 @@ namespace Daleel.Web.Logging;
 ///  • File — always on. The FULL operational trail at the host minimum level, written as
 ///    newline-delimited JSON to the persisted <c>daleel_data</c> volume (<c>/app/data/logs</c>). This is
 ///    the "logs folder" operators look in; it survives container restarts.
-///  • R2 (optional) — Warning+ only, mirrored to the Cloudflare <see cref="R2Bucket.Logs"/> bucket as
-///    JSON Lines when the <c>R2_*</c> env vars are set. Errors-only to keep object-storage cost/volume
-///    down; the full trail still lives on the file sink.
+///  • R2 (optional) — the FULL operational trail at the host minimum level (Information in prod,
+///    Debug in dev), mirrored to the Cloudflare <see cref="R2Bucket.Logs"/> bucket as JSON Lines under a
+///    <c>logs/</c> prefix when the <c>R2_*</c> env vars are set. This is the source the log-viewer Worker
+///    reads — so it gets the same complete picture as the local file sink, not just errors.
 ///
 /// Every event is enriched with a <c>TraceId</c> (W3C trace id from the ambient <see cref="Activity"/>)
 /// so all log lines emitted while handling one request share a correlation id, plus the source context
@@ -86,11 +87,12 @@ public static class SerilogConfiguration
         // (1) File sink — ALWAYS on. The full trail at the host minimum level, on the persisted volume.
         ConfigureFileSink(loggerConfiguration, configuration, minimumLevel);
 
-        // (4) R2 sink — additional, Warning+ only, when configured. The full trail still lives on disk.
+        // (4) R2 sink — additional, full trail at the host minimum level, when configured. Mirrors the
+        // file sink off-box so the log-viewer Worker can read it.
         var r2 = R2Options.FromConfiguration(configuration);
         if (r2 is not null)
         {
-            ConfigureR2Sink(loggerConfiguration, r2);
+            ConfigureR2Sink(loggerConfiguration, r2, minimumLevel);
         }
     }
 
@@ -125,29 +127,47 @@ public static class SerilogConfiguration
     }
 
     /// <summary>
-    /// Warning-level and above mirrored to the R2 <see cref="R2Bucket.Logs"/> bucket as JSON Lines,
-    /// partitioned into a date folder so a day's errors live together: <c>errors/2026/06/24/errors.jsonl</c>.
+    /// The full operational trail (at <paramref name="minimumLevel"/> and above — Information in prod,
+    /// Debug in dev) mirrored to the R2 <see cref="R2Bucket.Logs"/> bucket as JSON Lines under a
+    /// <c>logs/</c> prefix, one object per day: <c>logs/daleel-20260630.jsonl</c>. This is exactly the
+    /// prefix the log-viewer Worker scans, and the date in the filename lets it window by day. The
+    /// scraped-data objects (site-data/, final-specs/, …) keep their own prefixes and are untouched.
     /// </summary>
-    private static void ConfigureR2Sink(LoggerConfiguration loggerConfiguration, R2Options r2)
+    private static void ConfigureR2Sink(
+        LoggerConfiguration loggerConfiguration, R2Options r2, LogEventLevel minimumLevel)
     {
-        // The date folder is fixed at process start. Daleel redeploys (and thus restarts) frequently,
-        // so the folder tracks the current day in practice; a process that ran uninterrupted past
-        // midnight would keep appending to its start-day folder. RollingInterval.Infinite keeps the
-        // key exactly "errors.jsonl" (no date suffix) since the date already lives in the folder.
-        var bucketPath = $"errors/{DateTime.UtcNow:yyyy/MM/dd}";
+        // The date is fixed at process start and baked into the object key. Daleel redeploys (and thus
+        // restarts) frequently, so the filename tracks the current day in practice; a process that ran
+        // uninterrupted past midnight would keep appending to its start-day object. RollingInterval.Infinite
+        // keeps the key exactly as given (no extra date suffix) since the date already lives in the name.
+        var objectName = $"daleel-{DateTime.UtcNow:yyyyMMdd}.jsonl";
+
+        // The AmazonS3 sink first writes each event to a LOCAL buffer file (`path`), then uploads that file
+        // to R2. `path` resolves relative to the content root (WORKDIR /app in the container), which is NOT
+        // writable — a bare `daleel-20260701.jsonl` became `/app/daleel-20260701.jsonl` → "Access to the
+        // path ... is denied". Buffer under the persisted, writable data volume instead. A dedicated
+        // `r2-buffer/` subdirectory keeps this file out of the File sink's own `data/logs/daleel-*.jsonl`
+        // set so the two sinks never write the same path. The R2 object key is derived from the filename +
+        // `bucketPath`, so it stays `logs/daleel-20260701.jsonl` regardless of the local buffer directory.
+        var bufferDirectory = Path.Combine(DefaultFileLogDirectory, "r2-buffer");
+        Directory.CreateDirectory(bufferDirectory);
+        var bufferPath = Path.Combine(bufferDirectory, objectName);
 
         loggerConfiguration.WriteTo.AmazonS3(
-            path: "errors.jsonl",
+            path: bufferPath,
             bucketName: r2.Logs.BucketName,
             serviceUrl: r2.ServiceUrl,
             awsAccessKeyId: r2.AccessKey,
             awsSecretAccessKey: r2.SecretKey,
             // JsonFormatter writes one JSON object per line — that is the .jsonl format.
             formatter: new JsonFormatter(renderMessage: true),
-            restrictedToMinimumLevel: LogEventLevel.Warning,
+            // Information+ in prod (Debug in dev): the whole picture, matching the file sink — not errors-only.
+            restrictedToMinimumLevel: minimumLevel,
             // The AmazonS3 sink defines its own RollingInterval enum, distinct from the File sink's.
             rollingInterval: Serilog.Sinks.AmazonS3.RollingInterval.Infinite,
-            bucketPath: bucketPath,
+            // Group every app-log object under a single prefix so the Worker can list/search just `logs/`
+            // and never trips over the scraped-data objects sharing this bucket.
+            bucketPath: "logs",
             // Cloudflare R2 does not support AWS SigV4 *streaming* payload signing; disabling it is
             // the documented fix for S3-compatible uploads to R2.
             disablePayloadSigning: true,

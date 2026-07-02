@@ -7,8 +7,10 @@ namespace Daleel.Web.Conversation;
 public sealed record SubmitResult(bool Accepted, int? JobId, string? Error, int StatusCode);
 
 /// <summary>
-/// Front door for the async conversation flow. Enforces the quota, creates the job, and enqueues it.
-/// Shared by the /api/search endpoint and the interactive conversation page so both behave the same.
+/// Front door for the async conversation flow. Enforces the quota and creates the job. "Enqueuing" is just
+/// inserting a <see cref="SearchJob"/> row with <c>Status = queued</c> — the background worker polls Postgres
+/// for those, so there is no in-memory queue. Shared by the /api/search endpoint and the interactive
+/// conversation page so both behave the same.
 /// </summary>
 public interface IConversationService
 {
@@ -20,17 +22,15 @@ public sealed class ConversationService : IConversationService
 {
     private readonly DaleelDbContext _db;
     private readonly IQuotaService _quota;
-    private readonly ISearchJobQueue _queue;
     private readonly ISystemConfigService? _config;
 
     // _config is optional so tests can construct without it; DI supplies it in the app, where it
     // provides the per-plan default model ids (model.default_free / model.default_pro).
     public ConversationService(
-        DaleelDbContext db, IQuotaService quota, ISearchJobQueue queue, ISystemConfigService? config = null)
+        DaleelDbContext db, IQuotaService quota, ISystemConfigService? config = null)
     {
         _db = db;
         _quota = quota;
-        _queue = queue;
         _config = config;
     }
 
@@ -70,12 +70,13 @@ public sealed class ConversationService : IConversationService
             Status = JobStatus.Queued,
             CreatedAt = DateTimeOffset.UtcNow
         };
+        // Inserting the row with Status=queued IS the enqueue: the background worker polls Postgres for
+        // queued jobs and claims them. No in-memory queue means a restart can't lose a pending search.
         _db.SearchJobs.Add(job);
         await _db.SaveChangesAsync(ct);
 
         // No up-front consume: credits are charged for the actual provider calls once the job finishes
         // (see SearchJobService), so the CanSearch pre-check above is the gate.
-        await _queue.EnqueueAsync(job.Id, ct);
         return new SubmitResult(true, job.Id, null, 202);
     }
 
@@ -92,14 +93,13 @@ public sealed class ConversationService : IConversationService
             return true; // already terminal — nothing to cancel, but report success (idempotent)
         }
 
-        // Raise the durable cancel flag — the source of truth. The cooperative token is unreliable (the
-        // workflow can ignore it), so this persisted flag is what actually stops the run: the pipeline
-        // activities poll it and bail, the worker re-checks it before committing a result, and the periodic
-        // sweep force-cancels the job if it's still "running". A queued job is marked cancelled outright so
-        // the worker skips it when dequeued.
+        // Raise the durable cancel flag — the source of truth and the ONLY cancellation mechanism now that
+        // there's no in-memory CTS. This persisted flag is what actually stops the run: the pipeline
+        // activities poll it per step and bail, the worker re-checks it before committing a result, and the
+        // periodic sweep force-cancels the job if it's still "running". A queued job is marked cancelled
+        // outright so the worker's claim query (which only picks "queued") never picks it up.
         job.CancelRequested = true;
-        var wasRunning = _queue.RequestCancel(jobId);
-        if (!wasRunning && job.Status == JobStatus.Queued)
+        if (job.Status == JobStatus.Queued)
         {
             job.Status = JobStatus.Cancelled;
             job.CompletedAt = DateTimeOffset.UtcNow;

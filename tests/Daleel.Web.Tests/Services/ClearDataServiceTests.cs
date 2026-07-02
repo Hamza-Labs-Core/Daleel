@@ -44,6 +44,51 @@ public class ClearDataServiceTests
     }
 
     [Fact]
+    public async Task ClearSearchCache_AlsoWipesRenderedResults_SoNoStaleDataSurvives()
+    {
+        using var ctx = new PostgresTestContext();
+
+        // The dedup cache...
+        ctx.Db.SearchCache.Add(new SearchCache
+        {
+            CacheKey = "k", Layer = "result", Payload = "{}", CreatedAt = Now, ExpiresAt = Now.AddDays(1)
+        });
+        // ...and the materialized result surfaces a user actually sees on reload — the bug being fixed.
+        ctx.Db.UserConversations.Add(new UserConversation
+        {
+            UserId = "u1", CurrentStatus = "completed", CurrentResultJson = "{\"old\":true}", CurrentResultType = "ask"
+        });
+        ctx.Db.SearchJobs.Add(new SearchJob
+        {
+            UserId = "u1", Query = "old phones", Status = JobStatus.Completed,
+            ResultJson = "{\"old\":true}", CreatedAt = Now
+        });
+        var history = new SearchHistoryEntry
+        {
+            UserId = "u1", Query = "old phones", QueryType = "ask", Geo = "jordan",
+            ResultJson = "{\"old\":true}", CreatedAt = Now
+        };
+        ctx.Db.SearchHistory.Add(history);
+        await ctx.Db.SaveChangesAsync();
+        ctx.Db.SavedResults.Add(new SavedResult
+        {
+            UserId = "u1", SearchHistoryId = history.Id, Title = "old phones",
+            ResultJson = "{\"old\":true}", ResultType = "ask", CreatedAt = Now
+        });
+        await ctx.Db.SaveChangesAsync();
+
+        var removed = await NewService(ctx.NewContext()).ClearSearchCacheAsync();
+
+        removed.Should().Be(5, "1 cache + 1 conversation + 1 job + 1 saved + 1 history");
+        await using var verify = ctx.NewContext();
+        (await verify.SearchCache.CountAsync()).Should().Be(0);
+        (await verify.UserConversations.CountAsync()).Should().Be(0, "the source of truth the UI renders on load must be gone");
+        (await verify.SearchJobs.CountAsync()).Should().Be(0);
+        (await verify.SearchHistory.CountAsync()).Should().Be(0);
+        (await verify.SavedResults.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task ClearProducts_RemovesCatalogue_CascadesModels_LeavesUnrelatedRows()
     {
         using var ctx = new PostgresTestContext();

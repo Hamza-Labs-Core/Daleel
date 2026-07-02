@@ -349,6 +349,13 @@ jobs:
             # resolve to empty, which the app treats as "absent" — harmless.
             CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
             CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
+            # Log-viewer Worker (optional). LOG_VIEWER_AUTH_TOKEN is the SAME secret the
+            # deploy-worker.yml workflow uploads as the Worker's AUTH_TOKEN, so the admin
+            # panel can call the Worker with the matching bearer. Both resolve to empty
+            # when unset — the app then simply doesn't surface the log-viewer integration.
+            # LOG_VIEWER_URL is the Worker's base URL (https://daleel-log-viewer.<sub>.workers.dev).
+            LOG_VIEWER_URL=${{ secrets.LOG_VIEWER_URL }}
+            LOG_VIEWER_AUTH_TOKEN=${{ secrets.LOG_VIEWER_AUTH_TOKEN }}
             # Cloudflare R2 object storage (optional). Shared connection: if the creds
             # are unset they resolve to empty and the app falls back to file logging at
             # /app/data/logs/ — so these are intentionally NOT in the required-secrets
@@ -363,7 +370,9 @@ jobs:
             # specs,data} — just create those buckets in Cloudflare and leave these
             # unset. Override a name only if your bucket is named differently. The legacy
             # R2_BUCKET_NAME still seeds the LOGS bucket when R2_BUCKET_LOGS is unset.
-            R2_BUCKET_LOGS=${{ secrets.R2_BUCKET_LOGS }}
+            # Pin the logs bucket to a literal so it never falls back to the legacy
+            # single-bucket R2_BUCKET_NAME; the secret (when set) overrides it.
+            R2_BUCKET_LOGS=${{ secrets.R2_BUCKET_LOGS || 'daleel-logs' }}
             R2_BUCKET_IMAGES=${{ secrets.R2_BUCKET_IMAGES }}
             R2_BUCKET_SPECS=${{ secrets.R2_BUCKET_SPECS }}
             R2_BUCKET_DATA=${{ secrets.R2_BUCKET_DATA }}
@@ -394,6 +403,17 @@ jobs:
             # host, db, and password always match the actual container.
             POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
             POSTGRES_CONNECTION_STRING=Host=postgres;Port=5432;Database=daleel_events;Username=daleel;Password=${{ secrets.POSTGRES_PASSWORD }}
+            # Pin production to the image this deploy resolved (push-to-main → `latest`).
+            # CRITICAL: this is what actually makes prod run the latest code. `deploy.sh`
+            # only `export`s DALEEL_IMAGE for its own run, but the PERSISTED .env is what
+            # `docker compose up` and the systemd unit (ExecStart=docker compose up) read on
+            # every restart/reboot. Production previously wrote NO DALEEL_IMAGE line and
+            # leaned on the compose `:latest` default — so a stale value left in this file by
+            # a QA deploy against the same box, a `workflow_dispatch` tag override, or a hand
+            # edit (this is exactly how prod got stuck on `qa-pr-8`) would silently survive
+            # forever: build/push goes green while compose keeps resolving the stale tag.
+            # Rewriting it on every deploy evicts any leftover qa-pr-N and keeps prod on latest.
+            DALEEL_IMAGE=${{ env.IMAGE_NAME }}:${{ steps.tag.outputs.tag }}
             CADDY_DOMAIN=daleel.hamzalabs.dev
             CADDY_ACME_EMAIL=admin@daleel.hamzalabs.dev
             EOF

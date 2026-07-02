@@ -39,20 +39,57 @@ secret — if it isn't set the Worker fails closed (500), never open.
 
 ## Deploy
 
+### CI/CD (automatic)
+
+Pushing changes under `workers/log-viewer/**` to `main` triggers
+[`.github/workflows/deploy-worker.yml`](../../.github/workflows/deploy-worker.yml),
+which runs `wrangler deploy` and (re)uploads the `AUTH_TOKEN` Worker secret. You
+can also run it on demand from the Actions tab (workflow_dispatch). No manual
+`wrangler deploy` is needed in normal operation.
+
+It depends on three **GitHub Actions secrets** (repo Settings → Secrets and
+variables → Actions):
+
+| Secret | What it is |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | Cloudflare API token with **Workers Scripts: Edit** + **R2 Storage: Read** permissions. A *different* credential from the S3-style `R2_ACCESS_KEY`/`R2_SECRET_KEY` the .NET app uses — those cannot deploy Workers. |
+| `CLOUDFLARE_ACCOUNT_ID` | Your Cloudflare account ID (dash → right sidebar). |
+| `LOG_VIEWER_AUTH_TOKEN` | The bearer token the Worker checks; uploaded as its `AUTH_TOKEN` secret on each deploy. Generate with `openssl rand -hex 32`. The **same** secret is rendered into the app's `.env` by `deploy.yml` so the admin panel can call the Worker — one value, one source of truth. |
+
+```bash
+gh secret set CLOUDFLARE_API_TOKEN  --body '<token>'                 --repo Hamza-Labs-Core/Daleel
+gh secret set CLOUDFLARE_ACCOUNT_ID --body '<id>'                    --repo Hamza-Labs-Core/Daleel
+gh secret set LOG_VIEWER_AUTH_TOKEN --body "$(openssl rand -hex 32)" --repo Hamza-Labs-Core/Daleel
+```
+
+Auth stays on by design: this Worker exposes production logs over a public
+`*.workers.dev` URL, so it must never be open to the world. The token lives
+**only** in GitHub secrets (and the deploy-rendered `.env`) — never commit it to
+the repo. Keep a copy in your password manager; GitHub secrets are write-only, so
+you can't read it back from the dashboard. To read logs, present it as the bearer
+/ Basic-auth password (see [Auth](#auth) and the examples above).
+
+If you truly want it unauthenticated, see the warning at the end of this section.
+
+### Manual (first-time setup / break-glass)
+
 ```bash
 cd workers/log-viewer
 npm install                 # optional; wrangler can run via npx
 npx wrangler login          # one-time, unless CLOUDFLARE_API_TOKEN is set
-npx wrangler secret put AUTH_TOKEN   # paste a long random string
+npx wrangler secret put AUTH_TOKEN   # paste the LOG_VIEWER_AUTH_TOKEN value
 npx wrangler deploy
 ```
 
-Deploying needs a Cloudflare API token / login with **Workers Scripts: Edit**
-and **Workers R2 Storage** permissions. This is a *different* credential from the
-S3-style `R2_ACCESS_KEY`/`R2_SECRET_KEY` the .NET app uses — those cannot deploy
-Workers.
+### Running it unauthenticated (NOT recommended)
 
-Generate a token: `openssl rand -hex 32`.
+The Worker fails closed: if `AUTH_TOKEN` is unset it returns 500, never serving
+logs openly. If you accept that **anyone on the internet who finds the URL can
+read all production logs** and want it open anyway, change `authorize()` in
+[`src/index.js`](src/index.js) to `return null` when `env.AUTH_TOKEN` is unset,
+then deploy without setting the secret. Prefer instead to keep auth on and put a
+Cloudflare Access policy in front of the Worker if you want SSO-gated browser
+access.
 
 ## Local dev
 

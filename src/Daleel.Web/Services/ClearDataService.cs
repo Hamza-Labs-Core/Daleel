@@ -7,8 +7,9 @@ namespace Daleel.Web.Services;
 /// <summary>
 /// Admin-triggered, irreversible bulk deletes used by the "Data Management" admin page. Unlike the
 /// periodic, surgical <see cref="DataCleanupService"/> (which only drops rows failing a quality
-/// threshold), this wipes whole tables on demand: the search cache, the harvested catalogue
-/// (brands / stores / products / prices / profiles), and Elsa's workflow-instance history.
+/// threshold), this wipes whole tables on demand: every cached and stored search result (the cache
+/// table plus the conversations, jobs, history and saved-result blobs the UI renders), the harvested
+/// catalogue (brands / stores / products / prices / profiles), and Elsa's workflow-instance history.
 /// </summary>
 /// <remarks>
 /// Deletes are issued with EF Core's <c>ExecuteDeleteAsync</c> — one <c>DELETE FROM</c> per table that
@@ -23,7 +24,14 @@ namespace Daleel.Web.Services;
 /// </remarks>
 public interface IClearDataService
 {
-    /// <summary>Deletes every cached search result (both the provider and result cache layers).</summary>
+    /// <summary>
+    /// Wipes every cached and stored search result so no stale result survives the clear. Covers the
+    /// <see cref="SearchCache"/> table (both the provider and result cache layers), the materialized
+    /// result blobs that the UI actually renders — the per-user <see cref="UserConversation"/> (the
+    /// source of truth every device shows on load), in-flight/finished <see cref="SearchJob"/> rows,
+    /// the user's <see cref="SearchHistoryEntry"/> and their bookmarked <see cref="SavedResult"/>s —
+    /// all in one transaction. Returns the total rows removed across every table.
+    /// </summary>
     Task<int> ClearSearchCacheAsync(CancellationToken ct = default);
 
     /// <summary>
@@ -79,8 +87,32 @@ public sealed class ClearDataService : IClearDataService
 
     public async Task<int> ClearSearchCacheAsync(CancellationToken ct = default)
     {
-        var removed = await _db.SearchCache.ExecuteDeleteAsync(ct).ConfigureAwait(false);
-        _logger.LogInformation("Admin cleared search cache: {Count} entry(ies) removed", removed);
+        // Clearing only the cache table is not enough: users kept seeing old results because what the UI
+        // renders on load comes from the materialized result blobs (UserConversation.CurrentResultJson —
+        // "the source of truth every device renders on load" — plus SearchJob/SearchHistory/SavedResult
+        // ResultJson), not from the dedup cache. Wipe all of them together so the clear is total.
+        //
+        // One transaction so a mid-way failure can't leave results half-cleared (cache gone but the
+        // conversation still rendering stale JSON). These tables are independent (SavedResult → SearchHistory
+        // is ON DELETE SET NULL, so order doesn't matter for FKs), but the wipe is still all-or-nothing.
+        //
+        // Note: there is no in-memory result cache to flush — ICacheStore is the DB-backed PostgresCacheStore,
+        // and ConversationHub only holds transient per-connection progress signals, not results.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct).ConfigureAwait(false);
+
+        var cache = await _db.SearchCache.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        var conversations = await _db.UserConversations.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        var jobs = await _db.SearchJobs.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        var saved = await _db.SavedResults.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+        var history = await _db.SearchHistory.ExecuteDeleteAsync(ct).ConfigureAwait(false);
+
+        await tx.CommitAsync(ct).ConfigureAwait(false);
+
+        var removed = cache + conversations + jobs + saved + history;
+        _logger.LogInformation(
+            "Admin cleared search results: {Total} row(s) removed ({Cache} cache, {Conversations} conversation(s), " +
+            "{Jobs} job(s), {Saved} saved, {History} history)",
+            removed, cache, conversations, jobs, saved, history);
         return removed;
     }
 

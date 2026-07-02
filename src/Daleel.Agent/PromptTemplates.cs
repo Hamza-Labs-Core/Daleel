@@ -428,7 +428,7 @@ public static class PromptTemplates
             {
               "products": [
                 {
-                  "name": "full product name as written",
+                  "name": "full product name as written — NEVER a URL, link or domain",
                   "brand": "manufacturer, e.g. Samsung / LG / Gree",
                   "model": "model number/name if known, else null",
                   "imageUrl": "image link if present in context, else null",
