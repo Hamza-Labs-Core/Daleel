@@ -215,6 +215,34 @@ public sealed partial class AgentService
         }
     }
 
+    /// <summary>
+    /// Finds a representative product image via image search (the first hit's gstatic thumbnail).
+    /// Deliberately market-agnostic — no <c>gl</c>/<c>hl</c> targeting: a photo of a product is the
+    /// same everywhere, so this works in markets where Google Shopping (the grid's usual thumbnail
+    /// source) doesn't operate, e.g. Jordan. Best-effort: returns null when no provider is
+    /// configured, the search fails, or nothing carries an image.
+    /// </summary>
+    public async Task<string?> FindProductImageAsync(string query, CancellationToken cancellationToken = default)
+    {
+        if (_search is null || !_search.Supports(SearchKind.Images) || string.IsNullOrWhiteSpace(query))
+        {
+            return null;
+        }
+
+        try
+        {
+            var results = await _search.SearchAsync(
+                new SearchQuery { Query = query, Kind = SearchKind.Images, MaxResults = 3 },
+                cancellationToken).ConfigureAwait(false);
+            return results.Results.FirstOrDefault(r => !string.IsNullOrWhiteSpace(r.ImageUrl))?.ImageUrl;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log($"image lookup failed for '{query}': {ex.Message}");
+            return null;
+        }
+    }
+
     private async Task<IReadOnlyList<ScrapedPage>> RunReadAsync(
         IReadOnlyList<string> urls, CancellationToken cancellationToken)
     {

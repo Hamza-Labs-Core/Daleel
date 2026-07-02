@@ -74,6 +74,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// <summary>How many of the result's brands get their site catalogue harvested per run (slow crawls).</summary>
     private const int MaxBrandCatalogs = 2;
 
+    /// <summary>
+    /// Cap on per-run image-search lookups for models the pipeline left imageless (~one grid page).
+    /// Each is a paid SerpAPI call, so the backfill fills what the user sees first, not the long tail.
+    /// </summary>
+    private const int MaxImageLookups = 12;
+
     public ItemEnrichmentService(
         IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory,
         IScrapedPriceRepository scrapedPrices, IBrandCatalogService brandCatalog,
@@ -190,12 +196,48 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // (Context.dev /v1/brand/ai/products). Runs last because the catalogue crawl is the slowest call.
         var (pricedModels, priced) = await AttachCatalogPricesAsync(agent, withSpecs, products, progress, Record, ct);
 
+        // Phase 4b — backfill missing product images via image search. In markets where Google
+        // Shopping doesn't operate (Jordan: SerpAPI rejects gl=jo outright) the grid's usual
+        // thumbnail source never produces anything, so items the catalogue match above didn't cover
+        // stay imageless. A product photo is market-agnostic, so a plain image search closes the
+        // gap. Capped per run and best-effort per item — a failed lookup just leaves the placeholder.
+        var imagesFound = 0;
+        for (var i = 0; i < pricedModels.Count && imagesFound < MaxImageLookups; i++)
+        {
+            var m = pricedModels[i];
+            if (!string.IsNullOrWhiteSpace(m.ImageUrl))
+            {
+                continue;
+            }
+
+            var imageQuery = string.Join(' ', new[]
+            {
+                m.Brand,
+                string.IsNullOrWhiteSpace(m.Model) ? m.Name : m.Model
+            }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+            if (await agent.FindProductImageAsync(imageQuery, ct) is not { } img)
+            {
+                continue;
+            }
+
+            pricedModels[i] = m with { ImageUrl = img };
+            imagesFound++;
+            Record(EventCategory.Extract, "item.image", "serpapi",
+                new Dictionary<string, object?> { ["item"] = m.Name });
+        }
+
+        if (imagesFound > 0)
+        {
+            progress($"Found product images for {imagesFound} item(s).");
+        }
+
         // Phase 5 — harvest each surfaced brand's own site into the BrandModel database (specs/prices/images
         // → R2). A pure side effect: it builds the model database for later searches and does not alter the
         // result shown now, so it runs regardless of whether the product enrichment above changed anything.
         await HarvestBrandCatalogsAsync(products, progress, Record, ct);
 
-        if (enriched.Count == 0 && priced == 0)
+        if (enriched.Count == 0 && priced == 0 && imagesFound == 0)
         {
             return new ItemEnrichmentResult(null, events);
         }
