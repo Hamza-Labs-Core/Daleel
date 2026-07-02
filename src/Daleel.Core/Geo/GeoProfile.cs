@@ -51,6 +51,21 @@ public record GeoProfile
 
     /// <summary>True when Arabic is this market's primary language.</summary>
     public bool IsArabicFirst => PrimaryLanguage.StartsWith("ar", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Rough lat/lng bounding box(es) of the market's own territory, used to decide whether a
+    /// user-shared location actually PLACES the user in this market (see
+    /// <see cref="GeoProfiles.MarketContaining"/>). Multiple boxes let an irregular border be
+    /// approximated (e.g. Jordan's south-western Aqaba corner).
+    /// </summary>
+    public IReadOnlyList<GeoBounds> Bounds { get; init; } = Array.Empty<GeoBounds>();
+}
+
+/// <summary>An inclusive lat/lng rectangle used for coarse "is this point in the country" checks.</summary>
+public readonly record struct GeoBounds(double MinLat, double MaxLat, double MinLng, double MaxLng)
+{
+    public bool Contains(double lat, double lng) =>
+        lat >= MinLat && lat <= MaxLat && lng >= MinLng && lng <= MaxLng;
 }
 
 /// <summary>Registry of pre-built market profiles, looked up by key or country code.</summary>
@@ -67,7 +82,10 @@ public static class GeoProfiles
         Marketplaces = new[] { "opensooq.com", "jordan.dubizzle.com", "carrefourjordan.com" },
         ApifyActors = new[] { "apify/facebook-groups-scraper", "scrapeforge/facebook-search-posts" },
         Center = new GeoPoint(31.9539, 35.9106),
-        CenterCity = "Amman"
+        CenterCity = "Amman",
+        // Two boxes: the main body east of the Jordan River (min-lng 35.60 keeps Jerusalem / the
+        // West Bank out) plus the south-western Aqaba corner.
+        Bounds = new[] { new GeoBounds(30.5, 33.40, 35.60, 39.30), new GeoBounds(29.18, 30.5, 34.88, 38.00) }
     };
 
     public static readonly GeoProfile SaudiArabia = new()
@@ -81,7 +99,12 @@ public static class GeoProfiles
         Marketplaces = new[] { "haraj.com.sa", "opensooq.com", "noon.com" },
         ApifyActors = new[] { "apidojo/twitter-scraper", "apify/instagram-scraper" },
         Center = new GeoPoint(24.7136, 46.6753),
-        CenterCity = "Riyadh"
+        CenterCity = "Riyadh",
+        // Two boxes: the main body (south of lat 29.6, including the Red Sea coast and NEOM strip)
+        // and the northern region east of lng 36.5 (Al Qurayyat/Turaif/Arar) — a single rectangle
+        // would sweep over Israel/Palestine/Lebanon at its north-western corner. Qatar/Kuwait/Bahrain
+        // still fall inside and are carved out by the NonMarkets exclusion list in MarketContaining.
+        Bounds = new[] { new GeoBounds(16.29, 29.60, 34.48, 55.67), new GeoBounds(29.60, 32.16, 36.50, 49.00) }
     };
 
     public static readonly GeoProfile Uae = new()
@@ -95,7 +118,9 @@ public static class GeoProfiles
         Marketplaces = new[] { "dubizzle.com", "noon.com", "amazon.ae" },
         ApifyActors = new[] { "apify/instagram-scraper", "apidojo/twitter-scraper" },
         Center = new GeoPoint(25.2048, 55.2708),
-        CenterCity = "Dubai"
+        CenterCity = "Dubai",
+        // Min-lng 51.58 (the UAE's western tip) keeps the Qatar peninsula out.
+        Bounds = new[] { new GeoBounds(22.63, 26.10, 51.58, 56.40) }
     };
 
     public static readonly GeoProfile Egypt = new()
@@ -109,7 +134,8 @@ public static class GeoProfiles
         Marketplaces = new[] { "olx.com.eg", "jumia.com.eg", "souq.com" },
         ApifyActors = new[] { "apify/facebook-groups-scraper", "scrapeforge/facebook-search-posts" },
         Center = new GeoPoint(30.0444, 31.2357),
-        CenterCity = "Cairo"
+        CenterCity = "Cairo",
+        Bounds = new[] { new GeoBounds(21.99, 31.68, 24.70, 36.90) }
     };
 
     public static readonly GeoProfile Usa = new()
@@ -123,7 +149,10 @@ public static class GeoProfiles
         Marketplaces = new[] { "amazon.com", "ebay.com", "craigslist.org" },
         ApifyActors = new[] { "apify/instagram-scraper", "apidojo/twitter-scraper" },
         Center = new GeoPoint(40.7128, -74.0060),
-        CenterCity = "New York"
+        CenterCity = "New York",
+        // Contiguous US. Alaska/Hawaii users fall through to the inline market prompt — acceptable
+        // for a coarse consent-gated locator; they can also just name the market in the query.
+        Bounds = new[] { new GeoBounds(24.40, 49.40, -125.00, -66.90) }
     };
 
     private static readonly IReadOnlyDictionary<string, GeoProfile> ByKey =
@@ -161,41 +190,50 @@ public static class GeoProfiles
         Resolve(keyOrCodeOrName) ?? Usa;
 
     /// <summary>
-    /// Maps a raw coordinate (typically from the browser's geolocation API) to the supported market
-    /// whose <see cref="GeoProfile.Center"/> is closest by great-circle distance. This is the second
-    /// market-detection step, after <see cref="DetectInText"/> and before asking the user. There is
-    /// deliberately no max-distance cutoff: a successful location fix always resolves to a market — a
-    /// visitor far from every supported market is expected to name it in the query text instead.
-    /// Returns null only when no profiles are registered.
+    /// Neighbouring non-market territories that fall inside a market's coarse bounding box (Qatar,
+    /// Kuwait, Bahrain sit inside Saudi Arabia's). A location fix landing here must NOT silently
+    /// resolve to the surrounding market — the caller falls through to asking the user.
     /// </summary>
-    public static GeoProfile? NearestTo(double latitude, double longitude)
+    private static readonly GeoBounds[] NonMarkets =
     {
-        GeoProfile? nearest = null;
-        var bestKm = double.MaxValue;
-        foreach (var profile in ByKey.Values)
+        new(24.40, 26.20, 50.70, 51.70), // Qatar
+        new(28.50, 30.10, 46.50, 48.50), // Kuwait
+        new(25.50, 26.40, 50.30, 50.80), // Bahrain
+    };
+
+    // Containment is checked smallest-market-first so a point inside overlapping boxes (Aqaba sits in
+    // both Jordan's and Saudi Arabia's) resolves to the country it is actually in.
+    private static readonly GeoProfile[] ByBoundsSpecificity = { Jordan, Uae, Egypt, SaudiArabia, Usa };
+
+    /// <summary>
+    /// Maps a user-shared coordinate (the browser's consent-gated geolocation) to the supported market
+    /// whose territory actually CONTAINS it, or null when the user isn't in any supported market. This
+    /// is the second market-detection step, after <see cref="DetectInText"/> — a null makes the UI ask
+    /// the user to pick. Deliberately strict: a visitor in Berlin or Doha who shares their location is
+    /// ASKED, never silently assigned to whichever market happens to be nearest.
+    /// </summary>
+    public static GeoProfile? MarketContaining(double latitude, double longitude)
+    {
+        foreach (var exclusion in NonMarkets)
         {
-            var km = HaversineKm(latitude, longitude, profile.Center.Latitude, profile.Center.Longitude);
-            if (km < bestKm)
+            if (exclusion.Contains(latitude, longitude))
             {
-                bestKm = km;
-                nearest = profile;
+                return null;
             }
         }
 
-        return nearest;
-    }
+        foreach (var profile in ByBoundsSpecificity)
+        {
+            foreach (var box in profile.Bounds)
+            {
+                if (box.Contains(latitude, longitude))
+                {
+                    return profile;
+                }
+            }
+        }
 
-    /// <summary>Great-circle distance in kilometres between two lat/lng coordinates (Haversine).</summary>
-    private static double HaversineKm(double lat1, double lon1, double lat2, double lon2)
-    {
-        const double earthRadiusKm = 6371.0;
-        static double ToRad(double deg) => deg * Math.PI / 180.0;
-
-        var dLat = ToRad(lat2 - lat1);
-        var dLon = ToRad(lon2 - lon1);
-        var a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
-                Math.Cos(ToRad(lat1)) * Math.Cos(ToRad(lat2)) * Math.Sin(dLon / 2) * Math.Sin(dLon / 2);
-        return 2 * earthRadiusKm * Math.Asin(Math.Min(1.0, Math.Sqrt(a)));
+        return null;
     }
 
     // Distinctive country/city indicators (English + Arabic) for detecting the market straight from a
