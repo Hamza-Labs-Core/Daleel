@@ -281,22 +281,24 @@ jobs:
             DEEPL_API_KEY=${{ secrets.DEEPL_API_KEY }}
             CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
             CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}
-            R2_ACCESS_KEY=${{ secrets.R2_ACCESS_KEY }}
-            R2_SECRET_KEY=${{ secrets.R2_SECRET_KEY }}
+            # QA uses its OWN R2 token + buckets so QA reads/writes can NEVER touch production's
+            # objects. Sharing one token + one set of buckets is what let a QA-intended R2 purge wipe
+            # prod's data; the R2_QA_* token is scoped to the daleel-qa-* buckets only.
+            R2_ACCESS_KEY=${{ secrets.R2_QA_ACCESS_KEY }}
+            R2_SECRET_KEY=${{ secrets.R2_QA_SECRET_KEY }}
             R2_ENDPOINT=${{ secrets.R2_ENDPOINT }}
-            # One bucket per concern. Names default in-app to daleel-{logs,images,specs,
-            # data}; override only if your buckets are named differently. Legacy
-            # R2_BUCKET_NAME still seeds the LOGS bucket when R2_BUCKET_LOGS is unset.
-            R2_BUCKET_LOGS=${{ secrets.R2_BUCKET_LOGS }}
-            R2_BUCKET_IMAGES=${{ secrets.R2_BUCKET_IMAGES }}
-            R2_BUCKET_SPECS=${{ secrets.R2_BUCKET_SPECS }}
-            R2_BUCKET_DATA=${{ secrets.R2_BUCKET_DATA }}
-            R2_BUCKET_NAME=${{ secrets.R2_BUCKET_NAME }}
+            # QA-specific buckets, isolated from prod's daleel-{logs,images,specs,data}. Hardcoded
+            # (not secrets) since they are fixed per-environment, exactly like the QA tag and domain.
+            R2_BUCKET_LOGS=daleel-qa-logs
+            R2_BUCKET_IMAGES=daleel-qa-images
+            R2_BUCKET_SPECS=daleel-qa-specs
+            R2_BUCKET_DATA=daleel-qa-data
+            R2_BUCKET_NAME=daleel-qa-logs
             # Public hosts. Images REQUIRE one to be served from R2 (without it images are
             # hot-linked from source; the S3 API endpoint 403s a plain <img> GET). Specs/
             # data hosts are optional; logs are never public. Legacy R2_PUBLIC_URL seeds
             # the IMAGES host when R2_PUBLIC_URL_IMAGES is unset.
-            R2_PUBLIC_URL_IMAGES=${{ secrets.R2_PUBLIC_URL_IMAGES }}
+            R2_PUBLIC_URL_IMAGES=${{ secrets.R2_PUBLIC_URL_QA_IMAGES }}
             R2_PUBLIC_URL_SPECS=${{ secrets.R2_PUBLIC_URL_SPECS }}
             R2_PUBLIC_URL_DATA=${{ secrets.R2_PUBLIC_URL_DATA }}
             R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}

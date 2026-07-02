@@ -67,13 +67,28 @@ public sealed partial class AgentService
     // ── Planning ───────────────────────────────────────────────────────────────
 
     /// <summary>Asks the LLM to turn a planning prompt into a <see cref="SearchStrategy"/>.</summary>
-    public async Task<SearchStrategy> PlanAsync(string planningPrompt, CancellationToken cancellationToken = default)
+    public async Task<SearchStrategy> PlanAsync(
+        string planningPrompt, CancellationToken cancellationToken = default, string? userQuery = null)
     {
         var text = await _llm.CompleteTextAsync(PromptTemplates.PlannerSystem, planningPrompt, cancellationToken)
             .ConfigureAwait(false);
 
         var dto = LlmJson.Deserialize<StrategyDto>(text);
-        return dto?.ToStrategy() ?? new SearchStrategy { Reasoning = "Planner returned no usable JSON." };
+        var strategy = dto?.ToStrategy() ?? new SearchStrategy { Reasoning = "Planner returned no usable JSON." };
+
+        // Deterministic classification backstop: the LLM occasionally labels an obvious buy-intent
+        // query ("best espresso machine") General, which silently skips the whole product pipeline
+        // and renders an empty "No results just yet". When the caller supplies the raw user query,
+        // an unmistakably buy-intent-shaped one is upgraded to ProductResearch.
+        if (userQuery is not null &&
+            BuyIntentHeuristic.Coerce(strategy.QueryType, userQuery) is var coerced &&
+            coerced != strategy.QueryType)
+        {
+            Log("🧭 Buy-intent phrasing detected — treating this as product research.");
+            strategy = strategy with { QueryType = coerced };
+        }
+
+        return strategy;
     }
 
     // ── Top-level entry points ──────────────────────────────────────────────────
@@ -84,7 +99,8 @@ public sealed partial class AgentService
         var geo = GeoProfiles.ResolveOrDefault(geoKey ?? _options.DefaultGeo);
         Log($"Planning research for: {question} [{geo.Country}]");
 
-        var strategy = await PlanAsync(PromptTemplates.PlanFreeform(question, geo), cancellationToken).ConfigureAwait(false);
+        var strategy = await PlanAsync(PromptTemplates.PlanFreeform(question, geo), cancellationToken, userQuery: question)
+            .ConfigureAwait(false);
         var bundle = await GatherAsync(strategy, geo, cancellationToken).ConfigureAwait(false);
 
         var isProduct = strategy.QueryType == QueryType.ProductResearch;

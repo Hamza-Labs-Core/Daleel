@@ -83,7 +83,10 @@ public sealed partial class AgentService
                 case ResultType.Marketplace when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
                     AddMarketplace(marketplaces, r);
                     break;
-                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
+                // A web hit whose title is a URL/bare domain has no product identity — never surface
+                // a raw link as a product card (same rule as PickName and the extractor paths).
+                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url)
+                    && !LooksLikeUrl(r.Title):
                     webListings.Add(WebResultToListing(r, type));
                     break;
 
@@ -142,6 +145,19 @@ public sealed partial class AgentService
                 ? m with { Offers = m.Offers.Where(o => !IsPlaceholderOffer(o)).ToList() }
                 : m)
             .ToList();
+
+        // Relevance gate: deterministic shopping hits (SerpAPI → listing) reach this grid WITHOUT any
+        // LLM pass or halal guard, so loosely-matching items survive — a milk frother or a "slimming
+        // coffee" drink in a coffee-MAKER search. One cheap LLM call asks, per item, "is this ITSELF
+        // a <target>?" and drops the ones that aren't. Runs before the insight/reputation passes so
+        // junk items never earn a brand-reputation call. Product intent only — service/place results
+        // are provider/venue lists where the product-type question doesn't apply. Best-effort: any
+        // failure keeps the full list.
+        if (useLlmExtraction && intent == SearchIntentType.Product && models.Count > 1)
+        {
+            var target = intelligence?.Schema is { IsEmpty: false } sch ? sch.ProductType : query;
+            models = await FilterRelevantModelsAsync(target, models, cancellationToken).ConfigureAwait(false);
+        }
 
         // Attach the LLM-distilled pros/cons + verdict to each model up-front (keyed the same way
         // the aggregator groups listings), so the grid card and detail panel can show an honest
@@ -733,6 +749,82 @@ public sealed partial class AgentService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Runs the LLM relevance gate over the aggregated models: one call, one question per item —
+    /// "is this item ITSELF a &lt;target&gt;?" — and drops the items that aren't (accessories,
+    /// consumables, different product types, haram content). Best-effort by design: a failed call,
+    /// unparseable reply, or an implausible drop-everything verdict keeps the original list, so this
+    /// gate can reduce noise but can never empty a result or fault a search.
+    /// </summary>
+    private async Task<IReadOnlyList<ProductModel>> FilterRelevantModelsAsync(
+        string target, IReadOnlyList<ProductModel> models, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var labels = models
+                .Select(m => string.Join(" — ", new[] { m.Name, m.Brand, m.Model }
+                    .Where(s => !string.IsNullOrWhiteSpace(s))))
+                .ToList();
+
+            var text = await _llm.CompleteTextAsync(
+                PromptTemplates.RelevanceGateSystem,
+                PromptTemplates.RelevanceGate(target, labels),
+                cancellationToken).ConfigureAwait(false);
+
+            var dto = LlmJson.Deserialize<RelevanceVerdictsDto>(text);
+            if (dto?.Drop is not { Count: > 0 } drop)
+            {
+                return models; // nothing flagged (or unparseable reply) — keep everything
+            }
+
+            var kept = ApplyRelevanceVerdicts(models, drop);
+            if (kept.Count == models.Count)
+            {
+                return models;
+            }
+
+            // Sanity guard: a verdict that wipes (nearly) the whole grid is far more likely a gate
+            // misfire — or a prompt-injected product name — than 80%+ genuine noise. Distrust it and
+            // keep the originals; a noisy grid beats the empty-results failure class.
+            if (kept.Count < Math.Max(1, models.Count / 5))
+            {
+                Log($"relevance gate flagged {models.Count - kept.Count}/{models.Count} items — implausible, ignoring the verdict");
+                return models;
+            }
+
+            Log($"🧹 Relevance gate removed {models.Count - kept.Count} item(s) that aren't a {target}.");
+            return kept;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log($"relevance gate failed: {ex.Message}");
+            return models; // best-effort — never fault the search over a relevance pass
+        }
+    }
+
+    /// <summary>
+    /// Applies a drop-index verdict to the model list: listed indices are removed, out-of-range or
+    /// duplicate indices are ignored, unlisted items are kept (the gate fails open per item).
+    /// Pure and static so the verdict semantics are unit-testable without an LLM.
+    /// </summary>
+    internal static IReadOnlyList<ProductModel> ApplyRelevanceVerdicts(
+        IReadOnlyList<ProductModel> models, IReadOnlyList<int> dropIndices)
+    {
+        var drop = new HashSet<int>(dropIndices.Where(i => i >= 0 && i < models.Count));
+        if (drop.Count == 0)
+        {
+            return models;
+        }
+
+        return models.Where((_, i) => !drop.Contains(i)).ToList();
+    }
+
+    /// <summary>Wire shape for the relevance-gate LLM output.</summary>
+    private sealed class RelevanceVerdictsDto
+    {
+        [JsonPropertyName("drop")] public List<int>? Drop { get; set; }
     }
 
     /// <summary>

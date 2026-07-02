@@ -12,6 +12,8 @@ using Daleel.Web.Pipeline.SubWorkflows;
 using Daleel.Web.Services;
 using Elsa.Workflows;
 using Elsa.Workflows.Management;
+using Elsa.Workflows.Models;
+using Microsoft.EntityFrameworkCore;
 
 namespace Daleel.Web.Conversation;
 
@@ -120,10 +122,30 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             // context.CancellationToken, so a wedged step is forcibly unwound instead of hanging forever.
             using var deadline = CancellationTokenSource.CreateLinkedTokenSource(capTrip.Token);
             deadline.CancelAfter(WorkflowTimeout);
-            var run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: deadline.Token).ConfigureAwait(false);
+
+            // The deadline/cost-cap token also cancels Elsa's own workflow-state commit, so a tripped
+            // deadline makes RunAsync THROW OperationCanceledException instead of returning a faulted
+            // result — which used to bypass the salvage below entirely and turn an almost-finished run
+            // (products already extracted, only enrichment left) into a hard "no results" failure. Catch
+            // exactly that case and fall through to the same salvage a faulted run gets; a genuine job
+            // cancellation (user cancel / service shutdown, i.e. `ct`) still propagates untouched.
+            RunWorkflowResult? run = null;
+            try
+            {
+                run = await runner.RunAsync(new SearchWorkflow(), cancellationToken: deadline.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                var cause = capTrip.IsCancellationRequested
+                    ? "per-job cost cap"
+                    : $"{WorkflowTimeout.TotalMinutes:0}-minute deadline";
+                _logger.LogError(
+                    "Search workflow for job {JobId} was cancelled by the {Cause}; salvaging any extracted products",
+                    job.Id, cause);
+            }
 
             // Distinguish a timeout (deadline fired on its own) from a cost-cap/user cancel for diagnostics.
-            if (deadline.IsCancellationRequested && !capTrip.IsCancellationRequested)
+            if (run is not null && deadline.IsCancellationRequested && !capTrip.IsCancellationRequested)
             {
                 _logger.LogError(
                     "Search workflow for job {JobId} exceeded the {Minutes}-minute deadline and was cancelled",
@@ -138,7 +160,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             // before the sub-status check so faulted runs are tracked too. Best-effort: instance tracking
             // must never affect the search outcome.
             var instanceManager = scope.ServiceProvider.GetService<IWorkflowInstanceManager>();
-            if (instanceManager is not null)
+            if (instanceManager is not null && run is not null)
             {
                 try
                 {
@@ -158,12 +180,15 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             // rather than discard a result we already built and show a bare "no results", recover the
             // extracted products (un-enriched is fine) and log the incident so the underlying fault stays
             // diagnosable. Only a run that produced nothing usable is surfaced as a hard failure.
-            if (run.WorkflowState.SubStatus != WorkflowSubStatus.Finished)
+            if (run is null || run.WorkflowState.SubStatus != WorkflowSubStatus.Finished)
             {
-                var reason = string.Join("; ", run.WorkflowState.Incidents.Select(i => i.Message));
+                var subStatus = run?.WorkflowState.SubStatus.ToString() ?? "Cancelled";
+                var reason = run is null
+                    ? "workflow cancelled by the run deadline or cost cap before completing"
+                    : string.Join("; ", run.WorkflowState.Incidents.Select(i => i.Message));
                 _logger.LogWarning(
                     "Search workflow for job {JobId} ended non-finished ({SubStatus}): {Reason}",
-                    job.Id, run.WorkflowState.SubStatus,
+                    job.Id, subStatus,
                     string.IsNullOrWhiteSpace(reason) ? "(no incident detail)" : reason);
 
                 if (string.IsNullOrEmpty(state.ResultJson) && SalvageResultJson(state) is { } salvaged)
@@ -179,9 +204,21 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 if (string.IsNullOrEmpty(state.ResultJson))
                 {
                     throw new InvalidOperationException(
-                        $"Search workflow did not finish (sub-status: {run.WorkflowState.SubStatus})" +
+                        $"Search workflow did not finish (sub-status: {subStatus})" +
                         (string.IsNullOrWhiteSpace(reason) ? "." : $": {reason}"));
                 }
+            }
+
+            // Side-effect guard: the user's Cancel is a durable flag (there is no per-job CTS), so a
+            // cancel that landed mid-activity can reach this point with a freshly-built — or salvaged —
+            // result. The job service's post-run backstop discards the result AFTER this method returns,
+            // but the side effects below (the cache hit/miss record and the "results ready" email) would
+            // already have fired for a user who cancelled. Re-read the flag and leave via the same
+            // OperationCanceledException a cooperative cancel produces; ProcessAsync classifies it via
+            // the durable flag and finalizes the job as Cancelled — no email, no bogus cache record.
+            if (await IsCancelRequestedAsync(job.Id).ConfigureAwait(false))
+            {
+                throw new OperationCanceledException($"Search job {job.Id} was cancelled by the user.");
             }
 
             await RecordResultCacheAsync(job, state.FromCache ? "hit" : "miss", ct).ConfigureAwait(false);
@@ -208,7 +245,11 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             {
                 // Carries the smart-cache verdict (set only on a hit) up to the worker, which decides
                 // whether to launch a background partial re-enrichment for the missing pieces.
-                CacheQuality = state.CacheQuality
+                CacheQuality = state.CacheQuality,
+                // When the per-job cost cap cut the run short (and the result above was salvaged), the
+                // worker must NOT launch the post-result background enrichment — it would hand the very
+                // job the cap just stopped a fresh full budget, doubling the admin-configured ceiling.
+                CostCapTripped = capTrip.IsCancellationRequested && !ct.IsCancellationRequested
             };
         }
         finally
@@ -608,6 +649,30 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         catch
         {
             // best-effort: never let audit logging affect the search outcome
+        }
+    }
+
+    /// <summary>
+    /// Fresh durable read of the job's <c>CancelRequested</c> flag (written by the UI / sweep on a
+    /// different DbContext). Best-effort like the activities' cooperative check: a failed read returns
+    /// false and the worker's post-run backstop remains the hard guarantee that a cancelled job is
+    /// finalized as cancelled.
+    /// </summary>
+    private async Task<bool> IsCancelRequestedAsync(int jobId)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+            return await db.SearchJobs
+                .Where(j => j.Id == jobId)
+                .Select(j => j.CancelRequested)
+                .FirstOrDefaultAsync(CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch
+        {
+            return false; // best-effort — the job service's flag-reload backstop still runs after us
         }
     }
 

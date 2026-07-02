@@ -86,6 +86,10 @@ public static class PromptTemplates
         - "Product" — a buyable item (AC, phone, car, furniture). DEFAULT when unsure.
         - "Service" — something to hire/book (plumber, lawyer, cleaning, car repair, course).
         - "Place" — a physical venue to visit (restaurant, café, gym, clinic, hotel, salon).
+
+        queryType MUST be "ProductResearch" whenever the user is choosing or acquiring a product — "best X",
+        "top X", "cheapest X", "buy X", "X price/deals", "أفضل X", "سعر X" — even when phrased as a question.
+        Reserve "General" for questions that are NOT about acquiring something (news, advice, how-to, facts).
         """;
 
     /// <summary>Plan a free-form natural-language question.</summary>
@@ -156,8 +160,14 @@ public static class PromptTemplates
             "— generate enough queries (include brand-named and 'best <category> brands' queries) that the results " +
             "span the budget, mid-range and premium ends, not just the top one or two names.");
         sb.AppendLine("Design the search to surface CONCRETE LISTINGS from whatever local sites rank in this market:");
-        sb.AppendLine("- shoppingQueries: price/marketplace-style queries in both the market language and English " +
-            "(e.g. the category + 'للبيع' / 'price' / 'سعر'), including a few brand-specific ones.");
+        // Shopping queries must be PLAIN product+price phrases: the shopping engine (Google Shopping via
+        // gl=cc) is what returns priced listings WITH thumbnails, and it returns ~nothing for site:-scoped
+        // queries. A plan whose shopping queries are all "… site:amazon.com"-shaped yields zero structured
+        // listings — and with them go the product images and prices in the result grid (QA job 2 evidence).
+        sb.AppendLine("- shoppingQueries: PLAIN price/marketplace-style queries in both the market language and English " +
+            "(e.g. the category + 'للبيع' / 'price' / 'سعر' / 'buy'), including a few brand-specific ones. " +
+            "NEVER use 'site:' operators here — the shopping engine returns nothing for them; put " +
+            "site-scoped searches in webQueries instead.");
         sb.AppendLine("- webQueries: a mix of local classifieds/marketplace pages, brand catalog pages, store " +
             "sections, and SEVERAL buying-guide / 'best <category>' / review / comparison queries (these become the " +
             "'related articles' the user reads).");
@@ -215,9 +225,11 @@ public static class PromptTemplates
         "posts, AND review/buying-guide ARTICLES), you first CLASSIFY each source — a real product/store " +
         "listing, an article/review/blog about products, a store page, or an irrelevant page — then EXTRACT " +
         "the concrete products being sold and their prices. You never write prose, advice, or summaries — " +
-        "only structured data. CRITICAL RULES: (1) Output every distinct PRODUCT MODEL the context names — a " +
-        "model named in a buying guide with no price and no seller still counts; include it with an empty " +
-        "offers array. Never invent products, prices, models, or links. (2) Articles, reviews and round-ups " +
+        "only structured data. CRITICAL RULES: (1) Output the distinct PRODUCT MODELS the context names, " +
+        "capped at the ~20 BEST-EVIDENCED models (prefer those with prices, sellers or repeated mentions; " +
+        "within the cap still spread across brands and price tiers) — a model named in a buying guide with " +
+        "no price and no seller still counts; include it with an empty offers array. Never invent products, " +
+        "prices, models, or links. (2) Articles, reviews and round-ups " +
         "are SOURCES, not items: mine them for which products and brands exist, but NEVER output the article " +
         "itself as a product. (3) Output ONE entry per distinct " +
         "MODEL, with every place it is sold gathered into that entry's offers array — never repeat the same " +
@@ -280,6 +292,49 @@ public static class PromptTemplates
         SearchIntentType.Place => PlaceExtractionSystem,
         _ => ProductExtractionSystem
     };
+
+    /// <summary>
+    /// System prompt for the post-aggregation relevance gate. Deterministic shopping hits (SerpAPI →
+    /// listing) reach the grid WITHOUT any LLM pass, so loosely-matching items survive — a milk frother
+    /// or a "slimming coffee" drink in a coffee-MAKER search. This gate asks ONE question per item:
+    /// is the item ITSELF an instance of the product type the user is shopping for?
+    /// </summary>
+    public const string RelevanceGateSystem =
+        "You are Daleel's product-relevance gate. You are given the product TYPE a shopper is looking for " +
+        "and a numbered list of extracted items. For EACH item you answer exactly one question: is this item " +
+        "ITSELF an instance of that product type? An accessory FOR it, a consumable used WITH it, a spare " +
+        "part, or any other kind of product is NOT an instance of it (a milk frother is not a coffee maker; " +
+        "a bag of coffee or a 'slimming coffee' drink is not a coffee maker). Judge from the item's name/brand " +
+        "only; when you are genuinely unsure, treat the item as matching (keep it). You never write prose — " +
+        "you ALWAYS reply with a single JSON object only." +
+        HalalGuard;
+
+    /// <summary>
+    /// Builds the relevance-gate prompt: the target product type plus the numbered item names. The reply
+    /// lists only the indices to DROP, so an item the model overlooks fails open (kept), and the output
+    /// stays tiny regardless of how many items are kept.
+    /// </summary>
+    public static string RelevanceGate(string target, IReadOnlyList<string> items)
+    {
+        var sb = new StringBuilder();
+        sb.Append("The shopper is looking for: ").AppendLine(target);
+        sb.AppendLine("For each numbered item, decide: is the item ITSELF one of these? Accessories, consumables, " +
+            "parts, and different product types are NOT. Also drop any item that is haram/immodest content.");
+        sb.AppendLine("Items:");
+        for (var i = 0; i < items.Count; i++)
+        {
+            sb.Append(i).Append(". ").AppendLine(items[i]);
+        }
+        sb.AppendLine("""
+            Reply with exactly this JSON object:
+            {
+              "drop": [indices of items that are NOT themselves the target product type, or are haram]
+            }
+            Only list indices you are CONFIDENT about — when unsure, do not list the item (it stays).
+            Use an empty array when every item matches. No prose outside the JSON.
+            """);
+        return sb.ToString();
+    }
 
     /// <summary>System prompt for distilling per-model pros/cons from reviews.</summary>
     public const string ModelDetailSystem =
@@ -393,16 +448,31 @@ public static class PromptTemplates
         sb.Append("Buy-intent query: ").AppendLine(query);
         sb.Append("Extract the concrete products a shopper in ").Append(geo.Country)
           .AppendLine(" could buy, drawn ONLY from the context below. Prefer local sellers; quote real prices and links.");
-        sb.AppendLine("Be COMPREHENSIVE: extract EVERY distinct model the context evidences — span MULTIPLE brands and " +
-            "MULTIPLE models per brand (budget through premium), not just the few most prominent.");
+        // Bounded breadth: an uncapped "extract EVERY model" instruction produced multi-minute LLM
+        // generations on article-heavy queries (the call flirted with the HTTP client's timeout and
+        // burned most of the run's 10-minute budget). ~20 well-evidenced models is more than the grid,
+        // compare table or a shopper can use, and keeps the extraction call fast and reliable.
+        sb.AppendLine("Extract the distinct models the context evidences, CAPPED at the ~20 BEST-EVIDENCED — prefer " +
+            "models with prices/sellers, then well-known models the guides name; within the cap span MULTIPLE brands " +
+            "and MULTIPLE models per brand (budget through premium), not just the few most prominent.");
         sb.AppendLine("CLASSIFY before you extract. The context mixes two kinds of source: (a) real PRODUCT/STORE " +
             "listings — a concrete item sold by a real store/marketplace, with a price or a buy link — and (b) ARTICLES, " +
             "reviews, blogs and buying-guides ABOUT products. NEVER output an article, review or round-up ITSELF as a " +
             "product (its title is not a product). But DO mine articles for the models they name: a model named in a " +
             "buying guide with a name but NO price and NO seller still counts — include it with an empty offers array so " +
             "the shopper sees it exists. Attach real prices and seller links to a model's offers whenever the context " +
-            "provides them; leave offers empty when it does not. The goal is BREADTH: surface every distinct model the " +
-            "context names, not only the few that happen to carry an in-context price.");
+            "provides them; leave offers empty when it does not. The goal is BREADTH within the cap: spread the " +
+            "~20 models across brands and price tiers, not only the few that happen to carry an in-context price.");
+        // A tighter, deterministic article guard on top of the classification rule above: an article's HEADLINE
+        // (often phrased as a list/opinion and living under a blog/news URL path) is the single most common thing
+        // the extractor wrongly emits as a product. Name the tells explicitly so it never leaks into "products".
+        sb.AppendLine("HARD RULE — an item is an ARTICLE (a SOURCE, never a product) when ANY of these hold, no matter " +
+            "how product-like its title reads: its URL path contains /blog, /news, /article, /review, /guide, /best, " +
+            "/top, /vs, or a date; OR its title is a list/opinion headline (starts with or contains 'Best', 'Top', " +
+            "'أفضل', 'مراجعة', 'Review', 'Guide', 'How to', 'vs', a year, or a ranked count like '10 '). Mine such a " +
+            "source for the models it names, but NEVER output its headline as a product's \"name\".");
+        sb.AppendLine("A product's \"name\" is ALWAYS a real product/model name — NEVER a URL, domain, link, store name, " +
+            "or article headline. If the only label you can find for an item is a URL or a headline, drop the item.");
         // Schema-aware extraction: when the up-front category analysis identified the specs that matter for
         // this product type, tell the extractor to fill those exact keys (so the compare table and detail
         // views line up across products) instead of returning arbitrary free-form spec keys.
