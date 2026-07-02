@@ -161,6 +161,14 @@ public static class ListingExtractor
                 continue;
             }
 
+            // A shopping hit whose "title" is a URL/bare domain ("atelier21.org") has no product
+            // identity: it can't dedup-merge (the key is the normalized name) and would surface a
+            // raw link as a product card. Same guard as the extracted-JSON path above.
+            if (!string.IsNullOrWhiteSpace(r.Title) && LooksLikeUrl(r.Title))
+            {
+                continue;
+            }
+
             listings.Add(new ProductListing
             {
                 Name = r.Title,

@@ -83,7 +83,10 @@ public sealed partial class AgentService
                 case ResultType.Marketplace when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
                     AddMarketplace(marketplaces, r);
                     break;
-                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
+                // A web hit whose title is a URL/bare domain has no product identity — never surface
+                // a raw link as a product card (same rule as PickName and the extractor paths).
+                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url)
+                    && !LooksLikeUrl(r.Title):
                     webListings.Add(WebResultToListing(r, type));
                     break;
 

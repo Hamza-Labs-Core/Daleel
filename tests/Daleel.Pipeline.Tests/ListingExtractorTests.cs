@@ -94,6 +94,23 @@ public class ListingExtractorTests
     }
 
     [Fact]
+    public void FromShopping_SkipsUrlShapedTitles()
+    {
+        // A shopping hit titled with a bare domain ("atelier21.org") has no product identity —
+        // it must never surface as a product card (seen live on QA, "best microwave oven").
+        var hits = new[]
+        {
+            new SearchResult { Title = "atelier21.org", Price = new Money(99, "USD"), Url = "https://atelier21.org/x" },
+            new SearchResult { Title = "www.foo-shop.com/deals", Price = new Money(10, "USD") },
+            new SearchResult { Title = "Midea 0.7 Cu Ft Microwave", Price = new Money(75, "USD") },
+        };
+
+        var listings = ListingExtractor.FromShopping(hits);
+
+        listings.Should().ContainSingle().Which.Name.Should().Be("Midea 0.7 Cu Ft Microwave");
+    }
+
+    [Fact]
     public void FromShopping_MapsHitsToListings()
     {
         var hits = new[]
