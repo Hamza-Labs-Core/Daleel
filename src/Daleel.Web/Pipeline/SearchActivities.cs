@@ -36,7 +36,10 @@ public sealed class ParseQueryActivity : CancellableActivity
         state.Geo = state.GeoProfile.Key;
         services.Report(SearchStep.Analyzing, "Progress.Msg.Market", state.GeoProfile.Country);
         state.Strategy = await services.Agent.PlanAsync(
-            PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken);
+            PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken,
+            // The raw query lets PlanAsync's deterministic buy-intent backstop correct a planner
+            // misclassification (General on a "best <product>" query would skip the whole grid).
+            userQuery: state.Query);
         // Carry the planner's thing-type classification onto the run state so the extraction activity
         // can pick the product / service / place prompt without reaching back into the strategy.
         state.Intent = state.Strategy.Intent;

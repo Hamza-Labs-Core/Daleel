@@ -86,6 +86,10 @@ public static class PromptTemplates
         - "Product" — a buyable item (AC, phone, car, furniture). DEFAULT when unsure.
         - "Service" — something to hire/book (plumber, lawyer, cleaning, car repair, course).
         - "Place" — a physical venue to visit (restaurant, café, gym, clinic, hotel, salon).
+
+        queryType MUST be "ProductResearch" whenever the user is choosing or acquiring a product — "best X",
+        "top X", "cheapest X", "buy X", "X price/deals", "أفضل X", "سعر X" — even when phrased as a question.
+        Reserve "General" for questions that are NOT about acquiring something (news, advice, how-to, facts).
         """;
 
     /// <summary>Plan a free-form natural-language question.</summary>
