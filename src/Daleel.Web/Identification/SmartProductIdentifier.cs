@@ -184,7 +184,14 @@ public sealed class SmartProductIdentifier : IProductIdentifier
             return (cached.Confidence, cached.MatchedModelName, true);
         }
 
-        var result = await _vision.CompareAsync(storeImageUrl, brandImage, model.ModelName, ct).ConfigureAwait(false);
+        // Metered through the ambient per-job observer: the vision matcher runs on its own HTTP
+        // client, so without this the paid comparison would be invisible to the usage dashboard,
+        // the per-job estimate, and the cost cap. Cache hits return above and cost nothing.
+        var result = await Daleel.Core.Observability.ApiCallTimer.TimeAsync(
+            Daleel.Core.Observability.AmbientApiObserver.Observer,
+            Daleel.Core.Observability.AmbientApiObserver.Estimator ?? new Daleel.Core.Observability.CostEstimator(),
+            "OpenRouter", "vision/compare", model.ModelName,
+            () => _vision.CompareAsync(storeImageUrl, brandImage, model.ModelName, ct)).ConfigureAwait(false);
         // A non-match scores 0; result.Confidence is already clamped to [0,1] in the matcher.
         var confidence = result.SameProduct ? result.Confidence : 0.0;
 

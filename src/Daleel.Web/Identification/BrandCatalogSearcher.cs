@@ -85,7 +85,13 @@ public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
             try
             {
                 var ctx = new ContextDevProvider(key);
-                catalogue = await ctx.ExtractProductsAsync(domain, MaxModelsPerRegion, CrawlTimeoutMs, ct)
+                // Metered through the ambient per-job observer — this crawl runs on its own provider
+                // instance, invisible to the AgentFactory's wiring (see AmbientApiObserver).
+                catalogue = await Daleel.Core.Observability.ApiCallTimer.TimeAsync(
+                    Daleel.Core.Observability.AmbientApiObserver.Observer,
+                    Daleel.Core.Observability.AmbientApiObserver.Estimator ?? new Daleel.Core.Observability.CostEstimator(),
+                    "Context.dev", "catalog/extract", domain,
+                    () => ctx.ExtractProductsAsync(domain, MaxModelsPerRegion, CrawlTimeoutMs, ct))
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) { throw; }

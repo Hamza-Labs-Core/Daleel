@@ -93,8 +93,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// <summary>
     /// Hard wall-clock budget for the whole vision-identification phase, so a hung discovery crawl
     /// or slow vision endpoint costs THIS phase only — never the rest of the enrichment window.
-    /// NOTE: vision/discovery calls run outside the per-job API-call collector (own HttpClients), so
-    /// this time cap is also the practical spend bound for the phase.
+    /// The phase's paid calls are metered through <see cref="Daleel.Core.Observability.AmbientApiObserver"/>,
+    /// so they also count toward the per-job cost cap and appear in the usage dashboard.
     /// </summary>
     private const int VisionPhaseBudgetSeconds = 150;
 
@@ -1021,7 +1021,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     {
         try
         {
-            return await ctx.ExtractProductsAsync(domain, maxProducts: 12, timeoutMs: CatalogTimeoutMs, cancellationToken: ct);
+            // Metered through the ambient per-job observer — the store-catalogue crawl runs on its
+            // own provider instance, invisible to the AgentFactory's wiring (see AmbientApiObserver).
+            return await Daleel.Core.Observability.ApiCallTimer.TimeAsync(
+                Daleel.Core.Observability.AmbientApiObserver.Observer,
+                Daleel.Core.Observability.AmbientApiObserver.Estimator ?? new Daleel.Core.Observability.CostEstimator(),
+                "Context.dev", "catalog/extract", domain,
+                () => ctx.ExtractProductsAsync(domain, maxProducts: 12, timeoutMs: CatalogTimeoutMs, cancellationToken: ct));
         }
         catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
         catch (Exception ex)
