@@ -48,8 +48,9 @@
         @if (Model.Rating is { } rating)
         {
             @* Product-level buyer rating aggregated across this model's listings — distinct from the
-               brand-reputation chip above (that's the BRAND in-market; this is THIS product). *@
-            <div class="d-flex align-center gap-1 mt-1">
+               brand-reputation chip above (that's the BRAND in-market; this is THIS product). The
+               tooltip is the user-visible disambiguation between the two star scores. *@
+            <div class="d-flex align-center gap-1 mt-1" title="@L["ModelCard.ProductRating"]">
                 <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small" Color="Color.Warning" />
                 <MudText Typo="Typo.caption">@rating.ToString("0.0")@(Model.RatingCount is { } rc ? $" ({rc:n0})" : "")</MudText>
             </div>

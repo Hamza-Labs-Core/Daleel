@@ -842,7 +842,11 @@ public sealed partial class AgentService
             Name = m.Name,
             Brand = m.Brand,
             Model = m.Model,
-            Price = m.LowestPrice,
+            // Price, currency, URL and the indicative flag all come from the SAME offer — mixing
+            // LowestPrice (min over ALL offers incl. indicative) with another offer's currency/link
+            // minted figures that existed on no offer and dropped the ≈ semantics downstream.
+            Price = offer?.Price,
+            IsIndicative = offer?.IsIndicative ?? false,
             Currency = offer?.Currency,
             Url = offer?.Url,
             ImageUrl = m.ImageUrl,

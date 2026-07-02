@@ -367,6 +367,7 @@
 
   <data name="Sources.Label" xml:space="preserve"><value>المصادر</value></data>
 
+  <data name="ModelCard.ProductRating" xml:space="preserve"><value>تقييم المشترين من قوائم المتاجر</value></data>
   <data name="ModelCard.From" xml:space="preserve"><value>يبدأ من</value></data>
   <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>السعر على الموقع</value></data>
   <data name="ModelCard.Sale" xml:space="preserve"><value>تخفيض</value></data>

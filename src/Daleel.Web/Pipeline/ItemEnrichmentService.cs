@@ -90,6 +90,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// </summary>
     private const int MaxVisionIdentifications = 4;
 
+    /// <summary>
+    /// Hard wall-clock budget for the whole vision-identification phase, so a hung discovery crawl
+    /// or slow vision endpoint costs THIS phase only — never the rest of the enrichment window.
+    /// NOTE: vision/discovery calls run outside the per-job API-call collector (own HttpClients), so
+    /// this time cap is also the practical spend bound for the phase.
+    /// </summary>
+    private const int VisionPhaseBudgetSeconds = 150;
+
     public ItemEnrichmentService(
         IProductProfileRepository repo, ProfileOptions options, IAgentFactory factory,
         IScrapedPriceRepository scrapedPrices, IBrandCatalogService brandCatalog,
@@ -582,6 +590,19 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         var attempts = 0;
         var fills = 0;
 
+        // Hard PHASE budget (same pattern as the store-catalogue phase's catalogCts): the identifier's
+        // inner limits are partly advisory — the discovery crawl's "20s" rides in the request body only
+        // (a hung Context.dev call can burn ~100s × retries client-side) and each vision call can take
+        // up to 60s — so without this cap one slow item could eat the entire enrichment window and the
+        // outer timeout would then discard EVERY phase's work. When this budget expires we keep what
+        // was identified and simply move on to the remaining phases.
+        using var phaseCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        phaseCts.CancelAfter(TimeSpan.FromSeconds(VisionPhaseBudgetSeconds));
+
+        // One identification attempt per BRAND per run: a failed catalogue discovery for a brand would
+        // fail identically for its other items seconds later — repeating it just re-pays the crawls.
+        var attemptedBrands = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         for (var i = 0; i < models.Count && attempts < MaxVisionIdentifications; i++)
         {
             var m = models[i];
@@ -593,10 +614,24 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 continue;
             }
 
+            // A gstatic thumbnail means the photo came from OUR OWN image-search backfill (a previous
+            // run's last-resort phase), not from the listing — identifying against it would let a wrong
+            // backfilled photo pick the product's identity (a feedback loop). Only listing-origin
+            // photos carry identity signal.
+            if (m.ImageUrl!.Contains("gstatic.com", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (!attemptedBrands.Add(m.Brand!.Trim()))
+            {
+                continue;
+            }
+
             attempts++;
             try
             {
-                var id = await _identifier.IdentifyAsync(m, ct);
+                var id = await _identifier.IdentifyAsync(m, phaseCts.Token);
                 if (!id.Matched || id.BrandModelId is not { } rowId ||
                     await _brandModels.GetByIdAsync(rowId, ct) is not { } row)
                 {
@@ -623,6 +658,15 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                         ["item"] = m.Name, ["method"] = id.Method, ["confidence"] = id.Confidence,
                         ["canonical"] = id.CanonicalModelName
                     });
+            }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+            {
+                // The PHASE budget expired (the run itself is fine): keep what was identified so far
+                // and hand the remaining time to the other enrichment phases.
+                _logger.LogInformation(
+                    "Vision identification phase hit its {Seconds}s budget after {Attempts} attempt(s); continuing",
+                    VisionPhaseBudgetSeconds, attempts);
+                break;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

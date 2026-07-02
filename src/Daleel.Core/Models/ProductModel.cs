@@ -121,6 +121,13 @@ public record ProductModel
 
     public decimal? LowestPrice => Offers.Where(o => o.Price is not null).Select(o => o.Price).Min();
 
+    /// <summary>
+    /// The price the UI leads with — <see cref="LowestOffer"/>'s (exact preferred over indicative).
+    /// Every user-facing surface (card, sort, filters, detail, compare) must key off THIS, never
+    /// <see cref="LowestPrice"/>: mixing the two shows one number and sorts/links by another.
+    /// </summary>
+    public decimal? DisplayPrice => LowestOffer?.Price;
+
     /// <summary>True when the only prices known for this model are indicative (loosely parsed).</summary>
     public bool LowestIsIndicative => LowestOffer is { Price: not null, IsIndicative: true };
 

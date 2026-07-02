@@ -241,16 +241,19 @@ else
         if (_condition != AllValue)
             q = q.Where(x => x.Model.Offers.Any(o => string.Equals(o.Condition, _condition, StringComparison.OrdinalIgnoreCase)));
 
+        // Sort/filter by the DISPLAYED price (LowestOffer's — exact preferred over indicative), so
+        // the grid order always matches the figures on the cards. Keying off LowestPrice (min over
+        // ALL offers incl. loosely-parsed ones) would order a "From 500" card above a "From 490" one.
         if (_minPrice is { } min)
-            q = q.Where(x => x.Model.LowestPrice is { } p && p >= min);
+            q = q.Where(x => x.Model.DisplayPrice is { } p && p >= min);
 
         if (_maxPrice is { } max)
-            q = q.Where(x => x.Model.LowestPrice is { } p && p <= max);
+            q = q.Where(x => x.Model.DisplayPrice is { } p && p <= max);
 
         q = _sort switch
         {
-            "price_asc" => q.OrderBy(x => x.Model.LowestPrice ?? decimal.MaxValue),
-            "price_desc" => q.OrderByDescending(x => x.Model.LowestPrice ?? decimal.MinValue),
+            "price_asc" => q.OrderBy(x => x.Model.DisplayPrice ?? decimal.MaxValue),
+            "price_desc" => q.OrderByDescending(x => x.Model.DisplayPrice ?? decimal.MinValue),
             "sellers" => q.OrderByDescending(x => x.Model.SellerCount),
             _ => q
         };
