@@ -289,6 +289,49 @@ public static class PromptTemplates
         _ => ProductExtractionSystem
     };
 
+    /// <summary>
+    /// System prompt for the post-aggregation relevance gate. Deterministic shopping hits (SerpAPI →
+    /// listing) reach the grid WITHOUT any LLM pass, so loosely-matching items survive — a milk frother
+    /// or a "slimming coffee" drink in a coffee-MAKER search. This gate asks ONE question per item:
+    /// is the item ITSELF an instance of the product type the user is shopping for?
+    /// </summary>
+    public const string RelevanceGateSystem =
+        "You are Daleel's product-relevance gate. You are given the product TYPE a shopper is looking for " +
+        "and a numbered list of extracted items. For EACH item you answer exactly one question: is this item " +
+        "ITSELF an instance of that product type? An accessory FOR it, a consumable used WITH it, a spare " +
+        "part, or any other kind of product is NOT an instance of it (a milk frother is not a coffee maker; " +
+        "a bag of coffee or a 'slimming coffee' drink is not a coffee maker). Judge from the item's name/brand " +
+        "only; when you are genuinely unsure, treat the item as matching (keep it). You never write prose — " +
+        "you ALWAYS reply with a single JSON object only." +
+        HalalGuard;
+
+    /// <summary>
+    /// Builds the relevance-gate prompt: the target product type plus the numbered item names. The reply
+    /// lists only the indices to DROP, so an item the model overlooks fails open (kept), and the output
+    /// stays tiny regardless of how many items are kept.
+    /// </summary>
+    public static string RelevanceGate(string target, IReadOnlyList<string> items)
+    {
+        var sb = new StringBuilder();
+        sb.Append("The shopper is looking for: ").AppendLine(target);
+        sb.AppendLine("For each numbered item, decide: is the item ITSELF one of these? Accessories, consumables, " +
+            "parts, and different product types are NOT. Also drop any item that is haram/immodest content.");
+        sb.AppendLine("Items:");
+        for (var i = 0; i < items.Count; i++)
+        {
+            sb.Append(i).Append(". ").AppendLine(items[i]);
+        }
+        sb.AppendLine("""
+            Reply with exactly this JSON object:
+            {
+              "drop": [indices of items that are NOT themselves the target product type, or are haram]
+            }
+            Only list indices you are CONFIDENT about — when unsure, do not list the item (it stays).
+            Use an empty array when every item matches. No prose outside the JSON.
+            """);
+        return sb.ToString();
+    }
+
     /// <summary>System prompt for distilling per-model pros/cons from reviews.</summary>
     public const string ModelDetailSystem =
         "You are Daleel, a product analyst. Given reviews, specs and listings for a single product model, you " +

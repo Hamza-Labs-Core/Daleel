@@ -13,4 +13,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Lets the test project exercise internal pure helpers (e.g. the relevance-gate verdict logic). -->
+    <InternalsVisibleTo Include="Daleel.Agent.Tests" />
+  </ItemGroup>
+
 </Project>
