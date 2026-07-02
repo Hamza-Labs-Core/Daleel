@@ -32,6 +32,14 @@ public interface ISearchHistoryRepository
 
     /// <summary>Aggregate count across all users — for admin stats only (no row data exposed).</summary>
     Task<int> TotalCountAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Replaces the stored result on the user's MOST RECENT history row for <paramref name="query"/>.
+    /// Called after background enrichment so "open from history" replays the enriched (image/price/spec
+    /// filled) result, matching what a repeat search would serve from the cache. Returns true when a
+    /// row was updated.
+    /// </summary>
+    Task<bool> UpdateLatestResultAsync(string userId, string query, string resultJson, CancellationToken ct = default);
 }
 
 public sealed class SearchHistoryRepository : ISearchHistoryRepository
@@ -45,6 +53,24 @@ public sealed class SearchHistoryRepository : ISearchHistoryRepository
         _db.SearchHistory.Add(entry);
         await _db.SaveChangesAsync(ct);
         return entry;
+    }
+
+    public async Task<bool> UpdateLatestResultAsync(
+        string userId, string query, string resultJson, CancellationToken ct = default)
+    {
+        // Owner filter first (the isolation boundary), then the newest row for this exact query.
+        var entry = await _db.SearchHistory
+            .Where(x => x.UserId == userId && x.Query == query)
+            .OrderByDescending(x => x.CreatedAt)
+            .FirstOrDefaultAsync(ct);
+        if (entry is null)
+        {
+            return false;
+        }
+
+        entry.ResultJson = resultJson;
+        await _db.SaveChangesAsync(ct);
+        return true;
     }
 
     public async Task<PagedResult<SearchHistoryEntry>> ListAsync(

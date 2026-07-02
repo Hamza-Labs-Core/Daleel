@@ -398,6 +398,10 @@ public sealed class SearchJobService : BackgroundService
             await db.SaveChangesAsync(timeout.Token);
             await convos.CompleteAsync(
                 userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+            // Keep the history row in sync — without this, "open from history" replays the pre-enrichment
+            // (image/price/spec-less) result forever while a repeat search serves the enriched cache entry.
+            await sp.GetRequiredService<ISearchHistoryRepository>()
+                .UpdateLatestResultAsync(userId, job.Query, enriched.ResultJson, timeout.Token);
             await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
         }
         catch (OperationCanceledException)
@@ -459,6 +463,9 @@ public sealed class SearchJobService : BackgroundService
             await db.SaveChangesAsync(timeout.Token);
             await convos.CompleteAsync(
                 userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+            // Keep the history row in sync with the refilled result (see EnrichInBackgroundAsync).
+            await sp.GetRequiredService<ISearchHistoryRepository>()
+                .UpdateLatestResultAsync(userId, job.Query, enriched.ResultJson, timeout.Token);
             await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
         }
         catch (OperationCanceledException)
