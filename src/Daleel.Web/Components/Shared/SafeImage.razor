@@ -9,12 +9,15 @@
 }
 else if (_revealed)
 {
-    <img src="@Src" alt="@Alt" class="@Class" style="@Style" loading="lazy" />
+    @* referrerpolicy="no-referrer": we hot-link product/brand images straight from their source, and many
+       marketplace/CDN hosts serve a 403 to cross-origin hot-links (referer-based hotlink protection). Sending
+       no Referer defeats that check, so far more external product shots actually load instead of breaking. *@
+    <img src="@Src" alt="@Alt" class="@Class" style="@Style" loading="lazy" referrerpolicy="no-referrer" />
 }
 else
 {
     <div class="safe-image-wrap @Class" style="@Style">
-        <img src="@Src" alt="@Alt" class="safe-image-blur" loading="lazy" />
+        <img src="@Src" alt="@Alt" class="safe-image-blur" loading="lazy" referrerpolicy="no-referrer" />
         <div class="safe-image-overlay">
             <MudIcon Icon="@Icons.Material.Filled.VisibilityOff" Color="Color.Surface" />
             <MudText Typo="Typo.caption" Style="color:#fff;">Image hidden</MudText>

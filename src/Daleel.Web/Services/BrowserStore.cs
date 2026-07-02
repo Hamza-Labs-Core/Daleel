@@ -91,16 +91,18 @@ public sealed class BrowserStore
 
     /// <summary>
     /// Asks the browser for the visitor's GPS location (prompting for permission) and maps it to the
-    /// nearest supported market's key. Returns null when geolocation is denied, unavailable, or times
-    /// out — the caller then asks the user to pick. This is the geolocation step that sits between
-    /// query-text market detection and prompting.
+    /// supported market that actually CONTAINS it. Returns null when geolocation is denied,
+    /// unavailable, times out, or the fix lands outside every supported market — the caller then asks
+    /// the user to pick. This is the geolocation step between query-text market detection and prompting.
     /// </summary>
     public async Task<string?> DetectMarketFromLocationAsync()
     {
         try
         {
             var location = await _js.InvokeAsync<BrowserLocation?>("daleelGetLocation");
-            return location is { } loc ? GeoProfiles.NearestTo(loc.Lat, loc.Lng)?.Key : null;
+            // Strict containment, not nearest-by-distance: a consenting user OUTSIDE every supported
+            // market (Berlin, Doha…) gets null here and is asked to pick a market in the UI.
+            return location is { } loc ? GeoProfiles.MarketContaining(loc.Lat, loc.Lng)?.Key : null;
         }
         catch (Exception ex) when (ex is InvalidOperationException or JSException or TaskCanceledException)
         {

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using Daleel.Web.Storage;
 using Serilog;
 using Serilog.Core;
-using Serilog.Debugging;
 using Serilog.Events;
 using Serilog.Formatting.Json;
 
@@ -69,11 +68,6 @@ public static class SerilogConfiguration
         IConfiguration configuration,
         bool isDevelopment = false)
     {
-        // (0) Surface Serilog's OWN internal failures (sink construction, batch-emit, formatter errors)
-        // to stderr — otherwise they vanish, which is exactly how the R2 sink could stop uploading
-        // without a trace. Idempotent: enabling twice just replaces the output target.
-        SelfLog.Enable(Console.Error);
-
         // (2) Level policy: Debug in dev, Information in prod.
         var minimumLevel = isDevelopment ? LogEventLevel.Debug : LogEventLevel.Information;
 
@@ -82,12 +76,6 @@ public static class SerilogConfiguration
             // Tame framework chatter so the logs stay signal-rich.
             .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
-            // Elsa's bookmark-queue purger runs on a recurring schedule (~every 10s) and emits three
-            // Information lines each pass ("Purging bookmark queue items older than …", "Purged N …",
-            // "Finished purging …"). That flood rotated all useful logs out of the 30MB Docker buffer.
-            // Gate this single SourceContext (ILogger<DefaultBookmarkQueuePurger>) to Warning so the
-            // spam is dropped while the rest of Elsa stays at Information.
-            .MinimumLevel.Override("Elsa.Workflows.Runtime.DefaultBookmarkQueuePurger", LogEventLevel.Warning)
             // (3) Structured-logging enrichment: scoped properties, a per-request correlation id, and a
             // constant app tag so multi-service log aggregation can filter on it.
             .Enrich.FromLogContext()
@@ -145,13 +133,6 @@ public static class SerilogConfiguration
     /// prefix the log-viewer Worker scans, and the date in the filename lets it window by day. The
     /// scraped-data objects (site-data/, final-specs/, …) keep their own prefixes and are untouched.
     /// </summary>
-    /// <summary>
-    /// Property stamped on the events the R2 failure callback re-logs, so the R2 sink can filter them
-    /// back out (see <see cref="ConfigureR2Sink"/>). Without this, "R2 upload failed" would itself be
-    /// queued for R2 upload and — while R2 stays unreachable — amplify into an unbounded log/upload storm.
-    /// </summary>
-    private const string R2SinkFailureMarker = "R2SinkUploadFailed";
-
     private static void ConfigureR2Sink(
         LoggerConfiguration loggerConfiguration, R2Options r2, LogEventLevel minimumLevel)
     {
@@ -161,37 +142,37 @@ public static class SerilogConfiguration
         // keeps the key exactly as given (no extra date suffix) since the date already lives in the name.
         var objectName = $"daleel-{DateTime.UtcNow:yyyyMMdd}.jsonl";
 
-        // Route R2 through a sub-logger that drops anything the failure callback emitted, so an upload
-        // failure can be re-logged (to console+file, below) without feeding itself back into R2.
-        loggerConfiguration.WriteTo.Logger(sub => sub
-            .Filter.ByExcluding(e => e.Properties.ContainsKey(R2SinkFailureMarker))
-            .WriteTo.AmazonS3(
-                path: objectName,
-                bucketName: r2.Logs.BucketName,
-                serviceUrl: r2.ServiceUrl,
-                awsAccessKeyId: r2.AccessKey,
-                awsSecretAccessKey: r2.SecretKey,
-                // JsonFormatter writes one JSON object per line — that is the .jsonl format.
-                formatter: new JsonFormatter(renderMessage: true),
-                // Information+ in prod (Debug in dev): the whole picture, matching the file sink — not errors-only.
-                restrictedToMinimumLevel: minimumLevel,
-                // The AmazonS3 sink defines its own RollingInterval enum, distinct from the File sink's.
-                rollingInterval: Serilog.Sinks.AmazonS3.RollingInterval.Infinite,
-                // Group every app-log object under a single prefix so the Worker can list/search just `logs/`
-                // and never trips over the scraped-data objects sharing this bucket.
-                bucketPath: "logs",
-                // Cloudflare R2 does not support AWS SigV4 *streaming* payload signing; disabling it is
-                // the documented fix for S3-compatible uploads to R2.
-                disablePayloadSigning: true,
-                // Don't wait for the batch timer to flush the very first error of a run.
-                eagerlyEmitFirstEvent: true,
-                // The AmazonS3 sink otherwise catches and DISCARDS every upload exception — which is how
-                // R2 could silently stop receiving logs with nothing in any sink to explain it. Re-log the
-                // failure to the console + file sinks (tagged with R2SinkFailureMarker so this very event
-                // is filtered out of R2 above, avoiding a failure→re-log→re-upload loop).
-                failureCallback: ex => Log
-                    .ForContext(R2SinkFailureMarker, true)
-                    .Error(ex, "Serilog AmazonS3 (R2) log upload failed: {ErrorMessage}", ex.Message)));
+        // The AmazonS3 sink first writes each event to a LOCAL buffer file (`path`), then uploads that file
+        // to R2. `path` resolves relative to the content root (WORKDIR /app in the container), which is NOT
+        // writable — a bare `daleel-20260701.jsonl` became `/app/daleel-20260701.jsonl` → "Access to the
+        // path ... is denied". Buffer under the persisted, writable data volume instead. A dedicated
+        // `r2-buffer/` subdirectory keeps this file out of the File sink's own `data/logs/daleel-*.jsonl`
+        // set so the two sinks never write the same path. The R2 object key is derived from the filename +
+        // `bucketPath`, so it stays `logs/daleel-20260701.jsonl` regardless of the local buffer directory.
+        var bufferDirectory = Path.Combine(DefaultFileLogDirectory, "r2-buffer");
+        Directory.CreateDirectory(bufferDirectory);
+        var bufferPath = Path.Combine(bufferDirectory, objectName);
+
+        loggerConfiguration.WriteTo.AmazonS3(
+            path: bufferPath,
+            bucketName: r2.Logs.BucketName,
+            serviceUrl: r2.ServiceUrl,
+            awsAccessKeyId: r2.AccessKey,
+            awsSecretAccessKey: r2.SecretKey,
+            // JsonFormatter writes one JSON object per line — that is the .jsonl format.
+            formatter: new JsonFormatter(renderMessage: true),
+            // Information+ in prod (Debug in dev): the whole picture, matching the file sink — not errors-only.
+            restrictedToMinimumLevel: minimumLevel,
+            // The AmazonS3 sink defines its own RollingInterval enum, distinct from the File sink's.
+            rollingInterval: Serilog.Sinks.AmazonS3.RollingInterval.Infinite,
+            // Group every app-log object under a single prefix so the Worker can list/search just `logs/`
+            // and never trips over the scraped-data objects sharing this bucket.
+            bucketPath: "logs",
+            // Cloudflare R2 does not support AWS SigV4 *streaming* payload signing; disabling it is
+            // the documented fix for S3-compatible uploads to R2.
+            disablePayloadSigning: true,
+            // Don't wait for the batch timer to flush the very first error of a run.
+            eagerlyEmitFirstEvent: true);
     }
 
     /// <summary>

@@ -48,7 +48,14 @@ public sealed class SearchJobService : BackgroundService
     /// the deep-dive also harvests store catalogues for live prices (a slow site crawl). Clamped to a sane
     /// floor so a misconfiguration can't make it effectively zero.
     /// </summary>
-    private const int DefaultEnrichTimeoutSeconds = 180;
+    /// <remarks>
+    /// 180s proved far too small in practice: enriching ~12 items × several Context.dev scrapes each takes
+    /// minutes, and an abandoned pass is precisely why salvaged/article-derived results kept their empty
+    /// prices and images (QA job 2, 2026-07-01). The pass is detached — it never blocks the worker loop or
+    /// the user, who already has the base result on screen — so a longer ceiling only trades idle time for
+    /// filled-in prices, specs and product images.
+    /// </remarks>
+    private const int DefaultEnrichTimeoutSeconds = 600;
 
     private static TimeSpan ResolveEnrichTimeout(IConfiguration config)
     {
@@ -283,6 +290,16 @@ public sealed class SearchJobService : BackgroundService
                 {
                     _ = ReEnrichInBackgroundAsync(job.Id, job.UserId, result, quality);
                 }
+            }
+            else if (result.CostCapTripped)
+            {
+                // The per-job cost cap cut the base run short (the result above was salvaged). Launching
+                // the background deep-dive now would hand the very job the cap just stopped a FRESH full
+                // enrichment budget — doubling the admin-configured ceiling exactly when it fired. The
+                // user keeps the salvaged base result; enrichment is deliberately skipped.
+                _logger.LogWarning(
+                    "Skipping background enrichment for job {JobId}: the per-job cost cap tripped during the base run",
+                    job.Id);
             }
             else
             {

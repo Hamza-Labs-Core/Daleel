@@ -2,7 +2,7 @@
 <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
     <MudCardContent>
         <div class="d-flex justify-space-between align-start">
-            <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(Store.Name)">@Store.Name</MudText>
+            <TranslatedText Text="@Store.Name" Typo="Typo.subtitle1" />
             @if (Store.Rating is { } rating)
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Filled"

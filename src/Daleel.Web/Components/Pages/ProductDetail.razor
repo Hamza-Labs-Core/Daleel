@@ -28,7 +28,10 @@ else if (_view is null)
 }
 else
 {
-    <MudText Typo="Typo.h4" dir="@Catalog.Dir(_view.Name)" Class="mb-1">@_view.Name</MudText>
+    @* Search results are cached language-agnostically, so an Arabic-first market yields Arabic product
+       names even under an English UI. Route the name through TranslatedText (as ModelCard does) so it is
+       translated to the current UI language at display time — cache-first, best-effort, dir-aware. *@
+    <TranslatedText Text="@_view.Name" Typo="Typo.h4" CssClass="mb-1" />
     @if (!string.IsNullOrWhiteSpace(_view.Brand) || !string.IsNullOrWhiteSpace(_view.Model))
     {
         <MudText Typo="Typo.subtitle1" Color="Color.Secondary" Class="mb-3">

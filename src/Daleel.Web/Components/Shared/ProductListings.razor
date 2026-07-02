@@ -79,7 +79,7 @@
 else
 {
     <MudGrid Spacing="3">
-        @foreach (var (idx, model) in _filtered)
+        @foreach (var (idx, model) in _pageItems)
         {
             <MudItem xs="12" sm="6" md="4" @key="model">
                 <ModelCard Model="model"
@@ -90,6 +90,17 @@ else
             </MudItem>
         }
     </MudGrid>
+
+    @* Numbered pagination (with prev/next and first/last) so a 100+ item grid stays scannable.
+       Hidden for a single page. Compare selection is keyed by the model's ORIGINAL index, so
+       selections survive page flips. *@
+    @if (_pageCount > 1)
+    {
+        <div class="d-flex justify-center mt-4">
+            <MudPagination Count="_pageCount" Selected="_page" SelectedChanged="OnPageChanged"
+                           ShowFirstButton="true" ShowLastButton="true" BoundaryCount="1" MiddleCount="3" />
+        </div>
+    }
 }
 
 @if (Result.Comparisons.Count > 0)
@@ -146,6 +157,9 @@ else
     private const string AllValue = "__all__";
     private const int MaxCompare = 4;
 
+    /// <summary>Cards per page: 4 rows of the md 3-column grid.</summary>
+    private const int PageSize = 12;
+
     private string _brand = AllValue;
     private string _sourceType = AllValue;
     private string _condition = AllValue;
@@ -162,17 +176,41 @@ else
     // markup is then O(1), so unrelated re-renders (e.g. toggling a compare checkbox) stay cheap. PERF-2.
     private List<(int Index, ProductModel Model)> _filtered = new();
 
+    // Current page (1-based) over _filtered, and the cached slice the grid renders. A filter change
+    // resets to page 1 (the old page may no longer exist); a page flip just re-slices.
+    private int _page = 1;
+    private int _pageCount = 1;
+    private List<(int Index, ProductModel Model)> _pageItems = new();
+
     // Filter/sort inputs are exposed as properties so the bound MudBlazor controls trigger a single
-    // recompute on change instead of the markup re-running the LINQ pipeline on every render.
-    private string Brand { get => _brand; set { if (_brand != value) { _brand = value; Recompute(); } } }
-    private string SourceType { get => _sourceType; set { if (_sourceType != value) { _sourceType = value; Recompute(); } } }
-    private string Condition { get => _condition; set { if (_condition != value) { _condition = value; Recompute(); } } }
-    private string Sort { get => _sort; set { if (_sort != value) { _sort = value; Recompute(); } } }
-    private decimal? MinPrice { get => _minPrice; set { if (_minPrice != value) { _minPrice = value; Recompute(); } } }
-    private decimal? MaxPrice { get => _maxPrice; set { if (_maxPrice != value) { _maxPrice = value; Recompute(); } } }
+    // recompute on change instead of the markup re-running the LINQ pipeline on every render. A filter
+    // change also snaps back to page 1 — the current page may not exist in the narrowed list.
+    private string Brand { get => _brand; set { if (_brand != value) { _brand = value; OnFilterChanged(); } } }
+    private string SourceType { get => _sourceType; set { if (_sourceType != value) { _sourceType = value; OnFilterChanged(); } } }
+    private string Condition { get => _condition; set { if (_condition != value) { _condition = value; OnFilterChanged(); } } }
+    private string Sort { get => _sort; set { if (_sort != value) { _sort = value; OnFilterChanged(); } } }
+    private decimal? MinPrice { get => _minPrice; set { if (_minPrice != value) { _minPrice = value; OnFilterChanged(); } } }
+    private decimal? MaxPrice { get => _maxPrice; set { if (_maxPrice != value) { _maxPrice = value; OnFilterChanged(); } } }
+
+    private void OnFilterChanged()
+    {
+        _page = 1;
+        Recompute();
+    }
+
+    // The Result last seen by OnParametersSet: page 1 is forced only when a genuinely NEW result
+    // arrives (fresh search, or the background enrichment streaming a refreshed result) — a parent
+    // re-render passing the SAME Result must not yank the user off the page they're browsing.
+    private ProductSearchResult? _lastResult;
 
     protected override void OnParametersSet()
     {
+        if (!ReferenceEquals(_lastResult, Result))
+        {
+            _lastResult = Result;
+            _page = 1;
+        }
+
         if (!string.IsNullOrWhiteSpace(InitialBrand))
         {
             _brand = InitialBrand!;
@@ -218,6 +256,21 @@ else
         };
 
         _filtered = q.ToList();
+        RepageInternal();
+    }
+
+    private void OnPageChanged(int page)
+    {
+        _page = page;
+        RepageInternal();
+    }
+
+    /// <summary>Recomputes the page count (clamping the current page) and the rendered slice.</summary>
+    private void RepageInternal()
+    {
+        _pageCount = Math.Max(1, (_filtered.Count + PageSize - 1) / PageSize);
+        _page = Math.Clamp(_page, 1, _pageCount);
+        _pageItems = _filtered.Skip((_page - 1) * PageSize).Take(PageSize).ToList();
     }
 
     private bool MatchesSourceType(ResultType type) => _sourceType switch

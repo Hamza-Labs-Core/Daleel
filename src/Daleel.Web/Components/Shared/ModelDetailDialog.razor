@@ -6,7 +6,9 @@
 
 <MudDialog>
     <TitleContent>
-        <MudText Typo="Typo.h6" dir="@Catalog.Dir(_model.Name)">@_model.Name</MudText>
+        @* Translate the model name to the current UI language at display time (names are cached
+           language-agnostically, so an Arabic market surfaces Arabic names under an EN UI). *@
+        <TranslatedText Text="@_model.Name" Typo="Typo.h6" />
         @if (!string.IsNullOrWhiteSpace(_model.Brand) || !string.IsNullOrWhiteSpace(_model.Model))
         {
             <MudText Typo="Typo.caption" Color="Color.Secondary">

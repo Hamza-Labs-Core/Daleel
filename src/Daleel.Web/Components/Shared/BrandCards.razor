@@ -10,8 +10,10 @@
                         @if (LogoSrc(b) is { } logo)
                         {
                             @* Plain img (logos are benign): a logo-service miss just hides itself, falling
-                               back to no icon rather than a broken-image glyph. *@
-                            <img src="@logo" alt="@b.Name" loading="lazy"
+                               back to no icon rather than a broken-image glyph. referrerpolicy="no-referrer"
+                               so hotlink-protected logo hosts (which 403 cross-origin requests carrying a
+                               Referer) still serve the image — same reason SafeImage sends no Referer. *@
+                            <img src="@logo" alt="@b.Name" loading="lazy" referrerpolicy="no-referrer"
                                  style="height:32px;width:32px;object-fit:contain;border-radius:6px;"
                                  onerror="this.style.display='none'" />
                         }
@@ -19,7 +21,7 @@
                         {
                             <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Info" />
                         }
-                        <MudText Typo="Typo.h6">@b.Name</MudText>
+                        <TranslatedText Text="@b.Name" Typo="Typo.h6" />
                     </div>
                     <div class="d-flex align-center gap-2 mt-1" style="flex-wrap:wrap;">
                         @if (b.ListingCount > 0)

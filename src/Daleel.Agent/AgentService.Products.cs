@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Llm;
@@ -82,7 +83,10 @@ public sealed partial class AgentService
                 case ResultType.Marketplace when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
                     AddMarketplace(marketplaces, r);
                     break;
-                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
+                // A web hit whose title is a URL/bare domain has no product identity — never surface
+                // a raw link as a product card (same rule as PickName and the extractor paths).
+                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url)
+                    && !LooksLikeUrl(r.Title):
                     webListings.Add(WebResultToListing(r, type));
                     break;
 
@@ -141,6 +145,19 @@ public sealed partial class AgentService
                 ? m with { Offers = m.Offers.Where(o => !IsPlaceholderOffer(o)).ToList() }
                 : m)
             .ToList();
+
+        // Relevance gate: deterministic shopping hits (SerpAPI → listing) reach this grid WITHOUT any
+        // LLM pass or halal guard, so loosely-matching items survive — a milk frother or a "slimming
+        // coffee" drink in a coffee-MAKER search. One cheap LLM call asks, per item, "is this ITSELF
+        // a <target>?" and drops the ones that aren't. Runs before the insight/reputation passes so
+        // junk items never earn a brand-reputation call. Product intent only — service/place results
+        // are provider/venue lists where the product-type question doesn't apply. Best-effort: any
+        // failure keeps the full list.
+        if (useLlmExtraction && intent == SearchIntentType.Product && models.Count > 1)
+        {
+            var target = intelligence?.Schema is { IsEmpty: false } sch ? sch.ProductType : query;
+            models = await FilterRelevantModelsAsync(target, models, cancellationToken).ConfigureAwait(false);
+        }
 
         // Attach the LLM-distilled pros/cons + verdict to each model up-front (keyed the same way
         // the aggregator groups listings), so the grid card and detail panel can show an honest
@@ -561,10 +578,10 @@ public sealed partial class AgentService
         var insights = new Dictionary<string, ModelInsight>(StringComparer.Ordinal);
         foreach (var p in dto.Products)
         {
-            var name = string.IsNullOrWhiteSpace(p.Name) ? p.Model : p.Name;
+            var name = PickName(p.Name, p.Model);
             if (string.IsNullOrWhiteSpace(name))
             {
-                continue; // nothing to identify the product by
+                continue; // nothing to identify the product by (or the LLM only gave a URL)
             }
 
             var brand = string.IsNullOrWhiteSpace(p.Brand) ? null : p.Brand!.Trim();
@@ -653,6 +670,28 @@ public sealed partial class AgentService
     private sealed record ModelInsight(
         IReadOnlyList<string> Pros, IReadOnlyList<string> Cons, string? Summary);
 
+    // A URL / bare domain the LLM sometimes drops into the name field instead of the product name:
+    // "https://x.com/p", "www.foo.io", "amazon.com/dp/B0…". The final label must be all letters (a TLD)
+    // so real model numbers like "GX-3.5" or "A2.1" are NOT mistaken for domains.
+    private static readonly Regex UrlLikeName = new(
+        @"^\s*(https?://|www\.)|^\s*([a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,24}(/\S*)?\s*$",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// Chooses the product's display name, guarding against the LLM occasionally emitting the source URL
+    /// (or a bare domain) in the name field instead of the real product name. A URL-shaped name is rejected
+    /// in favour of the model number; if that is also missing or URL-shaped, the product is dropped rather
+    /// than surfacing a raw link to the shopper.
+    /// </summary>
+    private static string? PickName(string? name, string? model)
+    {
+        if (!string.IsNullOrWhiteSpace(name) && !LooksLikeUrl(name)) return name;
+        if (!string.IsNullOrWhiteSpace(model) && !LooksLikeUrl(model)) return model;
+        return null;
+    }
+
+    private static bool LooksLikeUrl(string text) => UrlLikeName.IsMatch(text.Trim());
+
     /// <summary>
     /// Insight-map key matching <see cref="ListingExtractor.DedupKey"/>'s identity rules
     /// (brand+model, else normalized name), so a model aggregated from listings can look up the
@@ -710,6 +749,82 @@ public sealed partial class AgentService
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Runs the LLM relevance gate over the aggregated models: one call, one question per item —
+    /// "is this item ITSELF a &lt;target&gt;?" — and drops the items that aren't (accessories,
+    /// consumables, different product types, haram content). Best-effort by design: a failed call,
+    /// unparseable reply, or an implausible drop-everything verdict keeps the original list, so this
+    /// gate can reduce noise but can never empty a result or fault a search.
+    /// </summary>
+    private async Task<IReadOnlyList<ProductModel>> FilterRelevantModelsAsync(
+        string target, IReadOnlyList<ProductModel> models, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var labels = models
+                .Select(m => string.Join(" — ", new[] { m.Name, m.Brand, m.Model }
+                    .Where(s => !string.IsNullOrWhiteSpace(s))))
+                .ToList();
+
+            var text = await _llm.CompleteTextAsync(
+                PromptTemplates.RelevanceGateSystem,
+                PromptTemplates.RelevanceGate(target, labels),
+                cancellationToken).ConfigureAwait(false);
+
+            var dto = LlmJson.Deserialize<RelevanceVerdictsDto>(text);
+            if (dto?.Drop is not { Count: > 0 } drop)
+            {
+                return models; // nothing flagged (or unparseable reply) — keep everything
+            }
+
+            var kept = ApplyRelevanceVerdicts(models, drop);
+            if (kept.Count == models.Count)
+            {
+                return models;
+            }
+
+            // Sanity guard: a verdict that wipes (nearly) the whole grid is far more likely a gate
+            // misfire — or a prompt-injected product name — than 80%+ genuine noise. Distrust it and
+            // keep the originals; a noisy grid beats the empty-results failure class.
+            if (kept.Count < Math.Max(1, models.Count / 5))
+            {
+                Log($"relevance gate flagged {models.Count - kept.Count}/{models.Count} items — implausible, ignoring the verdict");
+                return models;
+            }
+
+            Log($"🧹 Relevance gate removed {models.Count - kept.Count} item(s) that aren't a {target}.");
+            return kept;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Log($"relevance gate failed: {ex.Message}");
+            return models; // best-effort — never fault the search over a relevance pass
+        }
+    }
+
+    /// <summary>
+    /// Applies a drop-index verdict to the model list: listed indices are removed, out-of-range or
+    /// duplicate indices are ignored, unlisted items are kept (the gate fails open per item).
+    /// Pure and static so the verdict semantics are unit-testable without an LLM.
+    /// </summary>
+    internal static IReadOnlyList<ProductModel> ApplyRelevanceVerdicts(
+        IReadOnlyList<ProductModel> models, IReadOnlyList<int> dropIndices)
+    {
+        var drop = new HashSet<int>(dropIndices.Where(i => i >= 0 && i < models.Count));
+        if (drop.Count == 0)
+        {
+            return models;
+        }
+
+        return models.Where((_, i) => !drop.Contains(i)).ToList();
+    }
+
+    /// <summary>Wire shape for the relevance-gate LLM output.</summary>
+    private sealed class RelevanceVerdictsDto
+    {
+        [JsonPropertyName("drop")] public List<int>? Drop { get; set; }
     }
 
     /// <summary>

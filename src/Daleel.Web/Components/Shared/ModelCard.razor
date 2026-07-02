@@ -29,15 +29,15 @@
             }
         </div>
 
-        <MudText Typo="Typo.body1" dir="@Catalog.Dir(Model.Name)" Style="font-weight:500;line-height:1.3;">
-            @Model.Name
-        </MudText>
+        @* Search results are cached language-agnostically, and an Arabic-first market (e.g. Jordan) yields
+           Arabic product/brand names even under an English UI. Route names through TranslatedText so they
+           are translated to the current UI language at display time — cache-first and best-effort, a
+           transparent pass-through when no DeepL key is set or the text already matches the UI language. *@
+        <TranslatedText Text="@Model.Name" Typo="Typo.body1" Style="font-weight:500;line-height:1.3;" />
 
-        @if (!string.IsNullOrWhiteSpace(Model.Brand) || !string.IsNullOrWhiteSpace(Model.Model))
+        @if (!string.IsNullOrWhiteSpace(BrandLine))
         {
-            <MudText Typo="Typo.caption" Color="Color.Secondary">
-                @string.Join(" · ", new[] { Model.Brand, Model.Model }.Where(s => !string.IsNullOrWhiteSpace(s)))
-            </MudText>
+            <TranslatedText Text="@BrandLine" Typo="Typo.caption" Color="Color.Secondary" />
         }
 
         @if (Model.BrandReputation is { HasSignal: true })
@@ -104,6 +104,10 @@
     [Parameter] public bool CanSelectMore { get; set; } = true;
     [Parameter] public EventCallback<bool> SelectedChanged { get; set; }
     [Parameter] public EventCallback OnDetails { get; set; }
+
+    /// <summary>"Brand · Model" — the sub-caption under the name; empty when neither is set.</summary>
+    private string BrandLine =>
+        string.Join(" · ", new[] { Model.Brand, Model.Model }.Where(s => !string.IsNullOrWhiteSpace(s)));
 
     private Task OnToggleCompare(bool value) => SelectedChanged.InvokeAsync(value);
     private Task OnDetailsClicked() => OnDetails.InvokeAsync();

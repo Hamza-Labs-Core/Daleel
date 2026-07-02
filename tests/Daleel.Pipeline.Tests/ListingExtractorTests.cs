@@ -72,6 +72,45 @@ public class ListingExtractorTests
     }
 
     [Fact]
+    public void FromExtractedJson_RejectsUrlShapedName_FallsBackToModel()
+    {
+        // Extractors sometimes drop the source URL/bare domain into the name field. A URL-shaped name must
+        // never surface as the product name — fall back to the model number instead ("links as names" bug).
+        var json = Json("""
+        {
+          "products": [
+            { "name": "https://amazon.com/dp/B0ABC", "model": "AR24TXHQ", "price": 450, "url": "https://amazon.com/dp/B0ABC" },
+            { "name": "www.opensooq.com/split-ac", "price": 300, "url": "https://opensooq.com/x" }
+          ]
+        }
+        """);
+
+        var listings = ListingExtractor.FromExtractedJson(json, "X", ResultType.Marketplace);
+
+        // First row falls back to the model number; second row has only a URL for a name → dropped entirely.
+        listings.Should().ContainSingle();
+        listings[0].Name.Should().Be("AR24TXHQ");
+        listings.Should().NotContain(l => l.Name.Contains("http") || l.Name.Contains("www."));
+    }
+
+    [Fact]
+    public void FromShopping_SkipsUrlShapedTitles()
+    {
+        // A shopping hit titled with a bare domain ("atelier21.org") has no product identity —
+        // it must never surface as a product card (seen live on QA, "best microwave oven").
+        var hits = new[]
+        {
+            new SearchResult { Title = "atelier21.org", Price = new Money(99, "USD"), Url = "https://atelier21.org/x" },
+            new SearchResult { Title = "www.foo-shop.com/deals", Price = new Money(10, "USD") },
+            new SearchResult { Title = "Midea 0.7 Cu Ft Microwave", Price = new Money(75, "USD") },
+        };
+
+        var listings = ListingExtractor.FromShopping(hits);
+
+        listings.Should().ContainSingle().Which.Name.Should().Be("Midea 0.7 Cu Ft Microwave");
+    }
+
+    [Fact]
     public void FromShopping_MapsHitsToListings()
     {
         var hits = new[]

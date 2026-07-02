@@ -36,7 +36,10 @@ public sealed class ParseQueryActivity : CancellableActivity
         state.Geo = state.GeoProfile.Key;
         services.Report(SearchStep.Analyzing, "Progress.Msg.Market", state.GeoProfile.Country);
         state.Strategy = await services.Agent.PlanAsync(
-            PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken);
+            PromptTemplates.PlanFreeform(state.Query, state.GeoProfile), context.CancellationToken,
+            // The raw query lets PlanAsync's deterministic buy-intent backstop correct a planner
+            // misclassification (General on a "best <product>" query would skip the whole grid).
+            userQuery: state.Query);
         // Carry the planner's thing-type classification onto the run state so the extraction activity
         // can pick the product / service / place prompt without reaching back into the strategy.
         state.Intent = state.Strategy.Intent;
@@ -70,6 +73,17 @@ public sealed class CheckCacheActivity : CancellableActivity
         var services = context.GetRequiredService<SearchPipelineServices>();
         if (services.Cache is null)
         {
+            return;
+        }
+
+        // Admin kill-switch: when the search cache is disabled at /admin/settings, skip the check so
+        // every search runs fresh. FromCache stays false, so all downstream activities execute live.
+        // Resolve OPTIONALLY (GetService, like the base cancel check): a DI context without the config
+        // service — e.g. the workflow unit tests — must fail open to normal caching, never fault.
+        if (context.GetService<Daleel.Web.Data.ISystemConfigService>() is { } config &&
+            !await config.GetBoolAsync("cache.search_enabled", true, context.CancellationToken))
+        {
+            state.RecordEvent(EventCategory.Cache, "cache.bypass", "cache");
             return;
         }
 
