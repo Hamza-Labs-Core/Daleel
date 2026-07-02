@@ -34,6 +34,17 @@ public class ApifyPostFetcher : IPostFetcher
         ArgumentNullException.ThrowIfNull(source);
 
         var actorId = source.ActorId ?? DefaultActorFor(source.Kind);
+
+        // A group/page scraper is driven by startUrls, not a keyword — routing a Search-kind fetch
+        // at one (the Jordan/Egypt geo profiles list the groups scraper FIRST in ApifyActors) made
+        // Apify reject every social fetch with 400 "Field input.startUrls is required". A keyword
+        // search must always run on a search-capable actor, whatever the profile's ordering says.
+        if (source.Kind == SourceKind.Search &&
+            actorId.Contains("groups-scraper", StringComparison.OrdinalIgnoreCase))
+        {
+            actorId = _defaultSearchActor;
+        }
+
         var effectiveKeyword = !string.IsNullOrWhiteSpace(source.Target) && source.Kind == SourceKind.Search
             ? source.Target
             : keyword;

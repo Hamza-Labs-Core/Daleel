@@ -49,7 +49,17 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
     }
 
     public bool Supports(SearchKind kind) =>
-        kind is SearchKind.Web or SearchKind.Shopping or SearchKind.Maps or SearchKind.News;
+        kind is SearchKind.Web or SearchKind.Shopping or SearchKind.Maps or SearchKind.News or SearchKind.Images;
+
+    /// <summary>
+    /// Countries Google Shopping does NOT operate in, learned at runtime from SerpAPI's HTTP 400
+    /// "Unsupported `xx` country - gl parameter" rejection (Jordan hit this in prod: every shopping
+    /// call in a search burned a paid request and returned nothing). The first rejection per country
+    /// stops all further doomed calls for the process lifetime; product images that shopping results
+    /// normally supply are backfilled from <c>google_images</c> during enrichment instead.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> ShoppingUnsupportedGl =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<SearchResults> SearchAsync(SearchQuery query, CancellationToken cancellationToken = default)
     {
@@ -58,11 +68,20 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
             SearchKind.Shopping => "google_shopping",
             SearchKind.Maps => "google_maps",
             SearchKind.News => "google_news",
+            SearchKind.Images => "google_images",
             _ => "google"
         };
 
+        // A country already known to be rejected by the shopping engine: answer empty without
+        // spending a request. The caller's pipeline treats an empty shopping page as "no hits".
+        if (query.Kind == SearchKind.Shopping &&
+            query.CountryCode is { Length: > 0 } gl && ShoppingUnsupportedGl.ContainsKey(gl))
+        {
+            return new SearchResults { Provider = Name, Query = query.Query, Kind = query.Kind, Results = new List<SearchResult>() };
+        }
+
         // Web and shopping go deep — page through results (up to MaxPages) until we reach the
-        // requested count. Maps/News stay single-page (their result shapes don't paginate usefully here).
+        // requested count. Maps/News/Images stay single-page (their result shapes don't paginate usefully here).
         var results = query.Kind is SearchKind.Web or SearchKind.Shopping
             ? await SearchPagedAsync(engine, query, cancellationToken).ConfigureAwait(false)
             : await SearchSinglePageAsync(engine, query, cancellationToken).ConfigureAwait(false);
@@ -93,8 +112,25 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
         {
             cancellationToken.ThrowIfCancellationRequested();
             var url = BuildUrl(engine, query, start: page * PageSize, num: PageSize);
-            using var doc = await SendJsonAsync(
-                () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken).ConfigureAwait(false);
+            JsonDocument doc;
+            try
+            {
+                doc = await SendJsonAsync(
+                    () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken).ConfigureAwait(false);
+            }
+            catch (ProviderException ex) when (
+                query.Kind == SearchKind.Shopping &&
+                query.CountryCode is { Length: > 0 } gl &&
+                ex.Message.Contains("Unsupported", StringComparison.OrdinalIgnoreCase) &&
+                ex.Message.Contains("gl parameter", StringComparison.OrdinalIgnoreCase))
+            {
+                // Google Shopping doesn't operate in this country — remember it so every later
+                // shopping query for the market skips the call instead of burning another request.
+                ShoppingUnsupportedGl.TryAdd(gl, 0);
+                return collected;
+            }
+
+            using var _ = doc;
 
             var pageResults = query.Kind == SearchKind.Shopping
                 ? ParseShopping(doc.RootElement, int.MaxValue)
@@ -141,6 +177,7 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
         return query.Kind switch
         {
             SearchKind.Maps => ParseLocal(doc.RootElement, query.MaxResults),
+            SearchKind.Images => ParseImages(doc.RootElement, query.MaxResults),
             _ => ParseOrganic(doc.RootElement, query.MaxResults)
         };
     }
@@ -223,6 +260,37 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
                     Seller = StrOrNull(item, "source") ?? StrOrNull(item, "store"),
                     Rating = DblOrNull(item, "rating"),
                     ImageUrl = StrOrNull(item, "thumbnail"),
+                    Position = IntOrNull(item, "position")
+                });
+                if (list.Count >= max) break;
+            }
+        }
+
+        return list;
+    }
+
+    private List<SearchResult> ParseImages(JsonElement root, int max)
+    {
+        var list = new List<SearchResult>();
+        if (root.TryGetProperty("images_results", out var arr) && arr.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in arr.EnumerateArray())
+            {
+                // Prefer the gstatic thumbnail: same host as Google Shopping thumbnails, which render
+                // reliably (no hotlink protection); "original" is the fallback for older payloads.
+                var image = StrOrNull(item, "thumbnail") ?? StrOrNull(item, "original");
+                if (image is null)
+                {
+                    continue;
+                }
+
+                list.Add(new SearchResult
+                {
+                    Title = Str(item, "title"),
+                    Url = StrOrNull(item, "link"),
+                    Source = Name,
+                    Kind = SearchKind.Images,
+                    ImageUrl = image,
                     Position = IntOrNull(item, "position")
                 });
                 if (list.Count >= max) break;

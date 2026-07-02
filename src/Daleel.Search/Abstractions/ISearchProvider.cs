@@ -8,7 +8,13 @@ public enum SearchKind
     Web,
     Shopping,
     Maps,
-    News
+    News,
+
+    /// <summary>
+    /// Image search (SerpAPI's <c>google_images</c>). Used to backfill product images in markets
+    /// where Google Shopping — the grid's usual thumbnail source — doesn't operate (e.g. Jordan).
+    /// </summary>
+    Images
 }
 
 /// <summary>

@@ -49,6 +49,56 @@ public class SerpApiProviderTests
     }
 
     [Fact]
+    public async Task SearchAsync_Shopping_UnsupportedGlCountry_LearnsAndStopsCalling()
+    {
+        // SerpAPI hard-rejects countries Google Shopping doesn't operate in (prod hit this for
+        // gl=jo — four doomed paid calls per Jordan search). The first rejection must be learned
+        // so later shopping queries for that market return empty WITHOUT another HTTP call.
+        // A unique country code keeps this test independent of the provider's static learned set.
+        var handler = new StubHttpMessageHandler(req =>
+            req.RequestUri!.Query.Contains("engine=google_shopping")
+                ? (System.Net.HttpStatusCode.BadRequest, """{ "error": "Unsupported `zz` country - gl parameter." }""")
+                : (System.Net.HttpStatusCode.OK, """{ "organic_results": [] }"""));
+        var provider = Build(handler);
+
+        var first = await provider.SearchAsync(
+            new SearchQuery { Query = "AC", Kind = SearchKind.Shopping, CountryCode = "zz" });
+        first.Results.Should().BeEmpty();
+        handler.Requests.Should().HaveCount(1);
+
+        var second = await provider.SearchAsync(
+            new SearchQuery { Query = "fridge", Kind = SearchKind.Shopping, CountryCode = "zz" });
+        second.Results.Should().BeEmpty();
+        handler.Requests.Should().HaveCount(1, "the learned unsupported country must not be queried again");
+
+        // Other kinds for the same country are unaffected (web search supports every gl).
+        var web = await provider.SearchAsync(
+            new SearchQuery { Query = "AC", Kind = SearchKind.Web, CountryCode = "zz" });
+        handler.Requests.Should().HaveCountGreaterThan(1, "web searches must still go out");
+    }
+
+    [Fact]
+    public async Task SearchAsync_Images_ParsesImageResults()
+    {
+        const string json = """
+        { "images_results": [
+            { "title": "Samsung AR24 photo", "link": "https://page/1", "thumbnail": "https://encrypted-tbn0.gstatic.com/images?q=1", "original": "https://cdn/1.jpg", "position": 1 },
+            { "title": "no image fields at all", "link": "https://page/2", "position": 2 }
+        ] }
+        """;
+        var handler = new StubHttpMessageHandler(json);
+        var provider = Build(handler);
+
+        var results = await provider.SearchAsync(new SearchQuery { Query = "Samsung AR24", Kind = SearchKind.Images });
+
+        // The gstatic thumbnail wins (hotlink-safe); an entry with no image fields is skipped.
+        results.Results.Should().ContainSingle();
+        results.Results[0].ImageUrl.Should().Be("https://encrypted-tbn0.gstatic.com/images?q=1");
+        results.Results[0].Kind.Should().Be(SearchKind.Images);
+        handler.Requests[0].RequestUri!.Query.Should().Contain("engine=google_images");
+    }
+
+    [Fact]
     public async Task SearchAsync_Maps_ParsesLocalResults()
     {
         const string json = """
