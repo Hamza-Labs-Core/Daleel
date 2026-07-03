@@ -196,6 +196,28 @@ public class HalalModeratorTests
     }
 
     [Fact]
+    public async Task DuplicateVerdictIds_DoNotFaultModeration()
+    {
+        // A rogue classifier emitting duplicate ids must never throw out of ModerateAsync —
+        // moderation post-processing faults would fault the whole search (the f1507fa class).
+        var classifier = new FakeClassifier(candidates => candidates
+            .SelectMany(c => new[]
+            {
+                new HalalVerdict(c.Id, false, null, 0.6, "first"),
+                new HalalVerdict(c.Id, true, "alcohol", 0.9, "duplicate — haram wins")
+            })
+            .ToList());
+        var filter = new ContentFilter(FilterStrictness.Strict);
+        var moderator = new HalalModerator(filter, classifier);
+        var items = new[] { new Item("City Bar & Lounge") };
+
+        var kept = await moderator.ModerateAsync(items, Projection);
+
+        kept.Should().BeEmpty("the haram duplicate wins over the halal one");
+        filter.AuditDetails.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task LlmFailure_FallsBackToKeywordDecisions()
     {
         var filter = new ContentFilter(FilterStrictness.Strict);

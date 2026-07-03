@@ -80,6 +80,18 @@ public sealed class FilteredContentLogRepository : IFilteredContentLogRepository
             return row.WhitelistEntryId;
         }
 
+        // A previous attempt may have inserted the entry but died before linking it to the row
+        // (or another circuit raced us). The unique index on SourceLogId makes this lookup the
+        // single source of truth — relink instead of inserting a duplicate.
+        if (await _db.ModerationWhitelist.FirstOrDefaultAsync(x => x.SourceLogId == id, ct) is { } orphan)
+        {
+            row.WhitelistEntryId = orphan.Id;
+            row.Rating ??= -1;
+            row.RatedAt ??= DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return orphan.Id;
+        }
+
         // Most specific key first: an image finding un-hides that image; otherwise the content
         // hash un-hides the same item text wherever it reappears; the URL is the last resort.
         var (key, matchType) = row.Field == "image" && row.ImageUrl is not null ? (row.ImageUrl, "image")
@@ -107,11 +119,37 @@ public sealed class FilteredContentLogRepository : IFilteredContentLogRepository
         row.Rating ??= -1;
         row.RatedAt ??= DateTimeOffset.UtcNow;
 
-        await _db.SaveChangesAsync(ct);
+        // One transaction across the insert and the row link: either both land or neither does,
+        // so a live-but-unlinked whitelist entry can't be left silently bypassing moderation.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            row.WhitelistEntryId = entry.Id;
+            await _db.SaveChangesAsync(ct);
+            await tx.CommitAsync(ct);
+            return entry.Id;
+        }
+        catch (DbUpdateException)
+        {
+            // Unique-index race: another circuit inserted the entry between our lookup and commit.
+            // Roll back our attempt and link to the winner's entry instead.
+            await tx.RollbackAsync(CancellationToken.None);
+            _db.ChangeTracker.Clear();
 
-        row.WhitelistEntryId = entry.Id;
-        await _db.SaveChangesAsync(ct);
-        return entry.Id;
+            var winner = await _db.ModerationWhitelist.FirstOrDefaultAsync(x => x.SourceLogId == id, ct);
+            if (winner is null)
+            {
+                throw; // not the race — surface the real failure
+            }
+
+            var freshRow = await _db.FilteredContentLogs.FirstAsync(x => x.Id == id, ct);
+            freshRow.WhitelistEntryId = winner.Id;
+            freshRow.Rating ??= -1;
+            freshRow.RatedAt ??= DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return winner.Id;
+        }
     }
 
     public async Task RemoveWhitelistAsync(long id, CancellationToken ct = default)

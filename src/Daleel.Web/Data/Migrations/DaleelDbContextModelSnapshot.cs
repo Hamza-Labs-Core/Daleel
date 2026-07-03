@@ -573,7 +573,8 @@ namespace Daleel.Web.Data.Migrations
 
                     b.HasIndex("Key");
 
-                    b.HasIndex("SourceLogId");
+                    b.HasIndex("SourceLogId")
+                        .IsUnique();
 
                     b.ToTable("ModerationWhitelist");
                 });

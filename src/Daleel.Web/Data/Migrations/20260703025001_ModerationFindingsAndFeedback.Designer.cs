@@ -12,7 +12,7 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Daleel.Web.Data.Migrations
 {
     [DbContext(typeof(DaleelDbContext))]
-    [Migration("20260703011641_ModerationFindingsAndFeedback")]
+    [Migration("20260703025001_ModerationFindingsAndFeedback")]
     partial class ModerationFindingsAndFeedback
     {
         /// <inheritdoc />
@@ -576,7 +576,8 @@ namespace Daleel.Web.Data.Migrations
 
                     b.HasIndex("Key");
 
-                    b.HasIndex("SourceLogId");
+                    b.HasIndex("SourceLogId")
+                        .IsUnique();
 
                     b.ToTable("ModerationWhitelist");
                 });

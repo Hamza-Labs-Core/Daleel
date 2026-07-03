@@ -1,3 +1,5 @@
+using Daleel.Core.Moderation;
+
 namespace Daleel.Web.Data;
 
 /// <summary>
@@ -64,6 +66,33 @@ public sealed class FilteredContentLog
     public long? WhitelistEntryId { get; set; }
 
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// Maps a pipeline finding to a persistable row, truncating every free-form value to its
+    /// column limit. Model reasons and scraped URLs are unbounded, the batch insert is
+    /// all-or-nothing, and the callers deliberately swallow persistence errors — so ONE over-long
+    /// value would otherwise silently discard the run's entire findings batch.
+    /// </summary>
+    public static FilteredContentLog From(FilterFinding d, string? query, string? geo, DateTimeOffset now) => new()
+    {
+        Query = Truncate(query, 2000),
+        Geo = Truncate(geo, 64),
+        Category = Truncate(d.Category, 32)!,
+        Rule = Truncate(d.Rule, 256),
+        Kind = Truncate(d.Kind, 64),
+        Content = Truncate(d.Content, 300),
+        Field = Truncate(d.Field, 32),
+        SourceUrl = Truncate(d.SourceUrl, 2048),
+        ImageUrl = Truncate(d.ImageUrl, 2048),
+        Confidence = d.Confidence,
+        DecisionSource = d.Source.ToString().ToLowerInvariant(),
+        ContentHash = Truncate(d.ContentHash, 64),
+        ItemRemoved = d.ItemRemoved,
+        CreatedAt = now
+    };
+
+    private static string? Truncate(string? s, int max) =>
+        s is null || s.Length <= max ? s : s[..max];
 }
 
 /// <summary>

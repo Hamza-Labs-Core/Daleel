@@ -85,6 +85,27 @@ public class LlmHalalClassifierTests
     }
 
     [Fact]
+    public void ParseVerdicts_DedupesRepeatedIds_HaramWins()
+    {
+        // Models sometimes emit the same item twice (hinted + haram both match the prompt's
+        // response rules). At most one verdict per id may survive — and never a halal one when a
+        // duplicate said haram, so a duplicate can't accidentally overturn a real flag.
+        const string response = """
+            [
+              {"id": 0, "haram": false, "category": null, "confidence": 0.6, "reason": "hinted item"},
+              {"id": 0, "haram": true, "category": "alcohol", "confidence": 0.9, "reason": "sells drinks"},
+              {"id": 0, "haram": false, "category": null, "confidence": 0.7, "reason": "again"}
+            ]
+            """;
+
+        var verdicts = LlmHalalClassifier.ParseVerdicts(response, Batch);
+
+        var verdict = verdicts.Should().ContainSingle().Subject;
+        verdict.IsHaram.Should().BeTrue();
+        verdict.Category.Should().Be("alcohol");
+    }
+
+    [Fact]
     public async Task ClassifyAsync_SendsKeywordHints_AndParsesRoundTrip()
     {
         var llm = new FakeLlm("""[{"id": 0, "haram": false, "category": null, "confidence": 0.9, "reason": "barber shop"}]""");

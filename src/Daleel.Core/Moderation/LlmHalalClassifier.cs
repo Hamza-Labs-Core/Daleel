@@ -111,7 +111,11 @@ public sealed class LlmHalalClassifier : IHalalClassifier
         }
 
         var knownIds = batch.Select(b => b.Id).ToHashSet();
-        var verdicts = new List<HalalVerdict>(dtos.Count);
+        // Deduped by id: models sometimes emit the same item twice (the prompt's "per haram item,
+        // plus per hinted item" clauses both match a hinted-and-haram item). A haram verdict wins
+        // over a duplicate halal one — fail-safe toward compliance, and the caller can rely on
+        // at most one verdict per id.
+        var byId = new Dictionary<int, HalalVerdict>(dtos.Count);
         foreach (var dto in dtos)
         {
             if (!knownIds.Contains(dto.Id))
@@ -132,13 +136,18 @@ public sealed class LlmHalalClassifier : IHalalClassifier
                 }
             }
 
-            verdicts.Add(new HalalVerdict(
+            var verdict = new HalalVerdict(
                 dto.Id, dto.Haram, dto.Haram ? category : null,
                 Math.Clamp(dto.Confidence, 0.0, 1.0),
-                string.IsNullOrWhiteSpace(dto.Reason) ? null : dto.Reason.Trim()));
+                string.IsNullOrWhiteSpace(dto.Reason) ? null : dto.Reason.Trim());
+
+            if (!byId.TryGetValue(dto.Id, out var existing) || (verdict.IsHaram && !existing.IsHaram))
+            {
+                byId[dto.Id] = verdict;
+            }
         }
 
-        return verdicts;
+        return byId.Values.ToList();
     }
 
     private static string Truncate(string text)

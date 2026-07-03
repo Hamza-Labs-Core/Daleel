@@ -107,12 +107,12 @@ else
                             <tr>
                                 <td colspan="8" style="background: var(--mud-palette-background-gray);">
                                     <div class="pa-4 d-flex flex-wrap gap-6">
-                                        @if (row.ImageUrl is not null)
+                                        @if (SafeHttpUrl(row.ImageUrl) is { } imageUrl)
                                         {
                                             <div>
                                                 <MudText Typo="Typo.caption" Color="Color.Secondary">Flagged image</MudText>
                                                 <div>
-                                                    <img src="@row.ImageUrl" alt="flagged content (admin review)"
+                                                    <img src="@imageUrl" alt="flagged content (admin review)" referrerpolicy="no-referrer"
                                                          style="max-width:180px; max-height:180px; border-radius:6px; border:1px solid var(--mud-palette-lines-default);"
                                                          loading="lazy" />
                                                 </div>
@@ -143,9 +143,10 @@ else
                                                 }
                                             </div>
 
-                                            @if (row.SourceUrl is not null)
+                                            @if (SafeHttpUrl(row.SourceUrl) is { } sourceUrl)
                                             {
-                                                <MudLink Href="@row.SourceUrl" Target="_blank" Typo="Typo.body2" Class="mt-2 d-inline-block">
+                                                <MudLink Href="@sourceUrl" Target="_blank" rel="noopener noreferrer"
+                                                         Typo="Typo.body2" Class="mt-2 d-inline-block">
                                                     View source page ↗
                                                 </MudLink>
                                             }
@@ -211,6 +212,16 @@ else
     }
 
     private void Toggle(long id) => _expandedId = _expandedId == id ? null : id;
+
+    /// <summary>
+    /// The stored URLs come from scraped external content — render them only when they're plain
+    /// http(s), so a hostile result can't smuggle a javascript:/data: scheme into an admin click.
+    /// </summary>
+    private static string? SafeHttpUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u)
+        && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
+            ? url
+            : null;
 
     private static Color SourceColor(string? source) => source switch
     {

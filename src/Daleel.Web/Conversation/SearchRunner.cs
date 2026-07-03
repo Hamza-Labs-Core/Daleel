@@ -212,23 +212,7 @@ public sealed class AgentSearchRunner : ISearchRunner
         }
 
         var now = DateTimeOffset.UtcNow;
-        var rows = details.Select(d => new FilteredContentLog
-        {
-            Query = job.Query,
-            Geo = job.Geo,
-            Category = d.Category,
-            Rule = d.Rule,
-            Kind = d.Kind,
-            Content = d.Content,
-            Field = d.Field,
-            SourceUrl = d.SourceUrl,
-            ImageUrl = d.ImageUrl,
-            Confidence = d.Confidence,
-            DecisionSource = d.Source.ToString().ToLowerInvariant(),
-            ContentHash = d.ContentHash,
-            ItemRemoved = d.ItemRemoved,
-            CreatedAt = now
-        });
+        var rows = details.Select(d => FilteredContentLog.From(d, job.Query, job.Geo, now));
 
         try
         {

@@ -367,7 +367,10 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
         {
             // The whole active key set is loaded per search run; Key is looked up on admin undo.
             e.HasIndex(x => x.Key);
-            e.HasIndex(x => x.SourceLogId);
+            // UNIQUE: at most one whitelist entry per finding. This is the DB-level guarantee that
+            // a retried/concurrent "un-filter" click can't create an orphaned duplicate entry that
+            // would keep content whitelisted with no UI path to remove it.
+            e.HasIndex(x => x.SourceLogId).IsUnique();
             e.Property(x => x.Key).HasMaxLength(2048);
             e.Property(x => x.MatchType).HasMaxLength(16);
             e.Property(x => x.Category).HasMaxLength(32);

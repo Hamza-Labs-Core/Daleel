@@ -117,7 +117,8 @@ namespace Daleel.Web.Data.Migrations
             migrationBuilder.CreateIndex(
                 name: "IX_ModerationWhitelist_SourceLogId",
                 table: "ModerationWhitelist",
-                column: "SourceLogId");
+                column: "SourceLogId",
+                unique: true);
         }
 
         /// <inheritdoc />

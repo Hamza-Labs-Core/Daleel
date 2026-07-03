@@ -192,7 +192,16 @@ public sealed class HalalModerator
             verdicts = Array.Empty<HalalVerdict>();
         }
 
-        var byId = verdicts.ToDictionary(v => v.Id);
+        // Duplicate-tolerant (haram wins): LlmHalalClassifier dedupes already, but this lookup must
+        // never be able to throw — moderation post-processing faults would fault the whole search.
+        var byId = new Dictionary<int, HalalVerdict>(verdicts.Count);
+        foreach (var v in verdicts)
+        {
+            if (!byId.TryGetValue(v.Id, out var existing) || (v.IsHaram && !existing.IsHaram))
+            {
+                byId[v.Id] = v;
+            }
+        }
         foreach (var candidate in candidates)
         {
             var state = states[candidate.Id];
@@ -313,13 +322,19 @@ public sealed class HalalModerator
             return kept; // best-effort: a failed vision pass leaves images untouched
         }
 
-        var flagged = verdicts
-            .Where(v => v.IsHaram
+        // Duplicate-tolerant for the same reason as the text-verdict lookup above.
+        var flagged = new Dictionary<string, ImageVerdict>(StringComparer.OrdinalIgnoreCase);
+        foreach (var v in verdicts)
+        {
+            if (v.IsHaram
                 && v.Category is not null
                 && HalalPolicy.AllowedCategories.Contains(v.Category)
                 && !HalalPolicy.NeverFiltered.Contains(v.Category)
                 && v.Confidence >= _policy.ThresholdFor(v.Category))
-            .ToDictionary(v => v.ImageUrl, StringComparer.OrdinalIgnoreCase);
+            {
+                flagged[v.ImageUrl] = v;
+            }
+        }
 
         if (flagged.Count == 0)
         {
