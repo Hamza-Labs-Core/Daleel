@@ -37,6 +37,7 @@ public sealed partial class AgentService
     private readonly IPostMatcher _matcher;
     private readonly OpinionExtractor? _opinions;
     private readonly ContentFilter _filter;
+    private readonly HalalModerator _moderator;
 
     public AgentService(
         ILlmClient llm,
@@ -47,7 +48,8 @@ public sealed partial class AgentService
         IPostFetcher? social = null,
         IPostMatcher? matcher = null,
         OpinionExtractor? opinions = null,
-        ContentFilter? contentFilter = null)
+        ContentFilter? contentFilter = null,
+        HalalModerator? moderator = null)
     {
         _llm = llm ?? throw new ArgumentNullException(nameof(llm));
         _options = options ?? new AgentOptions();
@@ -58,7 +60,10 @@ public sealed partial class AgentService
         _matcher = matcher ?? new ArabicMatcher();
         _opinions = opinions;
         // Default to Strict so callers that don't supply a filter still get halal-compliant output.
-        _filter = contentFilter ?? new ContentFilter(FilterStrictness.Strict);
+        // A supplied moderator must carry the same filter instance (shared audit); when only a
+        // filter is given the moderator degrades to the keyword-only pipeline over it.
+        _filter = moderator?.Filter ?? contentFilter ?? new ContentFilter(FilterStrictness.Strict);
+        _moderator = moderator ?? new HalalModerator(_filter);
     }
 
     /// <summary>The halal content filter applied to gathered results (audit log lives on it).</summary>
@@ -187,8 +192,10 @@ public sealed partial class AgentService
 
         var queries = strategy.PlacesQueries.Count > 0 ? strategy.PlacesQueries : new[] { subject };
         var stores = await RunPlacesAsync(queries, geo, point, cancellationToken).ConfigureAwait(false);
-        // Strip bars, liquor stores, and other non-halal venues before returning.
-        var halal = _filter.FilterStores(stores);
+        // Strip bars, liquor stores, and other non-halal venues before returning — item-granular,
+        // with LLM adjudication of keyword flags when a classifier is configured.
+        var halal = await _moderator.ModerateAsync(stores, ModerationProjections.Store, cancellationToken)
+            .ConfigureAwait(false);
         LogFilteredCount();
         return halal;
     }

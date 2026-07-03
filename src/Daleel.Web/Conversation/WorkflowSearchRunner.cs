@@ -7,6 +7,7 @@ using Daleel.Core.Observability;
 using Daleel.Web.Data;
 using Daleel.Web.Email;
 using Daleel.Web.Events;
+using Daleel.Web.Moderation;
 using Daleel.Web.Pipeline;
 using Daleel.Web.Pipeline.SubWorkflows;
 using Daleel.Web.Services;
@@ -45,12 +46,15 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private readonly ISystemEventLog _systemLog;
     private readonly ISearchEmailNotifier _emailNotifier;
     private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IModerationPolicyProvider _moderationPolicy;
+    private readonly IHalalImageClassifier _imageClassifier;
     private readonly ILogger<WorkflowSearchRunner> _logger;
 
     public WorkflowSearchRunner(
         IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
         IFilteredContentLogRepository filteredLog, ICacheStore cache, IEventStore eventStore,
         ISystemEventLog systemLog, ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
+        IModerationPolicyProvider moderationPolicy, IHalalImageClassifier imageClassifier,
         ILogger<WorkflowSearchRunner> logger)
     {
         _agents = agents;
@@ -58,6 +62,8 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         _apiLog = apiLog;
         _filteredLog = filteredLog;
         _cache = cache;
+        _moderationPolicy = moderationPolicy;
+        _imageClassifier = imageClassifier;
         _eventStore = eventStore;
         _systemLog = systemLog;
         _emailNotifier = emailNotifier;
@@ -86,6 +92,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // through awaits and sub-workflow scopes; restored on dispose.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
+        // Admin feedback drives moderation: the active whitelist (undo decisions) and the
+        // rating-tuned thresholds ride into the agent with every run. Best-effort by contract.
+        var moderation = await _moderationPolicy.GetAsync(ct).ConfigureAwait(false);
+
         // Background jobs resolve keys from server env only (browser BYO keys aren't available here).
         var agent = _agents.Build(new AgentRequest
         {
@@ -96,7 +106,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             ApiObserver = collector,
             CostEstimator = estimator,
             Cache = _cache,
-            CacheTtl = CacheTtl
+            CacheTtl = CacheTtl,
+            ModerationWhitelist = moderation.WhitelistKeys,
+            HalalPolicy = moderation.Policy,
+            ImageClassifier = _imageClassifier
         });
 
         // Captured from the run's state so the finally block can flush buffered cache/profile events
@@ -643,7 +656,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     }
 
     private async Task PersistFilteredAsync(
-        SearchJob job, IReadOnlyList<ContentFilter.FilterAudit> details, CancellationToken ct)
+        SearchJob job, IReadOnlyList<FilterFinding> details, CancellationToken ct)
     {
         if (details.Count == 0)
         {
@@ -653,8 +666,11 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var now = DateTimeOffset.UtcNow;
         var rows = details.Select(d => new FilteredContentLog
         {
-            Query = job.Query, Geo = job.Geo, Category = d.Category, Rule = d.Term,
-            Kind = d.Kind, Content = d.Content, CreatedAt = now
+            Query = job.Query, Geo = job.Geo, Category = d.Category, Rule = d.Rule,
+            Kind = d.Kind, Content = d.Content, Field = d.Field,
+            SourceUrl = d.SourceUrl, ImageUrl = d.ImageUrl,
+            Confidence = d.Confidence, DecisionSource = d.Source.ToString().ToLowerInvariant(),
+            ContentHash = d.ContentHash, ItemRemoved = d.ItemRemoved, CreatedAt = now
         });
 
         try

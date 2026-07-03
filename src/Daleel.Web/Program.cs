@@ -254,6 +254,30 @@ builder.Services.AddTransient<IAnalyticsService, AnalyticsService>();
 builder.Services.AddTransient<ISystemConfigService, SystemConfigService>();
 builder.Services.AddTransient<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddTransient<IFilteredContentLogRepository, FilteredContentLogRepository>();
+builder.Services.AddTransient<IModerationWhitelistRepository, FilteredContentLogRepository>();
+
+// The moderation feedback loop's read side: whitelist keys + rating-tuned thresholds, briefly
+// cached and handed to every search run. Singleton (scope-factory based) so background jobs share
+// the snapshot cache.
+builder.Services.AddSingleton<Daleel.Web.Moderation.IModerationPolicyProvider,
+    Daleel.Web.Moderation.ModerationPolicyProvider>();
+
+// Vision screening of individual result images (halal moderation). OpenRouter-only, like the
+// product-identification matcher; inert when no key is configured.
+builder.Services.AddSingleton<Daleel.Core.Moderation.IHalalImageClassifier>(sp =>
+{
+    var key = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
+    if (string.IsNullOrWhiteSpace(key))
+    {
+        return new Daleel.Core.Moderation.NullHalalImageClassifier();
+    }
+
+    return new Daleel.Web.Moderation.OpenRouterImageHalalClassifier(
+        key.Trim(),
+        Environment.GetEnvironmentVariable("DALEEL_MODERATION_VISION_MODEL"),
+        sp.GetRequiredService<ILogger<Daleel.Web.Moderation.OpenRouterImageHalalClassifier>>(),
+        sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>());
+});
 builder.Services.AddHttpContextAccessor();
 
 // Persistent brand/store profiles: researched once via Context.dev + the LLM, saved to Postgres, and

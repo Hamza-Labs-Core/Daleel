@@ -36,6 +36,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<UserConversation> UserConversations => Set<UserConversation>();
     public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
     public DbSet<FilteredContentLog> FilteredContentLogs => Set<FilteredContentLog>();
+    public DbSet<ModerationWhitelistEntry> ModerationWhitelist => Set<ModerationWhitelistEntry>();
     public DbSet<SearchCache> SearchCache => Set<SearchCache>();
     public DbSet<Brand> Brands => Set<Brand>();
     public DbSet<Store> Stores => Set<Store>();
@@ -70,6 +71,11 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
         var toUnixMs = new ValueConverter<DateTimeOffset, long>(
             v => v.ToUnixTimeMilliseconds(),
             v => DateTimeOffset.FromUnixTimeMilliseconds(v));
+
+        // Nullable variant for optional timestamps (e.g. FilteredContentLog.RatedAt).
+        var toNullableUnixMs = new ValueConverter<DateTimeOffset?, long?>(
+            v => v.HasValue ? v.Value.ToUnixTimeMilliseconds() : null,
+            v => v.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(v.Value) : null);
 
         // Search-result emails are opt-out: default the column to true so existing accounts (and any
         // insert that doesn't set it) are opted in. The C# initializer handles new entities; this SQL
@@ -342,12 +348,30 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Query).HasMaxLength(2000);
             e.Property(x => x.Geo).HasMaxLength(64);
             e.Property(x => x.Category).HasMaxLength(32);
-            e.Property(x => x.Rule).HasMaxLength(128);
+            e.Property(x => x.Rule).HasMaxLength(256);
             e.Property(x => x.Kind).HasMaxLength(64);
             e.Property(x => x.Content).HasMaxLength(300);
+            e.Property(x => x.Field).HasMaxLength(32);
+            e.Property(x => x.SourceUrl).HasMaxLength(2048);
+            e.Property(x => x.ImageUrl).HasMaxLength(2048);
+            e.Property(x => x.DecisionSource).HasMaxLength(16);
+            e.Property(x => x.ContentHash).HasMaxLength(64);
 
             // CreatedAt as Unix-ms bigint so CountSinceAsync(>= since) and the newest-first browse
             // translate cleanly as range/order comparisons. Same trick as SearchCache.
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            e.Property(x => x.RatedAt).HasConversion(toNullableUnixMs);
+        });
+
+        builder.Entity<ModerationWhitelistEntry>(e =>
+        {
+            // The whole active key set is loaded per search run; Key is looked up on admin undo.
+            e.HasIndex(x => x.Key);
+            e.HasIndex(x => x.SourceLogId);
+            e.Property(x => x.Key).HasMaxLength(2048);
+            e.Property(x => x.MatchType).HasMaxLength(16);
+            e.Property(x => x.Category).HasMaxLength(32);
+            e.Property(x => x.Note).HasMaxLength(300);
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 

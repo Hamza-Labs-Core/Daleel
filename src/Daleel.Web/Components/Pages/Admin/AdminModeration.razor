@@ -1,6 +1,7 @@
 @page "/admin/moderation"
 @attribute [Authorize(Roles = "Admin")]
 @inject IAnalyticsService Analytics
+@inject IFilteredContentLogRepository FilteredLog
 
 <PageTitle>دليل · Admin · Moderation</PageTitle>
 
@@ -40,6 +41,42 @@ else
         }
     </MudPaper>
 
+    <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
+        <MudText Typo="Typo.h6" Class="mb-2">Classifier precision from admin ratings (90d)</MudText>
+        @if (_ratingStats.Count == 0)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                No rated findings yet — rate findings on the
+                <MudLink Href="/admin/filtered" Typo="Typo.caption">Filtered content</MudLink> page and the
+                classifier's per-category confidence thresholds will adapt.
+            </MudText>
+        }
+        else
+        {
+            @foreach (var s in _ratingStats)
+            {
+                var stat = s; // per-iteration local: deferred RenderFragments must not capture the loop var
+                var rated = stat.Correct + stat.Incorrect;
+                var precision = rated == 0 ? 0 : (double)stat.Correct / rated;
+                var threshold = Daleel.Core.Moderation.HalalPolicy.ThresholdFromPrecision(stat.Correct, stat.Incorrect);
+                <div class="d-flex justify-space-between align-center mb-1">
+                    <span>@stat.Category</span>
+                    <span>
+                        <b>@precision.ToString("P0")</b> precision (@stat.Correct✓ / @stat.Incorrect✗)
+                        · removal threshold @threshold.ToString("0.00")
+                    </span>
+                </div>
+                <MudProgressLinear Value="@(precision * 100)"
+                                   Color="@(precision >= 0.8 ? Color.Success : precision >= 0.5 ? Color.Warning : Color.Error)"
+                                   Class="mb-2" />
+            }
+            <MudText Typo="Typo.caption" Color="Color.Secondary">
+                Low precision raises that category's confidence bar automatically — the model must be more
+                certain before an item is hidden.
+            </MudText>
+        }
+    </MudPaper>
+
     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-3">
         Filtered items are never shown to users. For the exact content removed and the rule that fired,
         see <MudLink Href="/admin/filtered" Typo="Typo.caption">Filtered content</MudLink>.
@@ -52,6 +89,7 @@ else
     private int _totalFiltered;
     private int _withFilters;
     private IReadOnlyList<(string Category, int Count)> _byCategory = new List<(string, int)>();
+    private IReadOnlyList<CategoryRatingStats> _ratingStats = Array.Empty<CategoryRatingStats>();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -70,6 +108,7 @@ else
             _totalFiltered = total;
             _withFilters = withFilters;
             _byCategory = byCat;
+            _ratingStats = await FilteredLog.RatingStatsAsync(DateTimeOffset.UtcNow.AddDays(-90));
             _loading = false;
         }
         catch (Exception ex)

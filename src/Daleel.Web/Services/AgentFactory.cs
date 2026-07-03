@@ -35,6 +35,15 @@ public sealed record AgentRequest
     /// <summary>Halal content-filter strictness for this request (default: Strict).</summary>
     public FilterStrictness Strictness { get; init; } = FilterStrictness.Strict;
 
+    /// <summary>Whitelist keys (URLs / content hashes) admins have un-filtered; these bypass moderation.</summary>
+    public IReadOnlyCollection<string>? ModerationWhitelist { get; init; }
+
+    /// <summary>Moderation thresholds, typically feedback-tuned via <c>IModerationPolicyProvider</c>.</summary>
+    public HalalPolicy? HalalPolicy { get; init; }
+
+    /// <summary>Vision screening of individual result images (flagged images are stripped, items kept).</summary>
+    public IHalalImageClassifier? ImageClassifier { get; init; }
+
     /// <summary>Optional observer that records every external API call (timing + cost).</summary>
     public Daleel.Core.Observability.IApiCallObserver? ApiObserver { get; init; }
 
@@ -145,9 +154,20 @@ public sealed class AgentFactory : IAgentFactory
 
         var opinions = new OpinionExtractor(llm);
         var options = new AgentOptions { DefaultGeo = request.Geo, Log = request.Log, Language = request.Language };
-        var filter = new ContentFilter(request.Strictness);
+        var filter = new ContentFilter(request.Strictness, request.ModerationWhitelist);
 
-        return new AgentService(llm, options, search, places, scraper, social, matcher: null, opinions, filter);
+        // The moderation pipeline: deterministic keyword baseline + LLM adjudication over the SAME
+        // (already logging-wrapped) client, so classification calls are metered and cost-capped like
+        // every other LLM call. Vision image screening is optional and injected by the caller.
+        var moderator = new HalalModerator(
+            filter,
+            classifier: new LlmHalalClassifier(llm),
+            imageClassifier: request.ImageClassifier,
+            policy: request.HalalPolicy,
+            log: request.Log);
+
+        return new AgentService(llm, options, search, places, scraper, social, matcher: null, opinions, filter,
+            moderator);
     }
 
     /// <summary>Selects an LLM client, preferring OpenRouter (one key, every model), then OpenAI, then Anthropic.</summary>
