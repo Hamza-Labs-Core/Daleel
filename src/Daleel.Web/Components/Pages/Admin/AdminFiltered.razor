@@ -3,6 +3,7 @@
 @inject IFilteredContentLogRepository FilteredLog
 @inject Microsoft.Extensions.Caching.Memory.IMemoryCache Cache
 @inject ISnackbar Snackbar
+@inject IDialogService Dialogs
 
 <PageTitle>دليل · Admin · Filtered content</PageTitle>
 
@@ -32,6 +33,40 @@ else
         @_count finding(s) in the last 30 days · showing the latest @_rows.Count
     </MudText>
 
+    @if (_legacyCount > 0)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-2" Dense="true">
+            @_legacyCount legacy finding(s) from the old filter have no stable key — they can't be
+            whitelisted and don't tune thresholds.
+            <MudButton Variant="Variant.Text" Color="Color.Warning" Size="Size.Small" Class="ms-2"
+                       OnClick="PurgeLegacyAsync">Purge them</MudButton>
+        </MudAlert>
+    }
+
+    @if (_selected.Count > 0)
+    {
+        <MudPaper Outlined="true" Elevation="0" Class="pa-2 mb-2 d-flex flex-wrap gap-2 align-center">
+            <MudText Typo="Typo.body2" Class="me-2"><b>@_selected.Count</b> selected</MudText>
+            <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.ThumbUp" Disabled="@_busy"
+                       OnClick="() => RateSelectedAsync(1)">Rate correct</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.ThumbDown" Disabled="@_busy"
+                       OnClick="() => RateSelectedAsync(-1)">Rate incorrect</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Undo" Disabled="@_busy"
+                       OnClick="WhitelistSelectedAsync">Un-filter</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Redo" Disabled="@_busy"
+                       OnClick="UnwhitelistSelectedAsync">Re-enable filtering</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.DeleteOutline" Disabled="@_busy"
+                       OnClick="DeleteSelectedAsync">Delete</MudButton>
+            <MudButton Variant="Variant.Text" Color="Color.Default" Size="Size.Small" Disabled="@_busy"
+                       OnClick="ClearSelection">Clear</MudButton>
+        </MudPaper>
+    }
+
     @if (_rows.Count == 0)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">Nothing has been filtered yet.</MudAlert>
@@ -42,6 +77,10 @@ else
             <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
                 <thead>
                     <tr>
+                        <th style="width:36px;">
+                            <MudCheckBox T="bool" Value="@AllSelected" ValueChanged="ToggleSelectAll"
+                                         Size="Size.Small" Dense="true" />
+                        </th>
                         <th style="width:28px;"></th>
                         <th>When (UTC)</th>
                         <th>Category</th>
@@ -58,6 +97,11 @@ else
                         var row = r; // per-iteration local: deferred RenderFragments must not capture the loop var
                         var expanded = _expandedId == row.Id;
                         <tr @onclick="() => Toggle(row.Id)" style="cursor:pointer;">
+                            <td @onclick:stopPropagation="true" style="cursor:default;">
+                                <MudCheckBox T="bool" Value="@_selected.Contains(row.Id)"
+                                             ValueChanged="@(v => ToggleSelect(row.Id, v))"
+                                             Size="Size.Small" Dense="true" />
+                            </td>
                             <td>
                                 <MudIcon Icon="@(expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
                                          Size="Size.Small" />
@@ -105,7 +149,7 @@ else
                         @if (expanded)
                         {
                             <tr>
-                                <td colspan="8" style="background: var(--mud-palette-background-gray);">
+                                <td colspan="9" style="background: var(--mud-palette-background-gray);">
                                     <div class="pa-4 d-flex flex-wrap gap-6">
                                         @if (SafeHttpUrl(row.ImageUrl) is { } imageUrl)
                                         {
@@ -196,10 +240,15 @@ else
 
 @code {
     private bool _loading = true;
+    private bool _busy;
     private string? _error;
     private int _count;
+    private int _legacyCount;
     private long? _expandedId;
+    private readonly HashSet<long> _selected = new();
     private IReadOnlyList<FilteredContentLog> _rows = Array.Empty<FilteredContentLog>();
+
+    private bool AllSelected => _rows.Count > 0 && _selected.Count == _rows.Count;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -212,6 +261,131 @@ else
     }
 
     private void Toggle(long id) => _expandedId = _expandedId == id ? null : id;
+
+    private void ToggleSelect(long id, bool selected)
+    {
+        if (selected)
+        {
+            _selected.Add(id);
+        }
+        else
+        {
+            _selected.Remove(id);
+        }
+    }
+
+    private void ToggleSelectAll(bool selected)
+    {
+        _selected.Clear();
+        if (selected)
+        {
+            foreach (var row in _rows)
+            {
+                _selected.Add(row.Id);
+            }
+        }
+    }
+
+    private void ClearSelection() => _selected.Clear();
+
+    /// <summary>Runs one batch action: confirm (optional) → repo call → snackbar → reload.</summary>
+    private async Task RunBatchAsync(string? confirmText, Func<long[], Task<int>> action, Func<int, string> message)
+    {
+        if (_selected.Count == 0 || _busy)
+        {
+            return;
+        }
+
+        if (confirmText is not null)
+        {
+            var ok = await Dialogs.ShowMessageBox(
+                "Confirm", confirmText, yesText: "Proceed", cancelText: "Cancel");
+            if (ok != true)
+            {
+                return;
+            }
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var done = await action(_selected.ToArray());
+            Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            Snackbar.Add(message(done), Severity.Success);
+            _selected.Clear();
+            await RetryAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Batch action failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task RateSelectedAsync(int rating) => RunBatchAsync(
+        null,
+        ids => FilteredLog.RateManyAsync(ids, rating),
+        done => rating > 0
+            ? $"Rated {done} finding(s) correct — thresholds will trust these categories more."
+            : $"Rated {done} finding(s) incorrect — the classifier will need more confidence.");
+
+    private Task WhitelistSelectedAsync() => RunBatchAsync(
+        $"Un-filter {_selected.Count} finding(s)? Future searches will keep this content.",
+        ids => FilteredLog.WhitelistManyAsync(ids),
+        done => $"Un-filtered {done} finding(s); those without a stable key were skipped.");
+
+    private Task UnwhitelistSelectedAsync() => RunBatchAsync(
+        null,
+        ids => FilteredLog.RemoveWhitelistManyAsync(ids),
+        done => $"Re-enabled filtering for {done} finding(s).");
+
+    private Task DeleteSelectedAsync() => RunBatchAsync(
+        $"Delete {_selected.Count} finding(s)? Linked whitelist entries are removed too, so their "
+        + "content becomes filterable again. This cannot be undone.",
+        ids => FilteredLog.DeleteManyAsync(ids),
+        done => $"Deleted {done} finding(s).");
+
+    private async Task PurgeLegacyAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        var ok = await Dialogs.ShowMessageBox(
+            "Purge legacy findings",
+            $"Delete all {_legacyCount} legacy finding(s) from the old filter? They have no stable "
+            + "key, so they can't be whitelisted and don't tune thresholds. This cannot be undone.",
+            yesText: "Purge", cancelText: "Cancel");
+        if (ok != true)
+        {
+            return;
+        }
+
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            var done = await FilteredLog.PurgeKeylessAsync();
+            Snackbar.Add($"Purged {done} legacy finding(s).", Severity.Success);
+            _selected.Clear();
+            await RetryAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Purge failed: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
 
     /// <summary>
     /// The stored URLs come from scraped external content — render them only when they're plain
@@ -302,6 +476,9 @@ else
         {
             _count = await FilteredLog.CountSinceAsync(DateTimeOffset.UtcNow.AddDays(-30));
             _rows = await FilteredLog.ListRecentAsync(200);
+            _legacyCount = await FilteredLog.CountKeylessAsync();
+            // Selection only makes sense against rows still on screen.
+            _selected.IntersectWith(_rows.Select(r => r.Id));
             _loading = false;
         }
         catch (Exception ex)
