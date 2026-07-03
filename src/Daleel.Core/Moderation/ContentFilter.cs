@@ -103,21 +103,26 @@ public sealed class ContentFilter
         // policy note above. Banks and interest-offering retailers must remain visible in results.
     };
 
-    /// <summary>
-    /// A structured record of one removal, for admin review: which category and exact term tripped,
-    /// the kind of item, and a truncated snippet of the offending content. Never shown to users.
-    /// </summary>
-    public sealed record FilterAudit(string Category, string Term, string Kind, string Content);
-
     private readonly FilterStrictness _strictness;
     private readonly List<string> _audit = new();
-    private readonly List<FilterAudit> _details = new();
+    private readonly List<FilterFinding> _details = new();
+    // Whitelist keys (source URLs, image URLs, content hashes) that admins have explicitly
+    // un-filtered. An item matching any key bypasses every classifier — the feedback loop's "undo".
+    private readonly HashSet<string> _whitelist;
     // One ContentFilter is shared by reference across up to MaxConcurrency=5 parallel sub-workflows
     // (the halal moderation chokepoint). Record() and the audit readers run on those threads, so every
     // touch of _audit/_details is serialized here — unlocked List.Add corrupts the backing array.
     private readonly object _auditLock = new();
 
-    public ContentFilter(FilterStrictness strictness = FilterStrictness.Strict) => _strictness = strictness;
+    public ContentFilter(FilterStrictness strictness = FilterStrictness.Strict,
+        IReadOnlyCollection<string>? whitelist = null)
+    {
+        _strictness = strictness;
+        _whitelist = whitelist is { Count: > 0 }
+            ? new HashSet<string>(whitelist.Where(k => !string.IsNullOrWhiteSpace(k)).Select(k => k.Trim()),
+                StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
 
     /// <summary>The configured strictness level.</summary>
     public FilterStrictness Strictness => _strictness;
@@ -130,13 +135,27 @@ public sealed class ContentFilter
     }
 
     /// <summary>
-    /// Structured removal records (category + matched term + offending content) for the admin
-    /// "Filtered content" log. Server/admin-only — never surfaced to end users.
+    /// Structured findings (what was flagged, where, how it was decided) for the admin
+    /// "Filtered content" log. Server/admin-only — never surfaced to end users. Includes
+    /// image-strip findings whose item was kept; <see cref="AuditLog"/> counts removals only.
     /// </summary>
     /// <remarks>Returns a snapshot: the backing list can be mutated concurrently by parallel filtering.</remarks>
-    public IReadOnlyList<FilterAudit> AuditDetails
+    public IReadOnlyList<FilterFinding> AuditDetails
     {
         get { lock (_auditLock) { return _details.ToArray(); } }
+    }
+
+    /// <summary>True when any of the item's stable keys was explicitly un-filtered by an admin.</summary>
+    public bool IsWhitelisted(string? sourceUrl, string? imageUrl, string? contentHash)
+    {
+        if (_whitelist.Count == 0)
+        {
+            return false;
+        }
+
+        return (sourceUrl is not null && _whitelist.Contains(sourceUrl.Trim()))
+            || (imageUrl is not null && _whitelist.Contains(imageUrl.Trim()))
+            || (contentHash is not null && _whitelist.Contains(contentHash));
     }
 
     /// <summary>True when the text is free of any blocked term at the current strictness.</summary>
@@ -179,7 +198,7 @@ public sealed class ContentFilter
         foreach (var item in items)
         {
             var text = textSelector(item);
-            if (MatchDetail(text) is { } m)
+            if (MatchDetail(text) is { } m && !IsWhitelisted(null, null, ModerationKeys.HashContent(text)))
             {
                 Record(m.Category, m.Term, typeof(T).Name, text);
             }
@@ -192,13 +211,27 @@ public sealed class ContentFilter
         return kept;
     }
 
-    /// <summary>Records one removal in both the legacy string log and the structured detail log.</summary>
-    private void Record(string category, string term, string kind, string? content)
+    /// <summary>Records a keyword removal in both the legacy string log and the structured detail log.</summary>
+    private void Record(string category, string term, string kind, string? content) =>
+        RecordFinding(new FilterFinding(
+            category, term, kind, Truncate(content), Field: null, SourceUrl: null, ImageUrl: null,
+            Confidence: 1.0, FindingSource.Keyword, ModerationKeys.HashContent(content), ItemRemoved: true));
+
+    /// <summary>
+    /// Records a structured finding. Removals also bump the legacy per-removal string log
+    /// (which is what <c>FilteredCount</c> is derived from); image-strip findings whose item
+    /// survived appear only in <see cref="AuditDetails"/>.
+    /// </summary>
+    public void RecordFinding(FilterFinding finding)
     {
         lock (_auditLock)
         {
-            _audit.Add($"{kind}:{category}");
-            _details.Add(new FilterAudit(category, term, kind, Truncate(content)));
+            if (finding.ItemRemoved)
+            {
+                _audit.Add($"{finding.Kind}:{finding.Category}");
+            }
+
+            _details.Add(finding with { Content = Truncate(finding.Content) });
         }
     }
 
@@ -227,6 +260,25 @@ public sealed class ContentFilter
     /// <summary>Removes social posts / opinions containing blocked content.</summary>
     public List<SocialPost> FilterSocialPosts(IEnumerable<SocialPost> posts) =>
         FilterResults(posts, p => $"{p.Text} {p.Author}");
+
+    /// <summary>
+    /// Field-aware match: checks each projected field separately and reports WHICH field tripped
+    /// (title vs snippet vs seller…), so the admin log can show exactly where on the item the
+    /// blocked term was found. Returns null when every field is clean.
+    /// </summary>
+    public (string Category, string Term, string Field)? MatchFields(
+        IReadOnlyList<(string Field, string? Text)> fields)
+    {
+        foreach (var (field, text) in fields)
+        {
+            if (MatchDetail(text) is { } m)
+            {
+                return (m.Category, m.Term, field);
+            }
+        }
+
+        return null;
+    }
 
     /// <summary>The name of the first category the text trips, or null if clean.</summary>
     public string? MatchCategory(string? text) => MatchDetail(text)?.Category;

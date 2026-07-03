@@ -1,5 +1,6 @@
 using Daleel.Core.Geo;
 using Daleel.Core.Models;
+using Daleel.Core.Moderation;
 using Daleel.Core.Pipeline;
 using Daleel.Search.Abstractions;
 using Daleel.Search.Http;
@@ -31,12 +32,18 @@ public sealed partial class AgentService
 
         await Task.WhenAll(webTask, shopTask, placesTask, socialTask, readTask).ConfigureAwait(false);
 
-        // Halal moderation chokepoint: every report builder projects from this bundle, so filtering
-        // here removes non-halal web/shopping/store/social content from ALL downstream reports at once.
-        var web = _filter.FilterSearchResults(webTask.Result);
-        var shopping = _filter.FilterSearchResults(shopTask.Result);
-        var stores = _filter.FilterStores(placesTask.Result);
-        var social = _filter.FilterSocialPosts(socialTask.Result);
+        // Halal moderation chokepoint: every report builder projects from this bundle, so moderating
+        // here screens non-halal web/shopping/store/social content out of ALL downstream reports at
+        // once. Item-granular: each result/store/post is judged individually (keyword baseline, LLM
+        // adjudication, per-image vision screening) — never a whole site or seller.
+        var web = await _moderator.ModerateAsync(webTask.Result, SearchResultModeration.Projection, cancellationToken)
+            .ConfigureAwait(false);
+        var shopping = await _moderator.ModerateAsync(shopTask.Result, SearchResultModeration.Projection, cancellationToken)
+            .ConfigureAwait(false);
+        var stores = await _moderator.ModerateAsync(placesTask.Result, ModerationProjections.Store, cancellationToken)
+            .ConfigureAwait(false);
+        var social = await _moderator.ModerateAsync(socialTask.Result, ModerationProjections.Social, cancellationToken)
+            .ConfigureAwait(false);
         var pages = readTask.Result;
         LogFilteredCount();
 

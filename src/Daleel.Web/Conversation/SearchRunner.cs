@@ -3,6 +3,7 @@ using Daleel.Core.Caching;
 using Daleel.Core.Moderation;
 using Daleel.Core.Observability;
 using Daleel.Web.Data;
+using Daleel.Web.Moderation;
 using Daleel.Web.Services;
 
 namespace Daleel.Web.Conversation;
@@ -75,16 +76,22 @@ public sealed class AgentSearchRunner : ISearchRunner
     private readonly IApiCallLogRepository _apiLog;
     private readonly IFilteredContentLogRepository _filteredLog;
     private readonly ICacheStore _cache;
+    private readonly IModerationPolicyProvider _moderationPolicy;
+    private readonly IHalalImageClassifier _imageClassifier;
     private readonly ILogger<AgentSearchRunner> _logger;
 
     public AgentSearchRunner(IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
-        IFilteredContentLogRepository filteredLog, ICacheStore cache, ILogger<AgentSearchRunner> logger)
+        IFilteredContentLogRepository filteredLog, ICacheStore cache,
+        IModerationPolicyProvider moderationPolicy, IHalalImageClassifier imageClassifier,
+        ILogger<AgentSearchRunner> logger)
     {
         _agents = agents;
         _config = config;
         _apiLog = apiLog;
         _filteredLog = filteredLog;
         _cache = cache;
+        _moderationPolicy = moderationPolicy;
+        _imageClassifier = imageClassifier;
         _logger = logger;
     }
 
@@ -126,6 +133,10 @@ public sealed class AgentSearchRunner : ISearchRunner
             line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line),
             caps.MaxPerJob, capTrip);
 
+        // Admin feedback drives moderation: the active whitelist (undo decisions) and the
+        // rating-tuned thresholds ride into the agent with every run.
+        var moderation = await _moderationPolicy.GetAsync(ct).ConfigureAwait(false);
+
         // Background jobs resolve keys from server env only (browser BYO keys aren't available here).
         var agent = _agents.Build(new AgentRequest
         {
@@ -136,7 +147,10 @@ public sealed class AgentSearchRunner : ISearchRunner
             ApiObserver = collector,
             CostEstimator = estimator,
             Cache = _cache,
-            CacheTtl = CacheTtl
+            CacheTtl = CacheTtl,
+            ModerationWhitelist = moderation.WhitelistKeys,
+            HalalPolicy = moderation.Policy,
+            ImageClassifier = _imageClassifier
         });
 
         try
@@ -190,7 +204,7 @@ public sealed class AgentSearchRunner : ISearchRunner
     /// the query and the matched rule, but never the user id — filter review is anonymous.
     /// </summary>
     private async Task PersistFilteredAsync(
-        SearchJob job, IReadOnlyList<ContentFilter.FilterAudit> details, CancellationToken ct)
+        SearchJob job, IReadOnlyList<FilterFinding> details, CancellationToken ct)
     {
         if (details.Count == 0)
         {
@@ -198,16 +212,7 @@ public sealed class AgentSearchRunner : ISearchRunner
         }
 
         var now = DateTimeOffset.UtcNow;
-        var rows = details.Select(d => new FilteredContentLog
-        {
-            Query = job.Query,
-            Geo = job.Geo,
-            Category = d.Category,
-            Rule = d.Term,
-            Kind = d.Kind,
-            Content = d.Content,
-            CreatedAt = now
-        });
+        var rows = details.Select(d => FilteredContentLog.From(d, job.Query, job.Geo, now));
 
         try
         {

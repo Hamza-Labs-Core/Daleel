@@ -1,15 +1,18 @@
 @page "/admin/filtered"
 @attribute [Authorize(Roles = "Admin")]
 @inject IFilteredContentLogRepository FilteredLog
+@inject Microsoft.Extensions.Caching.Memory.IMemoryCache Cache
+@inject ISnackbar Snackbar
 
 <PageTitle>دليل · Admin · Filtered content</PageTitle>
 
 <AdminNav />
 <MudText Typo="Typo.h4" Class="mb-1">Filtered content</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Exactly what the halal filter removed — the offending content, the blocklist rule that fired, and
-    the query that produced it. Use this to check the filter isn't too aggressive (or missing things).
-    Anonymous by design: no user is recorded against a removal.
+    Every moderation finding — the exact content or image flagged, where it was found, how it was
+    decided (keyword, LLM, or vision), and the query that produced it. Rate findings
+    <b>correct/incorrect</b> to tune the classifier's thresholds, or <b>un-filter</b> a finding to
+    whitelist that content permanently. Anonymous by design: no user is recorded against a removal.
 </MudText>
 
 @if (_error is not null)
@@ -26,7 +29,7 @@ else if (_loading)
 else
 {
     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2">
-        @_count removed in the last 30 days · showing the latest @_rows.Count
+        @_count finding(s) in the last 30 days · showing the latest @_rows.Count
     </MudText>
 
     @if (_rows.Count == 0)
@@ -39,25 +42,151 @@ else
             <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
                 <thead>
                     <tr>
+                        <th style="width:28px;"></th>
                         <th>When (UTC)</th>
                         <th>Category</th>
-                        <th>Rule</th>
-                        <th>Kind</th>
+                        <th>Decided by</th>
+                        <th>Action</th>
                         <th>Query</th>
-                        <th>Filtered content</th>
+                        <th>Flagged content</th>
+                        <th>Feedback</th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var r in _rows)
                     {
-                        <tr>
-                            <td style="white-space:nowrap;">@r.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
-                            <td><MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text">@r.Category</MudChip></td>
-                            <td><code>@r.Rule</code></td>
-                            <td>@r.Kind</td>
-                            <td dir="@Catalog.Dir(r.Query)">@r.Query</td>
-                            <td dir="@Catalog.Dir(r.Content)" style="max-width:360px;">@r.Content</td>
+                        var row = r; // per-iteration local: deferred RenderFragments must not capture the loop var
+                        var expanded = _expandedId == row.Id;
+                        <tr @onclick="() => Toggle(row.Id)" style="cursor:pointer;">
+                            <td>
+                                <MudIcon Icon="@(expanded ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                         Size="Size.Small" />
+                            </td>
+                            <td style="white-space:nowrap;">@row.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@(row.WhitelistEntryId is not null ? Color.Default : Color.Error)"
+                                         Variant="Variant.Text">@row.Category</MudChip>
+                            </td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small" Color="@SourceColor(row.DecisionSource)"
+                                         Variant="Variant.Outlined">
+                                    @(row.DecisionSource ?? "keyword")@(row.DecisionSource is "llm" or "vision"
+                                        ? $" · {row.Confidence:0.00}" : "")
+                                </MudChip>
+                            </td>
+                            <td style="white-space:nowrap;">
+                                @if (row.WhitelistEntryId is not null)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">un-filtered</MudChip>
+                                }
+                                else
+                                {
+                                    @(row.ItemRemoved ? "item removed" : "image stripped")
+                                }
+                            </td>
+                            <td dir="@Catalog.Dir(row.Query)" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">@row.Query</td>
+                            <td dir="@Catalog.Dir(row.Content)" style="max-width:320px; overflow:hidden; text-overflow:ellipsis;">@row.Content</td>
+                            <td style="white-space:nowrap;">
+                                @if (row.Rating is > 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">correct</MudChip>
+                                }
+                                else if (row.Rating is < 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">incorrect</MudChip>
+                                }
+                                else
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">unrated</MudText>
+                                }
+                            </td>
                         </tr>
+                        @if (expanded)
+                        {
+                            <tr>
+                                <td colspan="8" style="background: var(--mud-palette-background-gray);">
+                                    <div class="pa-4 d-flex flex-wrap gap-6">
+                                        @if (SafeHttpUrl(row.ImageUrl) is { } imageUrl)
+                                        {
+                                            <div>
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary">Flagged image</MudText>
+                                                <div>
+                                                    <img src="@imageUrl" alt="flagged content (admin review)" referrerpolicy="no-referrer"
+                                                         style="max-width:180px; max-height:180px; border-radius:6px; border:1px solid var(--mud-palette-lines-default);"
+                                                         loading="lazy" />
+                                                </div>
+                                            </div>
+                                        }
+                                        <div style="min-width:280px; max-width:640px; flex:1;">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary">Flagged content</MudText>
+                                            <MudText Typo="Typo.body2" dir="@Catalog.Dir(row.Content)">@row.Content</MudText>
+
+                                            <div class="d-flex flex-wrap gap-2 mt-3 align-center">
+                                                @if (row.Field is not null)
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                                        found in: @row.Field
+                                                    </MudChip>
+                                                }
+                                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                                    rule/reason: @row.Rule
+                                                </MudChip>
+                                                <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                                    kind: @row.Kind
+                                                </MudChip>
+                                                @if (row.DecisionSource is "llm" or "vision")
+                                                {
+                                                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">
+                                                        confidence: @row.Confidence.ToString("0.00")
+                                                    </MudChip>
+                                                }
+                                            </div>
+
+                                            @if (SafeHttpUrl(row.SourceUrl) is { } sourceUrl)
+                                            {
+                                                <MudLink Href="@sourceUrl" Target="_blank" rel="noopener noreferrer"
+                                                         Typo="Typo.body2" Class="mt-2 d-inline-block">
+                                                    View source page ↗
+                                                </MudLink>
+                                            }
+                                        </div>
+                                        <div style="min-width:220px;">
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">Was this filter decision correct?</MudText>
+                                            <div class="d-flex gap-2 mb-3">
+                                                <MudButton Variant="@(row.Rating is > 0 ? Variant.Filled : Variant.Outlined)"
+                                                           Color="Color.Success" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.ThumbUp"
+                                                           OnClick="() => RateAsync(row, 1)">Correct</MudButton>
+                                                <MudButton Variant="@(row.Rating is < 0 ? Variant.Filled : Variant.Outlined)"
+                                                           Color="Color.Warning" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.ThumbDown"
+                                                           OnClick="() => RateAsync(row, -1)">Incorrect</MudButton>
+                                            </div>
+                                            @if (row.WhitelistEntryId is null)
+                                            {
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.Undo"
+                                                           OnClick="() => WhitelistAsync(row)">
+                                                    Un-filter (whitelist)
+                                                </MudButton>
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1 d-block">
+                                                    Future searches will keep this @(row.Field == "image" ? "image" : "content").
+                                                </MudText>
+                                            }
+                                            else
+                                            {
+                                                <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.Redo"
+                                                           OnClick="() => UnwhitelistAsync(row)">
+                                                    Re-enable filtering
+                                                </MudButton>
+                                            }
+                                        </div>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
                     }
                 </tbody>
             </MudSimpleTable>
@@ -69,6 +198,7 @@ else
     private bool _loading = true;
     private string? _error;
     private int _count;
+    private long? _expandedId;
     private IReadOnlyList<FilteredContentLog> _rows = Array.Empty<FilteredContentLog>();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -79,6 +209,88 @@ else
         }
 
         await RetryAsync();
+    }
+
+    private void Toggle(long id) => _expandedId = _expandedId == id ? null : id;
+
+    /// <summary>
+    /// The stored URLs come from scraped external content — render them only when they're plain
+    /// http(s), so a hostile result can't smuggle a javascript:/data: scheme into an admin click.
+    /// </summary>
+    private static string? SafeHttpUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u)
+        && (u.Scheme == Uri.UriSchemeHttp || u.Scheme == Uri.UriSchemeHttps)
+            ? url
+            : null;
+
+    private static Color SourceColor(string? source) => source switch
+    {
+        "llm" => Color.Info,
+        "vision" => Color.Tertiary,
+        _ => Color.Default
+    };
+
+    private async Task RateAsync(FilteredContentLog row, int rating)
+    {
+        try
+        {
+            // Clicking the same rating again clears it.
+            var newRating = row.Rating == rating ? (int?)null : rating;
+            await FilteredLog.RateAsync(row.Id, newRating);
+            row.Rating = newRating;
+            row.RatedAt = newRating is null ? null : DateTimeOffset.UtcNow;
+            Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            Snackbar.Add(newRating switch
+            {
+                > 0 => "Marked correct — thresholds will trust this category more.",
+                < 0 => "Marked incorrect — the classifier will need more confidence here.",
+                _ => "Rating cleared."
+            }, Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't save rating: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task WhitelistAsync(FilteredContentLog row)
+    {
+        try
+        {
+            var entryId = await FilteredLog.WhitelistAsync(row.Id);
+            if (entryId is null)
+            {
+                Snackbar.Add("This finding has no stable key to whitelist.", Severity.Warning);
+                return;
+            }
+
+            row.WhitelistEntryId = entryId;
+            row.Rating ??= -1;
+            Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            Snackbar.Add("Un-filtered — future searches will keep this content.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't whitelist: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
+    }
+
+    private async Task UnwhitelistAsync(FilteredContentLog row)
+    {
+        try
+        {
+            await FilteredLog.RemoveWhitelistAsync(row.Id);
+            row.WhitelistEntryId = null;
+            Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            Snackbar.Add("Filtering re-enabled for this content.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't re-enable filtering: {ex.Message}", Severity.Error);
+        }
+        StateHasChanged();
     }
 
     private async Task RetryAsync()
