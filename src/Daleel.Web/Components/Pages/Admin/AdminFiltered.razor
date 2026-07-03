@@ -124,9 +124,17 @@ else
                                 {
                                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">un-filtered</MudChip>
                                 }
+                                else if (row.ItemRemoved)
+                                {
+                                    @("item removed")
+                                }
+                                else if (row.Field == "image")
+                                {
+                                    @("image stripped")
+                                }
                                 else
                                 {
-                                    @(row.ItemRemoved ? "item removed" : "image stripped")
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">shown · low confidence</MudChip>
                                 }
                             </td>
                             <td dir="@Catalog.Dir(row.Query)" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">@row.Query</td>

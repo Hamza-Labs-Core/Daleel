@@ -158,15 +158,22 @@ public class LlmHalalClassifierTests
 public class HalalPolicyTests
 {
     [Fact]
-    public void ThresholdFromPrecision_KeepsFallback_UnderMinSample()
+    public void DefaultThreshold_IsShowByDefaultHigh()
     {
-        HalalPolicy.ThresholdFromPrecision(correct: 2, incorrect: 1).Should().Be(0.75);
+        new HalalPolicy().DefaultThreshold.Should().Be(0.8);
     }
 
     [Fact]
-    public void ThresholdFromPrecision_PerfectPrecision_TrustsTheModel()
+    public void ThresholdFromPrecision_KeepsFallback_UnderMinSample()
     {
-        HalalPolicy.ThresholdFromPrecision(correct: 10, incorrect: 0).Should().Be(0.5);
+        HalalPolicy.ThresholdFromPrecision(correct: 2, incorrect: 1).Should().Be(0.8);
+    }
+
+    [Fact]
+    public void ThresholdFromPrecision_PerfectPrecision_NeverDropsBelowTheFloor()
+    {
+        // Even a perfectly-rated category keeps the show-by-default bias.
+        HalalPolicy.ThresholdFromPrecision(correct: 10, incorrect: 0).Should().Be(0.65);
     }
 
     [Fact]
@@ -179,7 +186,7 @@ public class HalalPolicyTests
     public void ThresholdFromPrecision_MidPrecision_LandsBetween()
     {
         var t = HalalPolicy.ThresholdFromPrecision(correct: 6, incorrect: 4); // 60% precision
-        t.Should().BeApproximately(0.68, 0.001);
+        t.Should().BeApproximately(0.77, 0.001);
     }
 }
 

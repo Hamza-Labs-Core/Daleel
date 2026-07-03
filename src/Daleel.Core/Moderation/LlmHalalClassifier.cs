@@ -37,6 +37,11 @@ public sealed class LlmHalalClassifier : IHalalClassifier
         "person names, or words that merely resemble a blocked term (barber ≠ bar; Weedon ≠ weed).\n\n" +
         "Some items carry a keyword-filter hint (the term a simple blocklist matched). Re-judge " +
         "those in context and give an explicit verdict — haram true or false — for EVERY hinted item.\n\n" +
+        "Calibrate confidence honestly: reserve confidence above 0.8 for items that UNMISTAKABLY " +
+        "sell or promote haram content (a liquor store, a pork product listing). Ambiguous names, " +
+        "incidental mentions, places merely NEAR something haram, or ordinary products from a " +
+        "store that also sells haram goods deserve haram=false or a LOW confidence — hiding a " +
+        "legitimate product is a worse error than showing a questionable one.\n\n" +
         "Respond with ONLY a JSON array. One object per haram item, plus one per hinted item even " +
         "when halal: {\"id\": number, \"haram\": boolean, \"category\": string|null, " +
         "\"confidence\": number 0-1, \"reason\": short string}. Omit unhinted halal items.";

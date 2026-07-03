@@ -123,8 +123,10 @@ public sealed class HalalModerator
             await AdjudicateAsync(states, projection.Kind, ct).ConfigureAwait(false);
         }
 
-        // Keyword flags the LLM never saw (no LLM configured, call failed, or its response
-        // skipped the item) become removals — the deterministic baseline is authoritative.
+        // Keyword flags with NO working adjudicator (no LLM configured, or the whole call failed)
+        // become removals — the deterministic baseline is the only signal in degraded mode. In
+        // normal operation the LLM has ruled (or deliberately skipped) every flag by now, and
+        // show-by-default applies instead.
         FinalizeKeywordFlags(states, projection.Kind);
 
         // ── Decide, record findings, collect kept items ─────────────────────────
@@ -145,6 +147,22 @@ public sealed class HalalModerator
             }
             else
             {
+                if (state.ShownFlag is { } shown)
+                {
+                    // Flagged below the confidence bar: the item is SHOWN (false positives cost
+                    // more than a questionable listing), but the near-miss is recorded so admins
+                    // can rate it — that rating is what moves the thresholds.
+                    _filter.RecordFinding(shown with
+                    {
+                        Kind = projection.Kind,
+                        Content = state.Text,
+                        SourceUrl = state.SourceUrl,
+                        ImageUrl = state.ImageUrl,
+                        ContentHash = state.ContentHash,
+                        ItemRemoved = false
+                    });
+                }
+
                 kept.Add(state.Item);
             }
         }
@@ -179,6 +197,7 @@ public sealed class HalalModerator
         }
 
         IReadOnlyList<HalalVerdict> verdicts;
+        var callFailed = false;
         try
         {
             verdicts = await _classifier!.ClassifyAsync(candidates, ct).ConfigureAwait(false);
@@ -190,6 +209,20 @@ public sealed class HalalModerator
         catch
         {
             verdicts = Array.Empty<HalalVerdict>();
+            callFailed = true;
+        }
+
+        // The prompt demands an explicit verdict for every keyword-hinted item, so hinted
+        // candidates with a completely empty response means the call effectively failed (parse
+        // error, empty model output) — degraded mode, where keyword flags stay authoritative.
+        if (verdicts.Count == 0 && candidates.Any(c => c.KeywordCategory is not null))
+        {
+            callFailed = true;
+        }
+
+        if (callFailed)
+        {
+            return; // FinalizeKeywordFlags promotes the raw flags — the degraded-mode fallback
         }
 
         // Duplicate-tolerant (haram wins): LlmHalalClassifier dedupes already, but this lookup must
@@ -209,25 +242,49 @@ public sealed class HalalModerator
 
             if (state.KeywordMatch is { } kw)
             {
-                if (verdict is null)
-                {
-                    continue; // response skipped this item — FinalizeKeywordFlags handles it
-                }
-
                 state.Adjudicated = true;
 
+                if (verdict is null)
+                {
+                    // The LLM answered the batch but skipped this hinted item. Show-by-default:
+                    // a keyword hit the model didn't confirm is treated as a probable false
+                    // positive ("Barber shop", "Amsterdam bar district"), kept, and recorded so
+                    // an admin can overrule via rating.
+                    state.ShownFlag = new FilterFinding(
+                        kw.Category, kw.Term, kind, state.Text, kw.Field,
+                        null, null, 1.0, FindingSource.Keyword, null, ItemRemoved: false);
+                    continue;
+                }
+
                 // Keyword-flagged: the LLM adjudicates. An explicit halal verdict overturns the
-                // flag (context understood: "Barber shop", "hotel near the bar district"); a
-                // confirming one keeps the removal, now carrying the model's confidence/reason.
+                // flag; a confirming one removes ONLY above the per-category confidence bar —
+                // a hesitant confirm is shown and logged, not blocked.
                 if (!verdict.IsHaram)
                 {
                     _log?.Invoke($"moderation: LLM overturned keyword flag '{kw.Term}' ({kw.Category}) — kept item");
                     continue;
                 }
 
-                state.Removal = new FilterFinding(
-                    verdict.Category ?? kw.Category, verdict.Reason ?? kw.Term, kind, state.Text, kw.Field,
+                var category = verdict.Category ?? kw.Category;
+                var finding = new FilterFinding(
+                    category, verdict.Reason ?? kw.Term, kind, state.Text, kw.Field,
                     null, null, verdict.Confidence, FindingSource.Llm, null, ItemRemoved: true);
+                if (verdict.Confidence >= _policy.ThresholdFor(category))
+                {
+                    state.Removal = finding;
+                }
+                else
+                {
+                    state.ShownFlag = finding with { ItemRemoved = false };
+                }
+            }
+            else if (verdict is { IsHaram: true, Category: not null }
+                && verdict.Confidence < _policy.ThresholdFor(verdict.Category))
+            {
+                // LLM-only flag below the bar: shown, recorded for the feedback loop.
+                state.ShownFlag = new FilterFinding(
+                    verdict.Category, verdict.Reason ?? "llm", kind, state.Text, Field: null,
+                    null, null, verdict.Confidence, FindingSource.Llm, null, ItemRemoved: false);
             }
             else if (verdict is { IsHaram: true, Category: not null }
                 && verdict.Confidence >= _policy.ThresholdFor(verdict.Category))
@@ -390,7 +447,10 @@ public sealed class HalalModerator
         public (string Category, string Term, string Field)? KeywordMatch { get; set; }
         public FilterFinding? Removal { get; set; }
 
-        /// <summary>True once the LLM explicitly ruled on this keyword flag (confirm OR overturn).</summary>
+        /// <summary>A below-threshold flag: the item is kept but the near-miss is recorded for rating.</summary>
+        public FilterFinding? ShownFlag { get; set; }
+
+        /// <summary>True once the LLM pass ruled on this keyword flag (confirm, overturn, or skip).</summary>
         public bool Adjudicated { get; set; }
     }
 }

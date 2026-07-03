@@ -114,8 +114,12 @@ public sealed record HalalPolicy
         "riba", "interest", "banking", "bank", "finance", "financial", "insurance", "loans", "mortgage"
     };
 
-    /// <summary>Minimum LLM confidence to remove an item when no per-category threshold applies.</summary>
-    public double DefaultThreshold { get; init; } = 0.75;
+    /// <summary>
+    /// Minimum model confidence to remove an item when no per-category threshold applies.
+    /// Deliberately high: showing a questionable listing costs less than hiding a legitimate
+    /// one, so anything below the bar is shown (and recorded for admin rating).
+    /// </summary>
+    public double DefaultThreshold { get; init; } = 0.8;
 
     /// <summary>Per-category removal thresholds learned from admin ratings.</summary>
     public IReadOnlyDictionary<string, double> CategoryThresholds { get; init; } =
@@ -129,10 +133,12 @@ public sealed record HalalPolicy
 
     /// <summary>
     /// Derives a per-category threshold from admin feedback: precision = correct / rated.
-    /// Perfect precision trusts the model down to 0.5; poor precision demands near-certainty.
-    /// Categories with fewer than <paramref name="minSample"/> ratings keep the default.
+    /// Perfect precision trusts the model down to 0.65; poor precision demands near-certainty.
+    /// The floor stays above chance on purpose — even a well-rated category keeps the
+    /// show-by-default bias; only clear-cut flags block. Categories with fewer than
+    /// <paramref name="minSample"/> ratings keep the default.
     /// </summary>
-    public static double ThresholdFromPrecision(int correct, int incorrect, double fallback = 0.75, int minSample = 5)
+    public static double ThresholdFromPrecision(int correct, int incorrect, double fallback = 0.8, int minSample = 5)
     {
         var rated = correct + incorrect;
         if (rated < minSample)
@@ -141,7 +147,7 @@ public sealed record HalalPolicy
         }
 
         var precision = (double)correct / rated;
-        return Math.Clamp(0.5 + (1.0 - precision) * 0.45, 0.5, 0.95);
+        return Math.Clamp(0.65 + (1.0 - precision) * 0.3, 0.65, 0.95);
     }
 }
 
