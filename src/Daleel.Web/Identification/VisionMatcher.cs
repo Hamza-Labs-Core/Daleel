@@ -50,8 +50,8 @@ public sealed class NullVisionMatcher : IVisionMatcher
 /// </summary>
 public sealed class VisionMatcher : IVisionMatcher, IDisposable
 {
-    /// <summary>Default vision model — Claude Sonnet 4 is vision-capable and already the project default.</summary>
-    public const string DefaultModel = "anthropic/claude-sonnet-4";
+    /// <summary>Default vision model — Claude Sonnet 5 (high-resolution vision, current Sonnet tier).</summary>
+    public const string DefaultModel = "anthropic/claude-sonnet-5";
 
     private const string Endpoint = "https://openrouter.ai/api/v1/chat/completions";
     private const string Referer = "https://github.com/Hamza-Labs-Core/Daleel";
