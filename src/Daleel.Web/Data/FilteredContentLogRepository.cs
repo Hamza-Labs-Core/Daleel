@@ -27,6 +27,35 @@ public interface IFilteredContentLogRepository
     /// <summary>Reverts the "undo": removes the finding's whitelist entry so filtering applies again.</summary>
     Task RemoveWhitelistAsync(long id, CancellationToken ct = default);
 
+    /// <summary>Batch rate: applies one verdict to every finding in <paramref name="ids"/>. Returns rows updated.</summary>
+    Task<int> RateManyAsync(IReadOnlyCollection<long> ids, int? rating, CancellationToken ct = default);
+
+    /// <summary>
+    /// Batch un-filter: whitelists every finding in <paramref name="ids"/> (same semantics as
+    /// <see cref="WhitelistAsync"/> per row). Returns how many rows now carry a whitelist entry;
+    /// rows with no stable key — or deleted concurrently — are skipped, never faulting the batch.
+    /// </summary>
+    Task<int> WhitelistManyAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default);
+
+    /// <summary>Batch undo of <see cref="WhitelistManyAsync"/>. Returns how many entries were removed.</summary>
+    Task<int> RemoveWhitelistManyAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default);
+
+    /// <summary>
+    /// Batch delete: removes the findings AND any whitelist entries linked to them — a deleted
+    /// finding must not leave content silently whitelisted with no UI path to manage it.
+    /// Returns rows deleted.
+    /// </summary>
+    Task<int> DeleteManyAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default);
+
+    /// <summary>
+    /// Count of legacy findings from the pre-overhaul filter: no content hash and no URLs, so
+    /// they can't be whitelisted and (being keyword decisions) never tune thresholds.
+    /// </summary>
+    Task<int> CountKeylessAsync(CancellationToken ct = default);
+
+    /// <summary>Deletes every legacy keyless finding (see <see cref="CountKeylessAsync"/>). Returns rows deleted.</summary>
+    Task<int> PurgeKeylessAsync(CancellationToken ct = default);
+
     /// <summary>Per-category correct/incorrect tallies for LLM/vision findings rated since <paramref name="since"/>.</summary>
     Task<IReadOnlyList<CategoryRatingStats>> RatingStatsAsync(DateTimeOffset since, CancellationToken ct = default);
 }
@@ -169,6 +198,114 @@ public sealed class FilteredContentLogRepository : IFilteredContentLogRepository
         row.WhitelistEntryId = null;
         await _db.SaveChangesAsync(ct);
     }
+
+    public async Task<int> RateManyAsync(IReadOnlyCollection<long> ids, int? rating, CancellationToken ct = default)
+    {
+        if (ids.Count == 0)
+        {
+            return 0;
+        }
+
+        // One tracked load + one SaveChanges: batches are bounded by the admin page size (200),
+        // and the tracked path keeps the Unix-ms RatedAt conversion in one place.
+        var rows = await _db.FilteredContentLogs.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+        var now = DateTimeOffset.UtcNow;
+        foreach (var row in rows)
+        {
+            row.Rating = rating is null ? null : Math.Sign(rating.Value);
+            row.RatedAt = rating is null ? null : now;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return rows.Count;
+    }
+
+    public async Task<int> WhitelistManyAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default)
+    {
+        // Per-row on purpose: WhitelistAsync owns the transaction + unique-index race recovery,
+        // and a row that can't be whitelisted (no stable key, deleted meanwhile) must not fault
+        // the rest of the batch. Bounded by the admin page size, so N round-trips is fine.
+        var done = 0;
+        foreach (var id in ids)
+        {
+            try
+            {
+                if (await WhitelistAsync(id, ct) is not null)
+                {
+                    done++;
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (InvalidOperationException)
+            {
+                // row deleted concurrently — skip
+            }
+        }
+
+        return done;
+    }
+
+    public async Task<int> RemoveWhitelistManyAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default)
+    {
+        var done = 0;
+        foreach (var id in ids)
+        {
+            var row = await _db.FilteredContentLogs.AsNoTracking()
+                .Where(x => x.Id == id)
+                .Select(x => new { x.WhitelistEntryId })
+                .FirstOrDefaultAsync(ct);
+            if (row?.WhitelistEntryId is null)
+            {
+                continue;
+            }
+
+            await RemoveWhitelistAsync(id, ct);
+            done++;
+        }
+
+        return done;
+    }
+
+    public async Task<int> DeleteManyAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0)
+        {
+            return 0;
+        }
+
+        var rows = await _db.FilteredContentLogs.Where(x => ids.Contains(x.Id)).ToListAsync(ct);
+
+        // Take the linked whitelist entries with the findings: an entry whose finding is gone
+        // would keep content whitelisted forever with no admin surface to see or undo it.
+        var entryIds = rows.Where(r => r.WhitelistEntryId is not null)
+            .Select(r => r.WhitelistEntryId!.Value)
+            .ToList();
+        if (entryIds.Count > 0)
+        {
+            var entries = await _db.ModerationWhitelist.Where(e => entryIds.Contains(e.Id)).ToListAsync(ct);
+            _db.ModerationWhitelist.RemoveRange(entries);
+        }
+
+        _db.FilteredContentLogs.RemoveRange(rows);
+        await _db.SaveChangesAsync(ct);
+        return rows.Count;
+    }
+
+    /// <summary>Legacy pre-overhaul rows: no stable key of any kind (the new pipeline always writes a hash).</summary>
+    private static IQueryable<FilteredContentLog> Keyless(DaleelDbContext db) =>
+        db.FilteredContentLogs.Where(x =>
+            x.ContentHash == null && x.SourceUrl == null && x.ImageUrl == null && x.WhitelistEntryId == null);
+
+    public async Task<int> CountKeylessAsync(CancellationToken ct = default) =>
+        await Keyless(_db).AsNoTracking().CountAsync(ct);
+
+    public async Task<int> PurgeKeylessAsync(CancellationToken ct = default) =>
+        // Set-based delete: keyless rows can't carry a whitelist entry (whitelisting needs a key,
+        // and the predicate excludes linked rows defensively), so no entry cleanup is needed.
+        await Keyless(_db).ExecuteDeleteAsync(ct);
 
     public async Task<IReadOnlyList<CategoryRatingStats>> RatingStatsAsync(
         DateTimeOffset since, CancellationToken ct = default)
