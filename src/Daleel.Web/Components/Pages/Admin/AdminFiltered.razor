@@ -11,9 +11,10 @@
 <MudText Typo="Typo.h4" Class="mb-1">Filtered content</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
     Every moderation finding — the exact content or image flagged, where it was found, how it was
-    decided (keyword, LLM, or vision), and the query that produced it. Rate findings
-    <b>correct/incorrect</b> to tune the classifier's thresholds, or <b>un-filter</b> a finding to
-    whitelist that content permanently. Anonymous by design: no user is recorded against a removal.
+    decided (keyword, LLM, or vision), and the query that produced it. Mark findings
+    <b>haram/halal</b> to tune the classifier's confidence thresholds (below the bar, flagged items
+    are <b>shown</b>, not blocked), or <b>un-filter</b> a finding to whitelist that content
+    permanently. Anonymous by design: no user is recorded against a removal.
 </MudText>
 
 @if (_error is not null)
