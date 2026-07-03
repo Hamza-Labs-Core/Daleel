@@ -34,6 +34,7 @@ public record ProviderPricing
         new Dictionary<string, LlmRate>(StringComparer.OrdinalIgnoreCase)
         {
             ["anthropic/claude-sonnet-4"] = new(3m, 15m),
+            ["anthropic/claude-sonnet-5"] = new(3m, 15m),
             ["anthropic/claude-opus-4.1"] = new(15m, 75m),
             ["openai/gpt-4o"] = new(2.5m, 10m),
             ["openai/gpt-4o-mini"] = new(0.15m, 0.6m),
