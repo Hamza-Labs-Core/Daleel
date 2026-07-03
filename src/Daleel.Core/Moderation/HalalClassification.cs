@@ -46,6 +46,20 @@ public sealed record HalalCandidate(int Id, string Text, string Kind, string? Ke
 /// <summary>The LLM's verdict for one <see cref="HalalCandidate"/>.</summary>
 public sealed record HalalVerdict(int Id, bool IsHaram, string? Category, double Confidence, string? Reason);
 
+/// <summary>
+/// A classification round's outcome. <see cref="UnansweredIds"/> carries the candidates whose
+/// batch FAILED (transport error, empty/unparseable output) — for those, no decision was made
+/// and the caller must fall back to its deterministic baseline. A candidate absent from both
+/// lists was genuinely considered and left unflagged (a deliberate skip).
+/// </summary>
+public sealed record HalalClassifierResult(
+    IReadOnlyList<HalalVerdict> Verdicts,
+    IReadOnlyCollection<int> UnansweredIds)
+{
+    public static readonly HalalClassifierResult Empty =
+        new(Array.Empty<HalalVerdict>(), Array.Empty<int>());
+}
+
 /// <summary>A vision verdict for one image URL.</summary>
 public sealed record ImageVerdict(string ImageUrl, bool IsHaram, string? Category, double Confidence, string? Reason);
 
@@ -61,10 +75,11 @@ public interface IHalalClassifier
 
     /// <summary>
     /// Classifies the candidates. Returns verdicts for items the model judged haram, plus explicit
-    /// halal verdicts for keyword-flagged items it overturns. Returns an empty list on failure —
-    /// callers must then treat keyword decisions as final.
+    /// halal verdicts for keyword-flagged items it overturns — and, crucially, the ids whose batch
+    /// failed, so the caller can apply its deterministic fallback to exactly those items instead
+    /// of mistaking an infrastructure failure for a deliberate model skip.
     /// </summary>
-    Task<IReadOnlyList<HalalVerdict>> ClassifyAsync(IReadOnlyList<HalalCandidate> items, CancellationToken ct = default);
+    Task<HalalClassifierResult> ClassifyAsync(IReadOnlyList<HalalCandidate> items, CancellationToken ct = default);
 }
 
 /// <summary>

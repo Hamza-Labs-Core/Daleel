@@ -15,28 +15,35 @@ public class HalalModeratorTests
         ImageUrl: i => i.Image,
         WithImageUrl: (i, url) => i with { Image = url });
 
-    /// <summary>A scripted classifier: returns exactly the verdicts it was given.</summary>
+    /// <summary>A scripted classifier: returns exactly the verdicts it was given, full coverage.</summary>
     private sealed class FakeClassifier : IHalalClassifier
     {
         private readonly Func<IReadOnlyList<HalalCandidate>, IReadOnlyList<HalalVerdict>> _respond;
+        private readonly Func<IReadOnlyList<HalalCandidate>, IReadOnlyCollection<int>>? _unanswered;
         public List<IReadOnlyList<HalalCandidate>> Calls { get; } = new();
         public bool IsConfigured => true;
 
-        public FakeClassifier(Func<IReadOnlyList<HalalCandidate>, IReadOnlyList<HalalVerdict>> respond) =>
+        public FakeClassifier(
+            Func<IReadOnlyList<HalalCandidate>, IReadOnlyList<HalalVerdict>> respond,
+            Func<IReadOnlyList<HalalCandidate>, IReadOnlyCollection<int>>? unanswered = null)
+        {
             _respond = respond;
+            _unanswered = unanswered;
+        }
 
-        public Task<IReadOnlyList<HalalVerdict>> ClassifyAsync(
+        public Task<HalalClassifierResult> ClassifyAsync(
             IReadOnlyList<HalalCandidate> items, CancellationToken ct = default)
         {
             Calls.Add(items);
-            return Task.FromResult(_respond(items));
+            return Task.FromResult(new HalalClassifierResult(
+                _respond(items), _unanswered?.Invoke(items) ?? Array.Empty<int>()));
         }
     }
 
     private sealed class ThrowingClassifier : IHalalClassifier
     {
         public bool IsConfigured => true;
-        public Task<IReadOnlyList<HalalVerdict>> ClassifyAsync(
+        public Task<HalalClassifierResult> ClassifyAsync(
             IReadOnlyList<HalalCandidate> items, CancellationToken ct = default) =>
             throw new HttpRequestException("provider down");
     }
@@ -181,11 +188,13 @@ public class HalalModeratorTests
     }
 
     [Fact]
-    public async Task EmptyLlmResponseWithHintedFlags_IsDegradedMode_KeywordRemovalStands()
+    public async Task UnansweredCandidates_KeepKeywordRemovals_DegradedMode()
     {
-        // Hinted candidates demand explicit verdicts; a completely empty response means the call
-        // effectively failed — degraded mode keeps the deterministic keyword decision.
-        var classifier = new FakeClassifier(_ => Array.Empty<HalalVerdict>());
+        // The classifier reports the candidate's batch failed → no decision was made, so the
+        // deterministic keyword removal stands for exactly that item.
+        var classifier = new FakeClassifier(
+            _ => Array.Empty<HalalVerdict>(),
+            candidates => candidates.Select(c => c.Id).ToArray());
         var filter = new ContentFilter(FilterStrictness.Strict);
         var moderator = new HalalModerator(filter, classifier);
         var items = new[] { new Item("Imported Beer 6-pack") };
@@ -194,6 +203,36 @@ public class HalalModeratorTests
 
         kept.Should().BeEmpty();
         filter.AuditDetails.Single().Source.Should().Be(FindingSource.Keyword);
+    }
+
+    [Fact]
+    public async Task PartialBatchFailure_ShowsNothingFromTheFailedBatch()
+    {
+        // One batch answers, the other fails: answered items follow the LLM; the failed batch's
+        // keyword flags REMOVE (a partial infrastructure failure must not read as model skips).
+        var classifier = new FakeClassifier(
+            candidates => candidates
+                .Where(c => c.Text.Contains("Hotel"))
+                .Select(c => new HalalVerdict(c.Id, false, null, 0.9, "hotel near a nightlife district"))
+                .ToList(),
+            candidates => candidates
+                .Where(c => c.Text.Contains("Beer"))
+                .Select(c => c.Id)
+                .ToArray());
+        var filter = new ContentFilter(FilterStrictness.Strict);
+        var moderator = new HalalModerator(filter, classifier);
+        var items = new[]
+        {
+            new Item("Grand Hotel near the Bar district"), // answered: keyword flag overturned, kept
+            new Item("Imported Beer 6-pack")                // batch failed: keyword removal stands
+        };
+
+        var kept = await moderator.ModerateAsync(items, Projection);
+
+        kept.Should().ContainSingle().Which.Title.Should().Contain("Grand Hotel");
+        var finding = filter.AuditDetails.Single();
+        finding.Source.Should().Be(FindingSource.Keyword);
+        finding.ItemRemoved.Should().BeTrue();
     }
 
     [Fact]

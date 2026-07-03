@@ -111,23 +111,60 @@ public class LlmHalalClassifierTests
         var llm = new FakeLlm("""[{"id": 0, "haram": false, "category": null, "confidence": 0.9, "reason": "barber shop"}]""");
         var classifier = new LlmHalalClassifier(llm);
 
-        var verdicts = await classifier.ClassifyAsync(new[]
+        var result = await classifier.ClassifyAsync(new[]
         {
             new HalalCandidate(0, "Barber shop downtown", "StoreLocation", "alcohol", "bar")
         });
 
-        verdicts.Should().ContainSingle().Which.IsHaram.Should().BeFalse();
+        result.Verdicts.Should().ContainSingle().Which.IsHaram.Should().BeFalse();
+        result.UnansweredIds.Should().BeEmpty();
         llm.LastUserPrompt.Should().Contain("keyword hint: alcohol").And.Contain("\"bar\"");
     }
 
     [Fact]
-    public async Task ClassifyAsync_SwallowsTransportErrors()
+    public async Task ClassifyAsync_TransportError_ReportsCandidatesUnanswered()
     {
         var classifier = new LlmHalalClassifier(new ThrowingLlm());
 
-        var verdicts = await classifier.ClassifyAsync(new[] { new HalalCandidate(0, "anything", "Item") });
+        var result = await classifier.ClassifyAsync(new[] { new HalalCandidate(7, "anything", "Item") });
 
-        verdicts.Should().BeEmpty();
+        result.Verdicts.Should().BeEmpty();
+        result.UnansweredIds.Should().ContainSingle().Which.Should().Be(7);
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_GarbageResponseWithHints_ReportsBatchUnanswered()
+    {
+        // Hinted candidates demand explicit verdicts — a batch that parses to nothing didn't answer.
+        var classifier = new LlmHalalClassifier(new FakeLlm("The items look fine to me!"));
+
+        var result = await classifier.ClassifyAsync(new[]
+        {
+            new HalalCandidate(0, "City Bar & Lounge", "SearchResult", "alcohol", "bar"),
+            new HalalCandidate(1, "Samsung Fridge", "SearchResult")
+        });
+
+        result.Verdicts.Should().BeEmpty();
+        result.UnansweredIds.Should().BeEquivalentTo(new[] { 0, 1 });
+    }
+
+    [Fact]
+    public async Task ClassifyAsync_PartialBatchFailure_ReportsOnlyTheFailedBatch()
+    {
+        // 81 candidates → two batches. First call answers, second throws: only the second
+        // batch's ids are reported unanswered, the first batch's verdicts survive.
+        var llm = new SequenceLlm(
+            """[{"id": 0, "haram": true, "category": "alcohol", "confidence": 0.9, "reason": "bar"}]""");
+        var classifier = new LlmHalalClassifier(llm);
+        var candidates = Enumerable.Range(0, 81)
+            .Select(i => new HalalCandidate(i, $"item {i}", "SearchResult",
+                i == 0 ? "alcohol" : null, i == 0 ? "bar" : null))
+            .ToList();
+
+        var result = await classifier.ClassifyAsync(candidates);
+
+        result.Verdicts.Should().ContainSingle().Which.Id.Should().Be(0);
+        result.UnansweredIds.Should().ContainSingle().Which.Should().Be(80);
     }
 
     private sealed class FakeLlm : ILlmClient
@@ -144,6 +181,22 @@ public class LlmHalalClassifierTests
             LastUserPrompt = messages[^1].Content;
             return Task.FromResult(new LlmResponse { Content = _response });
         }
+    }
+
+    /// <summary>Answers the first call with the given response, throws on every later call.</summary>
+    private sealed class SequenceLlm : ILlmClient
+    {
+        private readonly string _firstResponse;
+        private int _calls;
+        public string Provider => "fake";
+
+        public SequenceLlm(string firstResponse) => _firstResponse = firstResponse;
+
+        public Task<LlmResponse> CompleteAsync(
+            string systemPrompt, IReadOnlyList<LlmMessage> messages, CancellationToken cancellationToken = default) =>
+            Interlocked.Increment(ref _calls) == 1
+                ? Task.FromResult(new LlmResponse { Content = _firstResponse })
+                : throw new HttpRequestException("second batch down");
     }
 
     private sealed class ThrowingLlm : ILlmClient

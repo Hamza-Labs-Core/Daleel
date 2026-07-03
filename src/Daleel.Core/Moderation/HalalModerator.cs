@@ -196,11 +196,10 @@ public sealed class HalalModerator
             return;
         }
 
-        IReadOnlyList<HalalVerdict> verdicts;
-        var callFailed = false;
+        HalalClassifierResult result;
         try
         {
-            verdicts = await _classifier!.ClassifyAsync(candidates, ct).ConfigureAwait(false);
+            result = await _classifier!.ClassifyAsync(candidates, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -208,22 +207,17 @@ public sealed class HalalModerator
         }
         catch
         {
-            verdicts = Array.Empty<HalalVerdict>();
-            callFailed = true;
+            // Whole call failed — degraded mode; FinalizeKeywordFlags promotes the raw flags.
+            return;
         }
 
-        // The prompt demands an explicit verdict for every keyword-hinted item, so hinted
-        // candidates with a completely empty response means the call effectively failed (parse
-        // error, empty model output) — degraded mode, where keyword flags stay authoritative.
-        if (verdicts.Count == 0 && candidates.Any(c => c.KeywordCategory is not null))
-        {
-            callFailed = true;
-        }
-
-        if (callFailed)
-        {
-            return; // FinalizeKeywordFlags promotes the raw flags — the degraded-mode fallback
-        }
+        var verdicts = result.Verdicts;
+        // Candidates whose batch failed were never judged: leave them unadjudicated so the
+        // deterministic keyword baseline applies to exactly them (a PARTIAL infrastructure
+        // failure must not read as "the model chose to show these").
+        var unanswered = result.UnansweredIds.Count > 0
+            ? new HashSet<int>(result.UnansweredIds)
+            : null;
 
         // Duplicate-tolerant (haram wins): LlmHalalClassifier dedupes already, but this lookup must
         // never be able to throw — moderation post-processing faults would fault the whole search.
@@ -237,6 +231,11 @@ public sealed class HalalModerator
         }
         foreach (var candidate in candidates)
         {
+            if (unanswered?.Contains(candidate.Id) == true)
+            {
+                continue; // batch failed for this item — FinalizeKeywordFlags owns it
+            }
+
             var state = states[candidate.Id];
             var verdict = byId.GetValueOrDefault(candidate.Id);
 
