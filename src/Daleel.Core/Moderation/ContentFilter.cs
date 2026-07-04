@@ -18,7 +18,7 @@ public enum FilterStrictness
     /// </summary>
     /// <remarks>
     /// Note: a store's <em>financing model</em> (riba / interest-based banking) is deliberately NOT
-    /// screened at any level — see the policy note on <see cref="Categories"/>.
+    /// screened at any level — see the policy note on <see cref="ContentFilter"/>.
     /// </remarks>
     Strict
 }
@@ -63,6 +63,11 @@ public sealed class ContentFilter
 
         private static Regex BuildEnglishPattern(string[] terms)
         {
+            if (terms.Length == 0)
+            {
+                return NeverMatches; // an EMPTY alternation would match everywhere, not nowhere
+            }
+
             var alternation = string.Join('|', terms.Select(Regex.Escape));
             return new Regex($@"\b(?:{alternation})s?\b",
                 RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -70,6 +75,11 @@ public sealed class ContentFilter
 
         private static Regex BuildArabicPattern(string[] normalizedTerms)
         {
+            if (normalizedTerms.Length == 0)
+            {
+                return NeverMatches;
+            }
+
             var alternation = string.Join('|', normalizedTerms.Select(Regex.Escape));
             // (?<!\p{L}) / (?!\p{L}) are letter boundaries (\b is unreliable across the mixed
             // Arabic/Latin text these fields carry). Prefixes: the definite-article family ONLY —
@@ -77,6 +87,9 @@ public sealed class ContentFilter
             return new Regex($@"(?<!\p{{L}})(?:وال|فال|بال|كال|ولل|فلل|ال|لل)?(?:{alternation})(?!\p{{L}})",
                 RegexOptions.Compiled | RegexOptions.CultureInvariant);
         }
+
+        private static readonly Regex NeverMatches =
+            new(@"(?!)", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     }
 
     // Halal-compliance policy — what we filter and what we deliberately do NOT.
@@ -93,7 +106,7 @@ public sealed class ContentFilter
     // payment method the user need not use. Hence there is intentionally no "riba"/"banking" category
     // here — keep it that way. (Previously a Strict-level "riba" category existed; it was removed
     // because it conflated the store's financing with the halal status of what it sells.)
-    private static readonly Category[] Categories =
+    private static readonly Category[] DefaultCategories =
     {
         new("alcohol", FilterStrictness.Moderate,
             new[] { "alcohol", "alcoholic", "beer", "wine", "whisky", "whiskey", "vodka", "liquor", "liqueur",
@@ -127,6 +140,7 @@ public sealed class ContentFilter
     };
 
     private readonly FilterStrictness _strictness;
+    private readonly IReadOnlyList<Category> _categories;
     private readonly List<string> _audit = new();
     private readonly List<FilterFinding> _details = new();
     // Whitelist keys (source URLs, image URLs, content hashes) that admins have explicitly
@@ -138,13 +152,77 @@ public sealed class ContentFilter
     private readonly object _auditLock = new();
 
     public ContentFilter(FilterStrictness strictness = FilterStrictness.Strict,
-        IReadOnlyCollection<string>? whitelist = null)
+        IReadOnlyCollection<string>? whitelist = null,
+        IReadOnlyList<Category>? categories = null)
     {
         _strictness = strictness;
+        _categories = categories ?? DefaultCategories;
         _whitelist = whitelist is { Count: > 0 }
             ? new HashSet<string>(whitelist.Where(k => !string.IsNullOrWhiteSpace(k)).Select(k => k.Trim()),
                 StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Compiles the EFFECTIVE category set from the static defaults plus dynamic rules: LLM- or
+    /// admin-created term suppressions drop a trigger, additions extend a category. Call this
+    /// once per policy snapshot (patterns recompile), then hand the result to every filter of
+    /// that snapshot's lifetime. With no rules, returns the shared defaults untouched.
+    /// </summary>
+    public static IReadOnlyList<Category> BuildCategories(IReadOnlyCollection<ModerationRule> rules)
+    {
+        if (rules.Count == 0)
+        {
+            return DefaultCategories;
+        }
+
+        static string StripArticle(string normalized) =>
+            new[] { "وال", "فال", "بال", "كال", "ولل", "فلل", "ال", "لل" }
+                .Where(normalized.StartsWith)
+                .Select(p => normalized[p.Length..])
+                .FirstOrDefault() ?? normalized;
+
+        var result = new List<Category>(DefaultCategories.Length);
+        foreach (var cat in DefaultCategories)
+        {
+            bool SuppressedEn(string term) => rules.Any(r =>
+                r.Kind == ModerationRule.SuppressTerm && r.Language == "en"
+                && r.Category.Equals(cat.Name, StringComparison.OrdinalIgnoreCase)
+                && r.Term.Trim().Equals(term, StringComparison.OrdinalIgnoreCase));
+
+            // Suppression terms come from finding audits, where the matched value may carry the
+            // definite-article prefix ("البار" suppresses list term "بار"); compare normalized,
+            // article-stripped forms.
+            bool SuppressedAr(string term)
+            {
+                var normalizedListTerm = ArabicNormalizer.Normalize(term);
+                return rules.Any(r =>
+                {
+                    if (r.Kind != ModerationRule.SuppressTerm || r.Language != "ar"
+                        || !r.Category.Equals(cat.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return false;
+                    }
+
+                    var ruleTerm = ArabicNormalizer.Normalize(r.Term.Trim());
+                    return ruleTerm == normalizedListTerm || StripArticle(ruleTerm) == normalizedListTerm;
+                });
+            }
+
+            string[] Added(string language) => rules
+                .Where(r => r.Kind == ModerationRule.AddTerm && r.Language == language
+                    && r.Category.Equals(cat.Name, StringComparison.OrdinalIgnoreCase)
+                    && !string.IsNullOrWhiteSpace(r.Term))
+                .Select(r => r.Term.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var english = cat.English.Where(t => !SuppressedEn(t)).Concat(Added("en")).ToArray();
+            var arabic = cat.Arabic.Where(t => !SuppressedAr(t)).Concat(Added("ar")).ToArray();
+            result.Add(new Category(cat.Name, cat.MinLevel, english, arabic));
+        }
+
+        return result;
     }
 
     /// <summary>The configured strictness level.</summary>
@@ -320,7 +398,7 @@ public sealed class ContentFilter
         var latin = text.ToLowerInvariant();
         var arabic = ArabicNormalizer.Normalize(text);
 
-        foreach (var category in Categories)
+        foreach (var category in _categories)
         {
             if (category.MinLevel > _strictness)
             {

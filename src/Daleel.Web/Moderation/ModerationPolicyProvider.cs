@@ -4,8 +4,15 @@ using Microsoft.Extensions.Caching.Memory;
 
 namespace Daleel.Web.Moderation;
 
-/// <summary>The per-run moderation inputs: admin whitelist keys and feedback-tuned thresholds.</summary>
-public sealed record ModerationPolicySnapshot(IReadOnlyCollection<string> WhitelistKeys, HalalPolicy Policy);
+/// <summary>
+/// The per-run moderation inputs: admin whitelist keys, feedback-tuned thresholds, and the
+/// EFFECTIVE keyword categories (static defaults + dynamic LLM/admin rule overrides), compiled
+/// once per snapshot so per-search filters share the regexes.
+/// </summary>
+public sealed record ModerationPolicySnapshot(
+    IReadOnlyCollection<string> WhitelistKeys,
+    HalalPolicy Policy,
+    IReadOnlyList<ContentFilter.Category> Categories);
 
 /// <summary>
 /// Builds the moderation policy each search run uses: the active whitelist (admin "undo"
@@ -52,9 +59,11 @@ public sealed class ModerationPolicyProvider : IModerationPolicyProvider
             using var scope = _scopeFactory.CreateScope();
             var logs = scope.ServiceProvider.GetRequiredService<IFilteredContentLogRepository>();
             var whitelist = scope.ServiceProvider.GetRequiredService<IModerationWhitelistRepository>();
+            var rules = scope.ServiceProvider.GetRequiredService<IModerationRuleRepository>();
 
             var keys = await whitelist.ActiveKeysAsync(ct).ConfigureAwait(false);
             var stats = await logs.RatingStatsAsync(DateTimeOffset.UtcNow - FeedbackWindow, ct).ConfigureAwait(false);
+            var activeRules = await rules.ActiveRulesAsync(ct).ConfigureAwait(false);
 
             var fallback = new HalalPolicy().DefaultThreshold;
             var thresholds = stats.ToDictionary(
@@ -62,8 +71,13 @@ public sealed class ModerationPolicyProvider : IModerationPolicyProvider
                 s => HalalPolicy.ThresholdFromPrecision(s.Correct, s.Incorrect, fallback),
                 StringComparer.OrdinalIgnoreCase);
 
+            // Compile the effective keyword set once per snapshot — the dynamic learning surface.
+            var categories = ContentFilter.BuildCategories(activeRules
+                .Select(r => new ModerationRule(r.Kind, r.Category, r.Term, r.Language))
+                .ToArray());
+
             var snapshot = new ModerationPolicySnapshot(
-                keys, new HalalPolicy { CategoryThresholds = thresholds });
+                keys, new HalalPolicy { CategoryThresholds = thresholds }, categories);
             _cache.Set(CacheKey, snapshot, SnapshotTtl);
             return snapshot;
         }
@@ -74,9 +88,11 @@ public sealed class ModerationPolicyProvider : IModerationPolicyProvider
         catch (Exception ex)
         {
             // Policy loading must never block a search: fall back to defaults (empty whitelist,
-            // stock thresholds) and let the next run retry.
+            // stock thresholds, static categories) and let the next run retry.
             _logger.LogWarning(ex, "Failed to load moderation policy; using defaults for this run");
-            return new ModerationPolicySnapshot(Array.Empty<string>(), new HalalPolicy());
+            return new ModerationPolicySnapshot(
+                Array.Empty<string>(), new HalalPolicy(),
+                ContentFilter.BuildCategories(Array.Empty<ModerationRule>()));
         }
     }
 

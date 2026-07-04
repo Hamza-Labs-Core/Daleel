@@ -2,6 +2,9 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject IAnalyticsService Analytics
 @inject IFilteredContentLogRepository FilteredLog
+@inject IModerationRuleRepository Rules
+@inject Microsoft.Extensions.Caching.Memory.IMemoryCache Cache
+@inject ISnackbar Snackbar
 
 <PageTitle>دليل · Admin · Moderation</PageTitle>
 
@@ -77,6 +80,54 @@ else
         }
     </MudPaper>
 
+    <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
+        <MudText Typo="Typo.h6" Class="mb-1">Dynamic keyword rules</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
+            The LLM auditor reviews every finding and adjusts the keyword layer itself: repeated
+            wrong flags auto-suppress a term (revocable below); proposed additions wait here for
+            your approval. Your ratings always outrank the machine's.
+        </MudText>
+        @if (_rules.Count == 0)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">No dynamic rules yet — the static keyword list is in effect.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Style="overflow-x:auto;">
+                <thead>
+                    <tr><th>Rule</th><th>Term</th><th>Category</th><th>Source</th><th>Status</th><th>Reason</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _rules)
+                    {
+                        var rule = r; // per-iteration local for deferred RenderFragments
+                        <tr>
+                            <td>@(rule.Kind == "suppress-term" ? "suppress" : "add")</td>
+                            <td dir="@Catalog.Dir(rule.Term)"><code>@rule.Term</code></td>
+                            <td>@rule.Category</td>
+                            <td>@rule.Source</td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small"
+                                         Color="@(rule.Status == "active" ? Color.Success : Color.Warning)"
+                                         Variant="Variant.Text">@rule.Status</MudChip>
+                            </td>
+                            <td style="max-width:340px;">@rule.Reason</td>
+                            <td style="white-space:nowrap;">
+                                @if (rule.Status == "pending")
+                                {
+                                    <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
+                                               OnClick="() => ApproveRuleAsync(rule)">Approve</MudButton>
+                                }
+                                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
+                                           OnClick="() => RevokeRuleAsync(rule)">Revoke</MudButton>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </MudPaper>
+
     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-3">
         Filtered items are never shown to users. For the exact content removed and the rule that fired,
         see <MudLink Href="/admin/filtered" Typo="Typo.caption">Filtered content</MudLink>.
@@ -90,6 +141,37 @@ else
     private int _withFilters;
     private IReadOnlyList<(string Category, int Count)> _byCategory = new List<(string, int)>();
     private IReadOnlyList<CategoryRatingStats> _ratingStats = Array.Empty<CategoryRatingStats>();
+    private IReadOnlyList<ModerationRuleOverride> _rules = Array.Empty<ModerationRuleOverride>();
+
+    private async Task ApproveRuleAsync(ModerationRuleOverride rule)
+    {
+        try
+        {
+            await Rules.ApproveAsync(rule.Id);
+            Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            Snackbar.Add($"Rule approved — '{rule.Term}' now applies to every search.", Severity.Success);
+            await RetryAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't approve rule: {ex.Message}", Severity.Error);
+        }
+    }
+
+    private async Task RevokeRuleAsync(ModerationRuleOverride rule)
+    {
+        try
+        {
+            await Rules.RevokeAsync(rule.Id);
+            Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            Snackbar.Add($"Rule revoked — the static default applies to '{rule.Term}' again.", Severity.Success);
+            await RetryAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't revoke rule: {ex.Message}", Severity.Error);
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -109,6 +191,7 @@ else
             _withFilters = withFilters;
             _byCategory = byCat;
             _ratingStats = await FilteredLog.RatingStatsAsync(DateTimeOffset.UtcNow.AddDays(-90));
+            _rules = await Rules.ListOpenAsync();
             _loading = false;
         }
         catch (Exception ex)

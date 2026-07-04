@@ -56,11 +56,23 @@ public sealed class FilteredContentLog
     /// <summary>True when the whole item was removed; false when only its image was stripped.</summary>
     public bool ItemRemoved { get; set; } = true;
 
-    /// <summary>Admin feedback: +1 the filter was correct, -1 incorrect, null unrated. Drives thresholds.</summary>
+    /// <summary>Admin verdict: +1 the content IS haram (flag right), -1 halal (flag wrong). Drives thresholds.</summary>
     public int? Rating { get; set; }
 
     /// <summary>When the admin rated this finding.</summary>
     public DateTimeOffset? RatedAt { get; set; }
+
+    /// <summary>
+    /// The LLM auto-reviewer's verdict, same scale as <see cref="Rating"/>. Feeds thresholds only
+    /// when no admin rating exists — the human always overrides the machine.
+    /// </summary>
+    public int? AutoRating { get; set; }
+
+    /// <summary>When the auto-reviewer audited this finding (null = not yet reviewed).</summary>
+    public DateTimeOffset? AutoReviewedAt { get; set; }
+
+    /// <summary>The auto-reviewer's one-line justification (admin review surface).</summary>
+    public string? AutoReviewNote { get; set; }
 
     /// <summary>The whitelist entry created from this finding via the admin "undo" action, if any.</summary>
     public long? WhitelistEntryId { get; set; }
@@ -93,6 +105,43 @@ public sealed class FilteredContentLog
 
     private static string? Truncate(string? s, int max) =>
         s is null || s.Length <= max ? s : s[..max];
+}
+
+/// <summary>
+/// One dynamic keyword-rule adjustment, persisted so the filter can learn without a deploy.
+/// The LLM auto-reviewer proposes them (suppressions activate on repeated-consensus, additions
+/// wait as "pending" for admin approval); admins can create, approve, or revoke any of them.
+/// The active set rides into every search run via the moderation policy snapshot.
+/// </summary>
+public sealed class ModerationRuleOverride
+{
+    public long Id { get; set; }
+
+    /// <summary>"suppress-term" or "add-term" (see Core's ModerationRule).</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Blocklist category, e.g. "alcohol".</summary>
+    public string Category { get; set; } = string.Empty;
+
+    /// <summary>The trigger term (suppressions may carry the matched article prefix).</summary>
+    public string Term { get; set; } = string.Empty;
+
+    /// <summary>"en" or "ar".</summary>
+    public string Language { get; set; } = string.Empty;
+
+    /// <summary>Why this rule exists — the reviewer's aggregated evidence or the admin's note.</summary>
+    public string? Reason { get; set; }
+
+    /// <summary>"llm" or "admin".</summary>
+    public string Source { get; set; } = string.Empty;
+
+    /// <summary>"active", "pending" (awaiting admin approval), or "revoked".</summary>
+    public string Status { get; set; } = string.Empty;
+
+    public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>When the rule was approved or revoked.</summary>
+    public DateTimeOffset? ResolvedAt { get; set; }
 }
 
 /// <summary>

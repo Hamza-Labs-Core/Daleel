@@ -58,12 +58,49 @@ public interface IFilteredContentLogRepository
 
     /// <summary>Per-category correct/incorrect tallies for LLM/vision findings rated since <paramref name="since"/>.</summary>
     Task<IReadOnlyList<CategoryRatingStats>> RatingStatsAsync(DateTimeOffset since, CancellationToken ct = default);
+
+    /// <summary>The oldest findings the auto-reviewer hasn't audited yet (skips whitelisted rows).</summary>
+    Task<IReadOnlyList<FilteredContentLog>> ListUnreviewedAsync(int take, CancellationToken ct = default);
+
+    /// <summary>Stores one auto-review verdict on a finding.</summary>
+    Task ApplyAutoReviewAsync(long id, int autoRating, string? note, CancellationToken ct = default);
 }
 
 /// <summary>Loads the active whitelist keys the moderation pipeline consults on every run.</summary>
 public interface IModerationWhitelistRepository
 {
     Task<IReadOnlyCollection<string>> ActiveKeysAsync(CancellationToken ct = default);
+}
+
+/// <summary>Dynamic keyword-rule overrides (the auto-learning surface of the feedback loop).</summary>
+public interface IModerationRuleRepository
+{
+    /// <summary>The rules the moderation pipeline applies right now.</summary>
+    Task<IReadOnlyList<ModerationRuleOverride>> ActiveRulesAsync(CancellationToken ct = default);
+
+    /// <summary>Everything non-revoked, for the admin rules panel (active + pending).</summary>
+    Task<IReadOnlyList<ModerationRuleOverride>> ListOpenAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a rule if no open (active/pending) rule with the same kind/category/term/language
+    /// exists yet. Returns the existing or created row.
+    /// </summary>
+    Task<ModerationRuleOverride> UpsertAsync(
+        string kind, string category, string term, string language, string reason, string source,
+        string status, CancellationToken ct = default);
+
+    /// <summary>Flips a pending rule to active (admin approval).</summary>
+    Task ApproveAsync(long id, CancellationToken ct = default);
+
+    /// <summary>Revokes a rule so the static default applies again.</summary>
+    Task RevokeAsync(long id, CancellationToken ct = default);
+
+    /// <summary>
+    /// How many findings for this term/category the auto-reviewer judged halal (wrong flag) vs
+    /// haram, plus whether ANY admin rated one of them haram — the human veto on auto-suppression.
+    /// </summary>
+    Task<(int AutoHalal, int AutoHaram, bool AdminSaysHaram)> TermEvidenceAsync(
+        string category, string term, CancellationToken ct = default);
 }
 
 public sealed class FilteredContentLogRepository : IFilteredContentLogRepository, IModerationWhitelistRepository
@@ -312,21 +349,122 @@ public sealed class FilteredContentLogRepository : IFilteredContentLogRepository
     {
         // Only model decisions are threshold-tunable; keyword rules are deterministic (their
         // feedback still matters — surfaced in the admin UI — but doesn't move thresholds).
+        // The admin rating overrides the auto-reviewer's verdict when both exist.
         var rows = await _db.FilteredContentLogs.AsNoTracking()
-            .Where(x => x.Rating != null && x.CreatedAt >= since
+            .Where(x => (x.Rating != null || x.AutoRating != null) && x.CreatedAt >= since
                 && (x.DecisionSource == "llm" || x.DecisionSource == "vision"))
             .GroupBy(x => x.Category)
             .Select(g => new
             {
                 Category = g.Key,
-                Correct = g.Count(x => x.Rating > 0),
-                Incorrect = g.Count(x => x.Rating < 0)
+                Correct = g.Count(x => (x.Rating ?? x.AutoRating) > 0),
+                Incorrect = g.Count(x => (x.Rating ?? x.AutoRating) < 0)
             })
             .ToListAsync(ct);
 
         return rows.Select(r => new CategoryRatingStats(r.Category, r.Correct, r.Incorrect)).ToList();
     }
 
+    public async Task<IReadOnlyList<FilteredContentLog>> ListUnreviewedAsync(int take, CancellationToken ct = default) =>
+        await _db.FilteredContentLogs.AsNoTracking()
+            .Where(x => x.AutoReviewedAt == null && x.WhitelistEntryId == null)
+            .OrderBy(x => x.Id)
+            .Take(take)
+            .ToListAsync(ct);
+
+    public async Task ApplyAutoReviewAsync(long id, int autoRating, string? note, CancellationToken ct = default)
+    {
+        var row = await _db.FilteredContentLogs.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (row is null)
+        {
+            return; // deleted meanwhile — nothing to review
+        }
+
+        row.AutoRating = Math.Sign(autoRating);
+        row.AutoReviewedAt = DateTimeOffset.UtcNow;
+        row.AutoReviewNote = note is { Length: > 300 } ? note[..300] : note;
+        await _db.SaveChangesAsync(ct);
+    }
+
     public async Task<IReadOnlyCollection<string>> ActiveKeysAsync(CancellationToken ct = default) =>
         await _db.ModerationWhitelist.AsNoTracking().Select(x => x.Key).ToListAsync(ct);
+}
+
+public sealed class ModerationRuleRepository : IModerationRuleRepository
+{
+    private readonly DaleelDbContext _db;
+
+    public ModerationRuleRepository(DaleelDbContext db) => _db = db;
+
+    public async Task<IReadOnlyList<ModerationRuleOverride>> ActiveRulesAsync(CancellationToken ct = default) =>
+        await _db.ModerationRules.AsNoTracking().Where(r => r.Status == "active").ToListAsync(ct);
+
+    public async Task<IReadOnlyList<ModerationRuleOverride>> ListOpenAsync(CancellationToken ct = default) =>
+        await _db.ModerationRules.AsNoTracking()
+            .Where(r => r.Status != "revoked")
+            .OrderByDescending(r => r.Id)
+            .ToListAsync(ct);
+
+    public async Task<ModerationRuleOverride> UpsertAsync(
+        string kind, string category, string term, string language, string reason, string source,
+        string status, CancellationToken ct = default)
+    {
+        var existing = await _db.ModerationRules.FirstOrDefaultAsync(r =>
+            r.Kind == kind && r.Category == category && r.Term == term && r.Language == language
+            && r.Status != "revoked", ct);
+        if (existing is not null)
+        {
+            return existing; // idempotent: repeated reviewer cycles must not stack duplicates
+        }
+
+        var rule = new ModerationRuleOverride
+        {
+            Kind = kind,
+            Category = category,
+            Term = term.Length > 128 ? term[..128] : term,
+            Language = language,
+            Reason = reason.Length > 300 ? reason[..300] : reason,
+            Source = source,
+            Status = status,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        _db.ModerationRules.Add(rule);
+        await _db.SaveChangesAsync(ct);
+        return rule;
+    }
+
+    public async Task ApproveAsync(long id, CancellationToken ct = default)
+    {
+        var rule = await _db.ModerationRules.FirstOrDefaultAsync(r => r.Id == id, ct)
+            ?? throw new InvalidOperationException($"Rule #{id} no longer exists.");
+        rule.Status = "active";
+        rule.ResolvedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task RevokeAsync(long id, CancellationToken ct = default)
+    {
+        var rule = await _db.ModerationRules.FirstOrDefaultAsync(r => r.Id == id, ct)
+            ?? throw new InvalidOperationException($"Rule #{id} no longer exists.");
+        rule.Status = "revoked";
+        rule.ResolvedAt = DateTimeOffset.UtcNow;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<(int AutoHalal, int AutoHaram, bool AdminSaysHaram)> TermEvidenceAsync(
+        string category, string term, CancellationToken ct = default)
+    {
+        // Findings store the matched value in Rule; the same list term can surface with an
+        // article prefix, so match on containment both ways (bounded set: one term's findings).
+        var rows = await _db.FilteredContentLogs.AsNoTracking()
+            .Where(x => x.Category == category && x.Rule != null
+                && (x.Rule == term || x.Rule.Contains(term) || term.Contains(x.Rule)))
+            .Select(x => new { x.Rating, x.AutoRating })
+            .ToListAsync(ct);
+
+        return (
+            rows.Count(r => r.Rating is null && r.AutoRating < 0),
+            rows.Count(r => r.Rating is null && r.AutoRating > 0),
+            rows.Any(r => r.Rating > 0));
+    }
 }

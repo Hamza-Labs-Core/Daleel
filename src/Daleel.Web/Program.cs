@@ -255,6 +255,12 @@ builder.Services.AddTransient<ISystemConfigService, SystemConfigService>();
 builder.Services.AddTransient<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddTransient<IFilteredContentLogRepository, FilteredContentLogRepository>();
 builder.Services.AddTransient<IModerationWhitelistRepository, FilteredContentLogRepository>();
+builder.Services.AddTransient<IModerationRuleRepository, ModerationRuleRepository>();
+
+// The dynamic feedback loop: an LLM auditor reviews persisted findings on an interval, stores
+// auto-ratings (admin ratings always override), and self-activates keyword suppressions on
+// repeated wrong-flag consensus. Inert when no LLM key is configured.
+builder.Services.AddHostedService<Daleel.Web.Moderation.FindingAutoReviewService>();
 
 // The moderation feedback loop's read side: whitelist keys + rating-tuned thresholds, briefly
 // cached and handed to every search run. Singleton (scope-factory based) so background jobs share
