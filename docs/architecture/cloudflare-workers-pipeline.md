@@ -6,7 +6,7 @@
 **Deciders:** Backend/platform owners
 **Scope:** How Daleel's search pipeline execution moves from inline .NET work inside Elsa activities to HTTP-invoked Cloudflare Workers, while the Elsa workflow on the VPS remains the orchestrator.
 
-> **One-paragraph summary.** Today every step of the search pipeline runs *inline* inside an in-process Elsa 3 workflow on the VPS: the same .NET process scrapes (Context.dev), calls LLMs (OpenRouter/Claude), extracts products, filters for halal compliance, and writes to R2/Postgres. This document proposes keeping Elsa as the brain — it still decides *what* to do, branches, fans out, and sequences — but turning each unit of *work* into a stateless Cloudflare Worker that Elsa calls over HTTPS. Long-running calls use an async **submit → poll** pattern backed by Cloudflare Queues, results land in **R2** (already the source of truth), and Elsa reads them back by handle. Postgres, Blazor, SignalR, auth, and Elsa itself stay on the VPS. The migration is a **strangler-fig**: one worker at a time, behind the existing provider/activity interfaces, so nothing is a big-bang cutover.
+> **One-paragraph summary.** Today every step of the search pipeline runs *inline* inside an in-process Elsa 3 workflow on the VPS: the same .NET process makes every scrape call (Context.dev), every LLM call (OpenRouter/Claude), extracts products, filters for halal compliance, and writes to R2/Postgres — all bounded by one box, which is why the fan-out is capped at `5 concurrent`. This document proposes keeping Elsa as the brain — it still decides *what* to do, branches, fans out, and sequences — but **moving each tool call into a Cloudflare Worker** that Elsa invokes over HTTPS. This is deliberately **not a vendor migration**. It is two independent changes: **(A) the execution host** — *whatever* a step calls today keeps being called, but now from inside a worker, so calls run **async, queue-backed, and massively parallel with the per-run caps removed**; and **(B) the tool/backend** — for each job, use the *right tool*, chosen on merit (keep Context.dev where it's best at brand+catalogue scraping; use Cloudflare Browser Rendering for searching/rendering arbitrary sites; use Workers AI for cheap high-volume inference; keep Claude for planning). Long-running calls use an async **submit → poll** pattern backed by Cloudflare Queues; results land in **R2** (already the source of truth) and Elsa reads them by handle. Postgres, Blazor, SignalR, auth, and Elsa itself stay on the VPS. The migration is a **strangler-fig** built on the existing `ScrapeRouter`/`IScrapeProvider` seam that already selects a backend per request — so it's swap-the-host-then-optimize-the-tool, never a big-bang cutover.
 
 ---
 
@@ -95,12 +95,14 @@ The three **sub-workflows** (dispatched via `SubWorkflowDispatcher.RunManyAsync<
 
 These are the compute/latency-heavy operations currently executing synchronously in the .NET process. Each is a candidate to move behind an HTTP call to a Worker:
 
-| Inline work today | Class / method | Becomes worker |
+Every row keeps its **backend choice open** (right column shows the *host* + candidate backends per the [matrix](#the-tool-for-the-job-matrix-evaluate-per-case-validate-by-shadow-compare)); the constant is that the call moves into a worker for async + parallelism.
+
+| Inline work today | Class / method | Host worker (candidate backends) |
 |---|---|---|
-| Web/product scraping | `ContextDevProvider` (`IScrapeProvider`/`IExtractProvider`) → Context.dev `GET /v1/web/scrape/{markdown\|html}` | **scrape-worker** (Browser Rendering) |
-| Query planning, category analysis, analyst summary, structured extraction | `AgentService.PlanAsync / AnalyzeCategoryAsync / AnalyzeAsync / BuildProductSearchResultAsync` via `ILlmClient` (`OpenRouterClient` default, `AnthropicClient` fallback) | **extract-worker** / **classify-worker** (Workers AI for commodity; planning stays on OpenRouter/Claude) |
-| Halal moderation (whitelist → keyword → LLM → vision) | `HalalModerator.ModerateAsync<T>()`, `LlmHalalClassifier`, `OpenRouterImageHalalClassifier` | **filter-worker** (Workers AI + Llama Guard/vision) |
-| Multi-provider gather (web/shopping/places/social) | `AgentService.GatherAsync()` | **search-worker** (external search APIs) |
+| Web/product scraping | `ContextDevProvider` + `ScrapeRouter` (`IScrapeProvider`/`IExtractProvider`) | **scrape-worker** (Context.dev *kept* for brand/catalogue · Browser Rendering for site-search/generic · Firecrawl fallback) |
+| Query planning, category analysis, analyst summary, structured extraction | `AgentService.PlanAsync / AnalyzeCategoryAsync / AnalyzeAsync / BuildProductSearchResultAsync` via `ILlmClient` (`OpenRouterClient` default, `AnthropicClient` fallback) | **extract-worker** / **classify-worker** (Workers AI for commodity; **Claude/OpenRouter kept** for planning + nuanced analysis) |
+| Halal moderation (whitelist → keyword → LLM → vision) | `HalalModerator.ModerateAsync<T>()`, `LlmHalalClassifier`, `OpenRouterImageHalalClassifier` | **filter-worker** (Workers AI Llama-Guard/vision · OpenRouter kept as fallback) — *policy stays on VPS* |
+| Multi-provider gather (web/shopping/places/social) | `AgentService.GatherAsync()` | **search-worker** (external search/shopping/places APIs · Browser Rendering for site render) |
 | Entity persistence | `SearchEntityStore.SaveAllAsync()` → R2 (`R2StorageService.StoreJsonAsync`) + Postgres `EntityRecord` index | R2 write from worker + **D1** edge index mirror |
 | Image re-host | `R2StorageService.StoreImageAsync` | inside scrape/brand workers |
 
@@ -199,13 +201,15 @@ state.BundleKey = handle.ResultKey;                   // pass the R2 key downstr
 
 ### 2.3 The five Workers at a glance
 
-| Worker | Input → Output | Cloudflare primitives | Mode |
+Each host routes to a backend per the [matrix](#the-tool-for-the-job-matrix-evaluate-per-case-validate-by-shadow-compare); the "backends" column lists candidates, not a mandated swap.
+
+| Worker (host) | Input → Output | Backends (chosen per job) | Mode |
 |---|---|---|---|
-| **scrape-worker** | URL → structured/markdown/HTML | Browser Rendering (`/markdown`, `/scrape`, `/content`, `/crawl`) | async for crawls, sync for single page |
-| **classify-worker** | text/images → labels + confidence | Workers AI (Llama/Mistral; vision models) | sync (small) / batch (bulk) |
-| **extract-worker** | raw HTML → structured product JSON | Workers AI (JSON mode) + R2 + D1 | async |
-| **filter-worker** | content → halal findings | Workers AI (Llama Guard + vision) | sync per batch |
-| **search-worker** | query → search results | external search APIs + KV cache | sync (async if provider is slow) |
+| **scrape-worker** | URL/site → structured/markdown/HTML | Browser Rendering · **Context.dev (kept)** · Firecrawl | async for crawls, sync for single page |
+| **classify-worker** | text/images → labels + confidence | Workers AI (Llama/Mistral; vision) · OpenRouter | sync (small) / batch (bulk) |
+| **extract-worker** | raw HTML → structured product JSON | Workers AI (JSON mode) · Browser Rendering `/json` · Claude for hard cases · + R2 + D1 | async |
+| **filter-worker** | content → halal findings | Workers AI (Llama-Guard + vision) · OpenRouter | sync per batch |
+| **search-worker** | query → search results | external search/shopping/places APIs · Browser Rendering · + KV cache | sync (async if provider is slow) |
 
 Details in [§3](#3-worker-definitions).
 
@@ -214,6 +218,37 @@ Details in [§3](#3-worker-definitions).
 ## 3. Worker definitions
 
 Each Worker is a small ES module exporting `default { async fetch(request, env, ctx) }`, deployed independently, secured with the **house auth pattern** already used by `workers/log-viewer` (see [§9.2](#92-the-house-auth-pattern-reuse-verbatim)). All accept JSON, all fail closed on a missing secret, all return either an inline result or a `{ jobId, resultKey }` handle.
+
+### 3.0 Workers are execution hosts, not vendor replacements
+
+A worker below is named for a **capability** (scrape, classify, extract, filter, search), **not** for a vendor. Two decisions are made separately for every job:
+
+- **Execution host — always a Worker.** Moving the call off the VM into a worker is the constant win, *independent of which backend it calls*: **async execution, queue-backed decoupling, and horizontal parallelism with the current caps (`5 concurrent`, `≤15/10/20 entities`) removed**. Those caps exist today only because everything shares one VM's threads and memory; on the edge, hundreds of jobs run at once.
+- **Backend/tool — the right tool for the job.** Inside a worker, the actual call routes to whichever backend is best for *that* job — which may be the **current vendor kept unchanged**. Daleel already has the seam for this: `ScrapeRouter` + `IScrapeProvider`/`IExtractProvider` already pick a provider per request. The migration hosts that router inside a worker and **widens the backend set** (adds Browser Rendering, Workers AI) rather than replacing it.
+
+So `scrape-worker` is not "the Browser Rendering worker" — it's "the scraping execution host," and a single request may dispatch to Context.dev *or* Browser Rendering *or* Firecrawl depending on the job. Retiring a vendor is never a goal; keeping Context.dev where it wins, *inside a worker*, still delivers the async + parallelism + no-caps win.
+
+#### The tool-for-the-job matrix (evaluate per case; validate by shadow-compare)
+
+All jobs run **inside workers** (async / queued / parallel). The only question below is *which backend the worker calls*. Recommendations are **hypotheses to validate** — the worker interface makes A/B cheap: run both backends, diff outputs, keep the winner (the existing `ScrapeRouter` shadow-mode pattern).
+
+| Pipeline job | Best-fit backend (hypothesis) | Why | Runner-up / fallback |
+|---|---|---|---|
+| Web/site **search & discovery** | External search API + **Browser Rendering** | search API for the SERP; Browser Rendering renders/scrapes arbitrary JS sites — the *"searching sites"* case | Context.dev scrape |
+| Shopping / product SERP | External shopping API | structured shopping results | Browser Rendering on retailer search |
+| Places / store locations (`VerifyOnMaps`) | Maps/Places API | authoritative geo + contact data | Browser Rendering |
+| Generic JS-heavy page render | **Browser Rendering** | full Chromium; `/markdown`, `/scrape` by selector; handles SPAs | Context.dev / Firecrawl |
+| **Brand → catalogue → products** (structured) | **Context.dev** | purpose-built brand intelligence + catalogue crawl (`GetBrandAsync`/`CrawlAsync`) returns structured brand+product | Browser Rendering `/json` + extract |
+| Product detail / spec pages | *evaluate:* Context.dev vs Browser Rendering `/json` | site-structure-dependent | the other |
+| Price scraping | **Browser Rendering** `/scrape` (CSS selectors) | precise element extraction | Context.dev |
+| **Query planning** (strategy) | **Claude** (via OpenRouter) | complex reasoning, quality-critical | keep |
+| Category / market analysis | Claude/OpenRouter *or* Workers AI 70B | reasoning; cost/quality trade-off — evaluate | the other |
+| Structured extraction from HTML | **Workers AI** (JSON mode) | commodity, high-volume, cheap, parallel | Browser Rendering `/json` (folds scrape+extract) |
+| Classification (labels, buy-intent) | **Workers AI** (3B/8B) | cheap, fast, massively parallel | OpenRouter |
+| Halal **text** moderation | **Workers AI** Llama-Guard + halal prompt | cheap signal feeding `HalalModerator` (VPS keeps policy) | OpenRouter (current) |
+| Halal **image** moderation | **Workers AI** vision | cheap parallel vision | OpenRouter vision (current) |
+
+Read the per-worker sections below as **the execution host + its default backend**, with the matrix as the routing policy each host applies.
 
 A shared response envelope keeps Elsa's client simple:
 
@@ -226,11 +261,11 @@ A shared response envelope keeps Elsa's client simple:
 { "ok": false, "error": { "code": "SCRAPE_TIMEOUT", "message": "…", "retryable": true } }
 ```
 
-### 3.1 scrape-worker — URL → structured data (replaces Context.dev)
+### 3.1 scrape-worker — URL/site → structured data (scraping execution host)
 
-**Replaces:** `ContextDevProvider` scraping paths (`ScrapeAsync`, catalogue crawl, product-page fetch).
+**Hosts:** the scraping capability today spread across `ContextDevProvider` + `ScrapeRouter` (`IScrapeProvider`/`IExtractProvider`). The worker **is the `ScrapeRouter`, relocated to the edge** — it picks a backend per request per the [matrix](#the-tool-for-the-job-matrix-evaluate-per-case-validate-by-shadow-compare): **Browser Rendering** for site search / generic JS pages / price selectors; **Context.dev** for brand-intelligence + catalogue → product scraping; Firecrawl as fallback. The `backend` is a request parameter (or inferred from the job kind), so Context.dev calls simply move *inside the worker* unchanged — the win is async + parallelism, not a vendor swap.
 
-**Cloudflare Browser Rendering** (rebranded **"Browser Run"** 2026-04-15; REST path segment and permission remain `browser-rendering`). Two access modes:
+One backend it adds — **Cloudflare Browser Rendering** (rebranded **"Browser Run"** 2026-04-15; REST path segment and permission remain `browser-rendering`) — is worth detailing since it's new to the stack. Two access modes:
 
 - **REST Quick Actions** (duration-billed only, no concurrency charge): `POST …/browser-rendering/markdown` (LLM-ready page text), `/content` (rendered HTML), `/scrape` (CSS-selector element extraction with text/attributes/geometry), `/links`, and `/crawl` (whole-site from one seed). This is the closest drop-in for Context.dev's "URL in → markdown/HTML out" shape.
 - **Worker `browser` binding** (`env.BROWSER.quickAction("json", …)` or Puppeteer/Playwright): needed only when you want session reuse across many pages; billed on **duration + concurrency** ($2/extra concurrent browser).
@@ -238,11 +273,14 @@ A shared response envelope keeps Elsa's client simple:
 **Endpoints:**
 
 ```
-POST /scrape/page      { url, format: "markdown"|"html", waitUntil?, waitForSelector?, timeoutMs? }
-                       → sync { ok, result: { url, title, content, format }, resultKey }
-POST /scrape/elements  { url, selectors: [".price", "h1", …] }  → sync { elements: [...] }
-POST /scrape/catalog   { seedUrl, maxPages }                    → async { jobId, resultKey }  (uses /crawl)
+POST /scrape/page      { url, format, backend?: "browser"|"contextdev"|"firecrawl", waitUntil?, waitForSelector? }
+                       → sync { ok, result: { url, title, content, format }, backendUsed, resultKey }
+POST /scrape/elements  { url, selectors: [".price", "h1", …], backend? }  → sync { elements: [...] }
+POST /scrape/brand     { brandUrl, withCatalog: true, backend?: "contextdev" }  → async { jobId, resultKey }  (default Context.dev)
+POST /scrape/catalog   { seedUrl, maxPages, backend? }           → async { jobId, resultKey }  (Browser Rendering /crawl or Context.dev)
 ```
+
+`backend` is optional — when omitted the worker applies the matrix default for the endpoint (`/scrape/brand` → Context.dev, `/scrape/catalog`/`/scrape/page` → Browser Rendering). `backendUsed` is echoed back for observability and shadow-compare.
 
 **Notes & gotchas that shape the contract:**
 - **JS-heavy pages/SPAs:** default wait is `domcontentloaded` (fires *before* JS renders), so `/markdown` etc. can return empty/partial content. The worker must default `gotoOptions.waitUntil = "networkidle2"` (or accept a `waitForSelector`). This is exactly Daleel's own "empty vs faulted" trap — surface it as an explicit error, never a silent empty.
@@ -496,11 +534,10 @@ Keep the current keying so old and new writers interoperate during migration: `E
 - Stand up a **`scrape-worker` skeleton** returning canned data; validate the auth handshake, observability, and cost-header capture (`X-Browser-Ms-Used`).
 - **Exit criteria:** Elsa can call a Worker, get a handle, drain the queue, and read R2 — proven in QA.
 
-### Phase 1 — scrape-worker (highest value, lowest risk) ✅ *first to move*
-- Implement Browser Rendering behind `IScrapeProvider`; flag `Scraper=cloudflare|contextdev`.
-- Start with single-page `/markdown` + `/scrape`; then catalogue `/crawl` (async).
-- Run **shadow mode** first: call both Context.dev and the worker, diff results, log divergence — don't change user-facing output yet.
-- **Why first:** scraping is already an isolated interface, is the most brittle current dependency (Context.dev), benefits most from the edge, and has a natural A/B (`ScrapeRouter`). Retiring Context.dev is a concrete win.
+### Phase 1 — scrape-worker: relocate the call *unchanged* (prove the execution-host win) ✅ *first to move*
+- **Step 1a — same vendor, new host.** Move the **existing Context.dev call into the worker verbatim** (`backend: "contextdev"`). No behavior change, no new vendor — this isolates and proves *Axis A*: the call is now async, queue-backed, and no longer capped at 5-concurrent. Success = the same results at higher parallelism.
+- **Step 1b — add backends per the matrix (*Axis B*).** *Then* add Browser Rendering for site-search / generic pages / price selectors, and route `/scrape/brand` to Context.dev. **Shadow-compare** each backend behind the worker (call both, diff, log divergence) before flipping any default.
+- **Why first:** scraping is already an isolated interface (`ScrapeRouter`/`IScrapeProvider`) with a built-in A/B seam, and it's the single biggest source of the concurrency caps — so it's where the parallelism win is largest and the vendor question is safest to defer. Keeping Context.dev is a valid end state; the goal is uncapped parallel execution, not retiring a vendor.
 
 ### Phase 2 — extract-worker + D1 index
 - Move structured extraction to Workers AI JSON mode behind `IExtractProvider`; worker writes R2 + upserts D1.
