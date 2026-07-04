@@ -436,7 +436,8 @@ public sealed class DispatchStoreWorkflowsActivity : CancellableActivity
                     s.Result = store;
                 },
                 services.Progress,
-                SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
+                // Stores get the longer budget: the catalogue deep-crawl (step 5) needs more than the 30s default.
+                SubWorkflowDispatcher.StoreResearchTimeout, context.CancellationToken);
 
         var merged = results.Select(r => r.Result).Concat(rest).ToList();
         foreach (var r in results)

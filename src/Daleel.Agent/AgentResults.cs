@@ -22,10 +22,13 @@ public sealed class AgentOptions
     /// <summary>Max web/shopping queries to actually execute from a plan (cost guard).</summary>
     /// <remarks>
     /// A broad query set is what gives "best &lt;category&gt;" searches their coverage — each diverse query
-    /// (per-brand, per-tier, buying-guide) surfaces a different slice of the catalogue. Kept generous; total
-    /// cost stays bounded by the per-job API-call cap.
+    /// (per-brand, per-tier, buying-guide, local-store-finder) surfaces a different slice of the catalogue.
+    /// In local markets the store-discovery queries ("&lt;category&gt; online store &lt;country&gt;",
+    /// "&lt;category&gt; متجر", "buy &lt;category&gt; &lt;city&gt;") are what surface small local e-commerce
+    /// sites the global engines bury — so the planner is asked for 8–10 diverse queries and this cap keeps
+    /// them. Kept generous; total cost stays bounded by the per-job API-call cap.
     /// </remarks>
-    public int MaxQueriesPerKind { get; init; } = 6;
+    public int MaxQueriesPerKind { get; init; } = 10;
 
     /// <summary>
     /// Max URLs to deep-read per run. For research-style queries the buying-guide / round-up articles ARE the

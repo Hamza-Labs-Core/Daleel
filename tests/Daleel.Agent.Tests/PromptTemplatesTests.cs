@@ -135,4 +135,32 @@ public class PromptTemplatesTests
         // Several review/buying-guide queries feed the "related articles" section.
         prompt.Should().Contain("buying-guide");
     }
+
+    [Fact]
+    public void PlanProduct_AsksForLocalStoreDiscoveryInBothLanguages()
+    {
+        var prompt = PromptTemplates.PlanProduct("coffee maker", GeoProfiles.Jordan);
+
+        // The plan must explicitly push for local online-store discovery — the gap that made Daleel miss
+        // local e-commerce sites — and name the country so the queries are geo-scoped.
+        prompt.Should().Contain("LOCAL STORE DISCOVERY");
+        prompt.Should().Contain("online store");
+        prompt.Should().Contain("Jordan");
+        // Bilingual store-finder phrasing (Arabic "متجر" / "للبيع") must be requested.
+        prompt.Should().Contain("متجر");
+        prompt.Should().Contain("للبيع");
+        // And a concrete push for 8–10 diverse queries so a single generic query can't starve coverage.
+        prompt.Should().Contain("8–10");
+    }
+
+    [Fact]
+    public void ExtractProducts_RequestsFullListingDetail()
+    {
+        var prompt = PromptTemplates.ExtractProducts("coffee maker", GeoProfiles.Jordan, "some context");
+
+        // Each product should be mined for SKU, stock status and a description, not just name + price.
+        prompt.Should().Contain("sku");
+        prompt.Should().Contain("availability");
+        prompt.Should().Contain("description");
+    }
 }

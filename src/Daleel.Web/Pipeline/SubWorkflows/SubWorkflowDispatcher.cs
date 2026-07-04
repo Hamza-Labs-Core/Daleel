@@ -23,6 +23,14 @@ public static class SubWorkflowDispatcher
     /// <summary>Hard per-entity budget; a slow brand/store/item is dropped rather than blocking the run.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
+    /// <summary>
+    /// Longer budget for the store sub-workflow specifically: its last step deep-crawls the store's whole
+    /// product catalogue (Context.dev <c>/v1/brand/ai/products</c>), which legitimately takes far longer than
+    /// the 30s default — under the default the crawl was silently timed out and the store's catalogue lost.
+    /// Bounded by <see cref="MaxConcurrency"/> and the per-job cost cap, so it can't run away.
+    /// </summary>
+    public static readonly TimeSpan StoreResearchTimeout = TimeSpan.FromSeconds(75);
+
     /// <summary>How many child sub-workflows run at once. Bounds DB/network fan-out per dispatch step.</summary>
     public const int MaxConcurrency = 5;
 

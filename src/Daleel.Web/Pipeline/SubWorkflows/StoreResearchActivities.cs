@@ -183,8 +183,19 @@ public sealed class SaveStoreProfileActivity : CancellableActivity
 [Activity("Daleel", "Store", "Scrape prices: harvest the store's catalogue prices via Context.dev")]
 public sealed class ScrapePricesActivity : CancellableActivity
 {
-    /// <summary>Catalogue products harvested per store — bounded so one store can't flood the run.</summary>
-    private const int MaxProducts = 12;
+    /// <summary>
+    /// Catalogue products harvested per store. Deep enough to capture a real local store's category page
+    /// (a coffee-maker collection can run to 100+ items — 12 barely scratched the first page), bounded so
+    /// one store still can't flood the run or the price time-series.
+    /// </summary>
+    private const int MaxProducts = 50;
+
+    /// <summary>
+    /// Server-side budget for the Context.dev catalogue crawl. Sits comfortably under the store
+    /// sub-workflow's <see cref="SubWorkflowDispatcher.StoreResearchTimeout"/> so a deep crawl finishes
+    /// instead of being cut off (steps 1–4 leave the rest of that budget for this call).
+    /// </summary>
+    private const int CatalogTimeoutMs = 60_000;
 
     protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
@@ -273,7 +284,8 @@ public sealed class ScrapePricesActivity : CancellableActivity
     {
         try
         {
-            return await provider.ExtractProductsAsync(domain, maxProducts: MaxProducts, cancellationToken: ct);
+            return await provider.ExtractProductsAsync(
+                domain, maxProducts: MaxProducts, timeoutMs: CatalogTimeoutMs, cancellationToken: ct);
         }
         catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
         catch (Exception ex)

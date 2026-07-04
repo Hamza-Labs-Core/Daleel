@@ -159,6 +159,20 @@ public static class PromptTemplates
         sb.AppendLine("Aim for BREADTH: cover as MANY brands as compete in this market and MULTIPLE models per brand " +
             "— generate enough queries (include brand-named and 'best <category> brands' queries) that the results " +
             "span the budget, mid-range and premium ends, not just the top one or two names.");
+        sb.AppendLine("Generate 8–10 DIVERSE webQueries (and 4–6 shoppingQueries) so the search casts a wide net — a " +
+            "single generic query only surfaces the big global sites; the diverse ones are what reach the local sellers.");
+        // Local-store discovery is the single biggest gap in local markets: a small, well-stocked local
+        // e-commerce store (a Shopify/WooCommerce shop, a local electronics chain's site) rarely ranks for a
+        // bare "<category>" query but DOES rank for store-finding phrasings — and once its domain is in the
+        // bundle, the store sub-workflow crawls its full catalogue. So EXPLICITLY ask for store-discovery
+        // queries in BOTH languages, without ever naming a specific store (let the engine reveal them).
+        sb.Append("CRITICAL — LOCAL STORE DISCOVERY: several webQueries MUST be store-FINDING queries that surface ")
+          .Append(geo.Country).AppendLine("-based online shops, e-commerce sites and their category/collection pages, " +
+            "in BOTH the market language and English. Use phrasings like: the category + 'online store' / 'متجر إلكتروني' / " +
+            "'اونلاين' / 'shop' / 'متجر', the category + 'buy' / 'للبيع' / 'اشتري' + the main city, the category + " +
+            "'online shopping " + geo.Country + "', and the category + the country/city name. Also include the market's " +
+            "well-known local e-commerce platforms and classifieds where a shopper actually buys this category (name them " +
+            "generically from your knowledge of this market — do NOT restrict to global sites like Amazon/AliExpress).");
         sb.AppendLine("Design the search to surface CONCRETE LISTINGS from whatever local sites rank in this market:");
         // Shopping queries must be PLAIN product+price phrases: the shopping engine (Google Shopping via
         // gl=cc) is what returns priced listings WITH thumbnails, and it returns ~nothing for site:-scoped
@@ -473,6 +487,15 @@ public static class PromptTemplates
             "source for the models it names, but NEVER output its headline as a product's \"name\".");
         sb.AppendLine("A product's \"name\" is ALWAYS a real product/model name — NEVER a URL, domain, link, store name, " +
             "or article headline. If the only label you can find for an item is a URL or a headline, drop the item.");
+        // Capture the FULL detail a store listing exposes — not just name+price. Local store pages carry
+        // SKU/model codes, stock status, a spec-rich description and product images; pulling all of it in
+        // makes each grid card and detail panel useful instead of a bare name. specs is free-form, so the
+        // extra attributes ride along without any schema change downstream.
+        sb.AppendLine("EXTRACT MAXIMUM DETAIL per product from its listing: set \"imageUrl\" to the product's image when the " +
+            "context provides one, and add these to \"specs\" whenever the listing shows them (use these exact keys): " +
+            "\"sku\" (SKU / model code / part number, verbatim), \"availability\" (in stock / out of stock / pre-order), " +
+            "and \"description\" (a one- or two-sentence trim of the product description). Keep each offer's real price, " +
+            "currency and direct link. Never invent any of these — omit a field the listing does not show.");
         // Schema-aware extraction: when the up-front category analysis identified the specs that matter for
         // this product type, tell the extractor to fill those exact keys (so the compare table and detail
         // views line up across products) instead of returning arbitrary free-form spec keys.
