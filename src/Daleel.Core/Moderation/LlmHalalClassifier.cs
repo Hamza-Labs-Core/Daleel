@@ -36,7 +36,11 @@ public sealed class LlmHalalClassifier : IHalalClassifier
         "flag an item merely because the seller also sells haram goods. NEVER flag place names, " +
         "person names, or words that merely resemble a blocked term (barber ≠ bar; Weedon ≠ weed).\n\n" +
         "Some items carry a keyword-filter hint (the term a simple blocklist matched). Re-judge " +
-        "those in context and give an explicit verdict — haram true or false — for EVERY hinted item.\n\n" +
+        "those in context and give an explicit verdict — haram true or false — for EVERY hinted item. " +
+        "The hint is NOT evidence: never confirm an item because the hinted term merely appears in " +
+        "the text (it may be a fragment of an unrelated word — Arabic 'بار' occurs inside الغبار " +
+        "'dust' and أخبار 'news'). Confirm only when the item ITSELF sells, serves, or promotes " +
+        "the haram thing; your reason must name what the item actually is, not quote the hint.\n\n" +
         "Calibrate confidence honestly: reserve confidence above 0.8 for items that UNMISTAKABLY " +
         "sell or promote haram content (a liquor store, a pork product listing). Ambiguous names, " +
         "incidental mentions, places merely NEAR something haram, or ordinary products from a " +

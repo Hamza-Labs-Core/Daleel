@@ -48,11 +48,34 @@ public sealed class ContentFilter
         /// <summary>The Arabic trigger terms, pre-normalized once via <see cref="ArabicNormalizer"/>.</summary>
         public string[] NormalizedArabic { get; } = Array.ConvertAll(Arabic, ArabicNormalizer.Normalize);
 
+        /// <summary>
+        /// The Arabic terms compiled into a WORD-BOUNDARIED alternation, mirroring the English
+        /// pattern. Substring matching was a false-positive machine: "بار" (bar) fired inside
+        /// الغبار (dust), أخبار (news), بارد (cold)… A term may only match as a standalone word,
+        /// optionally carrying a DEFINITE-ARTICLE prefix family (ال/لل and the fused وال/فال/
+        /// بال/كال/ولل), so "البار" still hits while a longer stem containing the letters does
+        /// not. Bare single-letter clitics (و/ف/ب/ك/ل) are deliberately NOT tolerated: allowing
+        /// them re-created the bug one word over — كبيرة "big" normalizes to ك+بيره and matched
+        /// "beer", كبار "adults" matched "bar". Rare genuine forms like وبيرة are the LLM
+        /// layer's job; the keyword layer must stay high-precision.
+        /// </summary>
+        public Regex ArabicPattern { get; } = BuildArabicPattern(Array.ConvertAll(Arabic, ArabicNormalizer.Normalize));
+
         private static Regex BuildEnglishPattern(string[] terms)
         {
             var alternation = string.Join('|', terms.Select(Regex.Escape));
             return new Regex($@"\b(?:{alternation})s?\b",
                 RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        private static Regex BuildArabicPattern(string[] normalizedTerms)
+        {
+            var alternation = string.Join('|', normalizedTerms.Select(Regex.Escape));
+            // (?<!\p{L}) / (?!\p{L}) are letter boundaries (\b is unreliable across the mixed
+            // Arabic/Latin text these fields carry). Prefixes: the definite-article family ONLY —
+            // see the ArabicPattern remarks for why bare clitics must not be here.
+            return new Regex($@"(?<!\p{{L}})(?:وال|فال|بال|كال|ولل|فلل|ال|لل)?(?:{alternation})(?!\p{{L}})",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
         }
     }
 
@@ -310,12 +333,12 @@ public sealed class ContentFilter
                 return (category.Name, match.Value);
             }
 
-            foreach (var term in category.NormalizedArabic)
+            // Word-boundaried, like the English path. Substring matching burned us in production:
+            // 'بار' (bar) inside الغبار (dust) flagged a dehumidifier ad as alcohol.
+            var arabicMatch = category.ArabicPattern.Match(arabic);
+            if (arabicMatch.Success)
             {
-                if (arabic.Contains(term, StringComparison.Ordinal))
-                {
-                    return (category.Name, term);
-                }
+                return (category.Name, arabicMatch.Value);
             }
         }
 
