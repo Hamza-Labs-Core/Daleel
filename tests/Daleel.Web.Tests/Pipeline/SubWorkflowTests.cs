@@ -144,6 +144,49 @@ public class SubWorkflowTests
         state.Events.Should().Contain(e => e.EventType == "store.verify");
     }
 
+    [Fact]
+    public async Task StoreResearchWorkflow_SubmitsCatalogCrawlToEdge_WhenEnabled()
+    {
+        // Cloudflare execution path (docs/architecture/cloudflare-workers-pipeline.md, Phase 1a): with
+        // the layer configured and the admin flag on, the catalogue crawl is SUBMITTED to the
+        // scrape-worker and the sub-workflow moves on — no inline Context.dev call, no rows written
+        // here (the poll-drain service persists them whenever the edge job lands).
+        var cf = new FakeCloudflareClient();
+        var priceRepo = new InMemoryScrapedPriceRepo();
+        using var provider = BuildProvider(s =>
+        {
+            s.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(cf);
+            s.AddSingleton<ISystemConfigService>(new FakeSystemConfig(
+                bools: new() { [Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag] = true }));
+            s.AddSingleton<IScrapedPriceRepository>(priceRepo);
+        });
+
+        var state = await RunStoreAsync(provider,
+            new StoreInfo { Name = "ABC Store", Url = "https://www.abcstore.com" });
+
+        cf.Submits.Should().ContainSingle(s => s.Domain == "abcstore.com" && s.Store == "ABC Store",
+            "the crawl is handed to the edge with the bare registrable domain");
+        (await priceRepo.CountAsync()).Should().Be(0, "persistence belongs to the drain service now");
+        state.Events.Should().Contain(e => e.EventType == "store.prices.submitted");
+    }
+
+    [Fact]
+    public async Task StoreResearchWorkflow_StaysInline_WhenEdgeFlagIsOff()
+    {
+        var cf = new FakeCloudflareClient();
+        using var provider = BuildProvider(s =>
+        {
+            s.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(cf);
+            s.AddSingleton<ISystemConfigService>(new FakeSystemConfig(bools: new()));
+        });
+
+        var state = await RunStoreAsync(provider,
+            new StoreInfo { Name = "ABC Store", Url = "https://www.abcstore.com" });
+
+        cf.Submits.Should().BeEmpty("the admin flag is the strangler-fig switch — off means inline");
+        state.Events.Should().NotContain(e => e.EventType == "store.prices.submitted");
+    }
+
     // ── Item ───────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -658,5 +701,41 @@ public class SubWorkflowTests
         public AgentService Build(AgentRequest request) => throw new NotSupportedException();
         public ILlmClient? TryBuildLlm(string? model = null, IReadOnlyDictionary<string, string>? keys = null) => null;
         public string? Resolve(string name, IReadOnlyDictionary<string, string>? keys = null) => null;
+    }
+
+    private sealed class FakeCloudflareClient : Daleel.Web.Cloudflare.ICloudflareWorkerClient
+    {
+        public List<(string Domain, string? Store, string? SearchJobId, int MaxProducts)> Submits { get; } = new();
+
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitCatalogAsync(
+            string domain, string? store, string? searchJobId, int maxProducts = 0, CancellationToken ct = default)
+        {
+            Submits.Add((domain, store, searchJobId, maxProducts));
+            return Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(
+                new Daleel.Web.Cloudflare.WorkerHandle { JobId = "j1", ResultKey = $"test/{domain}.json" });
+        }
+
+        public Task<Daleel.Web.Cloudflare.WorkerJobStatus?> GetJobStatusAsync(string jobId, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Web.Cloudflare.WorkerJobStatus?>(null);
+
+        public Task<T?> ReadResultAsync<T>(string resultKey, CancellationToken ct = default) where T : class =>
+            Task.FromResult<T?>(null);
+    }
+
+    /// <summary>Dictionary-backed ISystemConfigService — unset keys fall back like production.</summary>
+    private sealed class FakeSystemConfig : ISystemConfigService
+    {
+        private readonly Dictionary<string, bool> _bools;
+        public FakeSystemConfig(Dictionary<string, bool> bools) => _bools = bools;
+
+        public Task<string?> GetAsync(string key, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task<int> GetIntAsync(string key, int fallback, CancellationToken ct = default) => Task.FromResult(fallback);
+        public Task<bool> GetBoolAsync(string key, bool fallback, CancellationToken ct = default) =>
+            Task.FromResult(_bools.TryGetValue(key, out var v) ? v : fallback);
+        public Task SetAsync(string key, string value, string type = "string", CancellationToken ct = default) =>
+            Task.CompletedTask;
+        public Task<IReadOnlyList<SystemConfig>> AllAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SystemConfig>>(Array.Empty<SystemConfig>());
+        public Task SeedDefaultsAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 }

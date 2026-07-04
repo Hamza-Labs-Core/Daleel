@@ -23,8 +23,12 @@ public static class SubWorkflowDispatcher
     /// <summary>Hard per-entity budget; a slow brand/store/item is dropped rather than blocking the run.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>How many child sub-workflows run at once. Bounds DB/network fan-out per dispatch step.</summary>
-    public const int MaxConcurrency = 5;
+    /// <summary>
+    /// How many child sub-workflows run at once. Bounds DB/network fan-out per dispatch step; tunable
+    /// via <c>PIPELINE_SUBWORKFLOW_CONCURRENCY</c> (see <see cref="PipelineLimits"/>) — raise it when
+    /// the Cloudflare execution layer carries the heavy calls off-box.
+    /// </summary>
+    public static int MaxConcurrency => PipelineLimits.SubWorkflowConcurrency;
 
     /// <summary>
     /// When at least this fraction of the fanned-out children fault, the failure is treated as systematic

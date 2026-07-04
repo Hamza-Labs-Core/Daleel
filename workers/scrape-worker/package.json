@@ -1,0 +1,16 @@
+{
+  "name": "daleel-scrape-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker hosting Daleel's scraping calls (Phase 1a: Context.dev relocated to the edge, async + queue-backed)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:qa": "wrangler deploy --env qa",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

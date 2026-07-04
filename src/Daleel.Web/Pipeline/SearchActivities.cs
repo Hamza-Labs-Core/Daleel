@@ -353,8 +353,8 @@ public sealed class ExtractProductsActivity : CancellableActivity
 [Activity("Daleel", "Search", "Dispatch a brand-research sub-workflow per brand, in parallel")]
 public sealed class DispatchBrandWorkflowsActivity : CancellableActivity
 {
-    /// <summary>Cap so a brand-heavy query can't fan out into unbounded research cost.</summary>
-    private const int MaxBrands = 15;
+    /// <summary>Cap so a brand-heavy query can't fan out into unbounded research cost (env-tunable).</summary>
+    private static int MaxBrands => PipelineLimits.MaxBrands;
 
     protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
@@ -405,8 +405,8 @@ public sealed class DispatchBrandWorkflowsActivity : CancellableActivity
 [Activity("Daleel", "Search", "Dispatch a store-research sub-workflow per store, in parallel")]
 public sealed class DispatchStoreWorkflowsActivity : CancellableActivity
 {
-    /// <summary>Cap so a store-heavy query can't fan out into unbounded research cost.</summary>
-    private const int MaxStores = 10;
+    /// <summary>Cap so a store-heavy query can't fan out into unbounded research cost (env-tunable).</summary>
+    private static int MaxStores => PipelineLimits.MaxStores;
 
     protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
@@ -457,8 +457,8 @@ public sealed class DispatchStoreWorkflowsActivity : CancellableActivity
 [Activity("Daleel", "Search", "Dispatch an item deep-dive sub-workflow per product/model, in parallel")]
 public sealed class DispatchItemWorkflowsActivity : CancellableActivity
 {
-    /// <summary>Cap so a model-heavy query can't fan out into unbounded scrape cost.</summary>
-    private const int MaxItems = 20;
+    /// <summary>Cap so a model-heavy query can't fan out into unbounded scrape cost (env-tunable).</summary>
+    private static int MaxItems => PipelineLimits.MaxItems;
 
     protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {

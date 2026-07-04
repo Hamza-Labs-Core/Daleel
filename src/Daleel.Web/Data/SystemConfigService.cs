@@ -77,6 +77,13 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "pricing.places", Value = "0.017", Type = "decimal" },
         new SystemConfig { Key = "pricing.social", Value = "0.01", Type = "decimal" },
         new SystemConfig { Key = "pricing.render", Value = "0.01", Type = "decimal" },
+
+        // Cloudflare execution layer (docs/architecture/cloudflare-workers-pipeline.md). The enable flag
+        // routes eligible pipeline work (store catalogue crawls) to the edge workers when the CF_* env
+        // endpoints are configured — flipping it back is the instant strangler-fig rollback. The product
+        // cap applies to edge catalogue crawls; 0 ⇒ uncapped (the vendor's own ceiling applies).
+        new SystemConfig { Key = Cloudflare.CloudflareWorkerOptions.EnabledFlag, Value = "false", Type = "bool" },
+        new SystemConfig { Key = Cloudflare.CloudflareWorkerOptions.CatalogMaxProductsKey, Value = "0", Type = "int" },
     };
 
     public async Task<string?> GetAsync(string key, CancellationToken ct = default) =>

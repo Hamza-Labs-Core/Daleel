@@ -180,10 +180,18 @@ public sealed class SaveStoreProfileActivity : CancellableActivity
 /// back. Best-effort and bounded by the sub-workflow timeout: any failure just means "no live prices for
 /// this store". Records how many priced products were found.
 /// </summary>
+/// <remarks>
+/// Two execution paths (docs/architecture/cloudflare-workers-pipeline.md, Phase 1a). When the Cloudflare
+/// execution layer is configured AND the <c>cloudflare.execution.enabled</c> flag is on, the crawl is
+/// SUBMITTED to the edge scrape-worker and this activity returns immediately — deep, uncapped crawls no
+/// longer race the sub-workflow timeout, and the poll-drain service persists the result whenever it
+/// lands (even after the search finishes or faults). Otherwise the original inline Context.dev call
+/// runs unchanged as the fallback.
+/// </remarks>
 [Activity("Daleel", "Store", "Scrape prices: harvest the store's catalogue prices via Context.dev")]
 public sealed class ScrapePricesActivity : CancellableActivity
 {
-    /// <summary>Catalogue products harvested per store — bounded so one store can't flood the run.</summary>
+    /// <summary>Inline-path cap — bounded so one store can't flood the run while it holds the workflow.</summary>
     private const int MaxProducts = 12;
 
     protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
@@ -193,11 +201,23 @@ public sealed class ScrapePricesActivity : CancellableActivity
         var factory = context.GetRequiredService<IAgentFactory>();
         var logger = context.GetRequiredService<ILogger<ScrapePricesActivity>>();
 
-        var key = factory.Resolve("CONTEXT_DEV_API_KEY");
         var domain = DomainOf(state.Result.Url);
-        if (string.IsNullOrWhiteSpace(key) || domain is null)
+        if (domain is null)
         {
-            return; // no Context.dev key or no resolvable store domain — nothing to crawl
+            return; // no resolvable store domain — nothing to crawl
+        }
+
+        // Edge path: fire the submit and move on. The result is durable in R2 the moment the worker
+        // finishes and reaches the ScrapedPrice series via the drain — nothing here can lose it.
+        if (await TrySubmitToEdgeAsync(context, state, services, domain, logger))
+        {
+            return;
+        }
+
+        var key = factory.Resolve("CONTEXT_DEV_API_KEY");
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return; // no Context.dev key — nothing to crawl inline
         }
 
         services.Report(SearchStep.FindingStores, "Progress.Msg.ReadingStoreCatalog", state.Store.Name);
@@ -219,6 +239,68 @@ public sealed class ScrapePricesActivity : CancellableActivity
         {
             services.Report(SearchStep.FindingStores, "Progress.Msg.FoundPricedProducts",
                 state.PricedProducts, state.Store.Name);
+        }
+    }
+
+    /// <summary>
+    /// Submits the catalogue crawl to the edge scrape-worker when the execution layer is configured,
+    /// enabled, and reachable. Returns true when the job was handed off (the drain service owns
+    /// persistence from here); false falls back to the inline path. Best-effort by design — any failure
+    /// here must degrade to inline, never fault the store sub-workflow.
+    /// </summary>
+    private static async Task<bool> TrySubmitToEdgeAsync(
+        ActivityExecutionContext context, StoreResearchState state, SubWorkflowServices services,
+        string domain, ILogger logger)
+    {
+        var client = context.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>();
+        if (client is null)
+        {
+            return false; // CF_SCRAPE_WORKER_URL/TOKEN not configured
+        }
+
+        try
+        {
+            var config = context.GetRequiredService<ISystemConfigService>();
+            if (!await config.GetBoolAsync(
+                    Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag, false, context.CancellationToken))
+            {
+                return false; // admin flag off — inline path stays authoritative
+            }
+
+            // 0 ⇒ uncapped: the vendor's own ceiling applies. The whole point of the edge path is that
+            // a deep catalogue (a 184-product collection page) no longer races a synchronous timeout.
+            var maxProducts = await config.GetIntAsync(
+                Daleel.Web.Cloudflare.CloudflareWorkerOptions.CatalogMaxProductsKey, 0, context.CancellationToken);
+
+            var handle = await client.SubmitCatalogAsync(
+                domain, state.Store.Name, state.SearchId, maxProducts, context.CancellationToken);
+            if (handle is null)
+            {
+                return false; // worker unreachable/rejecting — degrade to inline
+            }
+
+            services.Report(SearchStep.FindingStores, "Progress.Msg.ReadingStoreCatalog", state.Store.Name);
+            state.RecordEvent(EventCategory.Extract, "store.prices.submitted", "scrape-worker",
+                metadata: new Dictionary<string, object?>
+                {
+                    ["store"] = state.Store.Name,
+                    ["domain"] = domain,
+                    ["jobId"] = handle.JobId,
+                    ["resultKey"] = handle.ResultKey,
+                    ["maxProducts"] = maxProducts
+                });
+            logger.LogInformation(
+                "Catalogue crawl for {Store} ({Domain}) submitted to scrape-worker as job {JobId}",
+                state.Store.Name, domain, handle.JobId);
+            return true;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Edge catalogue submit failed for {Store} ({Domain}); falling back to inline",
+                state.Store.Name, domain);
+            return false;
         }
     }
 

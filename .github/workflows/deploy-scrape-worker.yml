@@ -1,0 +1,97 @@
+# Deploys the daleel-scrape-worker Cloudflare Worker (the scraping execution host of
+# docs/architecture/cloudflare-workers-pipeline.md, Phase 1a) — prod AND its isolated
+# QA environment (`--env qa`), which uses separate queues + the daleel-qa-data bucket.
+#
+# ONE-TIME provisioning (queues are not created by `wrangler deploy`; see
+# workers/scrape-worker/README.md): create daleel[-qa]-scrape-work, -scrape-dlq and
+# -poll-work, and enable the HTTP pull consumer on each poll queue.
+#
+# Required GitHub secrets:
+#   CLOUDFLARE_API_TOKEN        — needs "Workers Scripts: Edit", "Workers R2 Storage",
+#                                 and "Queues: Edit" (the log-viewer token may need the
+#                                 Queues permission added).
+#   CLOUDFLARE_ACCOUNT_ID       — account id.
+#   CF_SCRAPE_WORKER_TOKEN      — prod bearer (uploaded as the Worker's AUTH_TOKEN);
+#                                 the SAME secret deploy.yml renders into the app's .env.
+#   CF_QA_SCRAPE_WORKER_TOKEN   — QA bearer (ditto, rendered by deploy-qa.yml).
+#   CONTEXT_DEV_API_KEY         — the existing Context.dev key; the worker holds its own
+#                                 copy so edge crawls never round-trip the VPS.
+name: Deploy scrape-worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "workers/scrape-worker/**"
+      - ".github/workflows/deploy-scrape-worker.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-scrape-worker
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: wrangler deploy (prod + qa)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/scrape-worker
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail fast with a clear message if any required secret is unset/empty.
+      - name: Validate required secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_SCRAPE_WORKER_TOKEN: ${{ secrets.CF_SCRAPE_WORKER_TOKEN }}
+          CF_QA_SCRAPE_WORKER_TOKEN: ${{ secrets.CF_QA_SCRAPE_WORKER_TOKEN }}
+          CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
+        run: |
+          missing=""
+          for var in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID CF_SCRAPE_WORKER_TOKEN CF_QA_SCRAPE_WORKER_TOKEN CONTEXT_DEV_API_KEY; do
+            eval "val=\${$var}"
+            if [ -z "$val" ]; then missing="$missing $var"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Worker deploy aborted — required secrets unset/empty:$missing"
+            echo "Set each with: gh secret set <NAME> --body '<value>' --repo Hamza-Labs-Core/Daleel" >&2
+            exit 1
+          fi
+          echo "All required secrets are present."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Deploy Worker (prod)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/scrape-worker
+          command: deploy
+          secrets: |
+            AUTH_TOKEN
+            CONTEXT_DEV_API_KEY
+        env:
+          AUTH_TOKEN: ${{ secrets.CF_SCRAPE_WORKER_TOKEN }}
+          CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
+
+      - name: Deploy Worker (qa)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/scrape-worker
+          command: deploy --env qa
+          secrets: |
+            AUTH_TOKEN
+            CONTEXT_DEV_API_KEY
+        env:
+          AUTH_TOKEN: ${{ secrets.CF_QA_SCRAPE_WORKER_TOKEN }}
+          CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}

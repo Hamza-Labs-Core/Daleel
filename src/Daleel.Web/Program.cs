@@ -345,6 +345,30 @@ else
     builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService, Daleel.Web.Storage.NullR2StorageService>();
 }
 
+// Cloudflare execution layer (docs/architecture/cloudflare-workers-pipeline.md, Phase 0/1): the client
+// the pipeline submits async scrape jobs to, the Queues pull consumer, and the drain service that
+// persists finished results INDEPENDENT of any workflow's lifetime — a crawl finishing after a search's
+// deadline still lands. Registered only when the worker endpoint is configured (same optional-capability
+// pattern as R2); whether the pipeline actually routes work there is the admin-editable
+// `cloudflare.execution.enabled` flag, so rollback is a settings toggle.
+var cfWorkerOptions = Daleel.Web.Cloudflare.CloudflareWorkerOptions.FromConfiguration(builder.Configuration);
+if (cfWorkerOptions is not null)
+{
+    builder.Services.AddSingleton(cfWorkerOptions);
+    builder.Services.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(sp =>
+        new Daleel.Web.Cloudflare.CloudflareWorkerClient(
+            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            cfWorkerOptions,
+            sp.GetRequiredService<Daleel.Web.Storage.IR2StorageService>(),
+            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareWorkerClient>>()));
+    builder.Services.AddSingleton<Daleel.Web.Cloudflare.IQueuePullClient>(sp =>
+        new Daleel.Web.Cloudflare.QueuePullClient(
+            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            cfWorkerOptions,
+            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.QueuePullClient>>()));
+    builder.Services.AddHostedService<Daleel.Web.Cloudflare.CloudflarePollDrainService>();
+}
+
 // Transactional email (Resend). When RESEND_API_KEY is set, search-completion emails are sent via the
 // Resend HTTP API; otherwise a no-op service drops them — the same optional-capability pattern as the
 // event store and R2. EMAIL_FROM sets the sender (default noreply@daleel.hamzalabs.dev) and APP_BASE_URL

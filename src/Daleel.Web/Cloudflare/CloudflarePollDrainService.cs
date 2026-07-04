@@ -1,0 +1,291 @@
+using System.Text;
+using System.Text.Json;
+using Daleel.Web.Data;
+using Daleel.Web.Events;
+using Daleel.Web.Storage;
+
+namespace Daleel.Web.Cloudflare;
+
+/// <summary>
+/// Drains the Cloudflare poll queue (doc §4.2): workers enqueue a thin pointer the moment an async
+/// job's result is durable in R2, and this service — <em>not</em> the search workflow — reads the result
+/// and persists it. That decoupling is the point: a catalogue crawl finishing after the search's
+/// 10-minute deadline, after a cost-cap trip, or even after an app restart still lands in the
+/// <see cref="ScrapedPrice"/> time series. Results are never lost to a timeout again.
+/// </summary>
+/// <remarks>
+/// Delivery is at-least-once, so every handler is idempotent: a <c>.persisted</c> marker object is
+/// written next to the result key, and a redelivered message that finds the marker just acks. The drain
+/// runs whenever the queue credentials are configured — deliberately NOT gated on the
+/// <c>cloudflare.execution.enabled</c> flag, so flipping the flag off never strands in-flight results.
+/// </remarks>
+public sealed class CloudflarePollDrainService : BackgroundService
+{
+    private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(5);
+    private const int BatchSize = 10;
+    private const int VisibilityTimeoutMs = 60_000;
+
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IQueuePullClient _queue;
+    private readonly ICloudflareWorkerClient _client;
+    private readonly IR2StorageService _r2;
+    private readonly ILogger<CloudflarePollDrainService> _logger;
+
+    public CloudflarePollDrainService(
+        IServiceScopeFactory scopeFactory,
+        IQueuePullClient queue,
+        ICloudflareWorkerClient client,
+        IR2StorageService r2,
+        ILogger<CloudflarePollDrainService> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _queue = queue;
+        _client = client;
+        _r2 = r2;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        if (!_queue.IsConfigured)
+        {
+            _logger.LogInformation(
+                "Cloudflare poll drain idle: queue pull credentials not configured (CF_QUEUES_API_TOKEN / CF_POLL_QUEUE_ID)");
+            return;
+        }
+
+        _logger.LogInformation("Cloudflare poll drain started");
+        using var timer = new PeriodicTimer(TickInterval);
+        while (await WaitAsync(timer, stoppingToken).ConfigureAwait(false))
+        {
+            try
+            {
+                await DrainOnceAsync(stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                // The drain must survive any single bad tick — messages simply reappear after the
+                // visibility timeout.
+                _logger.LogWarning(ex, "Cloudflare poll drain tick failed");
+            }
+        }
+    }
+
+    private static async Task<bool> WaitAsync(PeriodicTimer timer, CancellationToken ct)
+    {
+        try { return await timer.WaitForNextTickAsync(ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { return false; }
+    }
+
+    /// <summary>One pull → handle → ack/retry round. Internal for tests.</summary>
+    internal async Task DrainOnceAsync(CancellationToken ct)
+    {
+        var messages = await _queue.PullAsync(BatchSize, VisibilityTimeoutMs, ct).ConfigureAwait(false);
+        if (messages.Count == 0)
+        {
+            return;
+        }
+
+        var acks = new List<string>();
+        var retries = new List<(string LeaseId, int DelaySeconds)>();
+
+        foreach (var msg in messages)
+        {
+            var outcome = await HandleAsync(msg, ct).ConfigureAwait(false);
+            if (outcome == Outcome.Ack)
+            {
+                acks.Add(msg.LeaseId);
+            }
+            else
+            {
+                // Explicit delay_seconds backoff (doc §4.3) — never rely on the visibility timeout.
+                retries.Add((msg.LeaseId, Math.Min(60, 15 * Math.Max(1, msg.Attempts))));
+            }
+        }
+
+        await _queue.AckAsync(acks, retries, ct).ConfigureAwait(false);
+    }
+
+    private enum Outcome { Ack, Retry }
+
+    private async Task<Outcome> HandleAsync(PulledMessage raw, CancellationToken ct)
+    {
+        var msg = ParseBody(raw.Body);
+        if (msg is null || string.IsNullOrWhiteSpace(msg.ResultKey))
+        {
+            _logger.LogWarning("Dropping unparseable poll message (lease {Lease})", raw.LeaseId);
+            return Outcome.Ack; // a poison message must not loop forever
+        }
+
+        // Terminal worker failure: surface a real error on the timeline (faulted ≠ empty), then ack.
+        if (!msg.IsDone)
+        {
+            await PublishEventAsync(msg, success: false,
+                summary: $"Edge {msg.Kind} job failed for {msg.Store ?? msg.Domain}: {msg.Error ?? "unknown error"}",
+                ct).ConfigureAwait(false);
+            return Outcome.Ack;
+        }
+
+        return msg.Kind?.ToLowerInvariant() switch
+        {
+            "catalog" or "brand" => await PersistCatalogAsync(msg, msg.ResultKey!, ct).ConfigureAwait(false),
+            _ => AckUnknown(msg)
+        };
+    }
+
+    private Outcome AckUnknown(PollMessage msg)
+    {
+        _logger.LogWarning("No drain handler for poll message kind '{Kind}' — acking", msg.Kind);
+        return Outcome.Ack;
+    }
+
+    /// <summary>
+    /// Persists a finished catalogue (or brand-with-catalogue) crawl into the ScrapedPrice time series —
+    /// the same rows the inline ScrapePricesActivity writes, so the store page and per-product price
+    /// comparison read worker results with zero changes.
+    /// </summary>
+    private async Task<Outcome> PersistCatalogAsync(PollMessage msg, string resultKey, CancellationToken ct)
+    {
+        var markerKey = resultKey + ".persisted";
+        if (await _r2.ReadTextAsync(markerKey, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is not null)
+        {
+            return Outcome.Ack; // redelivery of an already-persisted result
+        }
+
+        var doc = await _client.ReadResultAsync<CatalogResultDoc>(resultKey, ct).ConfigureAwait(false);
+        if (doc is null)
+        {
+            // "done" with no readable result should be transient (or an oversized doc, logged by the
+            // client); retry, and let the deadline decide when to give up.
+            return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > msg.DeadlineAt && msg.DeadlineAt > 0
+                ? Outcome.Ack
+                : Outcome.Retry;
+        }
+
+        var store = FirstNonEmpty(msg.Store, doc.Store, doc.Domain, msg.Domain) ?? "unknown-store";
+        var rows = doc.Products
+            .Where(p => p.Price is not null && !string.IsNullOrWhiteSpace(p.Name))
+            .Select(p => new ScrapedPrice
+            {
+                ProductName = p.Name,
+                ProductKey = ProductProfile.KeyFor(null, null, p.Name),
+                StoreName = store,
+                Price = p.Price,
+                Currency = p.Currency,
+                SourceUrl = p.Url,
+                Provider = "scrape-worker/context.dev",
+                // The crawl's own capture time, not the drain time — the drain may run long after.
+                ScrapedAt = doc.CapturedAt == default ? DateTimeOffset.UtcNow : doc.CapturedAt
+            })
+            .ToList();
+
+        if (rows.Count > 0)
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IScrapedPriceRepository>();
+            try
+            {
+                await repo.AddRangeAsync(rows, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Persisting {Count} drained price(s) for store {Store} failed; will retry", rows.Count, store);
+                return Outcome.Retry;
+            }
+        }
+
+        // Marker BEFORE ack: if the ack fails, the redelivered message short-circuits on the marker.
+        await _r2.StoreJsonAsync(
+            JsonSerializer.Serialize(new { persistedAt = DateTimeOffset.UtcNow, rows = rows.Count }),
+            markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
+
+        await PublishEventAsync(msg, success: true,
+            summary: $"Edge catalogue crawl for {store}: {doc.ProductCount} product(s), {rows.Count} priced",
+            ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Drained edge {Kind} result for {Store}: {Total} product(s), {Priced} priced (job {JobId})",
+            msg.Kind, store, doc.ProductCount, rows.Count, msg.JobId);
+        return Outcome.Ack;
+    }
+
+    /// <summary>Timeline visibility for drained results (they run outside any workflow's event buffer).</summary>
+    private async Task PublishEventAsync(PollMessage msg, bool success, string summary, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var log = scope.ServiceProvider.GetRequiredService<ISystemEventLog>();
+            await log.PublishAsync(new SystemEvent
+            {
+                Timestamp = DateTimeOffset.UtcNow,
+                Category = SystemEventCategory.Store,
+                EventType = success ? "store.prices.drained" : "store.prices.edge_failed",
+                Severity = success ? SystemEventSeverity.Info : SystemEventSeverity.Warning,
+                Source = "cloudflare/scrape-worker",
+                Summary = summary,
+                DetailsJson = JsonSerializer.Serialize(new
+                {
+                    msg.JobId,
+                    msg.ResultKey,
+                    msg.Store,
+                    msg.Domain,
+                    msg.Error
+                }),
+                CorrelationId = msg.SearchJobId
+            }, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Publishing drain event failed (best-effort)");
+        }
+    }
+
+    /// <summary>Queue bodies are JSON; tolerate base64-wrapped JSON from the pull API.</summary>
+    internal static PollMessage? ParseBody(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        if (TryParse(body, out var direct))
+        {
+            return direct;
+        }
+
+        try
+        {
+            var decoded = Encoding.UTF8.GetString(Convert.FromBase64String(body.Trim()));
+            return TryParse(decoded, out var fromBase64) ? fromBase64 : null;
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    private static bool TryParse(string json, out PollMessage? msg)
+    {
+        try
+        {
+            msg = JsonSerializer.Deserialize<PollMessage>(json, CloudflareJson.Options);
+            return msg is not null;
+        }
+        catch (JsonException)
+        {
+            msg = null;
+            return false;
+        }
+    }
+
+    private static string? FirstNonEmpty(params string?[] values) =>
+        values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim();
+}
