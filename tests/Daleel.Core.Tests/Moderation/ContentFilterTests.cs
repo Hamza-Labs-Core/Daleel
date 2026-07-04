@@ -37,6 +37,31 @@ public class ContentFilterTests
         _strict.IsHalal(text).Should().BeTrue();
     }
 
+    [Theory]
+    // Arabic terms must match as WORDS, not substrings — 'بار' (bar) lives inside many
+    // innocent words. The first case is a real production false positive: a Facebook ad for a
+    // dehumidifier ("…dust, mold, wall sweating…") was removed as alcohol.
+    [InlineData("أفضل جهاز للتخلص من الرطوبة والعفن والغبار وتعرق الجدران")] // dust
+    [InlineData("آخر أخبار الرياضة اليوم")]     // news
+    [InlineData("مشروب بارد منعش")]             // cold drink
+    [InlineData("مبارك عليكم الشهر")]            // congratulations
+    [InlineData("اختبار الجهاز قبل الشراء")]     // testing
+    [InlineData("عداد كهرباء ذكي")]              // electricity meter (no بار at all — control)
+    public void IsHalal_ArabicSubstringsOfInnocentWords_DoNotMatch(string text)
+    {
+        _strict.IsHalal(text).Should().BeTrue();
+    }
+
+    [Theory]
+    // …while the standalone word (with or without attached clitics) still matches.
+    [InlineData("رحنا إلى البار مساء أمس")]      // "the bar" — definite article
+    [InlineData("بار ومطعم في وسط البلد")]       // bare word
+    [InlineData("سهرة في بار الفندق")]            // bar of the hotel
+    public void IsHalal_ArabicStandaloneBar_StillMatches(string text)
+    {
+        _strict.IsHalal(text).Should().BeFalse();
+    }
+
     [Fact]
     public void FilterSearchResults_RemovesAlcoholHits()
     {

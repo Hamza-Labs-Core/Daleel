@@ -48,11 +48,31 @@ public sealed class ContentFilter
         /// <summary>The Arabic trigger terms, pre-normalized once via <see cref="ArabicNormalizer"/>.</summary>
         public string[] NormalizedArabic { get; } = Array.ConvertAll(Arabic, ArabicNormalizer.Normalize);
 
+        /// <summary>
+        /// The Arabic terms compiled into a WORD-BOUNDARIED alternation, mirroring the English
+        /// pattern. Substring matching was a false-positive machine: "بار" (bar) fired inside
+        /// الغبار (dust), أخبار (news), بارد (cold)… A term may only match as a standalone word,
+        /// optionally carrying a common attached prefix (definite article, conjunctions,
+        /// prepositions: ال/و/ف/ب/ك/ل and their fusions), so "البار" still hits while a longer
+        /// stem containing the letters does not.
+        /// </summary>
+        public Regex ArabicPattern { get; } = BuildArabicPattern(Array.ConvertAll(Arabic, ArabicNormalizer.Normalize));
+
         private static Regex BuildEnglishPattern(string[] terms)
         {
             var alternation = string.Join('|', terms.Select(Regex.Escape));
             return new Regex($@"\b(?:{alternation})s?\b",
                 RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        }
+
+        private static Regex BuildArabicPattern(string[] normalizedTerms)
+        {
+            var alternation = string.Join('|', normalizedTerms.Select(Regex.Escape));
+            // (?<!\p{L}) / (?!\p{L}) are letter boundaries (\b is unreliable across the mixed
+            // Arabic/Latin text these fields carry). The optional prefix group covers the
+            // definite article and the single-letter clitics Arabic writes attached to the word.
+            return new Regex($@"(?<!\p{{L}})(?:ال|لل|وال|فال|بال|كال|و|ف|ب|ك|ل)?(?:{alternation})(?!\p{{L}})",
+                RegexOptions.Compiled | RegexOptions.CultureInvariant);
         }
     }
 
@@ -310,12 +330,12 @@ public sealed class ContentFilter
                 return (category.Name, match.Value);
             }
 
-            foreach (var term in category.NormalizedArabic)
+            // Word-boundaried, like the English path. Substring matching burned us in production:
+            // 'بار' (bar) inside الغبار (dust) flagged a dehumidifier ad as alcohol.
+            var arabicMatch = category.ArabicPattern.Match(arabic);
+            if (arabicMatch.Success)
             {
-                if (arabic.Contains(term, StringComparison.Ordinal))
-                {
-                    return (category.Name, term);
-                }
+                return (category.Name, arabicMatch.Value);
             }
         }
 
