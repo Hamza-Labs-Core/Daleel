@@ -415,24 +415,10 @@ public sealed partial class AgentService
 
     private void Log(string message) => _options.Log?.Invoke(message);
 
-    /// <summary>
-    /// User-facing filter indicators are hidden until the confidence-scored moderation system is
-    /// deemed user-ready: the 🧹 progress line is suppressed (presentation only — moderation still
-    /// runs, findings still persist, FilteredCount telemetry is unaffected). Flip back to true to
-    /// restore. Deliberately static readonly, not const: a const guard makes the method body
-    /// provably unreachable and fails the -warnaserror build with CS0162.
-    /// </summary>
-    private static readonly bool FilterProgressLineEnabled = false;
-
     /// <summary>Surfaces how many items the halal filter removed (audited, never the items themselves).</summary>
     private int _lastFilteredCount;
     private void LogFilteredCount()
     {
-        if (!FilterProgressLineEnabled)
-        {
-            return;
-        }
-
         // This AgentService instance is shared by reference across parallel sub-workflows, so the
         // running total is advanced atomically — otherwise two threads could log the same delta twice
         // or miss a delta entirely. Only the thread that wins the bump logs its slice.

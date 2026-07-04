@@ -37,24 +37,20 @@ public class SafeImageTests : TestContext
     }
 
     [Fact]
-    public void BlurKillSwitch_IgnoresOptIn_ImageStaysVisible()
+    public void Blurs_WhenUserOptsIn_AndRevealsOnClick()
     {
-        // All user-facing blur UI is suspended (SafeImage.BlurUiEnabled = false) until the
-        // confidence-scored moderation system is user-ready: even a user who opted into
-        // app-side blur (img.blur = "1") must see the image plainly, with no overlay.
-        // When re-enabling the kill-switch, restore the original expectation:
-        // opt-in → "safe-image-blur" appears → Reveal click clears the overlay.
+        // Opt into app-side blur: every localStorage read returns "1" (img.blur ON).
         JSInterop.Setup<string?>("localStorage.getItem", _ => true).SetResult("1");
 
         var cut = RenderComponent<SafeImage>(p => p
             .Add(x => x.Src, "https://images.example.com/photo.jpg"));
 
-        cut.WaitForAssertion(() =>
-        {
-            cut.Markup.Should().Contain("https://images.example.com/photo.jpg");
-            cut.Markup.Should().NotContain("safe-image-blur");
-            cut.Markup.Should().NotContain("safe-image-overlay");
-        });
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("safe-image-blur"));
+
+        cut.Find("button.mud-button").Click();
+
+        cut.Markup.Should().NotContain("safe-image-overlay");
+        cut.Markup.Should().Contain("https://images.example.com/photo.jpg");
     }
 
     [Fact]
