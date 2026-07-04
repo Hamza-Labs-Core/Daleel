@@ -11,9 +11,10 @@
 <MudText Typo="Typo.h4" Class="mb-1">Filtered content</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
     Every moderation finding — the exact content or image flagged, where it was found, how it was
-    decided (keyword, LLM, or vision), and the query that produced it. Rate findings
-    <b>correct/incorrect</b> to tune the classifier's thresholds, or <b>un-filter</b> a finding to
-    whitelist that content permanently. Anonymous by design: no user is recorded against a removal.
+    decided (keyword, LLM, or vision), and the query that produced it. Mark findings
+    <b>haram/halal</b> to tune the classifier's confidence thresholds (below the bar, flagged items
+    are <b>shown</b>, not blocked), or <b>un-filter</b> a finding to whitelist that content
+    permanently. Anonymous by design: no user is recorded against a removal.
 </MudText>
 
 @if (_error is not null)
@@ -47,12 +48,12 @@ else
     {
         <MudPaper Outlined="true" Elevation="0" Class="pa-2 mb-2 d-flex flex-wrap gap-2 align-center">
             <MudText Typo="Typo.body2" Class="me-2"><b>@_selected.Count</b> selected</MudText>
+            <MudButton Variant="Variant.Outlined" Color="Color.Error" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Block" Disabled="@_busy"
+                       OnClick="() => RateSelectedAsync(1)">Mark haram</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Success" Size="Size.Small"
-                       StartIcon="@Icons.Material.Filled.ThumbUp" Disabled="@_busy"
-                       OnClick="() => RateSelectedAsync(1)">Rate correct</MudButton>
-            <MudButton Variant="Variant.Outlined" Color="Color.Warning" Size="Size.Small"
-                       StartIcon="@Icons.Material.Filled.ThumbDown" Disabled="@_busy"
-                       OnClick="() => RateSelectedAsync(-1)">Rate incorrect</MudButton>
+                       StartIcon="@Icons.Material.Filled.CheckCircleOutline" Disabled="@_busy"
+                       OnClick="() => RateSelectedAsync(-1)">Mark halal</MudButton>
             <MudButton Variant="Variant.Outlined" Color="Color.Primary" Size="Size.Small"
                        StartIcon="@Icons.Material.Filled.Undo" Disabled="@_busy"
                        OnClick="WhitelistSelectedAsync">Un-filter</MudButton>
@@ -124,9 +125,17 @@ else
                                 {
                                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">un-filtered</MudChip>
                                 }
+                                else if (row.ItemRemoved)
+                                {
+                                    @("item removed")
+                                }
+                                else if (row.Field == "image")
+                                {
+                                    @("image stripped")
+                                }
                                 else
                                 {
-                                    @(row.ItemRemoved ? "item removed" : "image stripped")
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">shown · low confidence</MudChip>
                                 }
                             </td>
                             <td dir="@Catalog.Dir(row.Query)" style="max-width:200px; overflow:hidden; text-overflow:ellipsis;">@row.Query</td>
@@ -134,11 +143,11 @@ else
                             <td style="white-space:nowrap;">
                                 @if (row.Rating is > 0)
                                 {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">correct</MudChip>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text">haram</MudChip>
                                 }
                                 else if (row.Rating is < 0)
                                 {
-                                    <MudChip T="string" Size="Size.Small" Color="Color.Warning" Variant="Variant.Text">incorrect</MudChip>
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">halal</MudChip>
                                 }
                                 else
                                 {
@@ -196,16 +205,18 @@ else
                                             }
                                         </div>
                                         <div style="min-width:220px;">
-                                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">Was this filter decision correct?</MudText>
+                                            @* Flag-centric on purpose: "was the DECISION right" reads backwards on
+                                               shown rows and would feed the thresholds inverted. *@
+                                            <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-1">Is this content actually haram?</MudText>
                                             <div class="d-flex gap-2 mb-3">
                                                 <MudButton Variant="@(row.Rating is > 0 ? Variant.Filled : Variant.Outlined)"
-                                                           Color="Color.Success" Size="Size.Small"
-                                                           StartIcon="@Icons.Material.Filled.ThumbUp"
-                                                           OnClick="() => RateAsync(row, 1)">Correct</MudButton>
+                                                           Color="Color.Error" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.Block"
+                                                           OnClick="() => RateAsync(row, 1)">Yes — haram</MudButton>
                                                 <MudButton Variant="@(row.Rating is < 0 ? Variant.Filled : Variant.Outlined)"
-                                                           Color="Color.Warning" Size="Size.Small"
-                                                           StartIcon="@Icons.Material.Filled.ThumbDown"
-                                                           OnClick="() => RateAsync(row, -1)">Incorrect</MudButton>
+                                                           Color="Color.Success" Size="Size.Small"
+                                                           StartIcon="@Icons.Material.Filled.CheckCircleOutline"
+                                                           OnClick="() => RateAsync(row, -1)">No — halal</MudButton>
                                             </div>
                                             @if (row.WhitelistEntryId is null)
                                             {
@@ -331,8 +342,8 @@ else
         null,
         ids => FilteredLog.RateManyAsync(ids, rating),
         done => rating > 0
-            ? $"Rated {done} finding(s) correct — thresholds will trust these categories more."
-            : $"Rated {done} finding(s) incorrect — the classifier will need more confidence.");
+            ? $"Marked {done} finding(s) haram — model findings among them tune thresholds."
+            : $"Marked {done} finding(s) halal — model findings among them tune thresholds.");
 
     private Task WhitelistSelectedAsync() => RunBatchAsync(
         $"Un-filter {_selected.Count} finding(s)? Future searches will keep this content.",
@@ -404,6 +415,10 @@ else
         _ => Color.Default
     };
 
+    /// <summary>Only model findings feed the threshold tuner; keyword rows are review-only.</summary>
+    private static bool TunesThresholds(FilteredContentLog row) =>
+        row.DecisionSource is "llm" or "vision";
+
     private async Task RateAsync(FilteredContentLog row, int rating)
     {
         try
@@ -414,11 +429,14 @@ else
             row.Rating = newRating;
             row.RatedAt = newRating is null ? null : DateTimeOffset.UtcNow;
             Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            // Honest copy: keyword rows never move thresholds (they're deterministic), so don't
+            // promise learning that won't happen.
             Snackbar.Add(newRating switch
             {
-                > 0 => "Marked correct — thresholds will trust this category more.",
-                < 0 => "Marked incorrect — the classifier will need more confidence here.",
-                _ => "Rating cleared."
+                null => "Rating cleared.",
+                _ when !TunesThresholds(row) => "Recorded — keyword findings are review-only and don't tune thresholds.",
+                > 0 => "Marked haram — the classifier will be trusted more in this category.",
+                _ => "Marked halal — the classifier will need more confidence in this category."
             }, Severity.Success);
         }
         catch (Exception ex)

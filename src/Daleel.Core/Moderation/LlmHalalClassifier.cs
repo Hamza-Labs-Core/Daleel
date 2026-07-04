@@ -37,6 +37,11 @@ public sealed class LlmHalalClassifier : IHalalClassifier
         "person names, or words that merely resemble a blocked term (barber ≠ bar; Weedon ≠ weed).\n\n" +
         "Some items carry a keyword-filter hint (the term a simple blocklist matched). Re-judge " +
         "those in context and give an explicit verdict — haram true or false — for EVERY hinted item.\n\n" +
+        "Calibrate confidence honestly: reserve confidence above 0.8 for items that UNMISTAKABLY " +
+        "sell or promote haram content (a liquor store, a pork product listing). Ambiguous names, " +
+        "incidental mentions, places merely NEAR something haram, or ordinary products from a " +
+        "store that also sells haram goods deserve haram=false or a LOW confidence — hiding a " +
+        "legitimate product is a worse error than showing a questionable one.\n\n" +
         "Respond with ONLY a JSON array. One object per haram item, plus one per hinted item even " +
         "when halal: {\"id\": number, \"haram\": boolean, \"category\": string|null, " +
         "\"confidence\": number 0-1, \"reason\": short string}. Omit unhinted halal items.";
@@ -47,22 +52,34 @@ public sealed class LlmHalalClassifier : IHalalClassifier
 
     public bool IsConfigured => true;
 
-    public async Task<IReadOnlyList<HalalVerdict>> ClassifyAsync(
+    public async Task<HalalClassifierResult> ClassifyAsync(
         IReadOnlyList<HalalCandidate> items, CancellationToken ct = default)
     {
         if (items.Count == 0)
         {
-            return Array.Empty<HalalVerdict>();
+            return HalalClassifierResult.Empty;
         }
 
         var verdicts = new List<HalalVerdict>();
+        var unanswered = new List<int>();
         for (var offset = 0; offset < items.Count; offset += BatchSize)
         {
             var batch = items.Skip(offset).Take(BatchSize).ToList();
             try
             {
                 var text = await _llm.CompleteTextAsync(SystemPrompt, BuildPrompt(batch), ct).ConfigureAwait(false);
-                verdicts.AddRange(ParseVerdicts(text, batch));
+                var parsed = ParseVerdicts(text, batch);
+
+                // The prompt demands an explicit verdict for every hinted item, so a batch that
+                // contains hints yet parses to NOTHING didn't really answer (empty model output,
+                // garbage) — report it failed rather than letting its flags read as skips.
+                if (parsed.Count == 0 && batch.Any(b => b.KeywordCategory is not null))
+                {
+                    unanswered.AddRange(batch.Select(b => b.Id));
+                    continue;
+                }
+
+                verdicts.AddRange(parsed);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -70,12 +87,14 @@ public sealed class LlmHalalClassifier : IHalalClassifier
             }
             catch
             {
-                // Best-effort: a failed batch yields no verdicts; keyword decisions stand for it.
-                // Deliberately do not fail other batches — partial adjudication is still useful.
+                // Best-effort per batch: a failed batch's candidates are reported unanswered so
+                // the caller's deterministic fallback applies to exactly them, while the other
+                // batches' adjudication is kept.
+                unanswered.AddRange(batch.Select(b => b.Id));
             }
         }
 
-        return verdicts;
+        return new HalalClassifierResult(verdicts, unanswered);
     }
 
     private static string BuildPrompt(IReadOnlyList<HalalCandidate> batch)

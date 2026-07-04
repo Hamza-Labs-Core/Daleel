@@ -46,6 +46,20 @@ public sealed record HalalCandidate(int Id, string Text, string Kind, string? Ke
 /// <summary>The LLM's verdict for one <see cref="HalalCandidate"/>.</summary>
 public sealed record HalalVerdict(int Id, bool IsHaram, string? Category, double Confidence, string? Reason);
 
+/// <summary>
+/// A classification round's outcome. <see cref="UnansweredIds"/> carries the candidates whose
+/// batch FAILED (transport error, empty/unparseable output) — for those, no decision was made
+/// and the caller must fall back to its deterministic baseline. A candidate absent from both
+/// lists was genuinely considered and left unflagged (a deliberate skip).
+/// </summary>
+public sealed record HalalClassifierResult(
+    IReadOnlyList<HalalVerdict> Verdicts,
+    IReadOnlyCollection<int> UnansweredIds)
+{
+    public static readonly HalalClassifierResult Empty =
+        new(Array.Empty<HalalVerdict>(), Array.Empty<int>());
+}
+
 /// <summary>A vision verdict for one image URL.</summary>
 public sealed record ImageVerdict(string ImageUrl, bool IsHaram, string? Category, double Confidence, string? Reason);
 
@@ -61,10 +75,11 @@ public interface IHalalClassifier
 
     /// <summary>
     /// Classifies the candidates. Returns verdicts for items the model judged haram, plus explicit
-    /// halal verdicts for keyword-flagged items it overturns. Returns an empty list on failure —
-    /// callers must then treat keyword decisions as final.
+    /// halal verdicts for keyword-flagged items it overturns — and, crucially, the ids whose batch
+    /// failed, so the caller can apply its deterministic fallback to exactly those items instead
+    /// of mistaking an infrastructure failure for a deliberate model skip.
     /// </summary>
-    Task<IReadOnlyList<HalalVerdict>> ClassifyAsync(IReadOnlyList<HalalCandidate> items, CancellationToken ct = default);
+    Task<HalalClassifierResult> ClassifyAsync(IReadOnlyList<HalalCandidate> items, CancellationToken ct = default);
 }
 
 /// <summary>
@@ -114,8 +129,12 @@ public sealed record HalalPolicy
         "riba", "interest", "banking", "bank", "finance", "financial", "insurance", "loans", "mortgage"
     };
 
-    /// <summary>Minimum LLM confidence to remove an item when no per-category threshold applies.</summary>
-    public double DefaultThreshold { get; init; } = 0.75;
+    /// <summary>
+    /// Minimum model confidence to remove an item when no per-category threshold applies.
+    /// Deliberately high: showing a questionable listing costs less than hiding a legitimate
+    /// one, so anything below the bar is shown (and recorded for admin rating).
+    /// </summary>
+    public double DefaultThreshold { get; init; } = 0.8;
 
     /// <summary>Per-category removal thresholds learned from admin ratings.</summary>
     public IReadOnlyDictionary<string, double> CategoryThresholds { get; init; } =
@@ -129,10 +148,12 @@ public sealed record HalalPolicy
 
     /// <summary>
     /// Derives a per-category threshold from admin feedback: precision = correct / rated.
-    /// Perfect precision trusts the model down to 0.5; poor precision demands near-certainty.
-    /// Categories with fewer than <paramref name="minSample"/> ratings keep the default.
+    /// Perfect precision trusts the model down to 0.65; poor precision demands near-certainty.
+    /// The floor stays above chance on purpose — even a well-rated category keeps the
+    /// show-by-default bias; only clear-cut flags block. Categories with fewer than
+    /// <paramref name="minSample"/> ratings keep the default.
     /// </summary>
-    public static double ThresholdFromPrecision(int correct, int incorrect, double fallback = 0.75, int minSample = 5)
+    public static double ThresholdFromPrecision(int correct, int incorrect, double fallback = 0.8, int minSample = 5)
     {
         var rated = correct + incorrect;
         if (rated < minSample)
@@ -141,7 +162,7 @@ public sealed record HalalPolicy
         }
 
         var precision = (double)correct / rated;
-        return Math.Clamp(0.5 + (1.0 - precision) * 0.45, 0.5, 0.95);
+        return Math.Clamp(0.65 + (1.0 - precision) * 0.3, 0.65, 0.95);
     }
 }
 

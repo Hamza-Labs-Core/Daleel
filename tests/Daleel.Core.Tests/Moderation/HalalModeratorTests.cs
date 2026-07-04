@@ -15,28 +15,35 @@ public class HalalModeratorTests
         ImageUrl: i => i.Image,
         WithImageUrl: (i, url) => i with { Image = url });
 
-    /// <summary>A scripted classifier: returns exactly the verdicts it was given.</summary>
+    /// <summary>A scripted classifier: returns exactly the verdicts it was given, full coverage.</summary>
     private sealed class FakeClassifier : IHalalClassifier
     {
         private readonly Func<IReadOnlyList<HalalCandidate>, IReadOnlyList<HalalVerdict>> _respond;
+        private readonly Func<IReadOnlyList<HalalCandidate>, IReadOnlyCollection<int>>? _unanswered;
         public List<IReadOnlyList<HalalCandidate>> Calls { get; } = new();
         public bool IsConfigured => true;
 
-        public FakeClassifier(Func<IReadOnlyList<HalalCandidate>, IReadOnlyList<HalalVerdict>> respond) =>
+        public FakeClassifier(
+            Func<IReadOnlyList<HalalCandidate>, IReadOnlyList<HalalVerdict>> respond,
+            Func<IReadOnlyList<HalalCandidate>, IReadOnlyCollection<int>>? unanswered = null)
+        {
             _respond = respond;
+            _unanswered = unanswered;
+        }
 
-        public Task<IReadOnlyList<HalalVerdict>> ClassifyAsync(
+        public Task<HalalClassifierResult> ClassifyAsync(
             IReadOnlyList<HalalCandidate> items, CancellationToken ct = default)
         {
             Calls.Add(items);
-            return Task.FromResult(_respond(items));
+            return Task.FromResult(new HalalClassifierResult(
+                _respond(items), _unanswered?.Invoke(items) ?? Array.Empty<int>()));
         }
     }
 
     private sealed class ThrowingClassifier : IHalalClassifier
     {
         public bool IsConfigured => true;
-        public Task<IReadOnlyList<HalalVerdict>> ClassifyAsync(
+        public Task<HalalClassifierResult> ClassifyAsync(
             IReadOnlyList<HalalCandidate> items, CancellationToken ct = default) =>
             throw new HttpRequestException("provider down");
     }
@@ -181,10 +188,13 @@ public class HalalModeratorTests
     }
 
     [Fact]
-    public async Task LlmSilenceOnKeywordFlag_KeepsRemoval_FailSafe()
+    public async Task UnansweredCandidates_KeepKeywordRemovals_DegradedMode()
     {
-        // Classifier responds but skips the keyword-flagged item → the flag stands.
-        var classifier = new FakeClassifier(_ => Array.Empty<HalalVerdict>());
+        // The classifier reports the candidate's batch failed → no decision was made, so the
+        // deterministic keyword removal stands for exactly that item.
+        var classifier = new FakeClassifier(
+            _ => Array.Empty<HalalVerdict>(),
+            candidates => candidates.Select(c => c.Id).ToArray());
         var filter = new ContentFilter(FilterStrictness.Strict);
         var moderator = new HalalModerator(filter, classifier);
         var items = new[] { new Item("Imported Beer 6-pack") };
@@ -193,6 +203,102 @@ public class HalalModeratorTests
 
         kept.Should().BeEmpty();
         filter.AuditDetails.Single().Source.Should().Be(FindingSource.Keyword);
+    }
+
+    [Fact]
+    public async Task PartialBatchFailure_ShowsNothingFromTheFailedBatch()
+    {
+        // One batch answers, the other fails: answered items follow the LLM; the failed batch's
+        // keyword flags REMOVE (a partial infrastructure failure must not read as model skips).
+        var classifier = new FakeClassifier(
+            candidates => candidates
+                .Where(c => c.Text.Contains("Hotel"))
+                .Select(c => new HalalVerdict(c.Id, false, null, 0.9, "hotel near a nightlife district"))
+                .ToList(),
+            candidates => candidates
+                .Where(c => c.Text.Contains("Beer"))
+                .Select(c => c.Id)
+                .ToArray());
+        var filter = new ContentFilter(FilterStrictness.Strict);
+        var moderator = new HalalModerator(filter, classifier);
+        var items = new[]
+        {
+            new Item("Grand Hotel near the Bar district"), // answered: keyword flag overturned, kept
+            new Item("Imported Beer 6-pack")                // batch failed: keyword removal stands
+        };
+
+        var kept = await moderator.ModerateAsync(items, Projection);
+
+        kept.Should().ContainSingle().Which.Title.Should().Contain("Grand Hotel");
+        var finding = filter.AuditDetails.Single();
+        finding.Source.Should().Be(FindingSource.Keyword);
+        finding.ItemRemoved.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task LlmSkippingOneHintedFlag_ShowsThatItem_AndRecordsIt()
+    {
+        // The LLM answered the batch (so it's not degraded mode) but skipped one hinted item —
+        // show-by-default: the unconfirmed keyword hit is kept and logged for rating.
+        var classifier = new FakeClassifier(candidates => candidates
+            .Where(c => c.Text.Contains("Liquor"))
+            .Select(c => new HalalVerdict(c.Id, true, "alcohol", 0.95, "liquor store"))
+            .ToList());
+        var filter = new ContentFilter(FilterStrictness.Strict);
+        var moderator = new HalalModerator(filter, classifier);
+        var items = new[]
+        {
+            new Item("The Liquor Store"),          // answered: removed
+            new Item("Imported Beer 6-pack")        // hinted but skipped: shown
+        };
+
+        var kept = await moderator.ModerateAsync(items, Projection);
+
+        kept.Should().ContainSingle().Which.Title.Should().Be("Imported Beer 6-pack");
+        filter.AuditDetails.Should().HaveCount(2);
+        var shown = filter.AuditDetails.Single(f => !f.ItemRemoved);
+        shown.Source.Should().Be(FindingSource.Keyword);
+        shown.Content.Should().Contain("Beer");
+        filter.AuditLog.Should().ContainSingle("only the real removal counts as removed");
+    }
+
+    [Fact]
+    public async Task LlmConfirmBelowThreshold_ShowsItem_AndRecordsNearMiss()
+    {
+        // The LLM agrees it's haram but hesitates (0.7 < default 0.8): show the item, record
+        // the near-miss so an admin rating can move the threshold.
+        var classifier = new FakeClassifier(candidates => candidates
+            .Where(c => c.KeywordCategory is not null)
+            .Select(c => new HalalVerdict(c.Id, true, "alcohol", 0.7, "possibly a bar"))
+            .ToList());
+        var filter = new ContentFilter(FilterStrictness.Strict);
+        var moderator = new HalalModerator(filter, classifier);
+        var items = new[] { new Item("City Bar & Lounge") };
+
+        var kept = await moderator.ModerateAsync(items, Projection);
+
+        kept.Should().ContainSingle();
+        var finding = filter.AuditDetails.Single();
+        finding.ItemRemoved.Should().BeFalse();
+        finding.Source.Should().Be(FindingSource.Llm);
+        finding.Confidence.Should().Be(0.7);
+        filter.AuditLog.Should().BeEmpty("shown items must not count as removals");
+    }
+
+    [Theory]
+    [InlineData(0.79, false)] // below the 0.8 default — shown
+    [InlineData(0.81, true)]  // above — removed
+    public async Task DefaultThreshold_IsPointEight(double confidence, bool removed)
+    {
+        var classifier = new FakeClassifier(candidates => candidates
+            .Select(c => new HalalVerdict(c.Id, true, "adult", confidence, "borderline"))
+            .ToList());
+        var filter = new ContentFilter(FilterStrictness.Strict);
+        var moderator = new HalalModerator(filter, classifier);
+
+        var kept = await moderator.ModerateAsync(new[] { new Item("Evening event tickets") }, Projection);
+
+        kept.Any().Should().Be(!removed);
     }
 
     [Fact]
@@ -257,20 +363,22 @@ public class HalalModeratorTests
     }
 
     [Fact]
-    public async Task LlmOnlyFlag_BelowThreshold_KeepsItem()
+    public async Task LlmOnlyFlag_BelowThreshold_KeepsItem_ButRecordsIt()
     {
         var classifier = new FakeClassifier(candidates => candidates
             .Select(c => new HalalVerdict(c.Id, true, "adult", 0.55, "maybe"))
             .ToList());
         var filter = new ContentFilter(FilterStrictness.Strict);
-        // Default threshold 0.75 > 0.55 → not removed.
+        // Default threshold 0.8 > 0.55 → shown, but the near-miss is recorded for rating.
         var moderator = new HalalModerator(filter, classifier);
         var items = new[] { new Item("Evening event tickets") };
 
         var kept = await moderator.ModerateAsync(items, Projection);
 
         kept.Should().ContainSingle();
-        filter.AuditDetails.Should().BeEmpty();
+        var finding = filter.AuditDetails.Should().ContainSingle().Subject;
+        finding.ItemRemoved.Should().BeFalse();
+        filter.AuditLog.Should().BeEmpty();
     }
 
     [Fact]
