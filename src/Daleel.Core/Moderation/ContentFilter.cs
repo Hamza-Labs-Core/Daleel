@@ -52,9 +52,12 @@ public sealed class ContentFilter
         /// The Arabic terms compiled into a WORD-BOUNDARIED alternation, mirroring the English
         /// pattern. Substring matching was a false-positive machine: "بار" (bar) fired inside
         /// الغبار (dust), أخبار (news), بارد (cold)… A term may only match as a standalone word,
-        /// optionally carrying a common attached prefix (definite article, conjunctions,
-        /// prepositions: ال/و/ف/ب/ك/ل and their fusions), so "البار" still hits while a longer
-        /// stem containing the letters does not.
+        /// optionally carrying a DEFINITE-ARTICLE prefix family (ال/لل and the fused وال/فال/
+        /// بال/كال/ولل), so "البار" still hits while a longer stem containing the letters does
+        /// not. Bare single-letter clitics (و/ف/ب/ك/ل) are deliberately NOT tolerated: allowing
+        /// them re-created the bug one word over — كبيرة "big" normalizes to ك+بيره and matched
+        /// "beer", كبار "adults" matched "bar". Rare genuine forms like وبيرة are the LLM
+        /// layer's job; the keyword layer must stay high-precision.
         /// </summary>
         public Regex ArabicPattern { get; } = BuildArabicPattern(Array.ConvertAll(Arabic, ArabicNormalizer.Normalize));
 
@@ -69,9 +72,9 @@ public sealed class ContentFilter
         {
             var alternation = string.Join('|', normalizedTerms.Select(Regex.Escape));
             // (?<!\p{L}) / (?!\p{L}) are letter boundaries (\b is unreliable across the mixed
-            // Arabic/Latin text these fields carry). The optional prefix group covers the
-            // definite article and the single-letter clitics Arabic writes attached to the word.
-            return new Regex($@"(?<!\p{{L}})(?:ال|لل|وال|فال|بال|كال|و|ف|ب|ك|ل)?(?:{alternation})(?!\p{{L}})",
+            // Arabic/Latin text these fields carry). Prefixes: the definite-article family ONLY —
+            // see the ArabicPattern remarks for why bare clitics must not be here.
+            return new Regex($@"(?<!\p{{L}})(?:وال|فال|بال|كال|ولل|فلل|ال|لل)?(?:{alternation})(?!\p{{L}})",
                 RegexOptions.Compiled | RegexOptions.CultureInvariant);
         }
     }

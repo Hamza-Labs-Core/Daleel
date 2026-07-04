@@ -47,6 +47,13 @@ public class ContentFilterTests
     [InlineData("مبارك عليكم الشهر")]            // congratulations
     [InlineData("اختبار الجهاز قبل الشراء")]     // testing
     [InlineData("عداد كهرباء ذكي")]              // electricity meter (no بار at all — control)
+    // Second production false positive: كبيرة "big" normalizes to ك+بيره and, with bare
+    // single-letter clitics tolerated, matched the beer term. Same for كبار "adults" vs بار
+    // and خبيرة "expert" vs بيره.
+    [InlineData("جهاز سحب الرطوبة بقدرة كبيرة")]  // dehumidifier with BIG capacity
+    [InlineData("غرفة كبيرة وواسعة")]              // big room
+    [InlineData("ألعاب للكبار والصغار")]           // for adults and kids
+    [InlineData("خبيرة تجميل معتمدة")]             // certified (female) expert
     public void IsHalal_ArabicSubstringsOfInnocentWords_DoNotMatch(string text)
     {
         _strict.IsHalal(text).Should().BeTrue();
