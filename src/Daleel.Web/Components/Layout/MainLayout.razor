@@ -29,7 +29,10 @@
 
         <MudMainContent>
             <MudContainer MaxWidth="MaxWidth.Large" Class="py-6 daleel-content">
-                <HaramBlurBanner />
+                @* HaramBlurBanner intentionally NOT rendered: all user-facing filter indicators are
+                   hidden until the confidence-scored moderation system is deemed user-ready.
+                   Moderation itself still runs and logs findings — this is presentation-only.
+                   Restore by re-adding <HaramBlurBanner /> here. *@
                 @Body
             </MudContainer>
 

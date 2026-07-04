@@ -35,6 +35,12 @@ else
 }
 
 @code {
+    /// <summary>
+    /// Master switch for the app-side blur overlay (see the kill-switch note below). Static
+    /// readonly, not const, so the guarded code isn't flagged unreachable under -warnaserror.
+    /// </summary>
+    private static readonly bool BlurUiEnabled = false;
+
     [Parameter, EditorRequired] public string? Src { get; set; }
     [Parameter] public string? Alt { get; set; }
     [Parameter] public string? Class { get; set; }
@@ -51,6 +57,14 @@ else
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender)
+        {
+            return;
+        }
+
+        // KILL-SWITCH: every user-facing blur/overlay is disabled until the confidence-scored
+        // moderation system is deemed user-ready — even for users who opted into app-side blur
+        // (img.blur = "1"). Flip BlurUiEnabled back to true to restore the opt-in behavior.
+        if (!BlurUiEnabled)
         {
             return;
         }
