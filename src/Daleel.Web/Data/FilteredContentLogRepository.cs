@@ -66,10 +66,27 @@ public interface IFilteredContentLogRepository
     Task ApplyAutoReviewAsync(long id, int autoRating, string? note, CancellationToken ct = default);
 }
 
-/// <summary>Loads the active whitelist keys the moderation pipeline consults on every run.</summary>
+/// <summary>The whitelist: keys the moderation pipeline must never filter, and their management.</summary>
 public interface IModerationWhitelistRepository
 {
+    /// <summary>The keys consulted by every search run.</summary>
     Task<IReadOnlyCollection<string>> ActiveKeysAsync(CancellationToken ct = default);
+
+    /// <summary>Every whitelist entry, newest first, for the admin management panel.</summary>
+    Task<IReadOnlyList<ModerationWhitelistEntry>> ListEntriesAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Manually whitelists a key (URL, image URL, or content hash) without a source finding.
+    /// Idempotent: an existing entry with the same key is returned instead of duplicated.
+    /// </summary>
+    Task<ModerationWhitelistEntry> AddEntryAsync(
+        string key, string matchType, string? category, string? note, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deletes an entry directly (works even when its source finding is gone or off-page) and
+    /// clears any finding still linking to it, so that finding shows as filterable again.
+    /// </summary>
+    Task DeleteEntryAsync(long id, CancellationToken ct = default);
 }
 
 /// <summary>Dynamic keyword-rule overrides (the auto-learning surface of the feedback loop).</summary>
@@ -388,6 +405,56 @@ public sealed class FilteredContentLogRepository : IFilteredContentLogRepository
 
     public async Task<IReadOnlyCollection<string>> ActiveKeysAsync(CancellationToken ct = default) =>
         await _db.ModerationWhitelist.AsNoTracking().Select(x => x.Key).ToListAsync(ct);
+
+    public async Task<IReadOnlyList<ModerationWhitelistEntry>> ListEntriesAsync(CancellationToken ct = default) =>
+        await _db.ModerationWhitelist.AsNoTracking().OrderByDescending(x => x.Id).ToListAsync(ct);
+
+    public async Task<ModerationWhitelistEntry> AddEntryAsync(
+        string key, string matchType, string? category, string? note, CancellationToken ct = default)
+    {
+        var trimmed = key.Trim();
+        if (trimmed.Length == 0)
+        {
+            throw new ArgumentException("Whitelist key must not be empty.", nameof(key));
+        }
+
+        if (await _db.ModerationWhitelist.FirstOrDefaultAsync(x => x.Key == trimmed, ct) is { } existing)
+        {
+            return existing; // idempotent — one key needs one entry
+        }
+
+        var entry = new ModerationWhitelistEntry
+        {
+            Key = trimmed.Length > 2048 ? trimmed[..2048] : trimmed,
+            MatchType = matchType,
+            Category = category,
+            Note = note is { Length: > 300 } ? note[..300] : note,
+            SourceLogId = null, // manual entry — not born from a finding
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+        _db.ModerationWhitelist.Add(entry);
+        await _db.SaveChangesAsync(ct);
+        return entry;
+    }
+
+    public async Task DeleteEntryAsync(long id, CancellationToken ct = default)
+    {
+        var entry = await _db.ModerationWhitelist.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (entry is null)
+        {
+            return;
+        }
+
+        // Unlink any finding still pointing here so its admin row flips back to filterable.
+        var linked = await _db.FilteredContentLogs.Where(x => x.WhitelistEntryId == id).ToListAsync(ct);
+        foreach (var row in linked)
+        {
+            row.WhitelistEntryId = null;
+        }
+
+        _db.ModerationWhitelist.Remove(entry);
+        await _db.SaveChangesAsync(ct);
+    }
 }
 
 public sealed class ModerationRuleRepository : IModerationRuleRepository

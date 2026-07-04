@@ -3,6 +3,7 @@
 @inject IAnalyticsService Analytics
 @inject IFilteredContentLogRepository FilteredLog
 @inject IModerationRuleRepository Rules
+@inject IModerationWhitelistRepository Whitelist
 @inject Microsoft.Extensions.Caching.Memory.IMemoryCache Cache
 @inject ISnackbar Snackbar
 
@@ -128,6 +129,60 @@ else
         }
     </MudPaper>
 
+    <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
+        <MudText Typo="Typo.h6" Class="mb-1">Whitelist (never filtered)</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
+            Content the moderation pipeline must always keep — created from a finding's
+            "un-filter" action or added here manually. Removing an entry makes that content
+            filterable again on the next run.
+        </MudText>
+
+        <div class="d-flex flex-wrap gap-2 align-end mb-3">
+            <MudSelect T="string" @bind-Value="_newKind" Label="Type" Dense="true" Style="min-width:170px;">
+                <MudSelectItem T="string" Value="@("url")">Page URL</MudSelectItem>
+                <MudSelectItem T="string" Value="@("image")">Image URL</MudSelectItem>
+                <MudSelectItem T="string" Value="@("text")">Exact text (hashed)</MudSelectItem>
+            </MudSelect>
+            <MudTextField @bind-Value="_newValue" Label="@(_newKind == "text" ? "The exact item text to always allow" : "https://…")"
+                          Style="min-width:340px; flex:1;" Immediate="true" />
+            <MudTextField @bind-Value="_newNote" Label="Note (optional)" Style="min-width:200px;" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       Disabled="@(_busy || string.IsNullOrWhiteSpace(_newValue))"
+                       OnClick="AddWhitelistAsync">Add</MudButton>
+        </div>
+
+        @if (_whitelist.Count == 0)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">No whitelist entries.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Style="overflow-x:auto;">
+                <thead>
+                    <tr><th>Type</th><th>Key</th><th>Category</th><th>Note</th><th>Created (UTC)</th><th>Origin</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var w in _whitelist)
+                    {
+                        var entry = w; // per-iteration local for deferred RenderFragments
+                        <tr>
+                            <td><MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@entry.MatchType</MudChip></td>
+                            <td style="max-width:380px; overflow:hidden; text-overflow:ellipsis;"><code>@entry.Key</code></td>
+                            <td>@entry.Category</td>
+                            <td dir="@Catalog.Dir(entry.Note)" style="max-width:280px; overflow:hidden; text-overflow:ellipsis;">@entry.Note</td>
+                            <td style="white-space:nowrap;">@entry.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@(entry.SourceLogId is null ? "manual" : $"finding #{entry.SourceLogId}")</td>
+                            <td>
+                                <MudButton Variant="Variant.Text" Color="Color.Error" Size="Size.Small"
+                                           Disabled="@_busy" OnClick="() => RemoveWhitelistEntryAsync(entry)">Remove</MudButton>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+    </MudPaper>
+
     <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-3">
         Filtered items are never shown to users. For the exact content removed and the rule that fired,
         see <MudLink Href="/admin/filtered" Typo="Typo.caption">Filtered content</MudLink>.
@@ -142,6 +197,86 @@ else
     private IReadOnlyList<(string Category, int Count)> _byCategory = new List<(string, int)>();
     private IReadOnlyList<CategoryRatingStats> _ratingStats = Array.Empty<CategoryRatingStats>();
     private IReadOnlyList<ModerationRuleOverride> _rules = Array.Empty<ModerationRuleOverride>();
+    private IReadOnlyList<ModerationWhitelistEntry> _whitelist = Array.Empty<ModerationWhitelistEntry>();
+    private bool _busy;
+    private string _newKind = "url";
+    private string? _newValue;
+    private string? _newNote;
+
+    private async Task AddWhitelistAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newValue) || _busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            string key, matchType;
+            var note = _newNote;
+            if (_newKind == "text")
+            {
+                // Whitelist-by-content: hash the exact text (same normalization as the pipeline)
+                // and keep the original in the note so the entry stays human-readable.
+                key = Daleel.Core.Moderation.ModerationKeys.HashContent(_newValue);
+                matchType = "hash";
+                note = string.IsNullOrWhiteSpace(note) ? _newValue.Trim() : note;
+            }
+            else
+            {
+                if (!Uri.TryCreate(_newValue.Trim(), UriKind.Absolute, out var uri)
+                    || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+                {
+                    Snackbar.Add("Enter a full http(s) URL.", Severity.Warning);
+                    return;
+                }
+
+                key = _newValue.Trim();
+                matchType = _newKind;
+            }
+
+            await Whitelist.AddEntryAsync(key, matchType, category: null, note);
+            Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            Snackbar.Add("Whitelisted — future searches will keep this content.", Severity.Success);
+            _newValue = null;
+            _newNote = null;
+            await RetryAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't add whitelist entry: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task RemoveWhitelistEntryAsync(ModerationWhitelistEntry entry)
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            await Whitelist.DeleteEntryAsync(entry.Id);
+            Daleel.Web.Moderation.ModerationPolicyProvider.Invalidate(Cache);
+            Snackbar.Add("Whitelist entry removed — filtering applies again.", Severity.Success);
+            await RetryAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't remove entry: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
 
     private async Task ApproveRuleAsync(ModerationRuleOverride rule)
     {
@@ -192,6 +327,7 @@ else
             _byCategory = byCat;
             _ratingStats = await FilteredLog.RatingStatsAsync(DateTimeOffset.UtcNow.AddDays(-90));
             _rules = await Rules.ListOpenAsync();
+            _whitelist = await Whitelist.ListEntriesAsync();
             _loading = false;
         }
         catch (Exception ex)
