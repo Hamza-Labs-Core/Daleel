@@ -366,6 +366,13 @@ jobs:
             CF_SCRAPE_WORKER_TOKEN=${{ secrets.CF_SCRAPE_WORKER_TOKEN }}
             CF_QUEUES_API_TOKEN=${{ secrets.CF_QUEUES_API_TOKEN }}
             CF_POLL_QUEUE_ID=${{ secrets.CF_POLL_QUEUE_ID }}
+            # Pipeline fan-out caps (PipelineLimits.cs) — repo/environment VARIABLES, not secrets.
+            # Unset/empty → int.TryParse fails → code defaults (5 / 15 / 10 / 20). Raise once the
+            # Cloudflare execution layer carries the heavy calls off-box.
+            PIPELINE_SUBWORKFLOW_CONCURRENCY=${{ vars.PIPELINE_SUBWORKFLOW_CONCURRENCY }}
+            PIPELINE_MAX_BRANDS=${{ vars.PIPELINE_MAX_BRANDS }}
+            PIPELINE_MAX_STORES=${{ vars.PIPELINE_MAX_STORES }}
+            PIPELINE_MAX_ITEMS=${{ vars.PIPELINE_MAX_ITEMS }}
             # Cloudflare R2 object storage (optional). Shared connection: if the creds
             # are unset they resolve to empty and the app falls back to file logging at
             # /app/data/logs/ — so these are intentionally NOT in the required-secrets

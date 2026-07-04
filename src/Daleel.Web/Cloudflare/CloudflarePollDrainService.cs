@@ -122,11 +122,20 @@ public sealed class CloudflarePollDrainService : BackgroundService
         }
 
         // Terminal worker failure: surface a real error on the timeline (faulted ≠ empty), then ack.
+        // Same marker discipline as the success path so a redelivered failure doesn't spam the
+        // timeline with duplicate warnings.
         if (!msg.IsDone)
         {
-            await PublishEventAsync(msg, success: false,
-                summary: $"Edge {msg.Kind} job failed for {msg.Store ?? msg.Domain}: {msg.Error ?? "unknown error"}",
-                ct).ConfigureAwait(false);
+            var failMarker = msg.ResultKey + ".persisted";
+            if (await _r2.ReadTextAsync(failMarker, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is null)
+            {
+                await PublishEventAsync(msg, success: false,
+                    summary: $"Edge {msg.Kind} job failed for {msg.Store ?? msg.Domain}: {msg.Error ?? "unknown error"}",
+                    ct).ConfigureAwait(false);
+                await _r2.StoreJsonAsync(
+                    JsonSerializer.Serialize(new { failedAt = DateTimeOffset.UtcNow, msg.Error }),
+                    failMarker, R2Bucket.Data, ct).ConfigureAwait(false);
+            }
             return Outcome.Ack;
         }
 
@@ -159,11 +168,18 @@ public sealed class CloudflarePollDrainService : BackgroundService
         var doc = await _client.ReadResultAsync<CatalogResultDoc>(resultKey, ct).ConfigureAwait(false);
         if (doc is null)
         {
-            // "done" with no readable result should be transient (or an oversized doc, logged by the
-            // client); retry, and let the deadline decide when to give up.
-            return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > msg.DeadlineAt && msg.DeadlineAt > 0
-                ? Outcome.Ack
-                : Outcome.Retry;
+            // "done" with no readable result should be transient (or an oversized/invalid doc,
+            // logged by the client); retry, and let the deadline decide when to give up — but a
+            // give-up must be VISIBLE, never a silent ack (faulted ≠ empty).
+            if (msg.DeadlineAt > 0 && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > msg.DeadlineAt)
+            {
+                await PublishEventAsync(msg, success: false,
+                    summary: $"Edge {msg.Kind} result for {msg.Store ?? msg.Domain} could not be read before its " +
+                             "deadline (missing, oversized, or invalid JSON) — crawl discarded",
+                    ct).ConfigureAwait(false);
+                return Outcome.Ack;
+            }
+            return Outcome.Retry;
         }
 
         var store = FirstNonEmpty(msg.Store, doc.Store, doc.Domain, msg.Domain) ?? "unknown-store";
@@ -189,7 +205,15 @@ public sealed class CloudflarePollDrainService : BackgroundService
             var repo = scope.ServiceProvider.GetRequiredService<IScrapedPriceRepository>();
             try
             {
-                await repo.AddRangeAsync(rows, ct).ConfigureAwait(false);
+                // Belt for the marker's crash window (rows inserted, marker write lost): a crawl is
+                // identified by its capture instant, so rows for this store already carrying this
+                // exact ScrapedAt mean a previous delivery persisted this very result — skip the
+                // insert instead of duplicating the observations.
+                var existing = await repo.LatestForStoreAsync(store, ct).ConfigureAwait(false);
+                if (!existing.Any(r => r.ScrapedAt == rows[0].ScrapedAt))
+                {
+                    await repo.AddRangeAsync(rows, ct).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)

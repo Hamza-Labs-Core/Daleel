@@ -315,6 +315,12 @@ jobs:
             CF_SCRAPE_WORKER_TOKEN=${{ secrets.CF_QA_SCRAPE_WORKER_TOKEN }}
             CF_QUEUES_API_TOKEN=${{ secrets.CF_QUEUES_API_TOKEN }}
             CF_POLL_QUEUE_ID=${{ secrets.CF_QA_POLL_QUEUE_ID }}
+            # Pipeline fan-out caps — QA-scoped variables so QA tuning never bleeds into prod.
+            # Unset/empty → code defaults (5 / 15 / 10 / 20).
+            PIPELINE_SUBWORKFLOW_CONCURRENCY=${{ vars.QA_PIPELINE_SUBWORKFLOW_CONCURRENCY }}
+            PIPELINE_MAX_BRANDS=${{ vars.QA_PIPELINE_MAX_BRANDS }}
+            PIPELINE_MAX_STORES=${{ vars.QA_PIPELINE_MAX_STORES }}
+            PIPELINE_MAX_ITEMS=${{ vars.QA_PIPELINE_MAX_ITEMS }}
             # QA-only: enables the public /diagnostics provider testbench (never set in production).
             DIAGNOSTICS_ENABLED=true
             # QA hostname for Caddy/TLS. Point DNS for this name at the QA server IP,

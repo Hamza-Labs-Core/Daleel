@@ -38,6 +38,13 @@ const DEFAULT_CATALOG_TIMEOUT_MS = 120_000;
 /** Ceiling on the poll deadline a submit may request (ms). */
 const MAX_DEADLINE_MS = 30 * 60 * 1000;
 
+/**
+ * Total deliveries per work message: 1 initial + max_retries (3) from wrangler.toml's
+ * [[queues.consumers]]. KEEP IN SYNC — on the final delivery the job is finished as a terminal
+ * error instead of retried, so the VPS always learns the outcome (never a status stuck "running").
+ */
+const MAX_DELIVERIES = 4;
+
 export default {
   async fetch(request, env, ctx) {
     if (request.method === "OPTIONS") {
@@ -48,7 +55,12 @@ export default {
     if (denied) return denied;
 
     const url = new URL(request.url);
-    const path = decodeURIComponent(url.pathname);
+    let path;
+    try {
+      path = decodeURIComponent(url.pathname);
+    } catch {
+      return json({ ok: false, error: err("bad_request", "malformed percent-encoding in request path", false) }, 400);
+    }
 
     try {
       if (request.method === "GET") {
@@ -86,12 +98,28 @@ export default {
         msg.ack();
       } catch (e) {
         if (e instanceof TerminalJobError) {
-          // Vendor rejected the job for good — record the failure and don't burn retries.
-          await finishJob(msg.body, env, { error: err(e.code, e.message, false) });
-          msg.ack();
+          // Vendor rejected the job for good — record the failure and don't burn retries. The
+          // recording itself can fail transiently (R2/queue blip): retry just this message then,
+          // never let the throw escape queue() and re-drive the whole batch.
+          try {
+            await finishJob(msg.body, env, { error: err(e.code, e.message, false) });
+            msg.ack();
+          } catch {
+            msg.retry({ delaySeconds: Math.min(60, 10 * (msg.attempts || 1)) });
+          }
+        } else if ((msg.attempts || 1) >= MAX_DELIVERIES) {
+          // Final delivery — retrying would dead-letter the job with the status doc stuck on
+          // "running" and no poll message, i.e. a silent gap. Finish it as a terminal error so
+          // the VPS surfaces a real failure (the drain's !IsDone branch); the DLQ stays reserved
+          // for genuinely unprocessable messages (finishJob itself failing below).
+          try {
+            await finishJob(msg.body, env, { error: err("retries_exhausted", String((e && e.message) || e), true) });
+            msg.ack();
+          } catch {
+            msg.retry(); // exhausts → DLQ; depth alarms are the last-resort operator signal
+          }
         } else {
-          // Transient (network/5xx/timeout): let Queues redeliver; exhausted retries hit the
-          // DLQ, whose depth is the operator signal. The status doc still says "running".
+          // Transient (network/5xx/timeout): let Queues redeliver with backoff.
           msg.retry({ delaySeconds: Math.min(60, 10 * (msg.attempts || 1)) });
         }
       }
@@ -238,7 +266,9 @@ async function submitAsync(kind, body, request, env) {
     maxProducts: intOrNull(body.maxProducts),
     timeoutMs: intOrNull(body.timeoutMs) || DEFAULT_CATALOG_TIMEOUT_MS,
     withCatalog: body.withCatalog !== false,
-    searchJobId: body.searchJobId ?? null,
+    // Always a JSON string (or null): every VPS-side DTO types searchJobId as string, and a numeric
+    // value here would fail PollMessage deserialization and silently discard the crawl.
+    searchJobId: body.searchJobId == null ? null : String(body.searchJobId),
     store: typeof body.store === "string" ? body.store : null,
     enqueuedAt: Date.now(),
     deadlineAt: Date.now() + Math.min(intOrNull(body.deadlineMs) || MAX_DEADLINE_MS, MAX_DEADLINE_MS),
@@ -449,8 +479,17 @@ async function deriveJobId(request, kind, body) {
   const provided = (request.headers.get("Idempotency-Key") || "").trim();
   if (provided) return sanitize(provided).slice(0, 96);
 
-  const canonical = JSON.stringify({ kind, domain: body.domain, searchJobId: body.searchJobId ?? null,
-    maxProducts: body.maxProducts ?? null, withCatalog: body.withCatalog !== false });
+  // `store` is part of the identity: two stores that resolve to the same domain in one search must
+  // get distinct jobs/resultKeys, or the second store's prices silently vanish (its submit would
+  // short-circuit on the first store's finished result and never produce a poll message).
+  const canonical = JSON.stringify({
+    kind,
+    domain: body.domain,
+    searchJobId: body.searchJobId == null ? null : String(body.searchJobId),
+    store: typeof body.store === "string" ? body.store : null,
+    maxProducts: body.maxProducts ?? null,
+    withCatalog: body.withCatalog !== false,
+  });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical));
   return [...new Uint8Array(digest)].slice(0, 16).map((b) => b.toString(16).padStart(2, "0")).join("");
 }

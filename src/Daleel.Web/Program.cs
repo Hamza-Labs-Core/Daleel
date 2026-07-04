@@ -352,6 +352,15 @@ else
 // pattern as R2); whether the pipeline actually routes work there is the admin-editable
 // `cloudflare.execution.enabled` flag, so rollback is a settings toggle.
 var cfWorkerOptions = Daleel.Web.Cloudflare.CloudflareWorkerOptions.FromConfiguration(builder.Configuration);
+if (cfWorkerOptions is not null && r2Options is null)
+{
+    // Without R2 the VPS could never read an edge result back — every submitted crawl would be
+    // silently stranded. Refuse the half-configuration loudly and keep the inline path authoritative.
+    Console.WriteLine(
+        "[startup] CF_SCRAPE_WORKER_URL is set but R2 is not configured — edge results could never be " +
+        "read back, so the Cloudflare execution layer is DISABLED. Set R2_ACCESS_KEY/R2_SECRET_KEY.");
+    cfWorkerOptions = null;
+}
 if (cfWorkerOptions is not null)
 {
     builder.Services.AddSingleton(cfWorkerOptions);

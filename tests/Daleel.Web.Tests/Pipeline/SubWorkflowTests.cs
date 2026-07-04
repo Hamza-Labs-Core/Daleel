@@ -156,6 +156,8 @@ public class SubWorkflowTests
         using var provider = BuildProvider(s =>
         {
             s.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(cf);
+            s.AddSingleton(FullyConfiguredCfOptions());
+            s.AddSingleton<IR2StorageService>(new FakeImageR2()); // IsConfigured = true
             s.AddSingleton<ISystemConfigService>(new FakeSystemConfig(
                 bools: new() { [Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag] = true }));
             s.AddSingleton<IScrapedPriceRepository>(priceRepo);
@@ -171,12 +173,49 @@ public class SubWorkflowTests
     }
 
     [Fact]
+    public async Task StoreResearchWorkflow_StaysInline_WhenDrainPathIsIncomplete()
+    {
+        // Flag ON but no queue credentials: submitting would strand every result (nothing could ever
+        // drain it back into the ScrapedPrice series), so the activity must refuse the hand-off.
+        var cf = new FakeCloudflareClient();
+        using var provider = BuildProvider(s =>
+        {
+            s.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(cf);
+            s.AddSingleton(new Daleel.Web.Cloudflare.CloudflareWorkerOptions
+            {
+                ScrapeWorkerUrl = new Uri("https://scrape.test"),
+                ScrapeWorkerToken = "t" // no AccountId/QueuesApiToken/PollQueueId ⇒ CanDrainQueue false
+            });
+            s.AddSingleton<IR2StorageService>(new FakeImageR2());
+            s.AddSingleton<ISystemConfigService>(new FakeSystemConfig(
+                bools: new() { [Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag] = true }));
+        });
+
+        var state = await RunStoreAsync(provider,
+            new StoreInfo { Name = "ABC Store", Url = "https://www.abcstore.com" });
+
+        cf.Submits.Should().BeEmpty("a submit with no drain path would be silent, permanent price loss");
+        state.Events.Should().NotContain(e => e.EventType == "store.prices.submitted");
+    }
+
+    private static Daleel.Web.Cloudflare.CloudflareWorkerOptions FullyConfiguredCfOptions() => new()
+    {
+        ScrapeWorkerUrl = new Uri("https://scrape.test"),
+        ScrapeWorkerToken = "t",
+        AccountId = "acct",
+        QueuesApiToken = "qt",
+        PollQueueId = "q1"
+    };
+
+    [Fact]
     public async Task StoreResearchWorkflow_StaysInline_WhenEdgeFlagIsOff()
     {
         var cf = new FakeCloudflareClient();
         using var provider = BuildProvider(s =>
         {
             s.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(cf);
+            s.AddSingleton(FullyConfiguredCfOptions());
+            s.AddSingleton<IR2StorageService>(new FakeImageR2());
             s.AddSingleton<ISystemConfigService>(new FakeSystemConfig(bools: new()));
         });
 

@@ -258,6 +258,20 @@ public sealed class ScrapePricesActivity : CancellableActivity
             return false; // CF_SCRAPE_WORKER_URL/TOKEN not configured
         }
 
+        // Submitting replaces the INLINE persistence, so the whole return path must exist before we
+        // hand off: the poll queue (drain) credentials AND R2 (where the result lands). A partial
+        // configuration would strand every crawl result — silent, permanent price loss.
+        var options = context.GetService<Daleel.Web.Cloudflare.CloudflareWorkerOptions>();
+        var r2 = context.GetService<Daleel.Web.Storage.IR2StorageService>();
+        if (options is not { CanDrainQueue: true } || r2 is not { IsConfigured: true })
+        {
+            logger.LogWarning(
+                "Cloudflare execution requested but the drain path is incomplete (queue configured: {Queue}, " +
+                "R2 configured: {R2}) — staying inline so results aren't stranded",
+                options?.CanDrainQueue ?? false, r2?.IsConfigured ?? false);
+            return false;
+        }
+
         try
         {
             var config = context.GetRequiredService<ISystemConfigService>();

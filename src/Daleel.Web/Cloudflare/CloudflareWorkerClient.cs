@@ -63,6 +63,12 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
         _http.Timeout = TimeSpan.FromSeconds(30);
     }
 
+    /// <summary>
+    /// A submit is called from inside a store sub-workflow whose whole budget is ~30s — a hanging
+    /// worker must fail FAST into the inline fallback, not eat the child's budget and fault it.
+    /// </summary>
+    private static readonly TimeSpan SubmitTimeout = TimeSpan.FromSeconds(5);
+
     public async Task<WorkerHandle?> SubmitCatalogAsync(
         string domain, string? store, string? searchJobId, int maxProducts = 0,
         CancellationToken ct = default)
@@ -78,11 +84,13 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
 
         try
         {
+            using var submitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            submitCts.CancelAfter(SubmitTimeout);
             using var response = await _http.PostAsync(
                 "/scrape/catalog",
                 new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
-                ct).ConfigureAwait(false);
-            var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                submitCts.Token).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(submitCts.Token).ConfigureAwait(false);
             var dto = JsonSerializer.Deserialize<WorkerSubmitResponse>(text, CloudflareJson.Options);
 
             if (dto is not { Ok: true, JobId.Length: > 0, ResultKey.Length: > 0 })
@@ -95,10 +103,12 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
 
             return new WorkerHandle { JobId = dto.JobId!, ResultKey = dto.ResultKey! };
         }
-        catch (OperationCanceledException) { throw; }
+        // Only a genuine caller cancel propagates; a submit TIMEOUT falls through to the degrade
+        // path below (the whole point of the short budget).
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
-            // Unreachable worker must degrade to the inline path, never fault a search.
+            // Unreachable/slow worker must degrade to the inline path, never fault a search.
             _logger.LogWarning(ex, "scrape-worker catalog submit failed for {Domain}", domain);
             return null;
         }
@@ -108,12 +118,14 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
     {
         try
         {
-            using var response = await _http.GetAsync($"/jobs/{Uri.EscapeDataString(jobId)}", ct)
+            using var statusCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            statusCts.CancelAfter(TimeSpan.FromSeconds(10));
+            using var response = await _http.GetAsync($"/jobs/{Uri.EscapeDataString(jobId)}", statusCts.Token)
                 .ConfigureAwait(false);
-            var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(statusCts.Token).ConfigureAwait(false);
             return JsonSerializer.Deserialize<WorkerJobStatus>(text, CloudflareJson.Options);
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "scrape-worker status check failed for job {JobId}", jobId);

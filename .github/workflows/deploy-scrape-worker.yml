@@ -82,13 +82,17 @@ jobs:
           AUTH_TOKEN: ${{ secrets.CF_SCRAPE_WORKER_TOKEN }}
           CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
 
+      # `environment: qa` (not `command: deploy --env qa`) is load-bearing: the action's secret
+      # upload honors `environment`, so without it the QA AUTH_TOKEN would be uploaded to the PROD
+      # worker — silently breaking prod auth and pointing QA at a worker whose token it doesn't hold.
       - name: Deploy Worker (qa)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: workers/scrape-worker
-          command: deploy --env qa
+          command: deploy
+          environment: qa
           secrets: |
             AUTH_TOKEN
             CONTEXT_DEV_API_KEY

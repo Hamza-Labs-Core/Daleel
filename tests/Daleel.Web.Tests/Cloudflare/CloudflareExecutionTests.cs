@@ -247,6 +247,56 @@ public class CloudflareExecutionTests
     }
 
     [Fact]
+    public async Task Drain_DoesNotDuplicateRows_WhenMarkerWasLostAfterInsert()
+    {
+        // The marker's crash window: rows inserted, marker write lost, message redelivered. The
+        // capture-instant dedupe must recognize the rows and skip the second insert.
+        var fixture = new DrainFixture();
+        var captured = new DateTimeOffset(2026, 7, 4, 10, 0, 0, TimeSpan.Zero);
+        fixture.Worker.Results["qa/r.json"] = new CatalogResultDoc
+        {
+            Kind = "catalog", Domain = "store.example", Store = "ABC Store",
+            CapturedAt = captured, ProductCount = 1,
+            Products = { new() { Name = "Espresso X", Price = 139m, Currency = "JOD" } }
+        };
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        fixture.R2.Objects.TryRemove("qa/r.json.persisted", out _); // simulate the lost marker
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        (await fixture.Prices.CountAsync()).Should().Be(1, "redelivery after a lost marker must not duplicate rows");
+    }
+
+    [Fact]
+    public async Task Drain_AbandonsUnreadableResultPastDeadline_Visibly()
+    {
+        var fixture = new DrainFixture();
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/missing.json", store: "ABC Store",
+            deadlineAt: DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeMilliseconds()));
+
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        fixture.Queue.Acked.Should().ContainSingle("past the deadline the message must stop cycling");
+        fixture.Events.Published.Should().ContainSingle(e => e.EventType == "store.prices.edge_failed",
+            "a discarded crawl must be visible on the timeline, never a silent ack");
+    }
+
+    [Fact]
+    public async Task Drain_DoesNotDuplicateFailureEvents_OnRedelivery()
+    {
+        var fixture = new DrainFixture();
+        fixture.Queue.Enqueue(PollJson(status: "error", resultKey: "qa/r.json", store: "ABC Store", error: "boom"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+        fixture.Queue.Enqueue(PollJson(status: "error", resultKey: "qa/r.json", store: "ABC Store", error: "boom"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        fixture.Events.Published.Should().ContainSingle(
+            "an at-least-once redelivery of the same terminal failure must not spam the timeline");
+    }
+
+    [Fact]
     public async Task Drain_AcksPoisonMessages_InsteadOfLoopingForever()
     {
         var fixture = new DrainFixture();

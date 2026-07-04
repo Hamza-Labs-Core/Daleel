@@ -33,7 +33,12 @@ pattern as `workers/log-viewer` — fail-closed, constant-time compare.
 wrangler queues create daleel-scrape-work
 wrangler queues create daleel-scrape-dlq
 wrangler queues create daleel-poll-work
-wrangler queues consumer http add daleel-poll-work        # enable VPS pull consumer
+wrangler queues create daleel-poll-dlq
+# Pull consumer for the VPS drain. --message-retries MUST cover the drain's retry-until-deadline
+# behavior (30 × its 15/30/60s backoff ≈ the 30-min job deadline) — the default budget (3) would
+# delete a message the drain is still legitimately retrying. The DLQ catches true exhaustion.
+wrangler queues consumer http add daleel-poll-work \
+  --message-retries 30 --dead-letter-queue daleel-poll-dlq
 wrangler secret put AUTH_TOKEN
 wrangler secret put CONTEXT_DEV_API_KEY
 wrangler deploy
@@ -42,11 +47,16 @@ wrangler deploy
 wrangler queues create daleel-qa-scrape-work
 wrangler queues create daleel-qa-scrape-dlq
 wrangler queues create daleel-qa-poll-work
-wrangler queues consumer http add daleel-qa-poll-work
+wrangler queues create daleel-qa-poll-dlq
+wrangler queues consumer http add daleel-qa-poll-work \
+  --message-retries 30 --dead-letter-queue daleel-qa-poll-dlq
 wrangler secret put AUTH_TOKEN --env qa
 wrangler secret put CONTEXT_DEV_API_KEY --env qa
 wrangler deploy --env qa
 ```
+
+Alarm on DLQ depth > 0 (both `-scrape-dlq` and `-poll-dlq`): a resting message there is a job whose
+outcome could not be recorded — the one failure mode the pipeline can't self-surface.
 
 The VPS needs (rendered into `.env` by the deploy workflows):
 
