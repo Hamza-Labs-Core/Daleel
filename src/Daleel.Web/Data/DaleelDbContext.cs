@@ -37,6 +37,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
     public DbSet<FilteredContentLog> FilteredContentLogs => Set<FilteredContentLog>();
     public DbSet<ModerationWhitelistEntry> ModerationWhitelist => Set<ModerationWhitelistEntry>();
+    public DbSet<ModerationRuleOverride> ModerationRules => Set<ModerationRuleOverride>();
     public DbSet<SearchCache> SearchCache => Set<SearchCache>();
     public DbSet<Brand> Brands => Set<Brand>();
     public DbSet<Store> Stores => Set<Store>();
@@ -361,6 +362,26 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             // translate cleanly as range/order comparisons. Same trick as SearchCache.
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
             e.Property(x => x.RatedAt).HasConversion(toNullableUnixMs);
+            e.Property(x => x.AutoReviewedAt).HasConversion(toNullableUnixMs);
+            e.Property(x => x.AutoReviewNote).HasMaxLength(300);
+            // The auto-reviewer polls for unreviewed rows newest-batch-first.
+            e.HasIndex(x => x.AutoReviewedAt);
+        });
+
+        builder.Entity<ModerationRuleOverride>(e =>
+        {
+            // The active set is loaded per policy snapshot; the reviewer looks up by term+category.
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => new { x.Category, x.Term, x.Language });
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Category).HasMaxLength(32);
+            e.Property(x => x.Term).HasMaxLength(128);
+            e.Property(x => x.Language).HasMaxLength(8);
+            e.Property(x => x.Reason).HasMaxLength(300);
+            e.Property(x => x.Source).HasMaxLength(16);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            e.Property(x => x.ResolvedAt).HasConversion(toNullableUnixMs);
         });
 
         builder.Entity<ModerationWhitelistEntry>(e =>

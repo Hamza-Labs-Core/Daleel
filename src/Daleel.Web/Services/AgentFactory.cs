@@ -38,6 +38,12 @@ public sealed record AgentRequest
     /// <summary>Whitelist keys (URLs / content hashes) admins have un-filtered; these bypass moderation.</summary>
     public IReadOnlyCollection<string>? ModerationWhitelist { get; init; }
 
+    /// <summary>
+    /// The effective keyword categories (defaults + dynamic rule overrides) compiled by the
+    /// policy snapshot; null falls back to the static defaults.
+    /// </summary>
+    public IReadOnlyList<ContentFilter.Category>? ModerationCategories { get; init; }
+
     /// <summary>Moderation thresholds, typically feedback-tuned via <c>IModerationPolicyProvider</c>.</summary>
     public HalalPolicy? HalalPolicy { get; init; }
 
@@ -154,7 +160,7 @@ public sealed class AgentFactory : IAgentFactory
 
         var opinions = new OpinionExtractor(llm);
         var options = new AgentOptions { DefaultGeo = request.Geo, Log = request.Log, Language = request.Language };
-        var filter = new ContentFilter(request.Strictness, request.ModerationWhitelist);
+        var filter = new ContentFilter(request.Strictness, request.ModerationWhitelist, request.ModerationCategories);
 
         // The moderation pipeline: deterministic keyword baseline + LLM adjudication over the SAME
         // (already logging-wrapped) client, so classification calls are metered and cost-capped like

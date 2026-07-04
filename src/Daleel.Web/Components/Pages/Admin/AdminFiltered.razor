@@ -149,6 +149,14 @@ else
                                 {
                                     <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text">halal</MudChip>
                                 }
+                                else if (row.AutoRating is > 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Outlined">auto · haram</MudChip>
+                                }
+                                else if (row.AutoRating is < 0)
+                                {
+                                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Outlined">auto · halal</MudChip>
+                                }
                                 else
                                 {
                                     <MudText Typo="Typo.caption" Color="Color.Secondary">unrated</MudText>
@@ -195,6 +203,13 @@ else
                                                     </MudChip>
                                                 }
                                             </div>
+
+                                            @if (row.AutoReviewNote is not null)
+                                            {
+                                                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-2 d-block">
+                                                    Auto-review: @row.AutoReviewNote
+                                                </MudText>
+                                            }
 
                                             @if (SafeHttpUrl(row.SourceUrl) is { } sourceUrl)
                                             {

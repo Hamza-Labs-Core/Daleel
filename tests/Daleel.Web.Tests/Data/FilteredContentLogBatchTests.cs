@@ -127,6 +127,35 @@ public sealed class FilteredContentLogBatchTests : IDisposable
     }
 
     [Fact]
+    public async Task WhitelistManagement_AddListDelete_RoundTrip()
+    {
+        var repo = Repo();
+
+        var added = await repo.AddEntryAsync("https://shop.example/item", "url", null, "manual note");
+        (await repo.AddEntryAsync("https://shop.example/item", "url", null, "dupe attempt"))
+            .Id.Should().Be(added.Id, "same key must be idempotent");
+        (await repo.ListEntriesAsync()).Should().ContainSingle().Which.SourceLogId.Should().BeNull();
+        (await repo.ActiveKeysAsync()).Should().Contain("https://shop.example/item");
+
+        await repo.DeleteEntryAsync(added.Id);
+        (await repo.ListEntriesAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task DeleteEntry_UnlinksItsSourceFinding()
+    {
+        var ids = await SeedAsync(Finding(hash: "a"));
+        var repo = Repo();
+        var entryId = await repo.WhitelistAsync(ids[0]);
+
+        await repo.DeleteEntryAsync(entryId!.Value);
+
+        var row = await _ctx.Db.FilteredContentLogs.AsNoTracking().SingleAsync();
+        row.WhitelistEntryId.Should().BeNull("the finding must flip back to filterable in the UI");
+        (await repo.ActiveKeysAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task BatchMethods_AreNoOps_OnEmptyOrUnknownIds()
     {
         var repo = Repo();

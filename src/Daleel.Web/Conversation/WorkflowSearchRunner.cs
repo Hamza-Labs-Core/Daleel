@@ -108,6 +108,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             Cache = _cache,
             CacheTtl = CacheTtl,
             ModerationWhitelist = moderation.WhitelistKeys,
+            ModerationCategories = moderation.Categories,
             HalalPolicy = moderation.Policy,
             ImageClassifier = _imageClassifier
         });
