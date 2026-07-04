@@ -23,6 +23,10 @@
 9. [Cloudflare configuration (wrangler, bindings, secrets)](#9-cloudflare-configuration-wrangler-bindings-secrets)
 10. [Key design decisions (options & trade-offs)](#10-key-design-decisions-options--trade-offs)
 11. [Risks, open questions & verification checklist](#11-risks-open-questions--verification-checklist)
+12. [Full architecture reference (C4 views)](#12-full-architecture-reference-c4-views)
+13. [API reference](#13-api-reference)
+14. [Data types & schemas](#14-data-types--schemas)
+15. [Detailed call flows](#15-detailed-call-flows)
 
 A note on the numbers: every Cloudflare limit/price cited here was verified against the live Cloudflare docs on **2026-07-04**. Cloudflare ships changes weekly; treat anything marked **⚠︎ verify** as needing a re-check before you rely on it, and re-verify the whole table at cutover time. Doc links are collected in [§8](#8-cost--scaling-considerations) and inline.
 
@@ -812,6 +816,576 @@ The two decisions worth recording explicitly (the rest follow from the user's st
 ### 11.4 Reference docs
 
 Workers [limits](https://developers.cloudflare.com/workers/platform/limits/) · [pricing](https://developers.cloudflare.com/workers/platform/pricing/) · [wrangler config](https://developers.cloudflare.com/workers/wrangler/configuration/) · [secrets](https://developers.cloudflare.com/workers/configuration/secrets/) — Workers AI [pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/) · [JSON mode](https://developers.cloudflare.com/workers-ai/features/json-mode/) · [Batch API](https://developers.cloudflare.com/workers-ai/features/batch-api/) — Queues [limits](https://developers.cloudflare.com/queues/platform/limits/) · [pull consumers](https://developers.cloudflare.com/queues/configuration/pull-consumers/) · [batching/retries](https://developers.cloudflare.com/queues/configuration/batching-retries/) — D1 [limits](https://developers.cloudflare.com/d1/platform/limits/) · [read replication](https://developers.cloudflare.com/d1/best-practices/read-replication/) — Browser Rendering [limits](https://developers.cloudflare.com/browser-run/limits/) · [Quick Actions](https://developers.cloudflare.com/browser-run/quick-actions/) — KV [limits](https://developers.cloudflare.com/kv/platform/limits/) — Durable Objects [what-are](https://developers.cloudflare.com/durable-objects/concepts/what-are-durable-objects/) · [alarms](https://developers.cloudflare.com/durable-objects/api/alarms/) · [migrations](https://developers.cloudflare.com/durable-objects/reference/durable-objects-migrations/).
+
+---
+
+## 12. Full architecture reference (C4 views)
+
+Four zoom levels — context → containers → components → deployment — plus a data-ownership map and the trust boundaries.
+
+### 12.1 System context (who talks to what)
+
+```mermaid
+flowchart TB
+    user([User / browser])
+    admin([Admin])
+    subgraph vps["Daleel VPS (system of record + orchestrator)"]
+        app["Daleel.Web — Blazor Server · SignalR · Elsa · auth"]
+    end
+    subgraph cf["Cloudflare (execution layer)"]
+        workers["Pipeline Workers + Queues + R2 + D1 + KV"]
+    end
+    subgraph ext["External tool vendors (called from workers)"]
+        ctx["Context.dev"]
+        or["OpenRouter / Anthropic (Claude)"]
+        search["Search / Shopping / Places APIs"]
+    end
+    user -->|HTTPS| app
+    admin -->|HTTPS /admin| app
+    app <-->|"HTTPS + Bearer · Queue pull · R2 read"| workers
+    workers -->|outbound HTTPS| ctx
+    workers -->|outbound HTTPS| or
+    workers -->|outbound HTTPS| search
+    app -->|"complex planning (kept)"| or
+```
+
+**Key point:** external vendors (Context.dev, Claude, search APIs) are now called **from the workers**, not from the VPS — except complex planning, which the VPS still calls on Claude directly. The workers are the *execution host*; the vendor is a *per-job backend*.
+
+### 12.2 Container view (the deployable units)
+
+```mermaid
+flowchart LR
+    subgraph vps["VPS"]
+        blazor["Blazor Server + SignalR\n(ConversationHub, Home.razor)"]
+        sjs["SearchJobService\n(job poller + queue drainer)"]
+        elsa["Elsa runtime\n(SearchWorkflow + activities)"]
+        cfclient["CloudflareClient\n(submit / await / read-R2)"]
+        pg[("Postgres\napp · Elsa · events · index")]
+        blazor --- sjs --- elsa --- cfclient
+        blazor --- pg
+        elsa --- pg
+    end
+    subgraph edge["Cloudflare"]
+        sw["scrape-worker"]
+        cw["classify-worker"]
+        ew["extract-worker"]
+        fw["filter-worker"]
+        rw["search-worker"]
+        q[["Queues: poll-work + poll-dlq"]]
+        r2[("R2")]
+        d1[("D1")]
+        kv[("KV")]
+    end
+    cfclient -->|HTTPS+Bearer| sw & cw & ew & fw & rw
+    cfclient <-->|pull/ack| q
+    cfclient -->|GET by key| r2
+    sw & cw & ew & fw & rw -->|enqueue poll| q
+    sw & ew & rw -->|write| r2
+    ew -->|upsert| d1
+    rw -->|cache| kv
+```
+
+Each worker is an **independently deployable** wrangler project under `workers/` (own `wrangler.toml`, own secret, own release cadence) — same shape as the existing `workers/log-viewer`.
+
+### 12.3 Component view (inside a worker)
+
+```mermaid
+flowchart TB
+    subgraph w["scrape-worker (representative)"]
+        fetch["fetch(request, env, ctx)"]
+        auth["authorize() — bearer + constant-time (house pattern)"]
+        route["router — pick backend per matrix (backend param / job kind)"]
+        b1["Browser Rendering adapter"]
+        b2["Context.dev adapter"]
+        b3["Firecrawl adapter"]
+        persist["persist → R2 (write JSON) + enqueue poll (async)"]
+        fetch --> auth --> route
+        route --> b1 & b2 & b3
+        b1 & b2 & b3 --> persist
+    end
+    route -. "mirrors ScrapeRouter/IScrapeProvider on the VPS today" .- b2
+```
+
+Every worker shares the same skeleton: **auth → route/validate → do work (backend adapters) → persist/return**. The router mirrors the existing `ScrapeRouter` abstraction — the migration relocates that class's job to the edge and widens its adapter set.
+
+### 12.4 Deployment view (QA vs prod)
+
+```mermaid
+flowchart TB
+    subgraph prod["PROD"]
+        pvps["prod VPS\n(DEPLOY_SSH_HOST · Postgres)"]
+        pw["Workers (prod)\nCustom Domain"]
+        pd1[("D1 prod")]
+        pkv[("KV prod")]
+        pq[["Queues prod"]]
+    end
+    subgraph qa["QA (167.233.198.210)"]
+        qvps["qa-daleel VPS\n(Postgres)"]
+        qw["Workers (qa)\nworkers.dev"]
+        qd1[("D1 qa")]
+        qkv[("KV qa")]
+        qq[["Queues qa"]]
+    end
+    r2[("R2 — SHARED across QA+prod\n(key-prefixed by env)")]
+    pvps --- pw --- pd1 & pkv & pq
+    qvps --- qw --- qd1 & qkv & qq
+    pw --> r2
+    qw --> r2
+```
+
+**Isolation rules** (from Daleel's topology): Postgres, D1, KV, and Queues are **per-environment**; **R2 buckets are shared**, so every R2 key must be env-prefixed. Cloudflare resource IDs are rendered per-env into `deploy.yml`'s `.env` (a known deploy-invariant footgun).
+
+### 12.5 Data-ownership map
+
+| Store | Owner / writer | Readers | Consistency | Source of truth? |
+|---|---|---|---|---|
+| **Postgres** (app) | VPS (`DaleelDbContext`) | VPS | strong | ✅ users, jobs, cache, `EntityRecord` index, moderation rules |
+| **Postgres** (Elsa) | Elsa runtime | Elsa | strong | ✅ workflow state |
+| **Postgres** (events) | VPS (`EventStoreDbContext`) | VPS admin | strong | ✅ pipeline audit |
+| **R2** `daleel-data`/`specs`/`images` | workers + VPS | both | read-after-write (same region) | ✅ entity docs + intermediate payloads |
+| **D1** edge index | extract-worker | workers | eventual (replicas) via Sessions API | ✗ mirror of Postgres `EntityRecord` |
+| **KV** search cache | search-worker | search-worker | eventual (~60 s global) | ✗ accelerator over Postgres `SearchCache` |
+| **Queues** | workers (produce) | VPS (pull consume) | at-least-once | ✗ transient control messages |
+| **Durable Object** (opt.) | coordinator worker | workers + VPS via shim | strong per-object | ✗ per-job fan-in counter |
+
+### 12.6 Trust & security boundaries
+
+- **VPS ⇄ Worker:** HTTPS + per-worker bearer secret (`AUTH_TOKEN`), constant-time compare, fail-closed. Custom Domain (prod) / workers.dev (QA).
+- **VPS ⇄ Queue:** Cloudflare API token (`queues_read`+`queues_write`) held on the VPS only.
+- **Worker ⇄ R2/D1/KV:** bindings (no credentials over the wire) except R2 write which may use a scoped S3 token.
+- **Worker ⇄ vendor:** vendor API keys (`CONTEXT_DEV_API_KEY`, `OPENROUTER_API_KEY`, …) become **worker secrets**, scoped per worker — narrower blast radius than one VPS holding all keys.
+- **Postgres is never edge-reachable** — workers never connect to it; the VPS mediates all Postgres access (this is *why* intermediate state goes to R2, not Postgres — see [§5](#5-data-flow-workers--r2--elsa--ui)).
+
+---
+
+## 13. API reference
+
+Complete HTTP contract for the Elsa↔Worker edge. Type names in **bold** are defined in [§14](#14-data-types--schemas).
+
+### 13.1 Conventions
+
+- **Base URL** — one host per worker: `https://<worker>.daleel.app` (prod, Custom Domain) · `https://daleel-<worker>.<subdomain>.workers.dev` (QA). Paths are version-prefixed `/v1/…` (omitted below for brevity).
+- **Auth** — `Authorization: Bearer <AUTH_TOKEN>` on every request (per-worker token). Missing/invalid token → `401 unauthorized`; missing *server* secret → `500 server_misconfigured` (fail-closed, never open). Constant-time compare (house pattern, §9.2).
+- **Content type** — `application/json` in and out (except raw scrape passthrough with `?format=raw`).
+- **Idempotency** — async submits accept `Idempotency-Key` (defaults to a stable hash of the body); re-submitting returns the *same* `jobId`/`resultKey` without re-running. Required because Queues deliver at-least-once.
+- **Envelope** — every JSON response is a **WorkerResponse** (§14.1).
+- **Cost** — responses carry `meta.cost` (neurons / browser-ms / provider tokens) so the VPS `JobApiCallCollector` can aggregate per-job spend.
+
+### 13.2 Common endpoints (all workers)
+
+| Method | Path | Purpose | Response |
+|---|---|---|---|
+| `GET` | `/` | banner + endpoint list | text |
+| `GET` | `/health` | liveness | `{ ok: true }` |
+| `GET` | `/jobs/{jobId}` | async job status | **JobStatusResponse** |
+
+### 13.3 scrape-worker (scraping execution host)
+
+| Method | Path | Mode | Request | Success |
+|---|---|---|---|---|
+| `POST` | `/scrape/page` | sync | **ScrapePageRequest** | `result:` **ScrapedPage** |
+| `POST` | `/scrape/elements` | sync | **ScrapeElementsRequest** | `result: { elements: ElementHit[] }` |
+| `POST` | `/scrape/brand` | async | **ScrapeBrandRequest** | `202` `{ jobId, resultKey }` → **BrandScrapeDoc** |
+| `POST` | `/scrape/catalog` | async | **ScrapeCatalogRequest** | `202` `{ jobId, resultKey }` → **CatalogProduct**`[]` |
+
+```jsonc
+// POST /scrape/page  → 200
+// req
+{ "url": "https://acme.com/x200", "format": "markdown", "backend": "browser", "waitUntil": "networkidle2" }
+// res
+{ "ok": true, "mode": "sync", "backendUsed": "browser",
+  "result": { "url": "https://acme.com/x200", "title": "Acme X200", "content": "# Acme X200\n…", "format": "Markdown", "provider": "cf-browser", "success": true },
+  "resultKey": "qa/scrape/acme-com/x200.json", "meta": { "ms": 812, "cost": { "browserMs": 740 } } }
+```
+
+**Status codes:** `200` sync ok · `202` async accepted · `400` bad request (missing url) · `401` · `422 SCRAPE_TIMEOUT` (page-load/element timeout — retryable) · `502 BACKEND_ERROR` (vendor failed) · `500`.
+
+### 13.4 search-worker (query → results host)
+
+| Method | Path | Mode | Request | Success |
+|---|---|---|---|---|
+| `POST` | `/search` | sync* | **SearchRequest** | `result:` partial **ResearchBundle** + `cacheHit` |
+
+```jsonc
+// POST /search → 200
+{ "query": "air fryer", "market": "jordan", "kinds": ["web","shopping","places"], "freshnessTtl": 3600 }
+// res
+{ "ok": true, "mode": "sync", "cacheHit": false,
+  "result": { "webResults": [ … ], "shoppingResults": [ … ], "stores": [ … ] },
+  "resultKey": "qa/search/air-fryer_jordan.json", "meta": { "ms": 1900, "cost": { "serpCalls": 3 } } }
+```
+\* async (`202`) only when an upstream provider is itself slow.
+
+### 13.5 classify-worker (labels + confidence host)
+
+| Method | Path | Mode | Request | Success |
+|---|---|---|---|---|
+| `POST` | `/classify/text` | sync / batch | **ClassifyTextRequest** | `result: { verdicts:` **ClassVerdict**`[] }` |
+| `POST` | `/classify/images` | sync / batch | **ClassifyImagesRequest** | `result: { verdicts:` **ImageClassVerdict**`[] }` |
+
+```jsonc
+// POST /classify/text → 200
+{ "items": [ { "id": "l1", "text": "Refurbished — 90-day warranty" } ],
+  "schema": { "labels": ["new","used","refurbished","unknown"] }, "model": "@cf/meta/llama-3.2-3b-instruct" }
+// res
+{ "ok": true, "mode": "sync",
+  "result": { "verdicts": [ { "id": "l1", "label": "refurbished", "confidence": 0.94, "reason": "explicit 'refurbished'" } ] },
+  "meta": { "cost": { "neurons": 640 } } }
+```
+
+### 13.6 extract-worker (HTML → structured product JSON host)
+
+| Method | Path | Mode | Request | Success |
+|---|---|---|---|---|
+| `POST` | `/extract/products` | async | **ExtractRequest** | `202` `{ jobId, resultKey }` → **ProductSearchResult** |
+
+On completion the worker (a) writes **ProductSearchResult** to R2 `resultKey`, (b) writes one **EntityDocument** per entity to R2 `daleel-data`, (c) upserts a **D1 entity_index** row per entity, then (d) enqueues the poll message. See [§15.2](#152-async-submit--poll-extract-worker).
+
+### 13.7 filter-worker (halal findings host)
+
+| Method | Path | Mode | Request | Success |
+|---|---|---|---|---|
+| `POST` | `/filter/text` | sync | **FilterTextRequest** | `result: { findings:` **FilterFinding**`[] }` |
+| `POST` | `/filter/images` | sync | **FilterImagesRequest** | `result: { findings:` **FilterFinding**`[] }` |
+
+> The worker returns **findings only**; the VPS `HalalModerator` applies thresholds/whitelist/dedupe/veto and owns the decision. On worker error the VPS treats it as *no finding* (fail-open invariant).
+
+### 13.8 Elsa-side client (`CloudflareClient` on the VPS)
+
+The C# surface the activities call — it hides sync-vs-async behind three methods:
+
+```csharp
+public interface ICloudflareClient
+{
+    // sync: returns the parsed result payload directly
+    Task<T> InvokeAsync<T>(WorkerKind worker, string path, object body, CancellationToken ct);
+    // async: POST, get { jobId, resultKey }
+    Task<WorkerHandle> SubmitAsync(WorkerKind worker, string path, object body, CancellationToken ct);
+    // block-ish until the R2 result exists (drains the poll queue), then return the key
+    Task<string> AwaitResultAsync(WorkerHandle handle, CancellationToken ct);
+    // read + deserialize an R2 object by key
+    Task<T> ReadResultAsync<T>(string resultKey, CancellationToken ct);
+}
+```
+
+### 13.9 Queue pull-consumer API (Cloudflare, called by the VPS)
+
+Elsa drains async results via Cloudflare's REST pull API (needs `CF_API_TOKEN` with `queues_read`+`queues_write`):
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/accounts/{acct}/queues/{queueId}/messages/pull` | lease a batch (`{ visibility_timeout_ms, batch_size ≤ 100 }`) → messages + `lease_id`s |
+| `POST` | `/accounts/{acct}/queues/{queueId}/messages/ack` | `{ acks: [{lease_id}], retries: [{lease_id, delay_seconds}] }` |
+
+The VPS drain loop (in `SearchJobService`): pull → for each **PollMessage** GET `worker/jobs/{jobId}` → if `done` ack, else retry with `delay_seconds` backoff; on `deadlineAt` exceeded, ack + mark the `SearchJob` faulted (DLQ path).
+
+### 13.10 Error codes
+
+| `error.code` | HTTP | Retryable | Meaning |
+|---|---|---|---|
+| `unauthorized` | 401 | no | bad/missing bearer token |
+| `server_misconfigured` | 500 | no | worker secret unset (fail-closed) |
+| `bad_request` | 400 | no | schema validation failed |
+| `SCRAPE_TIMEOUT` | 422 | yes | page/element/action timeout |
+| `BACKEND_ERROR` | 502 | yes | vendor/backend call failed |
+| `AI_RATE_LIMITED` | 429 | yes | Workers AI sync rate limit → use batch |
+| `job_not_found` | 404 | no | unknown `jobId` |
+| `job_failed` | 200* | — | async job errored; envelope `ok:false` with cause |
+
+---
+
+## 14. Data types & schemas
+
+New contract types (envelope, messages, requests) are given as TypeScript (worker-side) with JSON examples; payloads reuse Daleel's **existing** C# domain records (cited with file paths) so a worker's output deserializes straight into what the pipeline already expects.
+
+### 14.1 WorkerResponse envelope
+
+```ts
+type WorkerResponse<T> =
+  | { ok: true;  mode: "sync";  result: T; resultKey?: string; backendUsed?: string; meta: Meta }
+  | { ok: true;  mode: "async"; jobId: string; resultKey: string; poll: { queue: string; after: number } }
+  | { ok: false; error: { code: string; message: string; retryable: boolean } };
+
+type Meta = { ms?: number; cost?: { neurons?: number; browserMs?: number; serpCalls?: number; tokens?: number } };
+```
+
+### 14.2 Async job & status
+
+```ts
+type JobStatusResponse = {
+  ok: true;
+  status: "queued" | "running" | "done" | "error";
+  jobId: string;
+  resultKey?: string;          // present once status === "done"
+  error?: { code: string; message: string };
+  updatedAt: number;           // epoch ms
+};
+type WorkerHandle = { worker: string; jobId: string; resultKey: string; statusUrl: string };
+```
+
+### 14.3 Queue messages (thin pointers — never payloads)
+
+```ts
+type PollMessage = {
+  type: "poll";
+  jobId: string;
+  worker: "scrape" | "extract" | "search" | "classify" | "filter";
+  statusUrl: string;           // GET → JobStatusResponse
+  resultKey: string;           // where the result must land in R2
+  searchJobId: number;         // Daleel SearchJob.Id (correlation)
+  attempt: number;
+  enqueuedAt: number;
+  deadlineAt: number;          // give up → DLQ after this
+};
+
+type FanoutMessage = {         // optional edge-side fan-out (§10.2 B)
+  type: "fanout";
+  kind: "brand" | "store" | "item";
+  searchJobId: number;
+  coordinatorId: string;       // Durable Object name = `${searchJobId}`
+  entity: { name: string; url?: string };
+};
+```
+Message size cap is 128 KB and billing is per 64 KB chunk — hence pointers only. See [§4](#4-message--queue-design).
+
+### 14.4 Worker request DTOs
+
+```ts
+type ScrapePageRequest    = { url: string; format: "markdown"|"html"|"text"; backend?: "browser"|"contextdev"|"firecrawl"; waitUntil?: "domcontentloaded"|"networkidle0"|"networkidle2"; waitForSelector?: string; timeoutMs?: number };
+type ScrapeElementsRequest= { url: string; selectors: string[]; backend?: string };
+type ScrapeBrandRequest   = { brandUrl: string; withCatalog?: boolean; maxPages?: number; backend?: "contextdev"|"browser" };
+type ScrapeCatalogRequest = { seedUrl: string; maxPages: number; backend?: "browser"|"contextdev" };
+
+type SearchRequest        = { query: string; market: string; kinds: ("web"|"shopping"|"places"|"social")[]; freshnessTtl?: number };
+
+type ClassifyTextRequest  = { items: {id:string; text:string}[]; schema: { labels: string[] }; model?: string };
+type ClassifyImagesRequest= { urls: string[]; model?: string };
+
+type ExtractRequest       = { htmlKey?: string; html?: string; market: string; intent: "Product"|"Service"|"Place"; schema: ProductSchemaDto };
+
+type FilterTextRequest    = { items: {id:string; text:string; sourceUrl?:string}[]; policy: HalalPolicyDto };
+type FilterImagesRequest  = { urls: string[]; policy: HalalPolicyDto };
+
+type ClassVerdict         = { id: string; label: string; confidence: number; reason?: string };
+type ImageClassVerdict    = { url: string; label: string; confidence: number };
+type ElementHit           = { selector: string; text?: string; html?: string; attrs?: Record<string,string> };
+```
+
+`ProductSchemaDto` / `HalalPolicyDto` are the JSON projections of the C# `ProductSchema` and `HalalPolicy` records (§14.5).
+
+### 14.5 Result payloads = existing Daleel domain records
+
+Workers emit JSON that maps **1:1 onto records the pipeline already uses** — no new result shapes. Canonical C# definitions (source of truth) and the worker that produces each:
+
+| Produced by | Result type | C# source |
+|---|---|---|
+| scrape-worker `/scrape/page` | `ScrapedPage` | `Daleel.Search/Abstractions/IScrapeProvider.cs` |
+| scrape-worker `/scrape/catalog` | `CatalogProduct[]` | `Daleel.Search/Providers/ContextDevProvider.cs` |
+| scrape-worker `/scrape/brand` | `BrandProfile` + `CatalogProduct[]` | ″ |
+| search-worker `/search` | partial `ResearchBundle` | `Daleel.Agent/AgentResults.cs` |
+| extract-worker `/extract/products` | `ProductSearchResult` | `Daleel.Core/Models/ProductSearchResult.cs` |
+| extract-worker → R2/D1 | `EntityDocument` / `EntityRecord` | `Daleel.Core/Persistence/EntityDocument.cs`, `Daleel.Web/Data/EntityRecord.cs` |
+| filter-worker | `FilterFinding[]` | `Daleel.Core/Moderation/HalalClassification.cs` |
+
+`ScrapedPage` (worker output → JSON):
+```jsonc
+{ "url": "https://acme.com/x200", "title": "Acme X200", "content": "…", "format": "Markdown", "provider": "cf-browser", "success": true, "error": null }
+```
+
+`FilterFinding` (positional record → JSON):
+```jsonc
+{ "category": "alcohol", "rule": "wine", "kind": "text", "content": "…", "field": "title",
+  "sourceUrl": "https://…", "imageUrl": null, "confidence": 0.91, "source": "Llm", "contentHash": "…", "itemRemoved": false }
+```
+
+`EntityDocument` (R2 source-of-truth doc — abbreviated):
+```jsonc
+{ "schemaVersion": 1, "id": "acme|x200", "intent": "Product", "name": "Acme X200", "brand": "Acme", "model": "X200",
+  "imageUrls": ["https://cdn…"], "geo": "jordan", "country": "JO", "brandId": "…", "productKey": "acme|x200",
+  "specs": { "capacity": "5L", "power": "1500W" },
+  "offers": [ { "source": "acme.com", "price": 89.9, "currency": "JOD", "url": "…", "condition": "new" } ],
+  "pros": ["quiet"], "cons": ["small basket"], "summary": "…", "capturedAt": "2026-07-04T10:00:00Z" }
+```
+
+### 14.6 R2 objects & key conventions
+
+| R2 key (env-prefixed) | Contents | Writer |
+|---|---|---|
+| `{env}/scrape/{host}/{slug}.json` | `ScrapedPage` | scrape-worker |
+| `{env}/search/{queryHash}.json` | partial `ResearchBundle` | search-worker |
+| `{env}/pipeline/{searchJobId}/bundle.json` | full `ResearchBundle` (intermediate) | search/extract worker |
+| `{env}/pipeline/{searchJobId}/products.json` | `ProductSearchResult` | extract-worker |
+| `{brand}/{model}/{intent}.json` (in `daleel-data`) | `EntityDocument` (existing convention) | extract-worker |
+| `specs/{productKey}/{ts}.json` | merged specs | item deep-dive |
+| `images/{hash}` | re-hosted image bytes | scrape/brand worker |
+
+Buckets `daleel-data` / `specs` / `images` are **shared across QA+prod** → the `{env}/` prefix on pipeline/scrape/search keys prevents cross-env bleed. Reads use the existing `R2StorageService`/S3 API.
+
+### 14.7 D1 edge index (mirrors Postgres `EntityRecord`)
+
+```sql
+CREATE TABLE entity_index (
+  id               TEXT PRIMARY KEY,        -- EntityRecord.Id
+  intent           TEXT NOT NULL,           -- 'Product'|'Service'|'Place'
+  name             TEXT NOT NULL,
+  name_key         TEXT NOT NULL,           -- normalized (trim+lower)
+  geo              TEXT,
+  search_id        TEXT,
+  brand_id         INTEGER,
+  store_id         INTEGER,
+  product_key      TEXT,
+  parent_product_key TEXT,
+  r2_key           TEXT NOT NULL,           -- pointer to EntityDocument in R2
+  r2_url           TEXT,
+  last_refreshed   INTEGER NOT NULL         -- epoch ms (SQLite has no DateTimeOffset ordering)
+);
+CREATE INDEX ix_entity_name_key   ON entity_index(name_key);
+CREATE INDEX ix_entity_intent_geo ON entity_index(intent, geo);
+CREATE INDEX ix_entity_product    ON entity_index(product_key);
+CREATE INDEX ix_entity_brand      ON entity_index(brand_id);
+```
+Thin rows only (IDs/names/keys) — rich JSON stays in R2. `last_refreshed` is epoch-ms to match the existing SQLite ordering technique. Every filter column is indexed (D1 bills per **row read** → avoid scans). Managed with `wrangler d1 migrations`.
+
+### 14.8 KV cache entry
+
+```
+key:   search:v1:{sha256(normalize(query) | market | lang)}      // ≤ 512 B
+value: JSON of ProductSearchResult  (or partial ResearchBundle)   // ≤ 25 MiB
+meta:  { "generatedAt": <epochMs>, "resultCount": <int>, "source": "pipeline" }   // ≤ 1024 B
+put:   env.KV.put(key, json, { expirationTtl: 3600, metadata })   // TTL ≥ 60 s
+```
+Postgres `SearchCache` stays authoritative; KV is a best-effort edge accelerator (eventual consistency, ≤ ~60 s global propagation, 1 write/key/s).
+
+### 14.9 `SearchPipelineState`: before → after (the actual "state moves to R2" change)
+
+The real change is **surgical** — the state already carries a `ResultKey` (an R2 key) and small scalars; only the two *heavy payload* fields become keys:
+
+| Field (today) | C# type | After | Why |
+|---|---|---|---|
+| `Query`, `Geo`, `Language`, `Intent`, `SearchId`, `ResultKey`, `CacheTtl` | scalars | **unchanged** | already tiny; already includes an R2 key |
+| `Strategy` | `SearchStrategy?` | **unchanged** (small) | a few query strings |
+| `Intelligence` | `SearchIntelligence?` | **unchanged** (small) | category + schema |
+| `Bundle` | `ResearchBundle?` | → `BundleKey: string` | **big** (all pages/results) → R2 `pipeline/{job}/bundle.json` |
+| `Products` | `ProductSearchResult?` | → `ProductsKey: string` | **big** (all listings) → R2 `pipeline/{job}/products.json` |
+| `Answer` | `AgentAnswer?` | → serialized to `ResultJson` / `ResultKey` (already exists) | already persisted |
+| `FilteredCount`, `FilteredCategories`, `ResultCount`, `FromCache` | scalars | **unchanged** | counters |
+
+So "moving state to R2" = **two fields (`Bundle`, `Products`) become R2 keys**; everything else stays. `ElsaStateFlowTests` changes from asserting payload identity to asserting the keys resolve. This is the concrete, minimal footprint of the state-contract change discussed in [§2.2](#22-the-activity-contract-change-the-real-work-of-the-migration).
+
+---
+
+## 15. Detailed call flows
+
+Step-by-step traces. "→W" = HTTPS+Bearer to a worker; "→R2/D1/KV/Q" = binding/API call.
+
+### 15.1 Full search — happy path
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Blazor UI
+    participant SJS as SearchJobService
+    participant EL as Elsa activities
+    participant SW as search-worker
+    participant XW as extract-worker
+    participant Q as Queue
+    participant R2 as R2
+    UI->>SJS: POST /api/search {query,geo}
+    SJS->>SJS: SearchJob(queued) → claim → running
+    SJS->>EL: run SearchWorkflow (scoped state)
+    EL->>EL: ParseQuery (LLM plan, on VPS/Claude) → Strategy
+    EL->>R2: CheckCache miss (KV+Postgres)
+    EL->>EL: AnalyzeMarket → Intelligence
+    EL->>SW: POST /search {query,market,kinds}
+    SW-->>EL: 200 partial ResearchBundle → state.BundleKey
+    EL->>XW: POST /extract/products {bundleKey,schema} (async)
+    XW-->>EL: 202 {jobId, resultKey}
+    XW->>R2: write ProductSearchResult + EntityDocuments
+    XW->>Q: enqueue PollMessage
+    EL->>Q: pull → poll → (done) ack
+    EL->>R2: GET resultKey → ProductSearchResult → state.ProductsKey
+    Note over EL: Dispatch Brand/Store/Item sub-workflows (§15.3)
+    EL->>EL: Aggregate → AgentAnswer ; Moderate (filter-worker) ; Cache
+    SJS-->>UI: SignalR Progress… / Completed {resultJson}
+```
+
+Activity → worker map for one run:
+
+| Activity | Calls | Mode |
+|---|---|---|
+| ParseQuery | Claude/OpenRouter (VPS-kept) | sync |
+| CheckCache | KV + Postgres `SearchCache` | sync |
+| AnalyzeMarket | classify/extract-worker *or* Claude | sync |
+| GatherSources | **search-worker** (+ filter-worker per list) | sync |
+| ExtractProducts | **extract-worker** | async |
+| Dispatch{Brand,Store,Item} | **scrape/extract/filter** ×N | async fan-out |
+| Aggregate | — (in-VPS assembly from R2 keys) | — |
+| ModerateContent | **filter-worker** LLM/vision layers | sync |
+| Cache | Postgres `SearchCache` (+ KV populate) | sync |
+
+### 15.2 Async submit → poll (extract-worker)
+
+```
+1. EL   →W  POST /extract/products { htmlKey:"qa/pipeline/42/bundle.json", schema, market:"jordan", intent:"Product" }
+             Idempotency-Key: sha256(body)
+2. XW   →EL 202 { ok:true, mode:"async", jobId:"job_01H…", resultKey:"qa/pipeline/42/products.json",
+                  poll:{ queue:"daleel-poll-work", after:5 } }
+3. XW        (background) Workers AI JSON-mode extraction → ProductSearchResult
+4. XW   →R2  PUT qa/pipeline/42/products.json           (ProductSearchResult)
+   XW   →R2  PUT daleel-data/acme/x200/Product.json     (EntityDocument)   × N entities
+   XW   →D1  UPSERT entity_index(...)                    × N
+5. XW   →Q   send PollMessage { jobId, worker:"extract", statusUrl, resultKey, searchJobId:42, deadlineAt }
+6. EL   →Q   pull(batch_size:10, visibility_timeout_ms:60000)  → [PollMessage]
+7. EL   →W   GET /jobs/job_01H…  → { status:"done", resultKey }
+8. EL   →Q   ack(lease_id)                    // if "running": retry(lease_id, delay_seconds: 15→30→60)
+9. EL   →R2  GET qa/pipeline/42/products.json → ProductSearchResult → state.ProductsKey
+```
+
+### 15.3 Brand sub-workflow fan-out (`DispatchBrandWorkflowsActivity`)
+
+```
+DispatchBrandWorkflows (≤15 brands, bounded parallel):
+  for each brand b:
+    →W  scrape-worker  POST /scrape/brand { brandUrl:b.url, withCatalog:true, backend:"contextdev" }  (async)
+    →W  extract-worker POST /extract/products { htmlKey:<brand scrape resultKey>, … }                  (async)
+    →W  filter-worker  POST /filter/images { urls:<brand images>, policy }                              (sync)
+    →R2 SaveBrandProfile → EntityDocument(intent=Product, brandId) ; images re-hosted
+```
+Today `SubWorkflowDispatcher.RunManyAsync` caps this at 5 concurrent / 30 s per entity **to protect the VM**. On the edge those caps can be **raised** (Browser Rendering allows 120 concurrent browsers; Workers fan-out is 10,000 subrequests) — one of the migration's headline wins ([§8.2](#82-scaling-wins)).
+
+### 15.4 Fan-in via Durable Object coordinator (optional — §10.2 B)
+
+```
+1. EL  →W  coordinator-shim POST /jobs/42/expect { n: 15 }      // DO getByName("42"); persist n to SQLite
+2. per completed brand sub-job:
+   XW  →W  coordinator-shim POST /jobs/42/complete { entityKey } // DO increments counter (serialized, race-free)
+3. DO       when count == n  → set done=true  (or alarm() fires at deadline → mark timed-out, salvage partial)
+4. EL  →W  GET /jobs/42/status → { done:true, completed:15, results:[keys…] }   // long-poll or poll
+5. EL  →R2 read each entity key → aggregate
+```
+The DO `alarm()` enforces the fan-in **timeout without any incoming request** — mapping onto Daleel's existing "salvage partial results on timeout" behavior. Counter is persisted to the DO's SQLite (in-memory is wiped on eviction).
+
+### 15.5 Cache-hit short-circuit
+
+```
+1. EL  →KV get search:v1:{hash}
+   • hit  → deserialize ProductSearchResult → state.FromCache=true → skip activities 3–8 (self-skip guards) → return
+   • miss → EL → Postgres SearchCache
+        • hit  → replay report (+ populate KV)
+        • miss → run full pipeline (§15.1), then Cache writes Postgres + KV
+```
+
+### 15.6 Failure → DLQ (surface faulted, don't swallow)
+
+```
+poll attempts exceed deadlineAt (or worker → status:"error"):
+  EL  →Q  ack(lease_id)  +  route original to poll-dlq (max_retries exhausted)
+  DLQ drain (low-freq Elsa tick):
+    → mark SearchJob.Status = "failed", SearchJob.Error = <cause>
+    → salvage: if partial results already in R2, assemble a partial AgentAnswer (timeout-salvage pattern)
+    → SignalR Completed{ status:"failed" }  — UI shows a real error, never a blank "no results"
+```
+This preserves the invariant that a **faulted run ≠ an empty run** — the error reaches `SearchJob.Error` and the UI, exactly as the current pipeline is designed to do.
 
 ---
 
