@@ -1451,12 +1451,34 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             ? new List<string>()
             : Tokens(query!).Where(tok => tok.Length >= 3 && !QueryStopwords.Contains(tok)).ToList();
 
-    /// <summary>Loose singular/plural-tolerant token match: "machines" in the query hits "machine".</summary>
+    /// <summary>
+    /// Singular/plural-tolerant token match, requiring at least TWO query tokens when the query has
+    /// them: one shared token proved far too loose in QA — "espresso machine" admitted a fondant
+    /// spray gun (via "machine") and espresso CUPS (via "espresso"); requiring both keeps exactly
+    /// the machines. Single-token queries keep the single-token bar.
+    /// </summary>
     private static bool NameMatchesQuery(string name, IReadOnlyList<string> queryTokens)
     {
         var have = Tokens(name);
-        return have.Count > 0 && queryTokens.Any(q =>
-            have.Any(h => string.Equals(h.TrimEnd('s'), q.TrimEnd('s'), StringComparison.OrdinalIgnoreCase)));
+        if (have.Count == 0)
+        {
+            return false;
+        }
+
+        var matched = queryTokens.Count(q =>
+            have.Any(h => string.Equals(NormalizeNoun(h), NormalizeNoun(q), StringComparison.OrdinalIgnoreCase)));
+        return matched >= Math.Min(2, queryTokens.Count);
+    }
+
+    /// <summary>
+    /// Plural trim + the one commerce synonym pair that matters here: "maker" and "machine" name the
+    /// same product category across appliances (coffee/espresso/ice/pasta maker ≡ machine), and a
+    /// DeLonghi "Espresso Maker" must count as a hit for an "espresso machine" query.
+    /// </summary>
+    private static string NormalizeNoun(string token)
+    {
+        var stem = token.TrimEnd('s', 'S');
+        return stem.Equals("maker", StringComparison.OrdinalIgnoreCase) ? "machine" : stem;
     }
 
     /// <summary>True when the entry already decorated an existing model (the matcher's own bar).</summary>

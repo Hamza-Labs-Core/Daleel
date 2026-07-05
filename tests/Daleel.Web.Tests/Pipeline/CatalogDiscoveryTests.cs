@@ -64,6 +64,24 @@ public class CatalogDiscoveryTests
     }
 
     [Fact]
+    public void Single_shared_token_is_not_enough_when_the_query_has_two()
+    {
+        // Both observed live in QA: a fondant spray gun (shares only "machine") and espresso CUPS
+        // (share only "espresso") must not become "espresso machine" results.
+        var (models, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
+            Existing("Krups Espresso Machine"),
+            new[]
+            {
+                Entry("JJ110 Fondant Cakes Air Spray Gun chromatically machine airbrush"),
+                Entry("Origin - Espresso tasses (2 x 80ml)")
+            },
+            storeName: "Ahlia", query: "buy espresso machine Jordan");
+
+        created.Should().BeEmpty();
+        models.Should().HaveCount(1);
+    }
+
+    [Fact]
     public void No_query_means_no_creation()
     {
         var (models, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
