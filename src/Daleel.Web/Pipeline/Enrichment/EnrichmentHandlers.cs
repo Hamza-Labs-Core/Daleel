@@ -225,11 +225,12 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
 
         // Edge-first: match whatever the drain has persisted for this domain — the same data an
         // inline crawl would fetch, already paid for once on the edge.
-        var (fromDrain, priced) = await svc.AttachScrapedPricesAsync(
-            products.Models.ToList(), payload.Domain, payload.StoreName, ct);
-        if (fromDrain is not null && priced > 0)
+        var (fromDrain, priced, drainCreated) = await svc.AttachScrapedPricesAsync(
+            products.Models.ToList(), payload.Domain, payload.StoreName, ctx.Job.Query, ct);
+        if (fromDrain is not null && (priced > 0 || drainCreated.Count > 0))
         {
             await Patch(ctx, item, fromDrain, ct);
+            await EnqueueFollowUpsAsync(ctx, item, drainCreated, ct);
             return UnitOutcome.Ok;
         }
 
@@ -243,15 +244,36 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
                 $"awaiting edge drain for {payload.Domain}", TimeSpan.FromSeconds(45));
         }
 
-        var (inline, inlinePriced) = await svc.AttachCatalogForDomainAsync(
+        var (inline, inlinePriced, inlineCreated) = await svc.AttachCatalogForDomainAsync(
             ctx.Agent(), products.Models.ToList(), payload.Domain, payload.StoreName,
-            products.Geo, item.SearchJobId.ToString(), ct);
+            products.Geo, item.SearchJobId.ToString(), ctx.Job.Query, ct);
         if (inline is not null && inlinePriced >= 0)
         {
             await Patch(ctx, item, inline, ct);
+            await EnqueueFollowUpsAsync(ctx, item, inlineCreated, ct);
         }
 
         return UnitOutcome.Ok;
+    }
+
+    /// <summary>
+    /// Catalogue-discovered models arrive AFTER the plan fanned out, so they'd miss their spec dive
+    /// and the (already-run) image pass — enqueue both. Queue recursion: discoveries create work.
+    /// </summary>
+    private static async Task EnqueueFollowUpsAsync(
+        EnrichmentUnitContext ctx, EnrichmentWorkItem item, IReadOnlyList<string> created, CancellationToken ct)
+    {
+        if (created.Count == 0)
+        {
+            return;
+        }
+
+        var children = created
+            .Select(name => HandlerHelpers.Child(item, EnrichmentUnit.ItemDive,
+                EnrichmentWorkQueue.Payload(new ItemPayload(-1, name))))
+            .ToList();
+        children.Add(HandlerHelpers.Child(item, EnrichmentUnit.ImageLookup, "{}", notBefore: TimeSpan.FromSeconds(30)));
+        await ctx.Queue.EnqueueAsync(children, ct);
     }
 
     private static Task Patch(

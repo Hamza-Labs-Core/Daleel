@@ -39,10 +39,10 @@ public interface IItemEnrichmentService
     Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
     /// <summary>Phase 4 for ONE store domain over the whole list (inline Context.dev extract + browser fallback + persist observations + match). Models null = unchanged.</summary>
-    Task<(List<ProductModel>? Models, int Priced)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, CancellationToken ct);
+    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, CancellationToken ct);
 
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
-    Task<(List<ProductModel>? Models, int Priced)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, CancellationToken ct);
+    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
 
     /// <summary>Phase 5 for ONE brand + immediate brand-DB refill of the list. Null = unchanged.</summary>
     Task<List<ProductModel>?> HarvestBrandAndRefillAsync(AgentService agent, string brand, List<ProductModel> models, string? geo, string? searchId, CancellationToken ct);
@@ -422,16 +422,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return WithDetail(item, content!);
     }
 
-    public async Task<(List<ProductModel>? Models, int Priced)> AttachCatalogForDomainAsync(
+    public async Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
         AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo,
-        string? searchId, CancellationToken ct)
+        string? searchId, string? query, CancellationToken ct)
     {
         // geo/searchId ride on the queue contract; this unit needs neither (events are dropped here).
-        // Same phase gate as the orchestrated path: a catalogue has something to offer only while an
-        // item still lacks a price, an image, or meaningful specs.
-        if (!models.Any(m => !HasPrice(m) || string.IsNullOrWhiteSpace(m.ImageUrl) || m.Specs.Count < ThinSpecThreshold))
+        // The gap gate only short-circuits when there's no query to discover NEW models for — a store
+        // catalogue is a first-class product source, not just a gap-filler for existing items.
+        if (SignificantQueryTokens(query).Count == 0 &&
+            !models.Any(m => !HasPrice(m) || string.IsNullOrWhiteSpace(m.ImageUrl) || m.Specs.Count < ThinSpecThreshold))
         {
-            return (null, 0);
+            return (null, 0, Array.Empty<string>());
         }
 
         // No internal phase-budget CancellationTokenSource (unlike AttachCatalogDataAsync's
@@ -452,26 +453,37 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         if (pool.Count == 0 && browserPrices.Count == 0)
         {
-            return (null, 0);
+            return (null, 0, Array.Empty<string>());
         }
 
         var (updated, priced, images, specsFilled, observations) =
             AttachPoolToModels(models, pool, browserPrices, storeName);
         await PersistObservations(observations, record: null, ct);
 
-        if (priced + images + specsFilled == 0)
+        // Catalogue entries that matched nothing but ARE what the user searched for become NEW
+        // models — this is how a deep local store's inventory reaches the grid at all (a 184-item
+        // catalogue used to contribute zero items unless web extraction had already named them).
+        var (withNew, created) = AppendCatalogDiscoveries(
+            updated,
+            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false))
+                .Concat(browserPrices.Select(b =>
+                    (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true))),
+            storeName, query);
+
+        if (priced + images + specsFilled == 0 && created.Count == 0)
         {
-            return (null, 0);
+            return (null, 0, Array.Empty<string>());
         }
 
         _logger.LogInformation(
-            "Store catalogue {Domain} matched {Priced} price(s), {Images} image(s), {Specs} spec set(s)",
-            domain, priced, images, specsFilled);
-        return (updated, priced);
+            "Store catalogue {Domain} matched {Priced} price(s), {Images} image(s), {Specs} spec set(s), " +
+            "added {Created} new model(s)",
+            domain, priced, images, specsFilled, created.Count);
+        return (withNew, priced, created);
     }
 
-    public async Task<(List<ProductModel>? Models, int Priced)> AttachScrapedPricesAsync(
-        List<ProductModel> models, string domain, string? storeName, CancellationToken ct)
+    public async Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(
+        List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct)
     {
         var since = _options.Now().AddMinutes(-ScrapedPriceReuseWindowMinutes);
 
@@ -496,13 +508,21 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             .ToList();
         if (pool.Count == 0)
         {
-            return (null, 0);
+            return (null, 0, Array.Empty<string>());
         }
 
         // Observations from the matcher are DISCARDED: these prices came out of the history table,
         // and persisting them again would duplicate the append-only series.
         var (updated, priced, _, _, _) = AttachPoolToModels(models, new List<CatalogProduct>(), pool, storeName);
-        return priced > 0 ? (updated, priced) : (null, 0);
+
+        // Drained edge catalogues create models too — indicative offers, like every drained price.
+        var (withNew, created) = AppendCatalogDiscoveries(
+            updated ?? models,
+            pool.Select(b => (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)),
+            storeName, query);
+        return priced > 0 || created.Count > 0
+            ? (withNew, priced, created)
+            : (null, 0, Array.Empty<string>());
     }
 
     public async Task<List<ProductModel>?> HarvestBrandAndRefillAsync(
@@ -1340,6 +1360,120 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         }
 
         return $"{root.TrimEnd('/')}/search?q={Uri.EscapeDataString(query)}";
+    }
+
+    /// <summary>
+    /// Query words that carry no product identity — never enough on their own to call a catalogue
+    /// entry "what the user searched for".
+    /// </summary>
+    private static readonly HashSet<string> QueryStopwords = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "in", "the", "a", "an", "for", "of", "and", "or", "best", "price", "prices",
+        "buy", "cheap", "deal", "deals", "near", "me", "shop", "store", "stores", "online"
+    };
+
+    private static List<string> SignificantQueryTokens(string? query) =>
+        string.IsNullOrWhiteSpace(query)
+            ? new List<string>()
+            : Tokens(query!).Where(tok => tok.Length >= 3 && !QueryStopwords.Contains(tok)).ToList();
+
+    /// <summary>Loose singular/plural-tolerant token match: "machines" in the query hits "machine".</summary>
+    private static bool NameMatchesQuery(string name, IReadOnlyList<string> queryTokens)
+    {
+        var have = Tokens(name);
+        return have.Count > 0 && queryTokens.Any(q =>
+            have.Any(h => string.Equals(h.TrimEnd('s'), q.TrimEnd('s'), StringComparison.OrdinalIgnoreCase)));
+    }
+
+    /// <summary>True when the entry already decorated an existing model (the matcher's own bar).</summary>
+    private static bool MatchedByAnyModel(string name, IReadOnlyList<ProductModel> models)
+    {
+        var have = Tokens(name);
+        if (have.Count == 0)
+        {
+            return false;
+        }
+
+        foreach (var m in models)
+        {
+            var want = Tokens($"{m.Brand} {m.Model} {m.Name}");
+            if (want.Count == 0)
+            {
+                continue;
+            }
+
+            var shared = want.Count(have.Contains);
+            if (IsStrongMatch(shared, want.Count, have.Count))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Appends catalogue entries that matched NO existing model but ARE query-relevant as new models.
+    /// This is what lets a deep store catalogue put products on the grid instead of only decorating
+    /// items web extraction happened to name. Deduped by normalized name; uncapped by design — the
+    /// relevance gate and the store's own inventory are the bounds.
+    /// </summary>
+    public static (List<ProductModel> Models, List<string> Created) AppendCatalogDiscoveries(
+        List<ProductModel> models,
+        IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)> entries,
+        string? storeName, string? query)
+    {
+        var queryTokens = SignificantQueryTokens(query);
+        var created = new List<string>();
+        if (queryTokens.Count == 0)
+        {
+            return (models, created);
+        }
+
+        var result = models;
+        var seen = new HashSet<string>(
+            models.Select(m => string.Join(' ', Tokens(m.Name))), StringComparer.OrdinalIgnoreCase);
+        foreach (var e in entries)
+        {
+            if (string.IsNullOrWhiteSpace(e.Name))
+            {
+                continue;
+            }
+
+            var key = string.Join(' ', Tokens(e.Name));
+            if (key.Length == 0 || !seen.Add(key) ||
+                !NameMatchesQuery(e.Name, queryTokens) || MatchedByAnyModel(e.Name, models))
+            {
+                continue;
+            }
+
+            if (ReferenceEquals(result, models))
+            {
+                result = new List<ProductModel>(models);
+            }
+
+            result.Add(new ProductModel
+            {
+                Name = e.Name.Trim(),
+                ImageUrl = string.IsNullOrWhiteSpace(e.Image) ? null : e.Image,
+                Offers = new List<PriceOffer>
+                {
+                    new()
+                    {
+                        Source = DomainOf(e.Url) ?? storeName ?? "Store",
+                        SourceType = ResultType.StorePage,
+                        Price = e.Price,
+                        Currency = e.Currency,
+                        Url = e.Url,
+                        IsLocal = true,
+                        IsIndicative = e.Indicative
+                    }
+                }
+            });
+            created.Add(e.Name.Trim());
+        }
+
+        return (result, created);
     }
 
     /// <summary>Best browser-scraped price for a model: the line sharing the most brand/model tokens.</summary>

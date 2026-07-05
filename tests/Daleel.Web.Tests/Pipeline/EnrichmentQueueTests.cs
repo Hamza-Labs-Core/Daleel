@@ -311,7 +311,8 @@ public class EnrichmentHandlerTests
 
     private sealed class FakeEnrichmentService : IItemEnrichmentService
     {
-        public (List<ProductModel>? Models, int Priced) DrainedResult { get; set; } = (null, 0);
+        public (List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created) DrainedResult { get; set; } =
+            (null, 0, Array.Empty<string>());
         public int InlineCatalogCalls { get; private set; }
 
         public Task<ItemEnrichmentResult> EnrichAsync(
@@ -325,15 +326,15 @@ public class EnrichmentHandlerTests
         public Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
             Task.FromResult<ProductModel?>(null);
 
-        public Task<(List<ProductModel>? Models, int Priced)> AttachCatalogForDomainAsync(
-            AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, CancellationToken ct)
+        public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
+            AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, CancellationToken ct)
         {
             InlineCatalogCalls++;
-            return Task.FromResult<(List<ProductModel>?, int)>((null, 0));
+            return Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>)>((null, 0, Array.Empty<string>()));
         }
 
-        public Task<(List<ProductModel>? Models, int Priced)> AttachScrapedPricesAsync(
-            List<ProductModel> models, string domain, string? storeName, CancellationToken ct) =>
+        public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(
+            List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct) =>
             Task.FromResult(DrainedResult);
 
         public Task<List<ProductModel>?> HarvestBrandAndRefillAsync(
@@ -410,7 +411,7 @@ public class EnrichmentHandlerTests
     public async Task Catalog_prefers_drained_edge_rows_over_crawling()
     {
         var (ctx, _, store, svc) = Build(ProductAnswer("A"));
-        svc.DrainedResult = (new List<ProductModel> { new() { Name = "A" } }, 1);
+        svc.DrainedResult = (new List<ProductModel> { new() { Name = "A" } }, 1, Array.Empty<string>());
 
         var outcome = await new CatalogAttachHandler().ExecuteAsync(
             Root(EnrichmentUnit.CatalogAttach, EnrichmentWorkQueue.Payload(new CatalogPayload("store-a.jo", "Store A"))),
