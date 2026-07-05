@@ -262,6 +262,42 @@ jobs:
 
             log "Bootstrap complete — QA VPS is ready to deploy."
 
+      # Derive this environment's worker endpoints + poll-queue id from the Cloudflare API, so no
+      # per-URL secrets are needed: the workers.dev subdomain is account-wide, the queue id resolves
+      # by name (both created by the worker deploy pipeline's provision step). Explicit CF_* secrets
+      # still win in the .env render below (custom domains / overrides). Empty stays empty — the
+      # app then runs the inline pipeline exactly as before.
+      - name: Resolve Cloudflare endpoints (qa)
+        id: cf
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Cloudflare credentials unset — worker endpoints stay empty (inline pipeline)."
+            exit 0
+          fi
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
+          auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
+          sub=$(curl -fsS -H "$auth" "$api/workers/subdomain" | jq -r '.result.subdomain // empty')
+          if [ -n "$sub" ]; then
+            for w in scrape search classify extract filter; do
+              echo "$w"'_url=https://daleel-'"$w"'-worker-qa.'"$sub"'.workers.dev' >> "$GITHUB_OUTPUT"
+            done
+            echo "Resolved worker URLs on subdomain: $sub"
+          else
+            echo "::warning::workers.dev subdomain not resolvable — CF_*_WORKER_URL stay empty unless set as secrets"
+          fi
+          qid=$(curl -fsS -H "$auth" "$api/queues?per_page=100" \
+            | jq -r '.result[] | select(.queue_name == "daleel-qa-poll-work") | .queue_id' | head -n1)
+          if [ -n "$qid" ]; then
+            echo "poll_queue_id=$qid" >> "$GITHUB_OUTPUT"
+            echo "Resolved poll queue id for daleel-qa-poll-work"
+          else
+            echo "::warning::queue daleel-qa-poll-work not found — CF_POLL_QUEUE_ID stays empty unless set as a secret"
+          fi
+
       - name: Write /opt/daleel/.env from GitHub secrets
         uses: appleboy/ssh-action@v1
         with:
@@ -313,18 +349,18 @@ jobs:
             # resolve to empty when unset — the app then runs the inline pipeline exactly as before.
             # Environment discriminator for the token authority (which workers this box owns).
             DALEEL_ENV=qa
-            CF_SCRAPE_WORKER_URL=${{ secrets.CF_QA_SCRAPE_WORKER_URL }}
+            CF_SCRAPE_WORKER_URL=${{ secrets.CF_QA_SCRAPE_WORKER_URL || steps.cf.outputs.scrape_url }}
             CF_SCRAPE_WORKER_TOKEN=${{ secrets.CF_QA_SCRAPE_WORKER_TOKEN }}
-            CF_QUEUES_API_TOKEN=${{ secrets.CF_QUEUES_API_TOKEN }}
-            CF_POLL_QUEUE_ID=${{ secrets.CF_QA_POLL_QUEUE_ID }}
+            CF_QUEUES_API_TOKEN=${{ secrets.CF_QUEUES_API_TOKEN || secrets.CLOUDFLARE_API_TOKEN }}
+            CF_POLL_QUEUE_ID=${{ secrets.CF_QA_POLL_QUEUE_ID || steps.cf.outputs.poll_queue_id }}
             # Worker fleet endpoints — QA points at the -qa workers so edge calls never cross envs.
-            CF_SEARCH_WORKER_URL=${{ secrets.CF_QA_SEARCH_WORKER_URL }}
+            CF_SEARCH_WORKER_URL=${{ secrets.CF_QA_SEARCH_WORKER_URL || steps.cf.outputs.search_url }}
             CF_SEARCH_WORKER_TOKEN=${{ secrets.CF_QA_SEARCH_WORKER_TOKEN }}
-            CF_CLASSIFY_WORKER_URL=${{ secrets.CF_QA_CLASSIFY_WORKER_URL }}
+            CF_CLASSIFY_WORKER_URL=${{ secrets.CF_QA_CLASSIFY_WORKER_URL || steps.cf.outputs.classify_url }}
             CF_CLASSIFY_WORKER_TOKEN=${{ secrets.CF_QA_CLASSIFY_WORKER_TOKEN }}
-            CF_EXTRACT_WORKER_URL=${{ secrets.CF_QA_EXTRACT_WORKER_URL }}
+            CF_EXTRACT_WORKER_URL=${{ secrets.CF_QA_EXTRACT_WORKER_URL || steps.cf.outputs.extract_url }}
             CF_EXTRACT_WORKER_TOKEN=${{ secrets.CF_QA_EXTRACT_WORKER_TOKEN }}
-            CF_FILTER_WORKER_URL=${{ secrets.CF_QA_FILTER_WORKER_URL }}
+            CF_FILTER_WORKER_URL=${{ secrets.CF_QA_FILTER_WORKER_URL || steps.cf.outputs.filter_url }}
             CF_FILTER_WORKER_TOKEN=${{ secrets.CF_QA_FILTER_WORKER_TOKEN }}
             # Pipeline fan-out limits — QA-scoped variables so QA tuning never bleeds into prod.
             # Unset/empty → code defaults: entity fan-outs UNCAPPED, concurrency 16 (restraints only).
