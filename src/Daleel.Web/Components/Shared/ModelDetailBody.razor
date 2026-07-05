@@ -249,13 +249,54 @@
     {
         var details = Model.Specs
             .FirstOrDefault(kv => kv.Key.Equals("details", StringComparison.OrdinalIgnoreCase)).Value;
-        _detailsText = string.IsNullOrWhiteSpace(details) ? null : Truncate(details.Trim(), DetailsMaxChars);
+        var cleaned = string.IsNullOrWhiteSpace(details) ? null : CleanScrapedProse(details!);
+        _detailsText = string.IsNullOrWhiteSpace(cleaned) ? null : Truncate(cleaned!.Trim(), DetailsMaxChars);
 
         _specRows = Model.Specs
             .Where(kv => !kv.Key.Equals("details", StringComparison.OrdinalIgnoreCase)
                          && !string.IsNullOrWhiteSpace(kv.Value))
             .Select(kv => (Label: Humanize(kv.Key), kv.Value))
             .ToList();
+    }
+
+    /// <summary>
+    /// Makes a scraped "details" blob readable: markdown link syntax collapses to its text, bare
+    /// URLs vanish, and navigation-shaped lines (mostly links/menu words, observed live: "[Support]
+    /// (…)[Hot Offers](…) Login Compare") are dropped entirely. Display-time on purpose — already
+    /// saved results get readable too.
+    /// </summary>
+    private static string? CleanScrapedProse(string raw)
+    {
+        var kept = new List<string>();
+        foreach (var line in raw.Split('\n'))
+        {
+            // [text](url) → text ; ![alt](url) → gone ; bare urls → gone.
+            var cleaned = System.Text.RegularExpressions.Regex.Replace(line, @"!\[[^\]]*\]\([^)]*\)", " ");
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\[([^\]]*)\]\([^)]*\)", "$1");
+            var beforeUrlStrip = cleaned;
+            cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"https?://\S+", " ");
+            cleaned = cleaned.Replace("#", " ").Replace("*", " ").Trim();
+
+            if (cleaned.Length < 3)
+            {
+                continue;
+            }
+
+            // Nav-shaped: the line lost most of its length to link/url stripping, or it's a short
+            // run of menu words (Login, Cart, Home…) with no sentence punctuation.
+            var linkHeavy = beforeUrlStrip.Length > 0 && cleaned.Length < beforeUrlStrip.Length / 2;
+            var words = cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var menuish = words.Length <= 6 && !cleaned.Contains('.') && !cleaned.Contains('،') &&
+                words.All(w => w.Length <= 12);
+            if (linkHeavy || menuish)
+            {
+                continue;
+            }
+
+            kept.Add(cleaned);
+        }
+
+        return kept.Count == 0 ? null : string.Join("\n", kept);
     }
 
     /// <summary>True when the model carries nothing beyond its identity and offers.</summary>
