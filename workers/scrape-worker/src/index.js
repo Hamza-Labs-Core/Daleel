@@ -82,7 +82,10 @@ export default {
 
       return json({ ok: false, error: err("method_not_allowed", request.method, false) }, 405);
     } catch (e) {
-      return json({ ok: false, error: err("internal_error", String((e && e.message) || e), true) }, 500);
+      // Details go to the worker logs (observability), never to the response: even though every
+      // caller is our own authenticated VPS, error internals don't belong on the wire.
+      console.error("scrape-worker unhandled error:", e);
+      return json({ ok: false, error: err("internal_error", "unexpected failure — see worker logs", true) }, 500);
     }
   },
 
@@ -253,7 +256,7 @@ async function submitAsync(kind, body, request, env) {
   const existing = await env.DATA_BUCKET.head(resultKey);
   if (existing) {
     await putStatus(env, jobId, { status: "done", jobId, resultKey });
-    return accepted(jobId, resultKey);
+    return accepted(env, jobId, resultKey);
   }
 
   const job = {
@@ -276,12 +279,13 @@ async function submitAsync(kind, body, request, env) {
 
   await putStatus(env, jobId, { status: "queued", jobId, resultKey });
   await env.SCRAPE_QUEUE.send(job);
-  return accepted(jobId, resultKey);
+  return accepted(env, jobId, resultKey);
 }
 
-function accepted(jobId, resultKey) {
+function accepted(env, jobId, resultKey) {
+  // The poll-queue NAME is per-environment metadata (prod vs qa) — never hardcode prod's.
   return json(
-    { ok: true, mode: "async", jobId, resultKey, poll: { queue: "daleel-poll-work", after: 5 } },
+    { ok: true, mode: "async", jobId, resultKey, poll: { queue: env.POLL_QUEUE_NAME || "daleel-poll-work", after: 5 } },
     202,
   );
 }
@@ -454,9 +458,12 @@ async function contextDev(env, method, pathAndQuery, body = null) {
 // R2 status docs & keys
 // ---------------------------------------------------------------------------
 
-/** Env-scoped key prefix, e.g. "prod/" or "qa/" — buckets are shared across environments. */
+/** Env-scoped key prefix, e.g. "prod/" or "qa/" — extra isolation on top of per-env buckets. */
 function keyPrefix(env) {
-  const p = (env.ENV_PREFIX || "").trim().replace(/\/+$/, "");
+  // Trailing slashes stripped with a loop, not a regex — an anchored /\/+$/ on configurable input
+  // is CodeQL's classic polynomial-backtracking flag, and the loop is just as clear.
+  let p = (env.ENV_PREFIX || "").trim();
+  while (p.endsWith("/")) p = p.slice(0, -1);
   return p ? `${p}/` : "";
 }
 

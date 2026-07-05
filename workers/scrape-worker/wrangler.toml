@@ -14,8 +14,9 @@ compatibility_date = "2026-06-01"
 # Results are therefore durable in R2 the moment they exist — a VPS-side timeout can no longer
 # discard a finished crawl.
 
-# Result + status documents. QA and prod share buckets for `daleel-data`; keys are prefixed with the
-# ENV_PREFIX var below so environments never bleed (deploy QA with --env qa).
+# Result + status documents. Environments are isolated TWO ways: QA overrides this binding to its
+# own `daleel-qa-data` bucket below ([env.qa]), AND every key is prefixed with ENV_PREFIX — the
+# prefix is belt-and-suspenders so even a mis-provisioned shared bucket can't cross-bleed.
 [[r2_buckets]]
 binding = "DATA_BUCKET"
 bucket_name = "daleel-data"
@@ -40,15 +41,17 @@ dead_letter_queue = "daleel-scrape-dlq"
 [observability]
 enabled = true
 
-# Plain (non-secret) config.
+# Plain (non-secret) config. POLL_QUEUE_NAME is informational metadata echoed in 202 envelopes —
+# keep it in sync with the POLL_QUEUE producer binding's queue for this environment.
 [vars]
 ENV_PREFIX = "prod"
+POLL_QUEUE_NAME = "daleel-poll-work"
 
 # QA deployment: `wrangler deploy --env qa`. Separate queues; same shared bucket with a distinct
 # key prefix (matches the app's QA R2 isolation).
 [env.qa]
 name = "daleel-scrape-worker-qa"
-vars = { ENV_PREFIX = "qa" }
+vars = { ENV_PREFIX = "qa", POLL_QUEUE_NAME = "daleel-qa-poll-work" }
 
 [[env.qa.r2_buckets]]
 binding = "DATA_BUCKET"

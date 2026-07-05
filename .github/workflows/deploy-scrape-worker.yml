@@ -30,6 +30,10 @@ concurrency:
   group: deploy-scrape-worker
   cancel-in-progress: false
 
+# The job only reads the repo; deploy credentials are Cloudflare secrets, not the GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   deploy:
     name: wrangler deploy (prod + qa)

@@ -270,17 +270,26 @@ public class CloudflareExecutionTests
     }
 
     [Fact]
-    public async Task Drain_AbandonsUnreadableResultPastDeadline_Visibly()
+    public async Task Drain_AbandonsUnreadableResultPastDeadline_Visibly_AndIdempotently()
     {
         var fixture = new DrainFixture();
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeMilliseconds();
         fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/missing.json", store: "ABC Store",
-            deadlineAt: DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeMilliseconds()));
+            deadlineAt: deadline));
 
         await fixture.Service.DrainOnceAsync(CancellationToken.None);
 
         fixture.Queue.Acked.Should().ContainSingle("past the deadline the message must stop cycling");
         fixture.Events.Published.Should().ContainSingle(e => e.EventType == "store.prices.edge_failed",
             "a discarded crawl must be visible on the timeline, never a silent ack");
+
+        // A failed ack redelivers the message — the abandon must be marker-idempotent, not re-published.
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/missing.json", store: "ABC Store",
+            deadlineAt: deadline));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        fixture.Events.Published.Should().ContainSingle("redelivery after a lost ack must not duplicate the event");
+        fixture.Queue.Acked.Should().HaveCount(2);
     }
 
     [Fact]

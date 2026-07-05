@@ -170,13 +170,17 @@ public sealed class CloudflarePollDrainService : BackgroundService
         {
             // "done" with no readable result should be transient (or an oversized/invalid doc,
             // logged by the client); retry, and let the deadline decide when to give up — but a
-            // give-up must be VISIBLE, never a silent ack (faulted ≠ empty).
+            // give-up must be VISIBLE, never a silent ack (faulted ≠ empty), and marker-idempotent:
+            // if the ack after this fails, the redelivered message must not re-publish the event.
             if (msg.DeadlineAt > 0 && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > msg.DeadlineAt)
             {
                 await PublishEventAsync(msg, success: false,
                     summary: $"Edge {msg.Kind} result for {msg.Store ?? msg.Domain} could not be read before its " +
                              "deadline (missing, oversized, or invalid JSON) — crawl discarded",
                     ct).ConfigureAwait(false);
+                await _r2.StoreJsonAsync(
+                    JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unreadable past deadline" }),
+                    markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
                 return Outcome.Ack;
             }
             return Outcome.Retry;
