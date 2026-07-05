@@ -75,6 +75,7 @@
   <data name="Search.Searching" xml:space="preserve"><value>جارٍ البحث…</value></data>
   <data name="Search.FetchingSpecs" xml:space="preserve"><value>جارٍ جلب المواصفات الرسمية — يتم تحميل المزيد من التفاصيل…</value></data>
   <data name="Search.PartialResults" xml:space="preserve"><value>البحث مستمر — تظهر النتائج فور جهوزها…</value></data>
+  <data name="Search.EnrichingHint" xml:space="preserve"><value>البحث المعمّق جارٍ — الصور والأسعار والتفاصيل تصل تباعًا</value></data>
   <data name="Market.Prompt" xml:space="preserve"><value>تعذّر تحديد السوق. في أي بلد تتسوّق؟</value></data>
   <data name="Market.Confirm" xml:space="preserve"><value>متابعة</value></data>
   <data name="Search.Results" xml:space="preserve"><value>النتائج</value></data>
@@ -374,6 +375,10 @@
   <data name="ModelCard.PriceOnSiteHint" xml:space="preserve"><value>وجدنا هذا المنتج لدى المتجر لكن تعذّرت قراءة السعر من الصفحة — افتح المتجر للتحقق منه.</value></data>
   <data name="ModelCard.Sale" xml:space="preserve"><value>تخفيض</value></data>
   <data name="ModelCard.Seller" xml:space="preserve"><value>بائع</value></data>
+  <data name="ModelCard.OnBrandSite" xml:space="preserve"><value>على موقع العلامة</value></data>
+  <data name="ModelCard.BrandSite" xml:space="preserve"><value>موقع العلامة</value></data>
+  <data name="ModelCard.Reviews" xml:space="preserve"><value>مراجعات</value></data>
+  <data name="ModelCard.MentionedIn" xml:space="preserve"><value>ورد في</value></data>
 
   <data name="History.Title" xml:space="preserve"><value>سجل البحث</value></data>
   <data name="History.Subtitle" xml:space="preserve"><value>يُحفظ كل استعلام تجريه هنا تلقائيًا. أعد تشغيله أو افتح نسخة محفوظة.</value></data>

@@ -288,6 +288,12 @@ public sealed partial class AgentService
             });
         }
 
+        // Wire the result-level research onto EACH model's own card: offers link to their selling
+        // store's site, models gain the brand's regional site + their page on the brand site, and
+        // every review/web hit that names the model is attached as an item review/mention. Runs
+        // after the stores dictionary is complete (brand-page fallbacks + Places stores included).
+        models = AttachItemResearch(models, bundle.WebResults, stores.Values, brands.Values, reviews, geo);
+
         // Aggregate the per-brand social/forum opinions into one product-level "what people say"
         // feed, deduped by quote, so real user sentiment surfaces in the results (not just in the
         // brand detail panel).
@@ -320,6 +326,345 @@ public sealed partial class AgentService
             GeneratedAt = _options.Clock()
         };
     }
+
+    /// <summary>Max item reviews attached to one model's card.</summary>
+    private const int MaxItemReviews = 5;
+
+    /// <summary>Max mention links attached to one model's card.</summary>
+    private const int MaxItemMentions = 5;
+
+    /// <summary>
+    /// Max models one review may attach to — a review naming more than this many models is a
+    /// generic roundup, not a review OF any one of them.
+    /// </summary>
+    private const int MaxModelsPerReview = 3;
+
+    /// <summary>Shared significant (3+ char) tokens required to call a review/hit "about this model".</summary>
+    private const int MinSharedIdentityTokens = 3;
+
+    /// <summary>Shared name tokens required for a brand-site hit when the model number is unknown.</summary>
+    private const int MinSharedNameTokens = 2;
+
+    /// <summary>
+    /// Wires the result-level research (stores/brand pages/review articles/raw web hits) onto EACH
+    /// <see cref="ProductModel"/>, per the item-card contract:
+    /// <list type="bullet">
+    ///   <item>Offers get <see cref="PriceOffer.StoreUrl"/> — the selling store's own site — matched
+    ///   from the stores dictionary by name (offer source) or by URL host.</item>
+    ///   <item><see cref="ProductModel.BrandRegionalUrl"/> — the brand's site for the market, from a
+    ///   classified brand page matching the model's brand (a local-looking URL preferred, the global
+    ///   site kept as a fallback: better than nothing).</item>
+    ///   <item><see cref="ProductModel.BrandSiteUrl"/> — the MODEL's page on the brand's own domain:
+    ///   a web hit whose registrable host label carries the brand AND whose text names the model.</item>
+    ///   <item><see cref="ProductModel.Reviews"/> / <see cref="ProductModel.Mentions"/> — review
+    ///   articles and remaining web hits (reddit threads included — non-commerce is exactly where
+    ///   mentions live) that name the model, token-matched and capped per model.</item>
+    /// </list>
+    /// Token sets are computed ONCE per model and once per review/result before the double loops —
+    /// grids reach 50+ models × 350 results, so the association must never re-tokenize inside them.
+    /// </summary>
+    private static IReadOnlyList<ProductModel> AttachItemResearch(
+        IReadOnlyList<ProductModel> models,
+        IReadOnlyList<SearchResult> webResults,
+        IEnumerable<StoreInfo> stores,
+        IEnumerable<BrandInfo> brandPages,
+        IReadOnlyList<ReviewSource> reviews,
+        GeoProfile geo)
+    {
+        if (models.Count == 0)
+        {
+            return models;
+        }
+
+        // Store lookups for the offer → store-site link: by display name and by URL host.
+        var storeUrlByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var storeUrlByHost = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in stores)
+        {
+            if (string.IsNullOrWhiteSpace(s.Url))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(s.Name))
+            {
+                storeUrlByName.TryAdd(s.Name, s.Url!);
+            }
+
+            if (HostOf(s.Url) is { } host)
+            {
+                storeUrlByHost.TryAdd(host, s.Url!);
+            }
+        }
+
+        var brandCandidates = brandPages.Where(b => !string.IsNullOrWhiteSpace(b.Url)).ToList();
+
+        // Tokenize each side ONCE; the model × review/result loops below only intersect sets.
+        var reviewData = reviews
+            .Where(r => !string.IsNullOrWhiteSpace(r.Url))
+            .Select(r => (Review: r, Tokens: ItemTokens($"{r.Title} {r.Snippet}")))
+            .ToList();
+        var reviewUses = new int[reviewData.Count];
+
+        var resultData = webResults
+            .Where(r => !string.IsNullOrWhiteSpace(r.Url))
+            .Select(r => (
+                Result: r,
+                Tokens: ItemTokens($"{r.Title} {r.Snippet} {UrlPath(r.Url)}"),
+                HostBrand: NormalizeLabel(HostLabel(r.Url)),
+                UrlShapedTitle: LooksLikeUrl(r.Title)))
+            .ToList();
+
+        var updated = new List<ProductModel>(models.Count);
+        foreach (var m in models)
+        {
+            var identityTokens = ItemTokens($"{m.Brand} {m.Model} {m.Name}");
+            var modelTokens = ItemTokens(m.Model);
+            var nameTokens = ItemTokens(m.Name);
+            var normalizedBrand = NormalizeLabel(m.Brand);
+
+            // "About this model": the model number's tokens all present (the strongest signal), or
+            // enough of the item's identity shared that a lone incidental word can never attach.
+            bool MentionsModel(HashSet<string> candidate) =>
+                (modelTokens.Count > 0 && modelTokens.All(candidate.Contains)) ||
+                SharedSignificantTokens(identityTokens, candidate) >= MinSharedIdentityTokens;
+
+            // 1) StoreUrl on offers: the seller chip links to the store's own site, distinct from
+            // the offer's product-page Url (never duplicated when they're the same link).
+            var offers = m.Offers;
+            List<PriceOffer>? patched = null;
+            for (var i = 0; i < offers.Count; i++)
+            {
+                var o = offers[i];
+                if (o.StoreUrl is not null)
+                {
+                    continue;
+                }
+
+                string? storeUrl = null;
+                if (!string.IsNullOrWhiteSpace(o.Source))
+                {
+                    storeUrlByName.TryGetValue(o.Source, out storeUrl);
+                }
+
+                if (storeUrl is null && HostOf(o.Url) is { } offerHost)
+                {
+                    storeUrlByHost.TryGetValue(offerHost, out storeUrl);
+                }
+
+                if (storeUrl is null || storeUrl.Equals(o.Url, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                patched ??= offers.ToList();
+                patched[i] = o with { StoreUrl = storeUrl };
+            }
+
+            if (patched is not null)
+            {
+                offers = patched;
+            }
+
+            // 2) BrandRegionalUrl: prefer a brand page confirmed local to the market (or carrying
+            // the /{cc} path), else fall back to the brand's global site — better than nothing.
+            var brandRegionalUrl = m.BrandRegionalUrl;
+            if (brandRegionalUrl is null && !string.IsNullOrWhiteSpace(m.Brand))
+            {
+                string? globalUrl = null;
+                foreach (var bp in brandCandidates)
+                {
+                    if (!NamesMatch(bp.Name, m.Brand!))
+                    {
+                        continue;
+                    }
+
+                    if (LocalityClassifier.IsLocal(bp.Url, geo.CountryCode, geo.Country,
+                            fromGeoScopedSearch: true, marketEvidence: $"{bp.Name} {geo.Country}") ||
+                        bp.Url!.Contains($"/{geo.CountryCode}", StringComparison.OrdinalIgnoreCase))
+                    {
+                        brandRegionalUrl = bp.Url;
+                        break;
+                    }
+
+                    globalUrl ??= bp.Url;
+                }
+
+                brandRegionalUrl ??= globalUrl;
+            }
+
+            // 3) BrandSiteUrl: the model's own page on the brand's domain — the host's registrable
+            // label must carry the brand, and the hit's text must name the model. First hit wins.
+            var brandSiteUrl = m.BrandSiteUrl;
+            if (brandSiteUrl is null && normalizedBrand.Length > 0)
+            {
+                foreach (var rd in resultData)
+                {
+                    if (rd.HostBrand.Length == 0 ||
+                        !rd.HostBrand.Contains(normalizedBrand, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var namesModel = modelTokens.Count > 0
+                        ? modelTokens.All(rd.Tokens.Contains)
+                        : SharedTokens(nameTokens, rd.Tokens) >= MinSharedNameTokens;
+                    if (namesModel)
+                    {
+                        brandSiteUrl = rd.Result.Url;
+                        break;
+                    }
+                }
+            }
+
+            // 4) Reviews that name THIS model, capped per model AND per review (a review spread
+            // over many models is a roundup, not a review of any one of them).
+            var itemReviews = new List<ItemReview>();
+            for (var i = 0; i < reviewData.Count && itemReviews.Count < MaxItemReviews; i++)
+            {
+                if (reviewUses[i] >= MaxModelsPerReview || !MentionsModel(reviewData[i].Tokens))
+                {
+                    continue;
+                }
+
+                reviewUses[i]++;
+                var rv = reviewData[i].Review;
+                itemReviews.Add(new ItemReview(rv.Title, rv.Url!, rv.Snippet, rv.Source));
+            }
+
+            // 5) Mentions: any remaining web hit naming the model — a reddit thread or blog post is
+            // exactly what belongs here — skipping links already on the card and URL-shaped titles.
+            var usedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var o in offers)
+            {
+                if (!string.IsNullOrWhiteSpace(o.Url))
+                {
+                    usedUrls.Add(o.Url!);
+                }
+            }
+
+            foreach (var rv in itemReviews)
+            {
+                usedUrls.Add(rv.Url);
+            }
+
+            if (brandSiteUrl is not null)
+            {
+                usedUrls.Add(brandSiteUrl);
+            }
+
+            var mentions = new List<ItemLink>();
+            foreach (var rd in resultData)
+            {
+                if (mentions.Count >= MaxItemMentions)
+                {
+                    break;
+                }
+
+                if (rd.UrlShapedTitle || string.IsNullOrWhiteSpace(rd.Result.Title) ||
+                    usedUrls.Contains(rd.Result.Url!) || !MentionsModel(rd.Tokens))
+                {
+                    continue;
+                }
+
+                mentions.Add(new ItemLink(rd.Result.Title, rd.Result.Url!, rd.Result.Source));
+            }
+
+            updated.Add(m with
+            {
+                Offers = offers,
+                Reviews = m.Reviews.Count > 0 ? m.Reviews : itemReviews,
+                Mentions = m.Mentions.Count > 0 ? m.Mentions : mentions,
+                BrandSiteUrl = brandSiteUrl,
+                BrandRegionalUrl = brandRegionalUrl
+            });
+        }
+
+        return updated;
+
+        static bool NamesMatch(string a, string b) =>
+            a.Equals(b, StringComparison.OrdinalIgnoreCase) ||
+            a.Contains(b, StringComparison.OrdinalIgnoreCase) ||
+            b.Contains(a, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Separators for item-association tokenizing (mirrors the enrichment matcher's set).</summary>
+    private static readonly char[] ItemTokenSeparators = " \t\r\n-_/\\|,.()[]{}،:;\"'".ToCharArray();
+
+    /// <summary>
+    /// Token set for item association. Keeps 2-character tokens: variant suffixes ("FE", "5G", or a
+    /// hyphen-split model half like "S4") are exactly what distinguishes one model from another.
+    /// </summary>
+    private static HashSet<string> ItemTokens(string? text)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return set;
+        }
+
+        foreach (var t in text.Split(ItemTokenSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (t.Length >= 2)
+            {
+                set.Add(t);
+            }
+        }
+
+        return set;
+    }
+
+    /// <summary>Count of tokens present in both sets.</summary>
+    private static int SharedTokens(HashSet<string> want, HashSet<string> have)
+    {
+        var shared = 0;
+        foreach (var t in want)
+        {
+            if (have.Contains(t))
+            {
+                shared++;
+            }
+        }
+
+        return shared;
+    }
+
+    /// <summary>Shared-token count over SIGNIFICANT (3+ char) tokens, so "of"/"in" never count.</summary>
+    private static int SharedSignificantTokens(HashSet<string> want, HashSet<string> have)
+    {
+        var shared = 0;
+        foreach (var t in want)
+        {
+            if (t.Length >= 3 && have.Contains(t))
+            {
+                shared++;
+            }
+        }
+
+        return shared;
+    }
+
+    /// <summary>Lowercased alphanumerics of a label ("Smart Buy" → "smartbuy") for host↔brand matching.</summary>
+    private static string NormalizeLabel(string? text) =>
+        string.IsNullOrWhiteSpace(text)
+            ? string.Empty
+            : new string(text!.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    /// <summary>Lowercased URL host without a "www." prefix, or null when unparseable.</summary>
+    private static string? HostOf(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u))
+        {
+            return null;
+        }
+
+        var host = u.Host.ToLowerInvariant();
+        return host.StartsWith("www.", StringComparison.Ordinal) ? host[4..] : host;
+    }
+
+    /// <summary>A URL's path component, for token matching ("/jo/air-conditioners/ar18" names a model).</summary>
+    private static string UrlPath(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.AbsolutePath : string.Empty;
 
     /// <summary>
     /// Per-model deep scrape: runs a focused, exact-model search across local sources, aggregates

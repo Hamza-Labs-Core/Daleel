@@ -75,6 +75,7 @@
   <data name="Search.Searching" xml:space="preserve"><value>Searching…</value></data>
   <data name="Search.FetchingSpecs" xml:space="preserve"><value>Fetching official specs — more details loading…</value></data>
   <data name="Search.PartialResults" xml:space="preserve"><value>Still searching — results load as they're ready…</value></data>
+  <data name="Search.EnrichingHint" xml:space="preserve"><value>Deep dive in progress — images, prices and details keep arriving</value></data>
   <data name="Market.Prompt" xml:space="preserve"><value>We couldn't detect your market. Which country are you shopping in?</value></data>
   <data name="Market.Confirm" xml:space="preserve"><value>Continue</value></data>
   <data name="Search.Results" xml:space="preserve"><value>Results</value></data>
@@ -374,6 +375,10 @@
   <data name="ModelCard.PriceOnSiteHint" xml:space="preserve"><value>We found this product at the store but could not read a price from the page — open the store to check it.</value></data>
   <data name="ModelCard.Sale" xml:space="preserve"><value>SALE</value></data>
   <data name="ModelCard.Seller" xml:space="preserve"><value>seller</value></data>
+  <data name="ModelCard.OnBrandSite" xml:space="preserve"><value>On brand site</value></data>
+  <data name="ModelCard.BrandSite" xml:space="preserve"><value>Brand site</value></data>
+  <data name="ModelCard.Reviews" xml:space="preserve"><value>Reviews</value></data>
+  <data name="ModelCard.MentionedIn" xml:space="preserve"><value>Mentioned in</value></data>
 
   <data name="History.Title" xml:space="preserve"><value>Search History</value></data>
   <data name="History.Subtitle" xml:space="preserve"><value>Every query you run is saved here automatically. Re-run it or open a saved copy.</value></data>

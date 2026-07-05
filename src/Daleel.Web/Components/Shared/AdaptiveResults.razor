@@ -1,51 +1,14 @@
-@* Product-search display. The product list is the primary unit — it always renders first and
-   prominently. Stores, brands, real user reviews, and related articles are kept but demoted to
-   secondary collapsible sections below the products. When a search returns no products at all,
-   the secondary content is shown directly so the page is never empty.
-   Brand cards drill into the product list pre-filtered to that brand. *@
+@* Product-search display. The product list is the ONLY primary surface — the research behind it
+   (stores, brands, reviews, mentions) attaches to each product card instead of trailing the grid
+   as "Also found" sections. When a search returns no products at all, the secondary content is
+   shown directly so the page is never empty. Brand cards drill into the product list pre-filtered
+   to that brand. *@
 @inject IStringLocalizer<SharedResource> L
 
 @if (Result.ProductCount > 0)
 {
     @* PRIMARY — the product grid (cards → detail dialog with price comparison + reviews). *@
     <ProductListings Result="Result" InitialBrand="@_brandFilter" />
-
-    @if (HasSecondary)
-    {
-        <MudText Typo="Typo.subtitle2" Color="Color.Secondary" Class="mt-5 mb-1">
-            @L["Results.AlsoFound"]
-        </MudText>
-        <MudExpansionPanels MultiExpansion="true" Elevation="0">
-            @if (Result.StoreCount > 0)
-            {
-                <MudExpansionPanel Icon="@Icons.Material.Filled.Store"
-                                   Text="@($"{L["Products.Stores"]} ({Result.StoreCount})")">
-                    <StoreCards Stores="Result.Stores" />
-                </MudExpansionPanel>
-            }
-            @if (Result.BrandCount > 0)
-            {
-                <MudExpansionPanel Icon="@Icons.Material.Filled.Verified"
-                                   Text="@($"{L["Products.Brands"]} ({Result.BrandCount})")">
-                    <BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />
-                </MudExpansionPanel>
-            }
-            @if (Result.HasUserReviews)
-            {
-                <MudExpansionPanel Icon="@Icons.Material.Filled.RateReview"
-                                   Text="@($"{L["Products.Reviews"]} ({Result.UserReviewCount})")">
-                    <UserReviewList Result="Result" />
-                </MudExpansionPanel>
-            }
-            @if (Result.ArticleCount > 0)
-            {
-                <MudExpansionPanel Icon="@Icons.Material.Filled.Article"
-                                   Text="@($"{L["Results.RelatedArticles"]} ({Result.ArticleCount})")">
-                    <ReviewList Reviews="Result.Reviews" />
-                </MudExpansionPanel>
-            }
-        </MudExpansionPanels>
-    }
 }
 else if (HasSecondary)
 {

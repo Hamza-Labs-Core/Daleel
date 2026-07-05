@@ -32,6 +32,9 @@ public interface IEnrichmentWorkQueue
 
     /// <summary>Kills a claimed unit immediately (non-retryable give-up, e.g. the job's cost cap).</summary>
     Task KillAsync(long id, string reason, CancellationToken ct = default);
+
+    /// <summary>Pending+running units for a job — the UI's "deep dive still in progress" signal.</summary>
+    Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default);
 }
 
 public sealed class EnrichmentWorkQueue : IEnrichmentWorkQueue
@@ -154,6 +157,15 @@ public sealed class EnrichmentWorkQueue : IEnrichmentWorkQueue
             item.CompletedAt = DateTimeOffset.UtcNow;
             item.LeaseUntil = null;
         }, ct);
+
+    public async Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+        return await db.EnrichmentWorkItems
+            .CountAsync(i => i.SearchJobId == searchJobId &&
+                (i.Status == WorkItemStatus.Pending || i.Status == WorkItemStatus.Running), ct);
+    }
 
     private async Task MutateAsync(long id, Action<EnrichmentWorkItem> mutate, CancellationToken ct)
     {

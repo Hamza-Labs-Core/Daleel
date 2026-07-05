@@ -28,6 +28,12 @@ public record PriceOffer
     /// <summary>Whether this offer is confirmed local to the target market.</summary>
     public bool IsLocal { get; init; }
 
+    /// <summary>
+    /// The selling store's own site/page (root or store profile), distinct from <see cref="Url"/>
+    /// (the product page). Lets the card's seller chip link to the store itself.
+    /// </summary>
+    public string? StoreUrl { get; init; }
+
     /// <summary>Whether the offer advertises free shipping.</summary>
     public bool FreeShipping { get; init; }
 
@@ -61,6 +67,12 @@ public record PriceOffer
         }
     }
 }
+
+/// <summary>A review/discussion source that names a specific model (attached to its card).</summary>
+public sealed record ItemReview(string? Title, string Url, string? Snippet = null, string? Source = null);
+
+/// <summary>Any other link that mentions a specific model — article, comparison, source page.</summary>
+public sealed record ItemLink(string Title, string Url, string? Source = null);
 
 /// <summary>
 /// A distinct product model with everything known about it: identity, specs, images, an
@@ -106,6 +118,18 @@ public record ProductModel
 
     /// <summary>Every place the model is available, sorted cheapest-first.</summary>
     public IReadOnlyList<PriceOffer> Offers { get; init; } = Array.Empty<PriceOffer>();
+
+    /// <summary>Reviews/discussions that name THIS model — card-attached, never an orphan section.</summary>
+    public IReadOnlyList<ItemReview> Reviews { get; init; } = Array.Empty<ItemReview>();
+
+    /// <summary>Other links mentioning THIS model (articles, comparisons, sources).</summary>
+    public IReadOnlyList<ItemLink> Mentions { get; init; } = Array.Empty<ItemLink>();
+
+    /// <summary>This model's page on its brand's site, when found (regional preferred).</summary>
+    public string? BrandSiteUrl { get; init; }
+
+    /// <summary>The brand's regional site root for the market (e.g. samsung.com/jo), when known.</summary>
+    public string? BrandRegionalUrl { get; init; }
 
     /// <summary>
     /// The offer the card leads with: the cheapest EXACT price first, then the cheapest indicative
