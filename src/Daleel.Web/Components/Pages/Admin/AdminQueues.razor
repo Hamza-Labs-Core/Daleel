@@ -43,42 +43,12 @@ else
 
     <MudText Typo="Typo.h6" Class="mb-2">Enrichment work queue</MudText>
     <MudGrid Spacing="2" Class="mb-4">
-        <MudItem xs="6" sm="4" md="2">
-            <MudPaper Class="pa-3" Outlined="true">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Pending</MudText>
-                <MudText Typo="Typo.h5">@d.Pending</MudText>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="6" sm="4" md="2">
-            <MudPaper Class="pa-3" Outlined="true">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Running</MudText>
-                <MudText Typo="Typo.h5" Color="@(d.Running > 0 ? Color.Info : Color.Default)">@d.Running</MudText>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="6" sm="4" md="2">
-            <MudPaper Class="pa-3" Outlined="true">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Processed</MudText>
-                <MudText Typo="Typo.h5" Color="Color.Success">@d.Done</MudText>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="6" sm="4" md="2">
-            <MudPaper Class="pa-3" Outlined="true">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Recovered (retried → done)</MudText>
-                <MudText Typo="Typo.h5">@d.Recovered</MudText>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="6" sm="4" md="2">
-            <MudPaper Class="pa-3" Outlined="true">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Dead</MudText>
-                <MudText Typo="Typo.h5" Color="@(d.Dead > 0 ? Color.Error : Color.Default)">@d.Dead</MudText>
-            </MudPaper>
-        </MudItem>
-        <MudItem xs="6" sm="4" md="2">
-            <MudPaper Class="pa-3" Outlined="true">
-                <MudText Typo="Typo.caption" Color="Color.Secondary">Oldest pending</MudText>
-                <MudText Typo="Typo.h5">@AgeText(d.OldestPendingAge)</MudText>
-            </MudPaper>
-        </MudItem>
+        @StatTile("Pending", d.Pending.ToString(), Color.Default, "Waiting for a consumer slot (or a retry/ordering delay)")
+        @StatTile("Running", d.Running.ToString(), d.Running > 0 ? Color.Info : Color.Default, "Claimed and executing right now")
+        @StatTile("Processed", d.Done.ToString(), Color.Success, "Units completed in this window")
+        @StatTile("Recovered", d.Recovered.ToString(), Color.Default, "Failed at least once, then completed — the retry machinery working")
+        @StatTile("Dead", d.Dead.ToString(), d.Dead > 0 ? Color.Error : Color.Default, "Gave up after exhausting retries — reasons in the ledger below")
+        @StatTile("Oldest pending", AgeText(d.OldestPendingAge), Color.Default, "Age of the longest-waiting unit — live regardless of the window")
     </MudGrid>
 
     <MudTable Items="d.Kinds" Hover="true" Dense="true" Striped="true" Class="mb-6">
@@ -136,9 +106,9 @@ else
     }
 
     <MudGrid Spacing="2" Class="mb-4">
-        <MudItem xs="12" md="6">
+        <MudItem xs="12" md="6" Class="d-flex flex-column">
             <MudText Typo="Typo.h6" Class="mb-2">Search jobs</MudText>
-            <MudPaper Class="pa-3" Outlined="true">
+            <MudPaper Class="pa-3 flex-grow-1" Outlined="true">
                 <div class="d-flex flex-wrap gap-4">
                     <div><MudText Typo="Typo.caption" Color="Color.Secondary">Queued</MudText><MudText Typo="Typo.h6">@d.Jobs.Queued</MudText></div>
                     <div><MudText Typo="Typo.caption" Color="Color.Secondary">Running</MudText><MudText Typo="Typo.h6">@d.Jobs.Running</MudText></div>
@@ -148,9 +118,9 @@ else
                 </div>
             </MudPaper>
         </MudItem>
-        <MudItem xs="12" md="6">
+        <MudItem xs="12" md="6" Class="d-flex flex-column">
             <MudText Typo="Typo.h6" Class="mb-2">Edge poll drain</MudText>
-            <MudPaper Class="pa-3" Outlined="true">
+            <MudPaper Class="pa-3 flex-grow-1" Outlined="true">
                 @if (d.Drain is { } drain)
                 {
                     <div class="d-flex flex-wrap gap-4">
@@ -170,6 +140,19 @@ else
 }
 
 @code {
+    /// <summary>One stat tile — identical structure for every metric so the row stays uniform.</summary>
+    private RenderFragment StatTile(string label, string value, Color color, string hint) => __builder =>
+    {
+        <MudItem xs="6" sm="4" md="2" Class="d-flex">
+            <MudTooltip Text="@hint" Class="flex-grow-1 d-flex">
+                <MudPaper Class="pa-3 flex-grow-1" Outlined="true" Style="height:100%; min-height:88px;">
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="white-space:nowrap;">@label</MudText>
+                    <MudText Typo="Typo.h5" Color="@color">@value</MudText>
+                </MudPaper>
+            </MudTooltip>
+        </MudItem>
+    };
+
     private const int RefreshSeconds = 5;
 
     private QueueDashboard? _dashboard;
