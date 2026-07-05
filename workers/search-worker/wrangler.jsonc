@@ -1,0 +1,44 @@
+// The SEARCH execution host of docs/architecture/cloudflare-workers-pipeline.md (§3.5), Phase A:
+// a caching PROXY in front of the exact vendor endpoints the VPS already calls (SerpAPI
+// /search.json, Google Places /v1/*). The vendor API keys live here as worker secrets — off the
+// VPS — and hot repeat queries short-circuit on the KV cache below. The VPS's SerpApiProvider /
+// GooglePlacesProvider keep their parsing and simply point their base URL at this worker.
+//
+// KV is a best-effort ACCELERATOR only: Postgres SearchCache on the VPS stays the authoritative
+// cache. Only 200 vendor bodies are cached; every proxied response carries X-Cache: hit|miss.
+//
+// SECRETS (never in this file) — `wrangler secret put <NAME>` (add `--env qa` for QA); CI uploads
+// them on every deploy:
+//   AUTH_TOKEN              bearer the VPS presents (house auth pattern, see scrape-worker)
+//   SERPAPI_KEY             SerpAPI key, moved here from the VPS; injected as api_key
+//   GOOGLE_PLACES_API_KEY   Google Places key, moved here from the VPS; injected as X-Goog-Api-Key
+{
+  "name": "daleel-search-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-01",
+
+  // Edge cache for raw vendor JSON. The ids are CI-INJECTED: the deploy workflow resolves each
+  // namespace by TITLE (daleel-search-cache / daleel-qa-search-cache), creates it if missing, and
+  // replaces these placeholder tokens before `wrangler deploy`. For a manual deploy, run
+  // `wrangler kv namespace create daleel-search-cache` and paste the id yourself.
+  "kv_namespaces": [
+    { "binding": "SEARCH_CACHE", "id": "PLACEHOLDER_SEARCH_CACHE_KV_ID_PROD" }
+  ],
+
+  "observability": { "enabled": true },
+
+  // CACHE_TTL_SECONDS is the SerpAPI cache TTL (default 3600 if unset/unparsable; the worker
+  // clamps to KV's minimum of 60). Places responses use a fixed 900 s.
+  "vars": { "CACHE_TTL_SECONDS": "3600" },
+
+  // QA: separate KV namespace — QA cache entries must never serve prod traffic (or vice versa).
+  "env": {
+    "qa": {
+      "name": "daleel-search-worker-qa",
+      "vars": { "CACHE_TTL_SECONDS": "3600" },
+      "kv_namespaces": [
+        { "binding": "SEARCH_CACHE", "id": "PLACEHOLDER_SEARCH_CACHE_KV_ID_QA" }
+      ]
+    }
+  }
+}

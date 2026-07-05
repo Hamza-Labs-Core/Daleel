@@ -39,7 +39,7 @@ const DEFAULT_CATALOG_TIMEOUT_MS = 120_000;
 const MAX_DEADLINE_MS = 30 * 60 * 1000;
 
 /**
- * Total deliveries per work message: 1 initial + max_retries (3) from wrangler.toml's
+ * Total deliveries per work message: 1 initial + max_retries (3) from wrangler.jsonc's
  * [[queues.consumers]]. KEEP IN SYNC — on the final delivery the job is finished as a terminal
  * error instead of retried, so the VPS always learns the outcome (never a status stuck "running").
  */

@@ -1,0 +1,20 @@
+// Read-only view over the daleel-logs R2 bucket. Bound as env.LOGS_BUCKET.
+// The bucket must already exist (the app/Serilog writes to it); the Worker never creates it.
+//
+// AUTH_TOKEN is a SECRET, intentionally not stored here. Set it with:
+//   wrangler secret put AUTH_TOKEN
+// For local `wrangler dev`, put it in .dev.vars (gitignored).
+//
+// account_id is taken from your wrangler login / CLOUDFLARE_ACCOUNT_ID env var.
+// Pin it here only if your token can see multiple accounts: "account_id": "<id>".
+{
+  "name": "daleel-log-viewer",
+  "main": "src/index.js",
+  "compatibility_date": "2025-06-01",
+
+  "r2_buckets": [
+    { "binding": "LOGS_BUCKET", "bucket_name": "daleel-logs" }
+  ],
+
+  "observability": { "enabled": true }
+}

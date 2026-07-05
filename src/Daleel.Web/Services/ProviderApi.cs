@@ -1,3 +1,6 @@
+using Daleel.Apify;
+using Daleel.Core.Geo;
+using Daleel.Core.Models;
 using Daleel.Core.Observability;
 using Daleel.Search.Abstractions;
 using Daleel.Search.Providers;
@@ -38,6 +41,24 @@ public interface IProviderApi
     /// <summary>One page rendered to markdown/HTML, or null when unconfigured/failed-empty.</summary>
     Task<ScrapedPage?> ScrapePageAsync(
         string url, ScrapeFormat format = ScrapeFormat.Markdown, CancellationToken ct = default);
+
+    /// <summary>True when a Places backend is configured.</summary>
+    bool HasPlaces { get; }
+
+    /// <summary>Google Places text search near a point; empty when unconfigured/failed.</summary>
+    Task<IReadOnlyList<StoreLocation>> SearchPlacesAsync(
+        string query, GeoPoint? near = null, double radiusMeters = 5000, string? languageCode = null,
+        CancellationToken ct = default);
+
+    /// <summary>Full place details (hours/reviews field mask); null when unconfigured/failed.</summary>
+    Task<StoreLocation?> GetPlaceDetailsAsync(string placeId, CancellationToken ct = default);
+
+    /// <summary>True when the social fetcher (Apify) is configured.</summary>
+    bool HasSocial { get; }
+
+    /// <summary>Social posts for a source/keyword; empty when unconfigured/failed.</summary>
+    Task<IReadOnlyList<SocialPost>> FetchSocialPostsAsync(
+        Source source, string? keyword = null, CancellationToken ct = default);
 
     /// <summary>
     /// Submits a catalogue crawl to the edge scrape-worker, metering the submit with the same
@@ -83,6 +104,10 @@ public sealed class ProviderApi : IProviderApi
     private readonly object _gate = new();
     private ContextDevProvider? _contextDev;
     private string? _contextDevKey;
+    private GooglePlacesProvider? _places;
+    private string? _placesKey;
+    private ApifyPostFetcher? _social;
+    private string? _socialToken;
 
     public ProviderApi(
         IAgentFactory factory, ICloudflareWorkerClient? edge = null, ICloudflareFleetClient? fleet = null)
@@ -170,6 +195,51 @@ public sealed class ProviderApi : IProviderApi
         return handle;
     }
 
+    public bool HasPlaces => _factory.Resolve("GOOGLE_PLACES_API_KEY") is not null || HasSearchProxy;
+
+    public async Task<IReadOnlyList<StoreLocation>> SearchPlacesAsync(
+        string query, GeoPoint? near = null, double radiusMeters = 5000, string? languageCode = null,
+        CancellationToken ct = default)
+    {
+        if (Places() is not { } places)
+        {
+            return Array.Empty<StoreLocation>();
+        }
+
+        return await MeterAsync(
+            "Google Places", "places/text-search", query,
+            () => places.SearchStoresAsync(query, near, radiusMeters, languageCode, ct),
+            r => r.Count).ConfigureAwait(false);
+    }
+
+    public async Task<StoreLocation?> GetPlaceDetailsAsync(string placeId, CancellationToken ct = default)
+    {
+        if (Places() is not { } places)
+        {
+            return null;
+        }
+
+        return await MeterAsync(
+            "Google Places", "places/details", placeId,
+            () => places.GetPlaceDetailsAsync(placeId, ct)).ConfigureAwait(false);
+    }
+
+    public bool HasSocial => _factory.Resolve("APIFY_TOKEN") is not null;
+
+    public async Task<IReadOnlyList<SocialPost>> FetchSocialPostsAsync(
+        Source source, string? keyword = null, CancellationToken ct = default)
+    {
+        if (Social() is not { } social)
+        {
+            return Array.Empty<SocialPost>();
+        }
+
+        return await MeterAsync(
+            "Apify", "social/fetch", keyword ?? source.Target,
+            () => social.FetchAsync(source, keyword, ct),
+            r => r.Count).ConfigureAwait(false);
+    }
+
     public bool HasEdgeClassify => _fleet?.HasClassify ?? false;
 
     public bool HasEdgeFilter => _fleet?.HasFilter ?? false;
@@ -224,6 +294,73 @@ public sealed class ProviderApi : IProviderApi
         return await MeterAsync(
             "workers-ai/filter", "filter/images", $"{urls.Count} url(s)",
             () => _fleet.FilterImagesAsync(urls, ct)).ConfigureAwait(false);
+    }
+
+    private bool HasSearchProxy =>
+        _factory.Resolve("CF_SEARCH_WORKER_URL") is not null &&
+        _factory.Resolve("CF_SEARCH_WORKER_TOKEN") is not null;
+
+    /// <summary>
+    /// A fresh HttpClient pointed at the search-worker proxy (bearer preset), or null — the same
+    /// routing AgentFactory gives the agent's own providers, so gateway Places calls ride the edge
+    /// cache and key relocation identically.
+    /// </summary>
+    private HttpClient? SearchProxyClient()
+    {
+        if (_factory.Resolve("CF_SEARCH_WORKER_URL") is not { } url ||
+            _factory.Resolve("CF_SEARCH_WORKER_TOKEN") is not { } token ||
+            !Uri.TryCreate(url, UriKind.Absolute, out var baseUri))
+        {
+            return null;
+        }
+
+        var client = Daleel.Search.Http.SharedHttpHandler.CreateClient();
+        client.BaseAddress = baseUri;
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return client;
+    }
+
+    /// <summary>Cached Places provider (rebuilt only if the resolved key changes); proxy-aware.</summary>
+    private GooglePlacesProvider? Places()
+    {
+        var key = _factory.Resolve("GOOGLE_PLACES_API_KEY");
+        var proxied = key is null && HasSearchProxy;
+        if (key is null && !proxied)
+        {
+            return null;
+        }
+
+        var effectiveKey = key ?? "edge-proxied";
+        lock (_gate)
+        {
+            if (_places is null || !string.Equals(_placesKey, effectiveKey, StringComparison.Ordinal))
+            {
+                _places = new GooglePlacesProvider(effectiveKey, SearchProxyClient());
+                _placesKey = effectiveKey;
+            }
+            return _places;
+        }
+    }
+
+    /// <summary>Cached social fetcher (rebuilt only if the resolved token changes).</summary>
+    private ApifyPostFetcher? Social()
+    {
+        var token = _factory.Resolve("APIFY_TOKEN");
+        if (token is null)
+        {
+            return null;
+        }
+
+        lock (_gate)
+        {
+            if (_social is null || !string.Equals(_socialToken, token, StringComparison.Ordinal))
+            {
+                _social = new ApifyPostFetcher(new ApifyClient(token));
+                _socialToken = token;
+            }
+            return _social;
+        }
     }
 
     /// <summary>Cached Context.dev provider (rebuilt only if the resolved key changes).</summary>

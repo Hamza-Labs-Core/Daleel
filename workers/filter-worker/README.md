@@ -66,7 +66,7 @@ forward-compat but **ignored** — thresholds are the VPS's job.
 
 ## Provisioning (one-time, per environment)
 
-The only Cloudflare resource is the account-level Workers AI binding (`[ai]` in `wrangler.toml`) —
+The only Cloudflare resource is the account-level Workers AI binding (`[ai]` in `wrangler.jsonc`) —
 nothing to create. Secrets: `AUTH_TOKEN` only.
 
 ```sh

@@ -90,8 +90,9 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
     /// </summary>
     private async Task VerifyOnPlacesAsync(Store store, string storeName, string? geo, CancellationToken ct)
     {
-        var places = TryBuildPlaces();
-        if (places is null)
+        // Through the gateway — metered by construction (this was one of the two unmetered direct
+        // provider constructions the audit caught).
+        if (!_providers.HasPlaces)
         {
             return;
         }
@@ -99,8 +100,8 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         var profile = GeoProfiles.ResolveOrDefault(geo);
         try
         {
-            var matches = await places
-                .SearchStoresAsync(storeName, profile.Center, 15000, profile.PrimaryLanguage, ct)
+            var matches = await _providers
+                .SearchPlacesAsync(storeName, profile.Center, 15000, profile.PrimaryLanguage, ct)
                 .ConfigureAwait(false);
 
             // Prefer a name-matching place; fall back to the closest result only if none matches.
@@ -111,7 +112,7 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
             }
 
             // The text-search field mask omits opening hours/reviews, so re-fetch full details.
-            var detail = await places.GetPlaceDetailsAsync(match.PlaceId, ct).ConfigureAwait(false) ?? match;
+            var detail = await _providers.GetPlaceDetailsAsync(match.PlaceId, ct).ConfigureAwait(false) ?? match;
 
             store.GooglePlaceId = detail.PlaceId;
             store.GoogleMapsUrl = detail.GoogleMapsUrl;
@@ -146,9 +147,6 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         var y = Norm(b);
         return x.Length > 0 && y.Length > 0 && (x.Contains(y) || y.Contains(x));
     }
-
-    private GooglePlacesProvider? TryBuildPlaces() =>
-        _factory.Resolve("GOOGLE_PLACES_API_KEY") is { } key ? new GooglePlacesProvider(key) : null;
 
     private async Task<string> GatherBrandContextAsync(string brandName, CancellationToken ct)
     {

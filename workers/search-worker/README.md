@@ -44,12 +44,17 @@ worker-generated errors (auth, 400s, 404s, 500s) use the standard envelope.
 
 ## Provisioning (one-time, per environment)
 
+**CI does this automatically**: the fleet deploy workflow runs `workers/provision.sh search-worker
+prod|qa` before every deploy — it resolves each KV namespace by title (creating it when missing)
+and injects the id into `wrangler.jsonc`'s placeholder. The commands below are the manual
+equivalent (paste the id yourself, or just run the script):
+
 ```sh
 cd workers/search-worker
 
 # prod
 wrangler kv namespace create daleel-search-cache
-#   -> paste the returned id into wrangler.toml: [[kv_namespaces]] id = "…"
+#   -> paste the returned id into wrangler.jsonc: [[kv_namespaces]] id = "…"
 wrangler secret put AUTH_TOKEN
 wrangler secret put SERPAPI_KEY
 wrangler secret put GOOGLE_PLACES_API_KEY
@@ -57,7 +62,7 @@ wrangler deploy
 
 # qa (mirrors, isolated)
 wrangler kv namespace create daleel-qa-search-cache
-#   -> paste the returned id into wrangler.toml: [[env.qa.kv_namespaces]] id = "…"
+#   -> paste the returned id into wrangler.jsonc: [[env.qa.kv_namespaces]] id = "…"
 wrangler secret put AUTH_TOKEN --env qa
 wrangler secret put SERPAPI_KEY --env qa
 wrangler secret put GOOGLE_PLACES_API_KEY --env qa
