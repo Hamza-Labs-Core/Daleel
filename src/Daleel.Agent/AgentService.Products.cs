@@ -50,12 +50,13 @@ public sealed partial class AgentService
         var includeIntl = LocalityClassifier.QueryWantsInternational(query);
 
         // Web results were fetched with gl={cc} whenever the market is known (SerpApiProvider),
-        // so the classifier may apply its geo-scoped generic-gTLD rule: Google already constrained
-        // these hits to the market — jo-cell.com must not die for lacking a ".jo".
+        // so the classifier may apply its geo-scoped generic-gTLD rule when the result's own text
+        // names the market: Google already constrained these hits, and a "…Jordan/JO…" title or
+        // snippet is what separates jo-cell.com from a global seller that merely ranks here.
         var geoScopedSearch = !string.IsNullOrWhiteSpace(cc);
 
-        bool KeepLocal(string? url, bool geoTargeted) =>
-            includeIntl || LocalityClassifier.IsLocal(url, cc, countryName, geoTargeted, geoScopedSearch);
+        bool KeepLocal(string? url, bool geoTargeted, string? evidence = null) =>
+            includeIntl || LocalityClassifier.IsLocal(url, cc, countryName, geoTargeted, geoScopedSearch, evidence);
 
         var classified = bundle.WebResults
             .Select(r => (r, type: ResultClassifier.Classify(r.Url, r.Title, r.Snippet)))
@@ -82,15 +83,15 @@ public sealed partial class AgentService
                     break;
 
                 // Buyable surfaces — only kept when confirmed local AND on an actual commerce host.
-                case ResultType.StorePage when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
+                case ResultType.StorePage when KeepLocal(r.Url, false, $"{r.Title} {r.Snippet}") && !IsNonCommerceHost(r.Url):
                     AddStore(stores, r);
                     break;
-                case ResultType.Marketplace when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
+                case ResultType.Marketplace when KeepLocal(r.Url, false, $"{r.Title} {r.Snippet}") && !IsNonCommerceHost(r.Url):
                     AddMarketplace(marketplaces, r);
                     break;
                 // A web hit whose title is a URL/bare domain has no product identity — never surface
                 // a raw link as a product card (same rule as PickName and the extractor paths).
-                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url)
+                case ResultType.ProductListing when KeepLocal(r.Url, false, $"{r.Title} {r.Snippet}") && !IsNonCommerceHost(r.Url)
                     && !LooksLikeUrl(r.Title):
                     webListings.Add(WebResultToListing(r, type));
                     break;
@@ -532,7 +533,9 @@ public sealed partial class AgentService
         var targets = classified
             .Where(c => c.type is ResultType.Marketplace or ResultType.StorePage && !string.IsNullOrWhiteSpace(c.r.Url))
             .Where(c => includeIntl || LocalityClassifier.IsLocal(
-                c.r.Url, geo.CountryCode, geo.Country, fromGeoScopedSearch: !string.IsNullOrWhiteSpace(geo.CountryCode)))
+                c.r.Url, geo.CountryCode, geo.Country,
+                fromGeoScopedSearch: !string.IsNullOrWhiteSpace(geo.CountryCode),
+                marketEvidence: $"{c.r.Title} {c.r.Snippet}"))
             .Select(c => (c.r.Url!, Source: SourceName(c.r), c.type))
             .Take(_options.MaxListingUrls)
             .ToList();

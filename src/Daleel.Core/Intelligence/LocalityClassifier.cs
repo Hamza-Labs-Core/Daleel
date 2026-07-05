@@ -26,7 +26,7 @@ public static class LocalityClassifier
     /// </summary>
     public static bool IsLocal(
         string? url, string countryCode, string? countryName = null, bool fromGeoTargetedSource = false,
-        bool fromGeoScopedSearch = false)
+        bool fromGeoScopedSearch = false, string? marketEvidence = null)
     {
         if (fromGeoTargetedSource)
         {
@@ -54,13 +54,23 @@ public static class LocalityClassifier
         // too (jo-cell.com, dumyah.com, smartbuy-me.com) and were all dropped as "non-local" while
         // Google — queried WITH gl=jo — had already ranked them for the market. So when the result
         // came from a geo-SCOPED search (gl=cc — weaker than the geo-TARGETED shopping/places
-        // short-circuit above), a generic-gTLD host counts as local UNLESS the URL carries another
-        // country's signal (a foreign ccTLD is already excluded by IsGenericGTld; a foreign locale
-        // path like "/uae-en/" is excluded explicitly). The US keeps the rule unconditionally —
-        // its sellers are on .com even in un-scoped searches.
-        if ((cc == "us" || fromGeoScopedSearch) && IsGenericGTld(host) && !HasForeignLocalePath(path, cc))
+        // short-circuit above) AND its own title/snippet mentions the market, a generic-gTLD host
+        // counts as local unless the URL carries another country's signal (a foreign ccTLD is
+        // already excluded by IsGenericGTld; a foreign locale path like "/uae-en/" is excluded
+        // explicitly). The market-mention requirement is what keeps genuinely global sellers out:
+        // AliExpress ranks under gl=jo too, but its snippets don't say "Jordan" — jo-cell's do.
+        // The US keeps the rule unconditionally: its sellers are on .com even in un-scoped searches.
+        if (IsGenericGTld(host) && !HasForeignLocalePath(path, cc))
         {
-            return true;
+            if (cc == "us")
+            {
+                return true;
+            }
+
+            if (fromGeoScopedSearch && MentionsMarket(marketEvidence, cc, countryName))
+            {
+                return true;
+            }
         }
 
         var labels = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
@@ -127,6 +137,43 @@ public static class LocalityClassifier
         }
 
         return GenericGTlds.Contains(host[(lastDot + 1)..]);
+    }
+
+    /// <summary>
+    /// True when free text (a result's title/snippet) names the market: the country name as a
+    /// substring, or the country code as a standalone word ("JO Cell", "prices in JO"). City and
+    /// currency mentions would strengthen this further; the country signals cover the observed
+    /// cases without new inputs.
+    /// </summary>
+    private static bool MentionsMarket(string? text, string cc, string? countryName)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(countryName) &&
+            text.Contains(countryName, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // cc as its own word: split on non-letters so "JO Cell" hits and "major" doesn't.
+        var start = 0;
+        for (var i = 0; i <= text.Length; i++)
+        {
+            if (i == text.Length || !char.IsLetter(text[i]))
+            {
+                if (i - start == cc.Length &&
+                    string.Compare(text, start, cc, 0, cc.Length, StringComparison.OrdinalIgnoreCase) == 0)
+                {
+                    return true;
+                }
+                start = i + 1;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
