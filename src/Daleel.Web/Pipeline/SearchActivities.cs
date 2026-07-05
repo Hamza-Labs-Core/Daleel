@@ -301,6 +301,9 @@ public sealed class ExtractProductsActivity : CancellableActivity
             if (state.Products is { } p)
             {
                 services.Report(SearchStep.ExtractingProducts, "Progress.Msg.Extracted", p.ProductCount, p.BrandCount);
+                // FIRST PARTIAL: the grid exists — show it NOW. The UI renders these products while the
+                // enrichment fan-out below is still running; updates stream in as sub-workflows land.
+                await services.TryPushPartialAsync(state);
                 // Persist each surfaced entity as a self-contained JSON document in R2 (source of truth)
                 // with a thin Postgres index row. Best-effort: persistence must never fail the search.
                 await PersistEntitiesAsync(context, state, p);
@@ -343,37 +346,96 @@ public sealed class ExtractProductsActivity : CancellableActivity
     }
 }
 
-// ── Steps 5–7: dispatch one sub-workflow per entity, in bounded parallel ─────────────────────────
-// The flat brand/store enrichment loop became three dispatch activities. Each fans a per-entity Elsa
-// sub-workflow (BrandResearch / StoreResearch / ItemDeepDive) out across its entities — each child in
-// its OWN DI scope (hence its own DbContext, so the fan-out is concurrency-safe) with a hard per-entity
-// timeout. The enriched entities + buffered events flow back onto the shared SearchPipelineState.
+// ── Steps 5–7: one CONCURRENT dispatch of every enrichment sub-workflow, streaming results ───────
+// The three sequential barrier stages (brands, then stores, then items) became one activity that fans
+// ALL entities out at once — each child in its OWN DI scope (hence its own DbContext) with a hard
+// per-entity timeout. Two properties matter:
+//   • NO BARRIERS THE UI WAITS ON: every finished entity merges into state.Products immediately and a
+//     throttled partial result streams to the user's devices — the grid fills in live while slower
+//     entities are still being researched.
+//   • NO CROSS-STAGE DEADLOCK: brands/stores/items proceed independently; a slow store can never delay
+//     item deep-dives, and a wedged child is bounded by the dispatcher's per-entity timeout.
 
-/// <summary>Step 5 — research every found brand in parallel (one <see cref="BrandResearchWorkflow"/> each).</summary>
-[Activity("Daleel", "Search", "Dispatch a brand-research sub-workflow per brand, in parallel")]
-public sealed class DispatchBrandWorkflowsActivity : CancellableActivity
+/// <summary>
+/// Steps 5–7 — research every found brand, store and model CONCURRENTLY (one sub-workflow per entity),
+/// merging each enriched entity into the shared state AS IT LANDS and streaming throttled partial
+/// results to the user. The final state is identical to the old sequential stages; only the waiting is gone.
+/// </summary>
+[Activity("Daleel", "Search", "Dispatch brand/store/item sub-workflows concurrently, streaming results")]
+public sealed class DispatchEnrichmentWorkflowsActivity : CancellableActivity
 {
-    /// <summary>Cap so a brand-heavy query can't fan out into unbounded research cost (env-tunable).</summary>
-    private static int MaxBrands => PipelineLimits.MaxBrands;
+    /// <summary>Minimum interval between streamed partial pushes (the trailing push is unconditional).</summary>
+    private static readonly TimeSpan PushInterval = TimeSpan.FromMilliseconds(800);
 
     protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
-        if (state.FromCache || state.Products is not { Brands.Count: > 0 } products)
+        if (state.FromCache || state.Products is not { } products)
         {
             return;
         }
 
         var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
-        var dispatched = products.Brands.Take(MaxBrands).ToList();
-        var rest = products.Brands.Skip(MaxBrands).ToList();
 
-        // Advance the stepper to the brand-profile phase (PR #10's animation) before fanning out.
-        services.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", dispatched.Count, products.Stores.Count);
-        var results = await SubWorkflowDispatcher
-            .RunManyAsync<BrandResearchWorkflow, BrandResearchState, BrandInfo>(
-                scopeFactory, dispatched,
+        // Slot arrays: each entity's enriched result replaces its input IN PLACE as its sub-workflow
+        // lands; merges rebuild Products from the current slots plus any env-restrained overflow, so a
+        // partial always contains every entity (enriched or not yet).
+        var brandSlots = products.Brands.Take(PipelineLimits.MaxBrands).ToArray();
+        var brandRest = products.Brands.Skip(PipelineLimits.MaxBrands).ToList();
+        var storeSlots = products.Stores.Take(PipelineLimits.MaxStores).ToArray();
+        var storeRest = products.Stores.Skip(PipelineLimits.MaxStores).ToList();
+        var deepDiveItems = state.IsProductQuery;
+        var itemSlots = deepDiveItems ? products.Models.Take(PipelineLimits.MaxItems).ToArray() : Array.Empty<ProductModel>();
+        var itemRest = deepDiveItems ? products.Models.Skip(PipelineLimits.MaxItems).ToList() : new List<ProductModel>();
+
+        // One gate serializes the quick in-memory merges (slot write + Products rebuild + event
+        // append). Never held across an await — pushes happen outside it — so it cannot deadlock.
+        var gate = new object();
+        var lastPush = System.Diagnostics.Stopwatch.StartNew();
+
+        void Merge()
+        {
+            state.Products = state.Products! with
+            {
+                Brands = brandSlots.Concat(brandRest).ToList(),
+                Stores = storeSlots.Concat(storeRest).ToList(),
+                Models = deepDiveItems ? itemSlots.Concat(itemRest).ToList() : state.Products!.Models
+            };
+        }
+
+        async Task StreamAsync()
+        {
+            bool push;
+            lock (gate)
+            {
+                push = lastPush.Elapsed >= PushInterval;
+                if (push)
+                {
+                    lastPush.Restart();
+                }
+            }
+            if (push)
+            {
+                await services.TryPushPartialAsync(state);
+            }
+        }
+
+        // Advance the stepper through all three enrichment phases up-front — they genuinely run at once.
+        services.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", brandSlots.Length, storeSlots.Length);
+        if (storeSlots.Length > 0)
+        {
+            services.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", storeSlots.Length);
+        }
+        if (itemSlots.Length > 0)
+        {
+            services.Report(SearchStep.ComparingPrices, "Progress.Msg.DeepDiving", itemSlots.Length);
+        }
+
+        var brandTask = brandSlots.Length == 0
+            ? Task.CompletedTask
+            : SubWorkflowDispatcher.RunManyAsync<BrandResearchWorkflow, BrandResearchState, BrandInfo>(
+                scopeFactory, brandSlots,
                 (s, svc, brand) =>
                 {
                     svc.Agent = services.Agent;
@@ -383,49 +445,22 @@ public sealed class DispatchBrandWorkflowsActivity : CancellableActivity
                     s.Brand = brand;
                     s.Result = brand;
                 },
-                services.Progress,
-                SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
+                services.Progress, SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken,
+                onCompleted: async (i, s) =>
+                {
+                    lock (gate)
+                    {
+                        brandSlots[i] = s.Result;
+                        state.Events.AddRange(s.Events);
+                        Merge();
+                    }
+                    await StreamAsync();
+                });
 
-        var merged = results.Select(r => r.Result).Concat(rest).ToList();
-        foreach (var r in results)
-        {
-            state.Events.AddRange(r.Events);
-        }
-
-        state.Products = products with { Brands = merged };
-        var enriched = merged.Count(b => b.Reputation is not null);
-        if (enriched > 0)
-        {
-            services.Report(SearchStep.BuildingProfiles, "Progress.Msg.EnrichedBrandsCount", enriched);
-        }
-    }
-}
-
-/// <summary>Step 6 — research every found store in parallel (one <see cref="StoreResearchWorkflow"/> each).</summary>
-[Activity("Daleel", "Search", "Dispatch a store-research sub-workflow per store, in parallel")]
-public sealed class DispatchStoreWorkflowsActivity : CancellableActivity
-{
-    /// <summary>Cap so a store-heavy query can't fan out into unbounded research cost (env-tunable).</summary>
-    private static int MaxStores => PipelineLimits.MaxStores;
-
-    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
-    {
-        var state = context.GetRequiredService<SearchPipelineState>();
-        var services = context.GetRequiredService<SearchPipelineServices>();
-        if (state.FromCache || state.Products is not { Stores.Count: > 0 } products)
-        {
-            return;
-        }
-
-        var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
-        var dispatched = products.Stores.Take(MaxStores).ToList();
-        var rest = products.Stores.Skip(MaxStores).ToList();
-
-        // Advance the stepper to the store-verification phase (PR #10's animation) before fanning out.
-        services.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", dispatched.Count);
-        var results = await SubWorkflowDispatcher
-            .RunManyAsync<StoreResearchWorkflow, StoreResearchState, StoreInfo>(
-                scopeFactory, dispatched,
+        var storeTask = storeSlots.Length == 0
+            ? Task.CompletedTask
+            : SubWorkflowDispatcher.RunManyAsync<StoreResearchWorkflow, StoreResearchState, StoreInfo>(
+                scopeFactory, storeSlots,
                 (s, svc, store) =>
                 {
                     svc.Agent = services.Agent;
@@ -435,48 +470,22 @@ public sealed class DispatchStoreWorkflowsActivity : CancellableActivity
                     s.Store = store;
                     s.Result = store;
                 },
-                services.Progress,
-                SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
+                services.Progress, SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken,
+                onCompleted: async (i, s) =>
+                {
+                    lock (gate)
+                    {
+                        storeSlots[i] = s.Result;
+                        state.Events.AddRange(s.Events);
+                        Merge();
+                    }
+                    await StreamAsync();
+                });
 
-        var merged = results.Select(r => r.Result).Concat(rest).ToList();
-        foreach (var r in results)
-        {
-            state.Events.AddRange(r.Events);
-        }
-
-        state.Products = products with { Stores = merged };
-        var verified = merged.Count(s => s.Rating is not null);
-        if (verified > 0)
-        {
-            services.Report(SearchStep.FindingStores, "Progress.Msg.VerifiedStoresCount", verified);
-        }
-    }
-}
-
-/// <summary>Step 7 — deep-dive every found product/model in parallel (one <see cref="ItemDeepDiveWorkflow"/> each).</summary>
-[Activity("Daleel", "Search", "Dispatch an item deep-dive sub-workflow per product/model, in parallel")]
-public sealed class DispatchItemWorkflowsActivity : CancellableActivity
-{
-    /// <summary>Cap so a model-heavy query can't fan out into unbounded scrape cost (env-tunable).</summary>
-    private static int MaxItems => PipelineLimits.MaxItems;
-
-    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
-    {
-        var state = context.GetRequiredService<SearchPipelineState>();
-        var services = context.GetRequiredService<SearchPipelineServices>();
-        if (state.FromCache || !state.IsProductQuery || state.Products is not { Models.Count: > 0 } products)
-        {
-            return;
-        }
-
-        var scopeFactory = context.GetRequiredService<IServiceScopeFactory>();
-        var dispatched = products.Models.Take(MaxItems).ToList();
-        var rest = products.Models.Skip(MaxItems).ToList();
-
-        services.Report(SearchStep.ComparingPrices, "Progress.Msg.DeepDiving", dispatched.Count);
-        var results = await SubWorkflowDispatcher
-            .RunManyAsync<ItemDeepDiveWorkflow, ItemDeepDiveState, ProductModel>(
-                scopeFactory, dispatched,
+        var itemTask = itemSlots.Length == 0
+            ? Task.CompletedTask
+            : SubWorkflowDispatcher.RunManyAsync<ItemDeepDiveWorkflow, ItemDeepDiveState, ProductModel>(
+                scopeFactory, itemSlots,
                 (s, svc, model) =>
                 {
                     svc.Agent = services.Agent;
@@ -489,16 +498,38 @@ public sealed class DispatchItemWorkflowsActivity : CancellableActivity
                     // recognized fields against it (the right attributes per category, not a blind dump).
                     s.Schema = products.Schema;
                 },
-                services.Progress,
-                SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken);
+                services.Progress, SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken,
+                onCompleted: async (i, s) =>
+                {
+                    lock (gate)
+                    {
+                        itemSlots[i] = s.Result;
+                        state.Events.AddRange(s.Events);
+                        Merge();
+                    }
+                    await StreamAsync();
+                });
 
-        var merged = results.Select(r => r.Result).Concat(rest).ToList();
-        foreach (var r in results)
+        await Task.WhenAll(brandTask, storeTask, itemTask);
+
+        // Every entity has merged (per-entity callbacks) — one unconditional trailing push so the UI
+        // holds the fully-enriched grid even before Aggregate/Completed lands.
+        await services.TryPushPartialAsync(state);
+
+        if (state.Products is { } enriched)
         {
-            state.Events.AddRange(r.Events);
-        }
+            var enrichedBrands = enriched.Brands.Count(b => b.Reputation is not null);
+            if (enrichedBrands > 0)
+            {
+                services.Report(SearchStep.BuildingProfiles, "Progress.Msg.EnrichedBrandsCount", enrichedBrands);
+            }
 
-        state.Products = products with { Models = merged };
+            var verified = enriched.Stores.Count(s => s.Rating is not null);
+            if (verified > 0)
+            {
+                services.Report(SearchStep.FindingStores, "Progress.Msg.VerifiedStoresCount", verified);
+            }
+        }
     }
 }
 

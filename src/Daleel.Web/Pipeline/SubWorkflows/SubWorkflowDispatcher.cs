@@ -40,6 +40,9 @@ public static class SubWorkflowDispatcher
     /// <see cref="MaxConcurrency"/> at a time, each seeded by <paramref name="seed"/> (state + services) and
     /// bounded by <paramref name="timeout"/>. Returns the finished states in input order. The parent's
     /// <paramref name="progress"/> sink surfaces a live line if the fan-out fails systematically.
+    /// <paramref name="onCompleted"/>, when supplied, streams each entity's finished state (with its input
+    /// index) to the caller AS IT LANDS — this is what lets results reach the UI without waiting for the
+    /// whole fan-out. The callback is failure-isolated: an exception in it never faults the fan-out.
     /// </summary>
     public static async Task<IReadOnlyList<TState>> RunManyAsync<TWorkflow, TState, TItem>(
         IServiceScopeFactory scopeFactory,
@@ -47,13 +50,14 @@ public static class SubWorkflowDispatcher
         Action<TState, SubWorkflowServices, TItem> seed,
         Action<string>? progress,
         TimeSpan timeout,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<int, TState, Task>? onCompleted = null)
         where TWorkflow : IWorkflow, new()
         where TState : SubWorkflowState
     {
         using var gate = new SemaphoreSlim(MaxConcurrency);
         var faults = 0;
-        var tasks = items.Select(async item =>
+        var tasks = items.Select(async (item, index) =>
         {
             await gate.WaitAsync(ct).ConfigureAwait(false);
             try
@@ -63,6 +67,19 @@ public static class SubWorkflowDispatcher
                 if (faulted)
                 {
                     Interlocked.Increment(ref faults);
+                }
+
+                if (onCompleted is not null)
+                {
+                    try
+                    {
+                        await onCompleted(index, state).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch
+                    {
+                        // Streaming is best-effort — a push/merge hiccup must never sink the fan-out.
+                    }
                 }
 
                 return state;

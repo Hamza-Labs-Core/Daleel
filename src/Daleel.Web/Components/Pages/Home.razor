@@ -89,6 +89,18 @@
                     @L["Search.EmailNotice"]
                 </MudAlert>
             }
+
+            @* PROGRESSIVE RESULTS: the pipeline streams partial grids while it keeps working — render
+               them immediately under the live stepper. The UI never waits on the workflow; the grid
+               fills in and re-renders in place as each enrichment sub-workflow lands. *@
+            @if (_answer?.Products is { } partial && (partial.HasListings || partial.StoreCount > 0 || partial.BrandCount > 0 || partial.ReviewCount > 0))
+            {
+                <div class="d-flex align-center mb-2 mt-3">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Search.PartialResults"]</MudText>
+                </div>
+                <AdaptiveResults Result="partial" />
+            }
         }
 
         @* No raw status/error metadata: a search that yields nothing shows a neutral empty state.
@@ -200,6 +212,7 @@
         Notifier.Progress += OnProgress;
         Notifier.Completed += OnCompleted;
         Notifier.Enriched += OnEnriched;
+        Notifier.Partial += OnPartial;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -466,6 +479,20 @@
         });
     }
 
+    // An INTERMEDIATE result while the search is still running: render the grid now and keep the
+    // stepper going — results load as they're ready, the UI never waits on the whole workflow. A
+    // partial that races the completion is ignored (Completed's answer supersedes).
+    private void OnPartial(string userId, int jobId, string resultJson, string resultType)
+    {
+        if (userId != _userId || jobId != _jobId) return;
+        InvokeAsync(() =>
+        {
+            if (_status != "running") return;
+            _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson) ?? _answer;
+            StateHasChanged();
+        });
+    }
+
     // Safety net so the "fetching specs" hint never sticks if no enrichment update arrives.
     private void ScheduleEnrichTimeout(int jobId) => _ = Task.Delay(TimeSpan.FromSeconds(60)).ContinueWith(_ =>
         InvokeAsync(() =>
@@ -497,5 +524,6 @@
         Notifier.Progress -= OnProgress;
         Notifier.Completed -= OnCompleted;
         Notifier.Enriched -= OnEnriched;
+        Notifier.Partial -= OnPartial;
     }
 }

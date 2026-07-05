@@ -34,6 +34,13 @@ public static class PipelineLimits
     /// <summary>Models deep-dived per search — every discovered model, unless an env restraint is set.</summary>
     public static int MaxItems { get; } = FromEnv("PIPELINE_MAX_ITEMS", fallback: int.MaxValue);
 
+    /// <summary>
+    /// Search jobs processed concurrently by one app instance — UNCAPPED by default (no job waits
+    /// because of a count; each job is individually bounded by its own deadline + cost cap).
+    /// Restrainable via <c>PIPELINE_MAX_CONCURRENT_JOBS</c>.
+    /// </summary>
+    public static int ConcurrentJobs { get; } = FromEnv("PIPELINE_MAX_CONCURRENT_JOBS", fallback: int.MaxValue);
+
     private static int FromEnv(string name, int fallback)
     {
         var raw = Environment.GetEnvironmentVariable(name);

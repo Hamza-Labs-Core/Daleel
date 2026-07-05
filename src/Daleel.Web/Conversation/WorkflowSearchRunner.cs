@@ -49,13 +49,15 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private readonly IModerationPolicyProvider _moderationPolicy;
     private readonly IHalalImageClassifier _imageClassifier;
     private readonly ILogger<WorkflowSearchRunner> _logger;
+    private readonly IConversationBroadcaster? _broadcaster;
 
     public WorkflowSearchRunner(
         IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
         IFilteredContentLogRepository filteredLog, ICacheStore cache, IEventStore eventStore,
         ISystemEventLog systemLog, ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
         IModerationPolicyProvider moderationPolicy, IHalalImageClassifier imageClassifier,
-        ILogger<WorkflowSearchRunner> logger)
+        ILogger<WorkflowSearchRunner> logger,
+        IConversationBroadcaster? broadcaster = null)
     {
         _agents = agents;
         _config = config;
@@ -69,6 +71,8 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         _emailNotifier = emailNotifier;
         _scopeFactory = scopeFactory;
         _logger = logger;
+        // Optional so existing test wiring keeps working; production DI always supplies it.
+        _broadcaster = broadcaster;
     }
 
     public async Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct)
@@ -134,6 +138,12 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             services.Agent = agent;
             services.Cache = _cache;
             services.Progress = progress;
+            // Progressive results: activities push intermediate grids to the user's devices as soon as
+            // data exists — the UI renders them while the run keeps going (never waits on the workflow).
+            if (_broadcaster is { } bc)
+            {
+                services.PushPartial = (json, type) => bc.PartialAsync(job.UserId, job.Id, json, type);
+            }
             bufferedEvents = state.Events;
 
             var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();

@@ -23,15 +23,18 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
 {
     private readonly IAgentFactory _factory;
     private readonly ILogger<ContextDevProfileResearcher> _logger;
+    private readonly IProviderApi _providers;
 
-    public ContextDevProfileResearcher(IAgentFactory factory, ILogger<ContextDevProfileResearcher> logger)
+    public ContextDevProfileResearcher(
+        IAgentFactory factory, ILogger<ContextDevProfileResearcher> logger, IProviderApi? providers = null)
     {
         _factory = factory;
         _logger = logger;
+        // Optional so existing test wiring keeps working; production DI always supplies the gateway.
+        _providers = providers ?? new ProviderApi(factory);
     }
 
-    public bool IsAvailable =>
-        _factory.HasLlm() && _factory.Resolve("CONTEXT_DEV_API_KEY") is not null;
+    public bool IsAvailable => _factory.HasLlm() && _providers.HasScraper;
 
     public async Task<Brand?> ResearchBrandAsync(string brandName, string? geo, CancellationToken ct = default)
     {
@@ -41,15 +44,14 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
             return null;
         }
 
-        var contextDev = TryBuildContextDev();
-        if (contextDev is null)
+        if (!_providers.HasScraper)
         {
             // No research keys configured: honor the documented contract (return null and let the
             // profile service degrade) rather than burning an LLM call on empty context.
             return null;
         }
 
-        var context = await GatherBrandContextAsync(contextDev, brandName, ct).ConfigureAwait(false);
+        var context = await GatherBrandContextAsync(brandName, ct).ConfigureAwait(false);
         return await new ProfileSynthesizer(llm).SynthesizeBrandAsync(brandName, context, ct).ConfigureAwait(false);
     }
 
@@ -61,15 +63,14 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
             return null;
         }
 
-        var contextDev = TryBuildContextDev();
-        if (contextDev is null)
+        if (!_providers.HasScraper)
         {
             // No research keys configured: honor the documented contract (return null and let the
             // profile service degrade) rather than burning an LLM call on empty context.
             return null;
         }
 
-        var context = await GatherStoreContextAsync(contextDev, storeName, geo, ct).ConfigureAwait(false);
+        var context = await GatherStoreContextAsync(storeName, geo, ct).ConfigureAwait(false);
         var store = await new ProfileSynthesizer(llm).SynthesizeStoreAsync(storeName, context, ct).ConfigureAwait(false);
 
         // Fall back to contact details scraped from the store page when the LLM didn't surface them.
@@ -146,45 +147,43 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         return x.Length > 0 && y.Length > 0 && (x.Contains(y) || y.Contains(x));
     }
 
-    private ContextDevProvider? TryBuildContextDev() =>
-        _factory.Resolve("CONTEXT_DEV_API_KEY") is { } key ? new ContextDevProvider(key) : null;
-
     private GooglePlacesProvider? TryBuildPlaces() =>
         _factory.Resolve("GOOGLE_PLACES_API_KEY") is { } key ? new GooglePlacesProvider(key) : null;
 
-    private async Task<string> GatherBrandContextAsync(
-        ContextDevProvider contextDev, string brandName, CancellationToken ct)
+    private async Task<string> GatherBrandContextAsync(string brandName, CancellationToken ct)
     {
         var sb = new StringBuilder();
         var domain = GuessDomain(brandName);
 
         try
         {
-            var profile = await contextDev.GetBrandAsync(domain, ct).ConfigureAwait(false);
-            if (!string.IsNullOrWhiteSpace(profile.Name)) sb.AppendLine($"Brand: {profile.Name}");
-            if (!string.IsNullOrWhiteSpace(profile.Description)) sb.AppendLine(profile.Description);
-            if (!string.IsNullOrWhiteSpace(profile.Industry)) sb.AppendLine($"Industry: {profile.Industry}");
+            // Through the gateway — metered by construction (ambient per-job observer).
+            var profile = await _providers.GetBrandAsync(domain, ct).ConfigureAwait(false);
+            if (profile is not null)
+            {
+                if (!string.IsNullOrWhiteSpace(profile.Name)) sb.AppendLine($"Brand: {profile.Name}");
+                if (!string.IsNullOrWhiteSpace(profile.Description)) sb.AppendLine(profile.Description);
+                if (!string.IsNullOrWhiteSpace(profile.Industry)) sb.AppendLine($"Industry: {profile.Industry}");
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogDebug(ex, "Context.dev brand lookup failed for {Domain}", domain);
         }
 
-        await AppendScrapeAsync(contextDev, $"https://{domain}", sb, ct).ConfigureAwait(false);
+        await AppendScrapeAsync($"https://{domain}", sb, ct).ConfigureAwait(false);
         return sb.ToString();
     }
 
-    private async Task<string> GatherStoreContextAsync(
-        ContextDevProvider contextDev, string storeName, string? geo, CancellationToken ct)
+    private async Task<string> GatherStoreContextAsync(string storeName, string? geo, CancellationToken ct)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Store: {storeName}{(string.IsNullOrWhiteSpace(geo) ? "" : $" ({geo})")}");
-        await AppendScrapeAsync(contextDev, $"https://{GuessDomain(storeName)}", sb, ct).ConfigureAwait(false);
+        await AppendScrapeAsync($"https://{GuessDomain(storeName)}", sb, ct).ConfigureAwait(false);
         return sb.ToString();
     }
 
-    private async Task AppendScrapeAsync(
-        ContextDevProvider contextDev, string url, StringBuilder sb, CancellationToken ct)
+    private async Task AppendScrapeAsync(string url, StringBuilder sb, CancellationToken ct)
     {
         // url is built from a guessed/LLM-derived domain — refuse internal targets (SSRF) before scraping.
         // The scrape runs on the Context.dev edge, so the DNS-free literal/localhost check is the right layer.
@@ -196,8 +195,9 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
 
         try
         {
-            var page = await contextDev.ScrapeAsync(url, ScrapeFormat.Markdown, ct).ConfigureAwait(false);
-            if (page.Success && page.Content.Length > 0)
+            // Through the gateway — metered by construction; null when unconfigured or empty.
+            var page = await _providers.ScrapePageAsync(url, ScrapeFormat.Markdown, ct).ConfigureAwait(false);
+            if (page is { Content.Length: > 0 })
             {
                 sb.AppendLine(page.Content.Length <= 4000 ? page.Content : page.Content[..4000]);
             }

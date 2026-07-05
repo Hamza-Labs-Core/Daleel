@@ -489,6 +489,13 @@ builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>(
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
+// THE provider gateway: every provider call made outside an AgentService flows through this — metered
+// (ambient per-job observer), cost-estimated, cap-enforced by construction. Never construct a provider
+// directly at a call site. Edge submits route through it too, so edge and inline spend meter identically.
+builder.Services.AddSingleton<Daleel.Web.Services.IProviderApi>(sp =>
+    new Daleel.Web.Services.ProviderApi(
+        sp.GetRequiredService<Daleel.Web.Services.IAgentFactory>(),
+        sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>()));
 // Smart cache: scores a cache hit's completeness so CheckCache can serve, serve-and-refill, or reject it.
 // Stateless + side-effect-free, so a singleton is fine (resolved by the Elsa activity from its context).
 builder.Services.AddSingleton<Daleel.Web.Pipeline.ICacheQualityValidator, Daleel.Web.Pipeline.CacheQualityValidator>();

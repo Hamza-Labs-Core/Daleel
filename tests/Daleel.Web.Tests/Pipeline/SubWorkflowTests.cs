@@ -311,6 +311,67 @@ public class SubWorkflowTests
     }
 
     [Fact]
+    public async Task RunManyAsync_StreamsEachEntityAsItCompletes()
+    {
+        // The streaming pipeline's foundation: onCompleted fires once per entity WITH its input index,
+        // as each child lands — this is what lets the UI render results without waiting for the fan-out.
+        var researcher = new FakeResearcher
+        {
+            Store = name => new Store { Name = name, NameKey = Store.Normalize(name), Website = $"https://{name}.com" }
+        };
+        using var provider = BuildProvider(s => s.AddSingleton<IProfileResearcher>(researcher));
+
+        var stores = new[]
+        {
+            new StoreInfo { Name = "alpha" }, new StoreInfo { Name = "beta" }, new StoreInfo { Name = "gamma" }
+        };
+        var streamed = new ConcurrentBag<(int Index, string Store)>();
+
+        var results = await SubWorkflowDispatcher.RunManyAsync<StoreResearchWorkflow, StoreResearchState, StoreInfo>(
+            provider.GetRequiredService<IServiceScopeFactory>(), stores,
+            (s, svc, store) =>
+            {
+                svc.Agent = BuildAgent();
+                s.Geo = "jordan";
+                s.Store = store;
+                s.Result = store;
+            },
+            progress: null, SubWorkflowDispatcher.DefaultTimeout, CancellationToken.None,
+            onCompleted: (i, s) =>
+            {
+                streamed.Add((i, s.Store.Name));
+                return Task.CompletedTask;
+            });
+
+        results.Should().HaveCount(3);
+        streamed.Should().HaveCount(3, "every entity streams exactly once as it completes");
+        streamed.Select(x => (x.Index, x.Store)).Should().BeEquivalentTo(
+            new[] { (0, "alpha"), (1, "beta"), (2, "gamma") },
+            "each callback carries the entity's input index so slot merges are exact");
+    }
+
+    [Fact]
+    public async Task RunManyAsync_SurvivesAThrowingStreamCallback()
+    {
+        using var provider = BuildProvider(_ => { });
+        var stores = new[] { new StoreInfo { Name = "alpha" }, new StoreInfo { Name = "beta" } };
+
+        var results = await SubWorkflowDispatcher.RunManyAsync<StoreResearchWorkflow, StoreResearchState, StoreInfo>(
+            provider.GetRequiredService<IServiceScopeFactory>(), stores,
+            (s, svc, store) =>
+            {
+                svc.Agent = BuildAgent();
+                s.Geo = "jordan";
+                s.Store = store;
+                s.Result = store;
+            },
+            progress: null, SubWorkflowDispatcher.DefaultTimeout, CancellationToken.None,
+            onCompleted: (_, _) => throw new InvalidOperationException("stream sink blew up"));
+
+        results.Should().HaveCount(2, "streaming is best-effort — a push failure must never sink the fan-out");
+    }
+
+    [Fact]
     public async Task ItemDeepDiveWorkflow_CreatesBrandModel_WhenUnidentified()
     {
         // The listing matched no pre-existing catalogue model (NoOp identifier), but its merged canonical
@@ -443,6 +504,12 @@ public class SubWorkflowTests
         services.AddSingleton<IScrapedPriceRepository>(new InMemoryScrapedPriceRepo());
         services.AddSingleton<IBrandModelRepository>(new InMemoryBrandModelRepo());
         services.AddSingleton<IAgentFactory>(new FakeAgentFactory());
+        // The REAL provider gateway over whatever fakes each test registers — activities resolve
+        // IProviderApi (never a provider directly), so the tests exercise the production call path.
+        services.AddSingleton<Daleel.Web.Services.IProviderApi>(sp =>
+            new Daleel.Web.Services.ProviderApi(
+                sp.GetRequiredService<IAgentFactory>(),
+                sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>()));
         // Smart-identification dependencies the item deep-dive now resolves. A no-op identifier keeps these
         // sequencing tests focused on the original behavior; the identifier itself is covered separately.
         services.AddSingleton<IProductIdentifier>(new NoOpProductIdentifier());

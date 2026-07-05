@@ -74,6 +74,7 @@
   <data name="Search.Search" xml:space="preserve"><value>Search</value></data>
   <data name="Search.Searching" xml:space="preserve"><value>Searching…</value></data>
   <data name="Search.FetchingSpecs" xml:space="preserve"><value>Fetching official specs — more details loading…</value></data>
+  <data name="Search.PartialResults" xml:space="preserve"><value>Still searching — results load as they're ready…</value></data>
   <data name="Market.Prompt" xml:space="preserve"><value>We couldn't detect your market. Which country are you shopping in?</value></data>
   <data name="Market.Confirm" xml:space="preserve"><value>Continue</value></data>
   <data name="Search.Results" xml:space="preserve"><value>Results</value></data>

@@ -35,6 +35,14 @@ public interface IConversationBroadcaster
     /// <summary>A refreshed result for an already-completed job (item deep-dive specs arrived) — the UI
     /// re-renders in place. Separate from Completed so the "done" state isn't reset to "running".</summary>
     Task EnrichedAsync(string userId, int jobId, string resultJson, string resultType);
+
+    /// <summary>
+    /// An intermediate result for a job that is STILL RUNNING — the UI renders the grid immediately and
+    /// keeps the search-ongoing affordance ("results load as they're ready"). The pipeline pushes one as
+    /// soon as products are extracted and again (throttled) as each enrichment sub-workflow lands, so a
+    /// user never stares at a stepper while finished data sits in memory.
+    /// </summary>
+    Task PartialAsync(string userId, int jobId, string resultJson, string resultType);
 }
 
 /// <summary>
@@ -49,6 +57,9 @@ public interface IConversationNotifier
 
     /// <summary>(userId, jobId, resultJson, resultType) — a streamed result refresh after completion.</summary>
     event Action<string, int, string, string>? Enriched;
+
+    /// <summary>(userId, jobId, resultJson, resultType) — an intermediate result while still running.</summary>
+    event Action<string, int, string, string>? Partial;
 
     /// <summary>
     /// The most recent progress signal for the user's running <paramref name="jobId"/>, or null when
@@ -78,6 +89,7 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
     public event Action<string, int, string>? Progress;
     public event Action<string, int, string, string?, string?, string?>? Completed;
     public event Action<string, int, string, string>? Enriched;
+    public event Action<string, int, string, string>? Partial;
 
     public string? LatestProgress(string userId, int jobId) =>
         _latestProgress.TryGetValue(userId, out var p) && p.JobId == jobId ? p.Signal : null;
@@ -102,5 +114,13 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
     {
         Enriched?.Invoke(userId, jobId, resultJson, resultType);
         return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Enriched", jobId, resultJson, resultType);
+    }
+
+    public Task PartialAsync(string userId, int jobId, string resultJson, string resultType)
+    {
+        // Deliberately does NOT touch _latestProgress: the job is still running and the stepper
+        // should keep showing its live stage alongside the partial grid.
+        Partial?.Invoke(userId, jobId, resultJson, resultType);
+        return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Partial", jobId, resultJson, resultType);
     }
 }

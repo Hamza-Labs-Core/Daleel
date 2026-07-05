@@ -72,6 +72,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IScrapedPriceRepository _scrapedPrices;
     private readonly IBrandCatalogService _brandCatalog;
     private readonly ILogger<ItemEnrichmentService> _logger;
+    private readonly Services.IProviderApi _providers;
 
     /// <summary>How many of the result's brands get their site catalogue harvested per run (slow crawls).</summary>
     private const int MaxBrandCatalogs = 2;
@@ -102,7 +103,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         IScrapedPriceRepository scrapedPrices, IBrandCatalogService brandCatalog,
         IBrandRepository brands, IBrandModelRepository brandModels,
         Identification.IProductIdentifier identifier,
-        ILogger<ItemEnrichmentService> logger)
+        ILogger<ItemEnrichmentService> logger,
+        Services.IProviderApi? providers = null)
     {
         _repo = repo;
         _options = options;
@@ -113,6 +115,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         _brandModels = brandModels;
         _identifier = identifier;
         _logger = logger;
+        // Optional so existing test wiring keeps working; production DI always supplies the gateway.
+        _providers = providers ?? new Services.ProviderApi(factory);
     }
 
     public async Task<ItemEnrichmentResult> EnrichAsync(
@@ -354,18 +358,16 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // Primary: Context.dev's purpose-built catalogue extraction. Secondary (for the domains it can't
         // read — JS-heavy/anti-bot stores): render the page through the scrape router, which falls through
         // to the Cloudflare Browser renderer, and parse prices out of the markdown ourselves.
-        var key = _factory.Resolve("CONTEXT_DEV_API_KEY");
         var pool = new List<CatalogProduct>();
         var browserUnpriced = domains;
 
-        if (!string.IsNullOrWhiteSpace(key))
+        if (_providers.HasScraper)
         {
-            var ctx = new ContextDevProvider(key);
             progress($"Reading {domains.Count} store catalogue(s) for live prices…");
 
             var catalogues = await Task.WhenAll(domains.Select(async d =>
             {
-                var found = await SafeCatalog(ctx, d, _logger, catalogCts.Token);
+                var found = await SafeCatalog(_providers, d, _logger, catalogCts.Token);
                 record(EventCategory.Extract, "catalog.products", "context.dev",
                     new Dictionary<string, object?> { ["domain"] = d, ["products"] = found.Count });
                 return (domain: d, found);
@@ -1019,18 +1021,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private static bool HasPrice(ProductModel m) => m.Offers.Any(o => o.Price is not null);
 
     private static async Task<IReadOnlyList<CatalogProduct>> SafeCatalog(
-        ContextDevProvider ctx, string domain, ILogger logger, CancellationToken ct)
+        Services.IProviderApi api, string domain, ILogger logger, CancellationToken ct)
     {
         try
         {
-            // Metered through the ambient per-job observer — the store-catalogue crawl runs on its
-            // own provider instance, invisible to the AgentFactory's wiring (see AmbientApiObserver).
-            return await Daleel.Core.Observability.ApiCallTimer.TimeAsync(
-                Daleel.Core.Observability.AmbientApiObserver.Observer,
-                Daleel.Core.Observability.AmbientApiObserver.Estimator ?? new Daleel.Core.Observability.CostEstimator(),
-                "Context.dev", "catalog/extract", domain,
-                // UNCAPPED (maxProducts 0 ⇒ vendor ceiling) — the phase budget bounds time, not count.
-                () => ctx.ExtractProductsAsync(domain, maxProducts: 0, timeoutMs: CatalogTimeoutMs, cancellationToken: ct));
+            // Metering is the gateway's job now (ambient per-job observer, by construction).
+            // UNCAPPED (maxProducts 0 ⇒ vendor ceiling) — the phase budget bounds time, not count.
+            return await api.ExtractCatalogAsync(domain, maxProducts: 0, timeoutMs: CatalogTimeoutMs, ct: ct);
         }
         catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
         catch (Exception ex)

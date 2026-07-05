@@ -195,7 +195,10 @@ public sealed class ScrapePricesActivity : CancellableActivity
     {
         var state = context.GetRequiredService<StoreResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
-        var factory = context.GetRequiredService<IAgentFactory>();
+        // ALL provider calls go through the gateway (metered by construction) — never a direct
+        // provider construction here. The unmetered inline crawl this activity used to make was
+        // exactly the leak the gateway exists to close.
+        var api = context.GetRequiredService<Daleel.Web.Services.IProviderApi>();
         var logger = context.GetRequiredService<ILogger<ScrapePricesActivity>>();
 
         var domain = DomainOf(state.Result.Url);
@@ -206,20 +209,18 @@ public sealed class ScrapePricesActivity : CancellableActivity
 
         // Edge path: fire the submit and move on. The result is durable in R2 the moment the worker
         // finishes and reaches the ScrapedPrice series via the drain — nothing here can lose it.
-        if (await TrySubmitToEdgeAsync(context, state, services, domain, logger))
+        if (await TrySubmitToEdgeAsync(context, state, services, api, domain, logger))
         {
             return;
         }
 
-        var key = factory.Resolve("CONTEXT_DEV_API_KEY");
-        if (string.IsNullOrWhiteSpace(key))
+        if (!api.HasScraper)
         {
             return; // no Context.dev key — nothing to crawl inline
         }
 
         services.Report(SearchStep.FindingStores, "Progress.Msg.ReadingStoreCatalog", state.Store.Name);
-        var provider = new ContextDevProvider(key);
-        var products = await SafeCatalog(provider, domain, logger, state.Store.Name, context.CancellationToken);
+        var products = await SafeCatalog(api, domain, logger, state.Store.Name, context.CancellationToken);
 
         // Persist every priced product as a new observation so the data isn't discarded after the crawl.
         var persisted = await PersistPricesAsync(context, state, products, logger);
@@ -247,10 +248,9 @@ public sealed class ScrapePricesActivity : CancellableActivity
     /// </summary>
     private static async Task<bool> TrySubmitToEdgeAsync(
         ActivityExecutionContext context, StoreResearchState state, SubWorkflowServices services,
-        string domain, ILogger logger)
+        Daleel.Web.Services.IProviderApi api, string domain, ILogger logger)
     {
-        var client = context.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>();
-        if (client is null)
+        if (!api.HasEdge)
         {
             return false; // CF_SCRAPE_WORKER_URL/TOKEN not configured
         }
@@ -283,7 +283,9 @@ public sealed class ScrapePricesActivity : CancellableActivity
             var maxProducts = await config.GetIntAsync(
                 Daleel.Web.Cloudflare.CloudflareWorkerOptions.CatalogMaxProductsKey, 0, context.CancellationToken);
 
-            var handle = await client.SubmitCatalogAsync(
+            // Through the gateway: the submit is metered with the same estimate an inline crawl
+            // records, so edge spend counts toward this job's cap and usage log at submit time.
+            var handle = await api.SubmitEdgeCatalogAsync(
                 domain, state.Store.Name, state.SearchId, maxProducts, context.CancellationToken);
             if (handle is null)
             {
@@ -362,13 +364,13 @@ public sealed class ScrapePricesActivity : CancellableActivity
     }
 
     private static async Task<IReadOnlyList<CatalogProduct>> SafeCatalog(
-        ContextDevProvider provider, string domain, ILogger logger, string storeName, CancellationToken ct)
+        Daleel.Web.Services.IProviderApi api, string domain, ILogger logger, string storeName, CancellationToken ct)
     {
         try
         {
             // UNCAPPED (maxProducts 0 ⇒ vendor ceiling): the whole point is the full catalogue, not
             // its first page. Time-bounded by the sub-workflow budget; cost-bounded by the job cap.
-            return await provider.ExtractProductsAsync(domain, maxProducts: 0, cancellationToken: ct);
+            return await api.ExtractCatalogAsync(domain, maxProducts: 0, ct: ct);
         }
         catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
         catch (Exception ex)

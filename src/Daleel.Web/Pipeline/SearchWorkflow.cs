@@ -35,18 +35,16 @@ public sealed class SearchWorkflow : WorkflowBase
         {
             Activities =
             {
-                new ParseQueryActivity(),                // 1. normalize + plan
-                new CheckCacheActivity(),                // 2. replay cached report (short-circuits the rest)
-                new AnalyzeMarketActivity(),             // 2b. think: category type, stores, brands, comparison specs
-                new GatherSourcesActivity(),             // 3. fan out to providers
-                new ExtractProductsActivity(),           // 4. LLM analyst + product extraction
-                new DispatchBrandWorkflowsActivity(),    // 5. one BrandResearchWorkflow per brand (parallel)
-                new DispatchStoreWorkflowsActivity(),    // 6. one StoreResearchWorkflow per store (parallel)
-                new DispatchItemWorkflowsActivity(),     // 7. one ItemDeepDiveWorkflow per model (parallel)
-                new AggregateResultsActivity(),          // 8. assemble the ranked answer
-                new ModerateContentActivity(),           // 9. record halal-filter audit
-                new CacheResultsActivity(),              // 10. serialize + persist
-                new ReturnResultsActivity()              // 11. finalize
+                new ParseQueryActivity(),                  // 1. normalize + plan
+                new CheckCacheActivity(),                  // 2. replay cached report (short-circuits the rest)
+                new AnalyzeMarketActivity(),               // 2b. think: category type, stores, brands, comparison specs
+                new GatherSourcesActivity(),               // 3. fan out to providers
+                new ExtractProductsActivity(),             // 4. LLM analyst + product extraction → FIRST partial to the UI
+                new DispatchEnrichmentWorkflowsActivity(), // 5–7. brand/store/item sub-workflows CONCURRENTLY, streaming partials
+                new AggregateResultsActivity(),            // 8. assemble the ranked answer
+                new ModerateContentActivity(),             // 9. record halal-filter audit
+                new CacheResultsActivity(),                // 10. serialize + persist
+                new ReturnResultsActivity()                // 11. finalize
             }
         };
     }

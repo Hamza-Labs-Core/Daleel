@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
@@ -65,8 +66,25 @@ public sealed class SearchJobService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // CONCURRENT JOBS: the loop keeps claiming while work is queued and runs each job as its own
+        // tracked task — one user's slow search never queues behind another's. No job-count cap by
+        // default (each job is individually bounded by its own deadline + cost cap); the semaphore is
+        // an optional per-environment RESTRAINT via PIPELINE_MAX_CONCURRENT_JOBS. FOR UPDATE SKIP
+        // LOCKED already makes claims safe across concurrent claimers, in-process or cross-container.
+        using var jobGate = new SemaphoreSlim(Pipeline.PipelineLimits.ConcurrentJobs);
+        var running = new ConcurrentDictionary<Task, byte>();
+
         while (!stoppingToken.IsCancellationRequested)
         {
+            try
+            {
+                await jobGate.WaitAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break; // host shutdown
+            }
+
             int jobId;
             try
             {
@@ -74,6 +92,7 @@ public sealed class SearchJobService : BackgroundService
                 {
                     // Nothing waiting — idle a beat, then poll again. Source of truth is the DB, so a job
                     // queued by another process (or a restart's leftover work) is picked up next tick.
+                    jobGate.Release();
                     await Task.Delay(PollInterval, stoppingToken);
                     continue;
                 }
@@ -81,29 +100,51 @@ public sealed class SearchJobService : BackgroundService
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                throw; // host shutdown
+                jobGate.Release();
+                break; // host shutdown
             }
             catch (Exception ex)
             {
                 // A claim failure (transient DB blip) must never take the worker down — back off and retry.
+                jobGate.Release();
                 _logger.LogError(ex, "Failed to claim the next queued search job");
                 await Task.Delay(PollInterval, stoppingToken);
                 continue;
             }
 
-            // One job's failure must never take down the worker loop.
-            try
+            // Run the job detached and immediately go claim the next one — queued searches start NOW,
+            // not after the previous search finishes. One job's failure never touches the others.
+            var task = Task.Run(async () =>
             {
-                await ProcessAsync(jobId, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                throw; // host shutdown — let the worker loop exit, don't mislabel it as a crash
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Search job {JobId} crashed the processor", jobId);
-            }
+                try
+                {
+                    await ProcessAsync(jobId, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    // host shutdown — the job's own interrupted-state reconciler handles the leftovers
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Search job {JobId} crashed the processor", jobId);
+                }
+                finally
+                {
+                    jobGate.Release();
+                }
+            }, CancellationToken.None);
+            running[task] = 0;
+            _ = task.ContinueWith(t => running.TryRemove(t, out _), TaskScheduler.Default);
+        }
+
+        // Drain: give in-flight jobs a moment to observe the stop token and finalize their state.
+        try
+        {
+            await Task.WhenAll(running.Keys).WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+        }
+        catch
+        {
+            // Shutdown drain is best-effort — the orphaned-job reconciler recovers anything cut off.
         }
     }
 

@@ -374,6 +374,7 @@ jobs:
             PIPELINE_MAX_BRANDS=${{ vars.PIPELINE_MAX_BRANDS }}
             PIPELINE_MAX_STORES=${{ vars.PIPELINE_MAX_STORES }}
             PIPELINE_MAX_ITEMS=${{ vars.PIPELINE_MAX_ITEMS }}
+            PIPELINE_MAX_CONCURRENT_JOBS=${{ vars.PIPELINE_MAX_CONCURRENT_JOBS }}
             # Cloudflare R2 object storage (optional). Shared connection: if the creds
             # are unset they resolve to empty and the app falls back to file logging at
             # /app/data/logs/ — so these are intentionally NOT in the required-secrets
