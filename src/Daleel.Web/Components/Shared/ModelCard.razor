@@ -73,7 +73,10 @@
             }
             else
             {
-                <MudText Typo="Typo.body2" Color="Color.Secondary">@L["ModelCard.PriceOnSite"]</MudText>
+                @* No numeric price could be read from any of this model's seller pages — the store
+                   link is the price source. Kept honest: never invent or estimate a number here. *@
+                <MudText Typo="Typo.body2" Color="Color.Secondary"
+                         title="@L["ModelCard.PriceOnSiteHint"]">@L["ModelCard.PriceOnSite"]</MudText>
             }
 
             @if (Model.Offers.Any(o => o.IsDeal))

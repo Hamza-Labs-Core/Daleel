@@ -370,7 +370,8 @@
 
   <data name="ModelCard.ProductRating" xml:space="preserve"><value>Buyer rating from store listings</value></data>
   <data name="ModelCard.From" xml:space="preserve"><value>from</value></data>
-  <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>Price on site</value></data>
+  <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>See price on store site</value></data>
+  <data name="ModelCard.PriceOnSiteHint" xml:space="preserve"><value>We found this product at the store but could not read a price from the page — open the store to check it.</value></data>
   <data name="ModelCard.Sale" xml:space="preserve"><value>SALE</value></data>
   <data name="ModelCard.Seller" xml:space="preserve"><value>seller</value></data>
 

@@ -370,7 +370,8 @@
 
   <data name="ModelCard.ProductRating" xml:space="preserve"><value>تقييم المشترين من قوائم المتاجر</value></data>
   <data name="ModelCard.From" xml:space="preserve"><value>يبدأ من</value></data>
-  <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>السعر على الموقع</value></data>
+  <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>راجع السعر على موقع المتجر</value></data>
+  <data name="ModelCard.PriceOnSiteHint" xml:space="preserve"><value>وجدنا هذا المنتج لدى المتجر لكن تعذّرت قراءة السعر من الصفحة — افتح المتجر للتحقق منه.</value></data>
   <data name="ModelCard.Sale" xml:space="preserve"><value>تخفيض</value></data>
   <data name="ModelCard.Seller" xml:space="preserve"><value>بائع</value></data>
 

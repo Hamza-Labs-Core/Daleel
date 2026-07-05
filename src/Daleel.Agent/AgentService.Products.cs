@@ -949,16 +949,36 @@ public sealed partial class AgentService
         return first ?? r.Title;
     }
 
-    /// <summary>Title-cased registrable label of a host, e.g. "https://www.samsung.com/jo" → "Samsung".</summary>
-    private static string? HostLabel(string? url)
+    /// <summary>
+    /// Title-cased REGISTRABLE label of a host — the brand-carrying label immediately left of the
+    /// public suffix, never a subdomain: "https://www.samsung.com/jo" → "Samsung",
+    /// "jo.opensooq.com" → "Opensooq" (jo is the country subdomain, not the store),
+    /// "khaleej.com.sa" → "Khaleej", "leaders.jo" → "Leaders". Taking the FIRST label minted
+    /// country/language/mobile subdomains ("Jo", "M", "En") as store names.
+    /// </summary>
+    public static string? HostLabel(string? url)
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u))
         {
             return null;
         }
 
-        var host = u.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? u.Host[4..] : u.Host;
-        var label = host.Split('.').FirstOrDefault();
+        var labels = u.Host.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (labels.Length == 0)
+        {
+            return null;
+        }
+
+        // Approximate public-suffix walk from the right: "<generic>.<cc>" pairs (com.jo, co.uk,
+        // com.sa…) are two-label suffixes, anything else is one. The label before the suffix is the
+        // registrable one — correct for any depth of subdomain without listing subdomains.
+        var suffixLen = 1;
+        if (labels.Length >= 3 && labels[^1].Length == 2 && GenericSecondLevels.Contains(labels[^2]))
+        {
+            suffixLen = 2;
+        }
+
+        var label = labels.Length > suffixLen ? labels[^(suffixLen + 1)] : labels[0];
         if (string.IsNullOrWhiteSpace(label))
         {
             return null;
@@ -966,6 +986,10 @@ public sealed partial class AgentService
 
         return char.ToUpperInvariant(label[0]) + label[1..];
     }
+
+    /// <summary>Generic second-level labels that pair with a country code to form a public suffix.</summary>
+    private static readonly HashSet<string> GenericSecondLevels =
+        new(StringComparer.OrdinalIgnoreCase) { "com", "co", "net", "org", "gov", "edu", "mil", "ac" };
 
     /// <summary>Wire shape for the structured product-extraction LLM output.</summary>
     private sealed class ExtractedProductsDto
