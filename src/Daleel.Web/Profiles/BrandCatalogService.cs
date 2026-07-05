@@ -24,8 +24,9 @@ public interface IBrandCatalogService
 
 public sealed class BrandCatalogService : IBrandCatalogService
 {
-    /// <summary>Cap on models harvested per brand per pass — a brand catalogue can be huge.</summary>
-    private const int MaxModels = 24;
+    /// <summary>Models harvested per brand per pass — uncapped (0 ⇒ the vendor's own ceiling); the
+    /// per-brand crawl budget below bounds time, not count.</summary>
+    private const int MaxModels = 0;
 
     /// <summary>Per-brand crawl budget, kept under the background enrichment timeout.</summary>
     private const int CrawlTimeoutMs = 30_000;

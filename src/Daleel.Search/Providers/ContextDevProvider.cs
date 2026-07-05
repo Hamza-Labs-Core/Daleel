@@ -212,13 +212,18 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
     /// it a generous timeout. Best-effort: returns empty on any failure.
     /// </summary>
     public async Task<IReadOnlyList<CatalogProduct>> ExtractProductsAsync(
-        string domain, int maxProducts = 12, int timeoutMs = 45_000, CancellationToken cancellationToken = default)
+        string domain, int maxProducts = 0, int timeoutMs = 45_000, CancellationToken cancellationToken = default)
     {
         try
         {
+            // maxProducts ≤ 0 ⇒ UNCAPPED: omit the field so Context.dev applies its own ceiling.
+            // Only an explicit caller-chosen cap is forwarded.
+            object payload = maxProducts > 0
+                ? new { domain, maxProducts, timeoutMS = timeoutMs }
+                : new { domain, timeoutMS = timeoutMs };
             using var doc = await PostAsync(
                 "/v1/brand/ai/products",
-                new { domain, maxProducts, timeoutMS = timeoutMs },
+                payload,
                 cancellationToken).ConfigureAwait(false);
 
             if (!doc.RootElement.TryGetProperty("products", out var arr) || arr.ValueKind != JsonValueKind.Array)

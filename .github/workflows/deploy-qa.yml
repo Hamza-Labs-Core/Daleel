@@ -315,8 +315,8 @@ jobs:
             CF_SCRAPE_WORKER_TOKEN=${{ secrets.CF_QA_SCRAPE_WORKER_TOKEN }}
             CF_QUEUES_API_TOKEN=${{ secrets.CF_QUEUES_API_TOKEN }}
             CF_POLL_QUEUE_ID=${{ secrets.CF_QA_POLL_QUEUE_ID }}
-            # Pipeline fan-out caps — QA-scoped variables so QA tuning never bleeds into prod.
-            # Unset/empty → code defaults (5 / 15 / 10 / 20).
+            # Pipeline fan-out limits — QA-scoped variables so QA tuning never bleeds into prod.
+            # Unset/empty → code defaults: entity fan-outs UNCAPPED, concurrency 16 (restraints only).
             PIPELINE_SUBWORKFLOW_CONCURRENCY=${{ vars.QA_PIPELINE_SUBWORKFLOW_CONCURRENCY }}
             PIPELINE_MAX_BRANDS=${{ vars.QA_PIPELINE_MAX_BRANDS }}
             PIPELINE_MAX_STORES=${{ vars.QA_PIPELINE_MAX_STORES }}

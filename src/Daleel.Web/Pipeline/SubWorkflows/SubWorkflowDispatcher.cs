@@ -24,9 +24,8 @@ public static class SubWorkflowDispatcher
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// How many child sub-workflows run at once. Bounds DB/network fan-out per dispatch step; tunable
-    /// via <c>PIPELINE_SUBWORKFLOW_CONCURRENCY</c> (see <see cref="PipelineLimits"/>) — raise it when
-    /// the Cloudflare execution layer carries the heavy calls off-box.
+    /// How many child sub-workflows run at once — a throughput WIDTH (work queues for a slot, nothing
+    /// is dropped), tunable via <c>PIPELINE_SUBWORKFLOW_CONCURRENCY</c> (see <see cref="PipelineLimits"/>).
     /// </summary>
     public static int MaxConcurrency => PipelineLimits.SubWorkflowConcurrency;
 

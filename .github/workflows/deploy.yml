@@ -366,9 +366,10 @@ jobs:
             CF_SCRAPE_WORKER_TOKEN=${{ secrets.CF_SCRAPE_WORKER_TOKEN }}
             CF_QUEUES_API_TOKEN=${{ secrets.CF_QUEUES_API_TOKEN }}
             CF_POLL_QUEUE_ID=${{ secrets.CF_POLL_QUEUE_ID }}
-            # Pipeline fan-out caps (PipelineLimits.cs) — repo/environment VARIABLES, not secrets.
-            # Unset/empty → int.TryParse fails → code defaults (5 / 15 / 10 / 20). Raise once the
-            # Cloudflare execution layer carries the heavy calls off-box.
+            # Pipeline fan-out limits (PipelineLimits.cs) — repo/environment VARIABLES, not secrets.
+            # Unset/empty → code defaults: entity fan-outs UNCAPPED, concurrency 16. Set a value only
+            # as a deliberate RESTRAINT for this environment; the real backstops are the per-job cost
+            # cap and the workflow deadline + salvage.
             PIPELINE_SUBWORKFLOW_CONCURRENCY=${{ vars.PIPELINE_SUBWORKFLOW_CONCURRENCY }}
             PIPELINE_MAX_BRANDS=${{ vars.PIPELINE_MAX_BRANDS }}
             PIPELINE_MAX_STORES=${{ vars.PIPELINE_MAX_STORES }}

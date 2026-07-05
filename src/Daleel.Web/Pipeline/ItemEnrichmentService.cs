@@ -32,20 +32,19 @@ public interface IItemEnrichmentService
 
 public sealed class ItemEnrichmentService : IItemEnrichmentService
 {
-    /// <summary>How many items get a price-comparison + reuse pass (DB reads only).</summary>
-    private const int MaxItems = 20;
-
-    /// <summary>How many NEW (uncached) thin items get an actual network scrape per run.</summary>
-    private const int MaxNewScrapes = 8;
+    /// <summary>
+    /// Items eligible for the paid phases (page scrapes, image search) per run. UNCAPPED by default —
+    /// every discovered model is eligible; each paid phase carries its own wall-clock budget and keeps
+    /// partial results, so TIME (and the per-job cost cap) is the limiter, never a count. Restrainable
+    /// per environment via <c>PIPELINE_MAX_ITEMS</c> (<see cref="PipelineLimits"/>).
+    /// </summary>
+    private static int MaxItems => PipelineLimits.MaxItems;
 
     /// <summary>An item is "thin" (worth scraping) when it has fewer than this many specs.</summary>
     private const int ThinSpecThreshold = 3;
 
     /// <summary>Cap on a saved detail blob (entity column is 8000).</summary>
     private const int MaxDetailChars = 4000;
-
-    /// <summary>How many of the found stores' catalogues we harvest for live prices (each is a slow crawl).</summary>
-    private const int MaxCatalogSites = 2;
 
     /// <summary>Per-catalogue crawl budget — kept under the background enrichment timeout.</summary>
     private const int CatalogTimeoutMs = 30_000;
@@ -187,7 +186,9 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             }
 
             var url = OfficialOrCheapestUrl(m);
-            if (url is not null && m.Specs.Count < ThinSpecThreshold && toScrape.Count < MaxNewScrapes)
+            // No scrape-count cap: every thin item is a candidate — the scrape phase's own wall-clock
+            // budget decides how many actually run, and it keeps whatever finished.
+            if (url is not null && m.Specs.Count < ThinSpecThreshold)
             {
                 toScrape.Add((m, idx, url, key));
             }
@@ -333,11 +334,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             return (models, 0, 0, 0);
         }
 
+        // No site-count cap: every distinct store domain is a candidate — the phase's catalogCts
+        // wall-clock budget below decides how many crawls actually complete, and keeps what finished.
         var domains = products.Stores
             .Select(s => DomainOf(s.Url))
             .Where(d => d is not null).Select(d => d!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(MaxCatalogSites)
             .ToList();
         if (domains.Count == 0)
         {
@@ -1027,7 +1029,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 Daleel.Core.Observability.AmbientApiObserver.Observer,
                 Daleel.Core.Observability.AmbientApiObserver.Estimator ?? new Daleel.Core.Observability.CostEstimator(),
                 "Context.dev", "catalog/extract", domain,
-                () => ctx.ExtractProductsAsync(domain, maxProducts: 12, timeoutMs: CatalogTimeoutMs, cancellationToken: ct));
+                // UNCAPPED (maxProducts 0 ⇒ vendor ceiling) — the phase budget bounds time, not count.
+                () => ctx.ExtractProductsAsync(domain, maxProducts: 0, timeoutMs: CatalogTimeoutMs, cancellationToken: ct));
         }
         catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
         catch (Exception ex)

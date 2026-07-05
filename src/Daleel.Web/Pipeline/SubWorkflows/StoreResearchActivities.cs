@@ -191,9 +191,6 @@ public sealed class SaveStoreProfileActivity : CancellableActivity
 [Activity("Daleel", "Store", "Scrape prices: harvest the store's catalogue prices via Context.dev")]
 public sealed class ScrapePricesActivity : CancellableActivity
 {
-    /// <summary>Inline-path cap — bounded so one store can't flood the run while it holds the workflow.</summary>
-    private const int MaxProducts = 12;
-
     protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();
@@ -369,7 +366,9 @@ public sealed class ScrapePricesActivity : CancellableActivity
     {
         try
         {
-            return await provider.ExtractProductsAsync(domain, maxProducts: MaxProducts, cancellationToken: ct);
+            // UNCAPPED (maxProducts 0 ⇒ vendor ceiling): the whole point is the full catalogue, not
+            // its first page. Time-bounded by the sub-workflow budget; cost-bounded by the job cap.
+            return await provider.ExtractProductsAsync(domain, maxProducts: 0, cancellationToken: ct);
         }
         catch (OperationCanceledException) { throw; } // genuine cancellation/timeout must propagate
         catch (Exception ex)

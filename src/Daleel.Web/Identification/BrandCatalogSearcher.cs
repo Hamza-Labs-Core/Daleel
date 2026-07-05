@@ -26,8 +26,9 @@ public interface IBrandCatalogSearcher
 
 public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
 {
-    /// <summary>Cap on models harvested per regional site per pass.</summary>
-    private const int MaxModelsPerRegion = 24;
+    /// <summary>Models harvested per regional site per pass — uncapped (0 ⇒ the vendor's own ceiling);
+    /// the per-region crawl budget below bounds time, not count.</summary>
+    private const int MaxModelsPerRegion = 0;
 
     /// <summary>How many regional candidate sites we'll probe before stopping (cost guard).</summary>
     private const int MaxRegionsProbed = 4;
