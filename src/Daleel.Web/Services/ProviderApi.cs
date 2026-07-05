@@ -46,20 +46,50 @@ public interface IProviderApi
     /// </summary>
     Task<WorkerHandle?> SubmitEdgeCatalogAsync(
         string domain, string? store, string? searchJobId, int maxProducts = 0, CancellationToken ct = default);
+
+    // ── Workers-AI fleet (doc §3.2–3.4) — signals only, metered, best-effort ────────────────────
+    // Callers own thresholds/policy; empty results mean "no verdict, keep the inline behavior".
+    // Filter findings in particular feed the VPS HalalModerator and must be A/B-validated before
+    // any default routing flips (doc §6 Phase 3).
+
+    /// <summary>True when the classify host is configured.</summary>
+    bool HasEdgeClassify { get; }
+
+    /// <summary>True when the filter host is configured.</summary>
+    bool HasEdgeFilter { get; }
+
+    /// <summary>Commodity text labeling on the edge; empty on failure/unconfigured.</summary>
+    Task<IReadOnlyList<Cloudflare.ClassifyVerdict>> ClassifyTextAsync(
+        IReadOnlyList<(string Id, string Text)> items, IReadOnlyList<string> labels, CancellationToken ct = default);
+
+    /// <summary>Workers-AI structured extraction from page content; empty on failure/unconfigured.</summary>
+    Task<IReadOnlyList<CatalogProduct>> ExtractProductsFromContentAsync(
+        string content, string? market = null, CancellationToken ct = default);
+
+    /// <summary>Halal findings (signals only) for texts; empty on failure/unconfigured.</summary>
+    Task<IReadOnlyList<Cloudflare.FilterFindingDto>> FilterTextFindingsAsync(
+        IReadOnlyList<(string Id, string Text, string? SourceUrl)> items, CancellationToken ct = default);
+
+    /// <summary>Halal findings (signals only) for image urls; empty on failure/unconfigured.</summary>
+    Task<IReadOnlyList<Cloudflare.FilterFindingDto>> FilterImageFindingsAsync(
+        IReadOnlyList<string> urls, CancellationToken ct = default);
 }
 
 public sealed class ProviderApi : IProviderApi
 {
     private readonly IAgentFactory _factory;
     private readonly ICloudflareWorkerClient? _edge;
+    private readonly ICloudflareFleetClient? _fleet;
     private readonly object _gate = new();
     private ContextDevProvider? _contextDev;
     private string? _contextDevKey;
 
-    public ProviderApi(IAgentFactory factory, ICloudflareWorkerClient? edge = null)
+    public ProviderApi(
+        IAgentFactory factory, ICloudflareWorkerClient? edge = null, ICloudflareFleetClient? fleet = null)
     {
         _factory = factory;
         _edge = edge;
+        _fleet = fleet;
     }
 
     public bool HasScraper => _factory.Resolve("CONTEXT_DEV_API_KEY") is not null;
@@ -138,6 +168,62 @@ public sealed class ProviderApi : IProviderApi
             });
         }
         return handle;
+    }
+
+    public bool HasEdgeClassify => _fleet?.HasClassify ?? false;
+
+    public bool HasEdgeFilter => _fleet?.HasFilter ?? false;
+
+    public async Task<IReadOnlyList<Cloudflare.ClassifyVerdict>> ClassifyTextAsync(
+        IReadOnlyList<(string Id, string Text)> items, IReadOnlyList<string> labels, CancellationToken ct = default)
+    {
+        if (_fleet is not { HasClassify: true })
+        {
+            return Array.Empty<Cloudflare.ClassifyVerdict>();
+        }
+
+        return await MeterAsync(
+            "workers-ai/classify", "classify/text", $"{items.Count} item(s)",
+            () => _fleet.ClassifyTextAsync(items, labels, ct)).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<CatalogProduct>> ExtractProductsFromContentAsync(
+        string content, string? market = null, CancellationToken ct = default)
+    {
+        if (_fleet is not { HasExtract: true })
+        {
+            return Array.Empty<CatalogProduct>();
+        }
+
+        return await MeterAsync(
+            "workers-ai/extract", "extract/products", $"{content.Length} chars",
+            () => _fleet.ExtractProductsAsync(content, market, ct)).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<Cloudflare.FilterFindingDto>> FilterTextFindingsAsync(
+        IReadOnlyList<(string Id, string Text, string? SourceUrl)> items, CancellationToken ct = default)
+    {
+        if (_fleet is not { HasFilter: true })
+        {
+            return Array.Empty<Cloudflare.FilterFindingDto>();
+        }
+
+        return await MeterAsync(
+            "workers-ai/filter", "filter/text", $"{items.Count} item(s)",
+            () => _fleet.FilterTextAsync(items, ct)).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<Cloudflare.FilterFindingDto>> FilterImageFindingsAsync(
+        IReadOnlyList<string> urls, CancellationToken ct = default)
+    {
+        if (_fleet is not { HasFilter: true })
+        {
+            return Array.Empty<Cloudflare.FilterFindingDto>();
+        }
+
+        return await MeterAsync(
+            "workers-ai/filter", "filter/images", $"{urls.Count} url(s)",
+            () => _fleet.FilterImagesAsync(urls, ct)).ConfigureAwait(false);
     }
 
     /// <summary>Cached Context.dev provider (rebuilt only if the resolved key changes).</summary>

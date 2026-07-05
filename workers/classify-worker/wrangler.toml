@@ -1,0 +1,40 @@
+name = "daleel-classify-worker"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+
+# The CLASSIFICATION EXECUTION HOST of docs/architecture/cloudflare-workers-pipeline.md (§3.2):
+# commodity text/image labeling on Workers AI (buy-intent, category tagging, the LLM adjudication
+# *signal* inside moderation). Stateless and policy-free by design — callers own thresholds,
+# whitelists, dedupe, and every moderation invariant; this worker only turns content into
+# {label, confidence} verdicts. Strategy planning and nuanced analysis stay on Claude/OpenRouter.
+#
+# Mode: sync per batch (≤100 text items / ≤20 image urls). For non-real-time bulk classification
+# the future path is the Workers AI async Batch API (queueRequest:true) — see README.
+
+# Workers AI. EXACTLY ONE AI binding per Worker (platform limit). The binding is account-level —
+# there is no per-environment resource to create, name, or migrate.
+#
+# COST WARNING: Workers AI BILLS EVEN IN `wrangler dev` — there is no local mock; every
+# env.AI.run() in dev hits the real account. Prototype on the small default models (3B/8B);
+# 70B-class models burn ~8x the neurons and exhaust the 10k free neurons/day almost immediately.
+[ai]
+binding = "AI"
+
+[observability]
+enabled = true
+
+# Plain (non-secret) config: none yet. The worker needs no env prefix — it owns no storage
+# (no R2/KV/Queues); requests and verdicts are its entire state.
+[vars]
+
+# QA deployment: `wrangler deploy --env qa`. Environments do not inherit bindings, so the AI
+# binding is redeclared — it points at the same account-level Workers AI (no -qa resource exists
+# for AI; isolation is by worker name + its own AUTH_TOKEN secret).
+[env.qa]
+name = "daleel-classify-worker-qa"
+
+[env.qa.ai]
+binding = "AI"
+
+# SECRETS (never in this file) — set with `wrangler secret put <NAME>` (add `--env qa` for QA):
+#   AUTH_TOKEN   bearer the VPS presents (house auth pattern, see scrape-worker/log-viewer)

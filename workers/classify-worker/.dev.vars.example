@@ -1,0 +1,4 @@
+# Local-dev secrets for `wrangler dev` — copy to .dev.vars (gitignored) and fill in.
+# CAUTION: Workers AI bills even under `wrangler dev` (no local mock) — every env.AI.run()
+# call hits the real account. Keep dev runs on the small default models.
+AUTH_TOKEN=dev-token

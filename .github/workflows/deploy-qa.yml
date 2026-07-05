@@ -315,6 +315,15 @@ jobs:
             CF_SCRAPE_WORKER_TOKEN=${{ secrets.CF_QA_SCRAPE_WORKER_TOKEN }}
             CF_QUEUES_API_TOKEN=${{ secrets.CF_QUEUES_API_TOKEN }}
             CF_POLL_QUEUE_ID=${{ secrets.CF_QA_POLL_QUEUE_ID }}
+            # Worker fleet endpoints — QA points at the -qa workers so edge calls never cross envs.
+            CF_SEARCH_WORKER_URL=${{ secrets.CF_QA_SEARCH_WORKER_URL }}
+            CF_SEARCH_WORKER_TOKEN=${{ secrets.CF_QA_SEARCH_WORKER_TOKEN }}
+            CF_CLASSIFY_WORKER_URL=${{ secrets.CF_QA_CLASSIFY_WORKER_URL }}
+            CF_CLASSIFY_WORKER_TOKEN=${{ secrets.CF_QA_CLASSIFY_WORKER_TOKEN }}
+            CF_EXTRACT_WORKER_URL=${{ secrets.CF_QA_EXTRACT_WORKER_URL }}
+            CF_EXTRACT_WORKER_TOKEN=${{ secrets.CF_QA_EXTRACT_WORKER_TOKEN }}
+            CF_FILTER_WORKER_URL=${{ secrets.CF_QA_FILTER_WORKER_URL }}
+            CF_FILTER_WORKER_TOKEN=${{ secrets.CF_QA_FILTER_WORKER_TOKEN }}
             # Pipeline fan-out limits — QA-scoped variables so QA tuning never bleeds into prod.
             # Unset/empty → code defaults: entity fan-outs UNCAPPED, concurrency 16 (restraints only).
             PIPELINE_SUBWORKFLOW_CONCURRENCY=${{ vars.QA_PIPELINE_SUBWORKFLOW_CONCURRENCY }}

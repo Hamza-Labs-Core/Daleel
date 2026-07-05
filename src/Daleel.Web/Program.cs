@@ -489,13 +489,26 @@ builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>(
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
+// The Workers-AI fleet hosts (classify / extract / filter — doc §3.2–3.4). Signals only: policy
+// stays on the VPS, and routing into the moderation/extraction hot paths waits for the doc's
+// mandated A/B validation. Registered only when at least one endpoint is configured.
+if (Daleel.Web.Cloudflare.CloudflareFleetOptions.FromConfiguration(builder.Configuration) is { } fleetOptions)
+{
+    builder.Services.AddSingleton<Daleel.Web.Cloudflare.ICloudflareFleetClient>(sp =>
+        new Daleel.Web.Cloudflare.CloudflareFleetClient(
+            fleetOptions,
+            Daleel.Search.Http.SharedHttpHandler.CreateClient,
+            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareFleetClient>>()));
+}
+
 // THE provider gateway: every provider call made outside an AgentService flows through this — metered
 // (ambient per-job observer), cost-estimated, cap-enforced by construction. Never construct a provider
-// directly at a call site. Edge submits route through it too, so edge and inline spend meter identically.
+// directly at a call site. Edge submits + fleet signals route through it too, so all spend meters identically.
 builder.Services.AddSingleton<Daleel.Web.Services.IProviderApi>(sp =>
     new Daleel.Web.Services.ProviderApi(
         sp.GetRequiredService<Daleel.Web.Services.IAgentFactory>(),
-        sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>()));
+        sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(),
+        sp.GetService<Daleel.Web.Cloudflare.ICloudflareFleetClient>()));
 // Smart cache: scores a cache hit's completeness so CheckCache can serve, serve-and-refill, or reject it.
 // Stateless + side-effect-free, so a singleton is fine (resolved by the Elsa activity from its context).
 builder.Services.AddSingleton<Daleel.Web.Pipeline.ICacheQualityValidator, Daleel.Web.Pipeline.CacheQualityValidator>();

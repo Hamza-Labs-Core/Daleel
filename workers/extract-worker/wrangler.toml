@@ -1,0 +1,43 @@
+name = "daleel-extract-worker"
+main = "src/index.js"
+compatibility_date = "2026-06-01"
+
+# The STRUCTURED-EXTRACTION execution host of docs/architecture/cloudflare-workers-pipeline.md
+# (§3.3): raw HTML/markdown -> Daleel product JSON via Workers AI in JSON mode (schema-forced).
+#
+# v1 is deliberately SYNCHRONOUS single-document — a page extract is seconds, so no queues, no R2,
+# no D1 yet. The doc's async batch flow (202 + jobId, queue consumer, R2 EntityDocument writes,
+# D1 edge-index upserts, poll messages) is Phase 2 and slots in behind these same routes,
+# which is when the bucket/queue/D1 bindings from the doc's sample config get added here.
+
+# Workers AI — exactly ONE [ai] binding per worker (doc §3.2 gotchas). Nothing to provision:
+# the binding is account-level. But note Workers AI BILLS even under `wrangler dev` (no local
+# mock), and 70B-class models burn neurons ~8x faster than 8B — mind the 10k free neurons/day.
+[ai]
+binding = "AI"
+
+[observability]
+enabled = true
+
+# Big prompts + JSON post-processing are CPU-heavy; 5-min CPU ceiling (paid plan, Standard
+# usage) per the architecture doc's worker config (§10).
+[limits]
+cpu_ms = 300000
+
+# Plain (non-secret) config — echoed in the GET / banner only.
+[vars]
+ENVIRONMENT = "prod"
+
+# QA deployment: `wrangler deploy --env qa`. Bindings don't inherit across environments, so the
+# AI binding is re-declared; observability/limits DO inherit. This worker holds no named
+# resources (no bucket/queue/KV/D1) in v1, so there is nothing to prefix daleel-qa- yet —
+# Phase 2's bindings must follow that convention when they land.
+[env.qa]
+name = "daleel-extract-worker-qa"
+vars = { ENVIRONMENT = "qa" }
+
+[env.qa.ai]
+binding = "AI"
+
+# SECRETS (never in this file) — set with `wrangler secret put <NAME>` (add `--env qa` for QA):
+#   AUTH_TOKEN   bearer the VPS presents (house auth pattern, see scrape-worker/log-viewer)

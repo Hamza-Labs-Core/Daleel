@@ -126,13 +126,24 @@ public sealed class AgentFactory : IAgentFactory
         var keys = request.Keys;
         var llm = BuildLlm(request.Model, keys);
 
+        // Edge search proxy (search-worker, doc §3.5): when configured, the SerpAPI/Places calls run
+        // through the worker — which injects the vendor key (held as a worker secret) and serves hot
+        // repeats from its KV cache — while ALL parsing stays in the untouched providers here (Axis A:
+        // relocated execution, identical behavior). Unconfigured ⇒ providers hit the vendors directly.
+        var searchProxy = EdgeSearchClient();
+
         ISearchProvider? search =
-            Resolve("SERPAPI_KEY", keys) is { } serp ? new SerpApiProvider(serp)
+            Resolve("SERPAPI_KEY", keys) is { } serp ? new SerpApiProvider(serp, searchProxy)
+            // The key can live ONLY on the worker: the placeholder satisfies the provider's ctor and
+            // the worker replaces whatever api_key the query carries with its own secret.
+            : searchProxy is not null ? new SerpApiProvider("edge-proxied", EdgeSearchClient())
             : Resolve("BING_SEARCH_KEY", keys) is { } bing ? new BingProvider(bing)
             : null;
 
         IPlacesProvider? places =
-            Resolve("GOOGLE_PLACES_API_KEY", keys) is { } gp ? new GooglePlacesProvider(gp) : null;
+            Resolve("GOOGLE_PLACES_API_KEY", keys) is { } gp ? new GooglePlacesProvider(gp, EdgeSearchClient())
+            : EdgeSearchClient() is { } placesProxy ? new GooglePlacesProvider("edge-proxied", placesProxy)
+            : null;
 
         IScrapeProvider? scraper = BuildScraper(keys);
 
@@ -200,6 +211,27 @@ public sealed class AgentFactory : IAgentFactory
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// A fresh HttpClient pointed at the search-worker (bearer pre-set) when CF_SEARCH_WORKER_URL +
+    /// CF_SEARCH_WORKER_TOKEN are configured, else null. One client per provider instance — they share
+    /// the pooled <see cref="Daleel.Search.Http.SharedHttpHandler"/> underneath, so sockets are reused.
+    /// </summary>
+    private HttpClient? EdgeSearchClient()
+    {
+        if (Resolve("CF_SEARCH_WORKER_URL") is not { } url ||
+            Resolve("CF_SEARCH_WORKER_TOKEN") is not { } token ||
+            !Uri.TryCreate(url, UriKind.Absolute, out var baseUri))
+        {
+            return null;
+        }
+
+        var client = Daleel.Search.Http.SharedHttpHandler.CreateClient();
+        client.BaseAddress = baseUri;
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        return client;
     }
 
     /// <summary>Builds the scrape router (Context.dev → Cloudflare) from whatever is configured.</summary>
