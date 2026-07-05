@@ -44,8 +44,8 @@ worker-generated errors (auth, 400s, 404s, 500s) use the standard envelope.
 
 ## Provisioning (one-time, per environment)
 
-**CI does this automatically**: the fleet deploy workflow runs `workers/provision.sh search-worker
-prod|qa` before every deploy — it resolves each KV namespace by title (creating it when missing)
+**CI does this automatically**: each environment's deploy workflow (deploy-workers.yml prod / deploy-workers-qa.yml QA) runs
+`workers/provision.sh search-worker <env>` before its deploy — it resolves each KV namespace by title (creating it when missing)
 and injects the id into `wrangler.jsonc`'s placeholder. The commands below are the manual
 equivalent (paste the id yourself, or just run the script):
 

@@ -70,8 +70,8 @@ and advisory** so a dead edge host changes nothing:
 
 ## 4. Resource provisioning (CI check-or-create)
 
-`workers/provision.sh <worker> <prod|qa>` — idempotent, run by the fleet deploy workflow before
-every deploy and usable manually:
+`workers/provision.sh <worker> <prod|qa>` — idempotent, run by each environment's own deploy workflow (deploy-workers.yml → prod, deploy-workers-qa.yml
+→ QA) before its deploy, and usable manually:
 
 | Worker | Resources ensured | Mechanism |
 |---|---|---|

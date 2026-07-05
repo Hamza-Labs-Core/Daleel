@@ -11,7 +11,7 @@
 // discard a finished crawl.
 //
 // SECRETS (never in this file) — set with `wrangler secret put <NAME>` (add `--env qa` for QA);
-// CI (deploy-scrape-worker.yml) uploads them on every deploy:
+// CI (deploy-workers.yml prod / deploy-workers-qa.yml qa) uploads them on every deploy:
 //   AUTH_TOKEN            bearer the VPS presents (house auth pattern, see log-viewer)
 //   CONTEXT_DEV_API_KEY   Context.dev key, moved here from the VPS for this worker's calls
 {

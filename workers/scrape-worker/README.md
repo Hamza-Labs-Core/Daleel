@@ -28,8 +28,9 @@ pattern as `workers/log-viewer` — fail-closed, constant-time compare.
 
 ## Provisioning (one-time, per environment)
 
-**CI does this automatically**: the fleet deploy workflow runs `workers/provision.sh scrape-worker
-prod|qa` before every deploy — it checks each queue and creates missing ones, and attaches the
+**CI does this automatically**: each environment's deploy workflow (deploy-workers.yml → prod on push to main;
+deploy-workers-qa.yml → QA on `qa`-labelled PRs) runs `workers/provision.sh scrape-worker <env>`
+before its deploy — it checks each queue and creates missing ones, and attaches the
 poll pull-consumer (idempotent; existing resources untouched). The commands below are the manual
 equivalent for local/first-time setup:
 

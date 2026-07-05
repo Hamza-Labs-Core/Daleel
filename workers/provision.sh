@@ -6,8 +6,8 @@
 # CHECK-THEN-CREATE for everything a worker binds: queues (+ DLQs + the poll queue's HTTP pull
 # consumer) for scrape-worker, the KV namespace for search-worker (resolved by TITLE, created when
 # missing, and its id injected into wrangler.jsonc's placeholder). Safe to run on every deploy —
-# existing resources are left untouched. CI (deploy-scrape-worker.yml) runs this before each
-# deploy; operators run the exact same script for a manual/first-time setup.
+# existing resources are left untouched. Each environment's deploy workflow runs this before its
+# deploy (deploy-workers.yml -> prod, deploy-workers-qa.yml -> qa); operators run the exact same script for a manual/first-time setup.
 #
 # Auth: CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID in the environment (wrangler reads both).
 # Run from the repo root or the worker directory — the script cd's itself.
