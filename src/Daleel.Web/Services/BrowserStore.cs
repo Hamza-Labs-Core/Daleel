@@ -59,19 +59,6 @@ public sealed class BrowserStore
         }
     }
 
-    /// <summary>The API-key names the Settings page manages and the agent consumes.</summary>
-    public static readonly IReadOnlyList<(string Key, string Label, string Help)> ApiKeyNames = new[]
-    {
-        ("OPENROUTER_API_KEY", "OpenRouter", "Recommended — one key, every model"),
-        ("OPENAI_API_KEY", "OpenAI", "Used if no OpenRouter key"),
-        ("ANTHROPIC_API_KEY", "Anthropic", "Used if no OpenRouter/OpenAI key"),
-        ("SERPAPI_KEY", "SerpApi", "Web & shopping search"),
-        ("BING_SEARCH_KEY", "Bing Search", "Fallback web search"),
-        ("GOOGLE_PLACES_API_KEY", "Google Places", "Store finder"),
-        ("CONTEXT_DEV_API_KEY", "Context.dev", "Page scraping"),
-        ("APIFY_TOKEN", "Apify", "Social monitoring"),
-    };
-
     /// <summary>
     /// Best-guess the visitor's market as a 2-letter country code (from the browser locale/timezone),
     /// for first-visit defaulting. Returns "" / null when nothing usable is found, so the caller can
@@ -113,19 +100,4 @@ public sealed class BrowserStore
     /// <summary>Shape of the <c>{lat,lng}</c> object returned by the <c>daleelGetLocation</c> JS helper.</summary>
     private readonly record struct BrowserLocation(double Lat, double Lng);
 
-    /// <summary>Reads all stored API keys into a dictionary for handing to the agent factory.</summary>
-    public async Task<Dictionary<string, string>> GetKeysAsync()
-    {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var (name, _, _) in ApiKeyNames)
-        {
-            var value = await GetAsync("key." + name);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                result[name] = value;
-            }
-        }
-
-        return result;
-    }
 }

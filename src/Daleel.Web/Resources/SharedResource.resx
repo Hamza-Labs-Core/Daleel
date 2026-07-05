@@ -479,8 +479,7 @@
   <data name="Auth.Error.WeakPassword" xml:space="preserve"><value>Password must be at least 8 characters with upper- and lower-case letters and a number.</value></data>
   <data name="Auth.Error.Failed" xml:space="preserve"><value>We couldn't create your account. Please check your details and try again.</value></data>
 
-  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>No LLM key configured. Add one on the</value></data>
-  <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>page, or set</value></data>
+  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>No LLM key configured. Set</value></data>
   <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>on the server.</value></data>
 
   <data name="Admin.Timeline.Title" xml:space="preserve"><value>Event timeline</value></data>

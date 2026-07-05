@@ -123,7 +123,7 @@ public sealed class MonitorService
     /// Returns the number of new hits, or -1 when no Apify token is configured. The monitor must be
     /// owned by <paramref name="userId"/>, else this is a no-op (returns 0).
     /// </summary>
-    public async Task<int> RunOnceAsync(string userId, string id, IReadOnlyDictionary<string, string>? keys, CancellationToken ct = default)
+    public async Task<int> RunOnceAsync(string userId, string id, CancellationToken ct = default)
     {
         MonitorDefinition? monitor;
         lock (_gate)
@@ -136,7 +136,7 @@ public sealed class MonitorService
             return 0;
         }
 
-        if (!_providers.HasSocial(keys))
+        if (!_providers.HasSocial)
         {
             return -1;
         }
@@ -157,7 +157,7 @@ public sealed class MonitorService
         var matcher = new ArabicMatcher();
         var keywords = new[] { monitor.Keyword };
 
-        var posts = await _providers.FetchSocialPostsAsync(source, monitor.Keyword, keys, ct).ConfigureAwait(false);
+        var posts = await _providers.FetchSocialPostsAsync(source, monitor.Keyword, ct).ConfigureAwait(false);
         var hits = posts
             .Where(p => matcher.Match(p.Text, keywords, MatchMode.Contains).IsMatch)
             .Select(p => new MonitorHit

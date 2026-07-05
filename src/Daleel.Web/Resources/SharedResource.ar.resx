@@ -479,8 +479,7 @@
   <data name="Auth.Error.WeakPassword" xml:space="preserve"><value>يجب أن تتكون كلمة المرور من 8 أحرف على الأقل تتضمن حروفًا كبيرة وصغيرة ورقمًا.</value></data>
   <data name="Auth.Error.Failed" xml:space="preserve"><value>تعذّر إنشاء حسابك. يُرجى التحقق من بياناتك والمحاولة مرة أخرى.</value></data>
 
-  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>لا يوجد مفتاح ذكاء اصطناعي</value></data>
-  <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>أو اضبط</value></data>
+  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>لم يتم إعداد مفتاح LLM. عيِّن</value></data>
   <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>على الخادم.</value></data>
 
   <data name="Admin.Timeline.Title" xml:space="preserve"><value>سجل الأحداث</value></data>

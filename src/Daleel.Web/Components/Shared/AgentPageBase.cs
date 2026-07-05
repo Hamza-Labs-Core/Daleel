@@ -40,7 +40,6 @@ public abstract class AgentPageBase : ComponentBase
     protected bool CanSearch => Quota_Status?.CanSearch ?? true;
 
     /// <summary>BYO keys read from the browser; merged with server env by the factory.</summary>
-    protected Dictionary<string, string> Keys { get; private set; } = new();
 
     /// <summary>Currently selected market.</summary>
     protected string Geo { get; set; } = "jordan";
@@ -61,7 +60,7 @@ public abstract class AgentPageBase : ComponentBase
     protected string? Error { get; set; }
 
     /// <summary>Whether an LLM key is resolvable (server env or BYO).</summary>
-    protected bool HasLlm => Agents.HasLlm(Keys);
+    protected bool HasLlm => Agents.HasLlm();
 
     /// <summary>Halal filter strictness, hydrated from the browser (default Strict).</summary>
     protected Daleel.Core.Moderation.FilterStrictness Strictness { get; private set; } =
@@ -74,7 +73,6 @@ public abstract class AgentPageBase : ComponentBase
             return;
         }
 
-        Keys = await Store.GetKeysAsync();
         Geo = await Store.GetAsync("geo") ?? Geo;
         Model = await Store.GetAsync("model") ?? Model;
         Strictness = await ResolveStrictnessAsync();
@@ -141,7 +139,7 @@ public abstract class AgentPageBase : ComponentBase
             return;
         }
 
-        if (!Agents.HasLlm(Keys))
+        if (!Agents.HasLlm())
         {
             Error = "No LLM key configured. Add one on the Settings page, or set OPENROUTER_API_KEY on the server.";
             return;
@@ -172,7 +170,6 @@ public abstract class AgentPageBase : ComponentBase
             {
                 Geo = Geo,
                 Model = Model,
-                Keys = Keys,
                 Log = AppendLog,
                 Strictness = Strictness,
                 ApiObserver = meter

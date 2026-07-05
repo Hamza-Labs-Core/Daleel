@@ -29,9 +29,9 @@ searches fail while a Bing key sits unused. Bing remains the no-SerpAPI-anywhere
 **CLI (`Daleel.Cli/Composition.cs`):** constructs providers directly and unmetered — accepted:
 it is a developer tool with no job context, no cost cap, and no usage dashboard.
 
-**Metering fidelity:** monitor social fetches keep the two-tier key resolution — the gateway's
-`FetchSocialPostsAsync`/`HasSocial` accept the caller's key dict, so a user-supplied APIFY_TOKEN
-still wins over the server's (the earlier regression is fixed).
+**Key policy:** there are NO per-user/browser API keys — every provider key is server-environment
+configuration, full stop. The former two-tier resolution (`AgentRequest.Keys`, `BrowserStore`
+key storage, keyed `Resolve/HasLlm/Describe` overloads) has been removed entirely.
 
 ## 2. Cloudflare worker fleet
 

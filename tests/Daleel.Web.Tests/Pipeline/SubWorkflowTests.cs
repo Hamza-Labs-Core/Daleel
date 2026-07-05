@@ -869,11 +869,11 @@ public class SubWorkflowTests
     // Resolve returns null so the store ScrapePrices step (which needs CONTEXT_DEV_API_KEY) no-ops.
     private sealed class FakeAgentFactory : IAgentFactory
     {
-        public bool HasLlm(IReadOnlyDictionary<string, string>? keys = null) => false;
-        public ProviderStatus Describe(IReadOnlyDictionary<string, string>? keys = null) => throw new NotSupportedException();
+        public bool HasLlm() => false;
+        public ProviderStatus Describe() => throw new NotSupportedException();
         public AgentService Build(AgentRequest request) => throw new NotSupportedException();
-        public ILlmClient? TryBuildLlm(string? model = null, IReadOnlyDictionary<string, string>? keys = null) => null;
-        public string? Resolve(string name, IReadOnlyDictionary<string, string>? keys = null) => null;
+        public ILlmClient? TryBuildLlm(string? model = null) => null;
+        public string? Resolve(string name) => null;
     }
 
     private sealed class FakeCloudflareClient : Daleel.Web.Cloudflare.ICloudflareWorkerClient

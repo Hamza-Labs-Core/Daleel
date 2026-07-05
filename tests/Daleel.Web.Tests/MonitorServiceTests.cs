@@ -45,7 +45,7 @@ public class MonitorServiceTests
     [Fact]
     public async Task RunOnce_ReturnsZeroForUnknownMonitor()
     {
-        var result = await _service.RunOnceAsync(Alice, "does-not-exist", new Dictionary<string, string>());
+        var result = await _service.RunOnceAsync(Alice, "does-not-exist");
         result.Should().Be(0);
     }
 
@@ -57,7 +57,7 @@ public class MonitorServiceTests
         try
         {
             Environment.SetEnvironmentVariable("APIFY_TOKEN", null);
-            var result = await _service.RunOnceAsync(Alice, m.Id, new Dictionary<string, string>());
+            var result = await _service.RunOnceAsync(Alice, m.Id);
             result.Should().Be(-1);
         }
         finally
@@ -106,7 +106,7 @@ public class MonitorServiceTests
         var aliceMonitor = _service.Add(Alice, "kw", "jordan", 60);
 
         // Bob runs Alice's monitor id — treated as unknown (0), so no Apify call is made on her behalf.
-        var result = await _service.RunOnceAsync(Bob, aliceMonitor.Id, new Dictionary<string, string>());
+        var result = await _service.RunOnceAsync(Bob, aliceMonitor.Id);
 
         result.Should().Be(0);
     }

@@ -59,16 +59,12 @@ public interface IProviderApi
     /// <summary>Full place details (hours/reviews field mask); null when unconfigured/failed.</summary>
     Task<StoreLocation?> GetPlaceDetailsAsync(string placeId, CancellationToken ct = default);
 
-    /// <summary>True when the social fetcher (Apify) is configured (user keys considered).</summary>
-    bool HasSocial(IReadOnlyDictionary<string, string>? keys = null);
+    /// <summary>True when the social fetcher (Apify) is configured.</summary>
+    bool HasSocial { get; }
 
-    /// <summary>
-    /// Social posts for a source/keyword; empty when unconfigured/failed. <paramref name="keys"/>
-    /// preserves the two-tier key resolution (a user-supplied APIFY_TOKEN wins over the server's).
-    /// </summary>
+    /// <summary>Social posts for a source/keyword; empty when unconfigured/failed.</summary>
     Task<IReadOnlyList<SocialPost>> FetchSocialPostsAsync(
-        Source source, string? keyword = null, IReadOnlyDictionary<string, string>? keys = null,
-        CancellationToken ct = default);
+        Source source, string? keyword = null, CancellationToken ct = default);
 
     /// <summary>
     /// Submits a catalogue crawl to the edge scrape-worker, metering the submit with the same
@@ -268,14 +264,12 @@ public sealed class ProviderApi : IProviderApi
             () => places.GetPlaceDetailsAsync(placeId, ct)).ConfigureAwait(false);
     }
 
-    public bool HasSocial(IReadOnlyDictionary<string, string>? keys = null) =>
-        _factory.Resolve("APIFY_TOKEN", keys) is not null;
+    public bool HasSocial => _factory.Resolve("APIFY_TOKEN") is not null;
 
     public async Task<IReadOnlyList<SocialPost>> FetchSocialPostsAsync(
-        Source source, string? keyword = null, IReadOnlyDictionary<string, string>? keys = null,
-        CancellationToken ct = default)
+        Source source, string? keyword = null, CancellationToken ct = default)
     {
-        if (Social(keys) is not { } social)
+        if (Social() is not { } social)
         {
             return Array.Empty<SocialPost>();
         }
@@ -392,9 +386,9 @@ public sealed class ProviderApi : IProviderApi
     }
 
     /// <summary>Cached social fetcher (rebuilt only if the resolved token changes).</summary>
-    private ApifyPostFetcher? Social(IReadOnlyDictionary<string, string>? keys = null)
+    private ApifyPostFetcher? Social()
     {
-        var token = _factory.Resolve("APIFY_TOKEN", keys);
+        var token = _factory.Resolve("APIFY_TOKEN");
         if (token is null)
         {
             return null;

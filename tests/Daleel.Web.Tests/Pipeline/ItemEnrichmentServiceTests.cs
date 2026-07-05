@@ -224,11 +224,11 @@ public class ItemEnrichmentServiceTests
     // Resolve returns null so the Context.dev catalogue/harvest phases no-op without a key.
     private sealed class StubAgentFactory : IAgentFactory
     {
-        public bool HasLlm(IReadOnlyDictionary<string, string>? keys = null) => false;
-        public ProviderStatus Describe(IReadOnlyDictionary<string, string>? keys = null) => throw new NotSupportedException();
+        public bool HasLlm() => false;
+        public ProviderStatus Describe() => throw new NotSupportedException();
         public AgentService Build(AgentRequest request) => throw new NotSupportedException();
-        public ILlmClient? TryBuildLlm(string? model = null, IReadOnlyDictionary<string, string>? keys = null) => null;
-        public string? Resolve(string name, IReadOnlyDictionary<string, string>? keys = null) => null;
+        public ILlmClient? TryBuildLlm(string? model = null) => null;
+        public string? Resolve(string name) => null;
     }
 
     private sealed class StubBrandCatalog : IBrandCatalogService
