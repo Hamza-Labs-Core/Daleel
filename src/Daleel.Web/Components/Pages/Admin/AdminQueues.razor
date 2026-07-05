@@ -7,11 +7,11 @@
 <PageTitle>دليل · Admin · Queues</PageTitle>
 
 <AdminNav />
-<div class="d-flex align-center mb-1">
+<div class="d-flex align-center flex-wrap gap-2 mb-1">
     <MudText Typo="Typo.h4">Queues</MudText>
     <MudSpacer />
     <MudSelect T="int" Value="_windowHours" ValueChanged="SetWindowAsync" Dense="true" Margin="Margin.Dense"
-               Variant="Variant.Outlined" Style="max-width:140px;" Class="me-3">
+               Variant="Variant.Outlined" Style="max-width:140px; min-width:120px;" Class="me-3">
         <MudSelectItem T="int" Value="1">Last hour</MudSelectItem>
         <MudSelectItem T="int" Value="24">Last 24h</MudSelectItem>
         <MudSelectItem T="int" Value="168">Last 7 days</MudSelectItem>
@@ -140,16 +140,19 @@ else
 }
 
 @code {
-    /// <summary>One stat tile — identical structure for every metric so the row stays uniform.</summary>
+    /// <summary>
+    /// One stat tile — identical structure for every metric so the row stays uniform in BOTH axes:
+    /// the flex item + grow makes the paper fill its grid cell exactly (2-up on phones, 3-up on
+    /// tablets, 6-up on desktop). The hint rides the native title attribute — a tooltip component
+    /// wrapper would put an inline-block between the cell and the paper and collapse its width.
+    /// </summary>
     private RenderFragment StatTile(string label, string value, Color color, string hint) => __builder =>
     {
         <MudItem xs="6" sm="4" md="2" Class="d-flex">
-            <MudTooltip Text="@hint" Class="flex-grow-1 d-flex">
-                <MudPaper Class="pa-3 flex-grow-1" Outlined="true" Style="height:100%; min-height:88px;">
-                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="white-space:nowrap;">@label</MudText>
-                    <MudText Typo="Typo.h5" Color="@color">@value</MudText>
-                </MudPaper>
-            </MudTooltip>
+            <MudPaper Class="pa-3 flex-grow-1" Outlined="true" Style="min-height:88px;" title="@hint">
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="text-truncate d-block">@label</MudText>
+                <MudText Typo="Typo.h5" Color="@color">@value</MudText>
+            </MudPaper>
         </MudItem>
     };
 
