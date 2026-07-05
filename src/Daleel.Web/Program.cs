@@ -572,6 +572,8 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
     Daleel.Web.Pipeline.Enrichment.ConditionsHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.CacheGapRefillHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.PriceFetchHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IReachabilityProbe>(_ =>
     new Daleel.Web.Pipeline.Enrichment.ReachabilityProbe(Daleel.Search.Http.SharedHttpHandler.CreateClient()));
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,

@@ -96,96 +96,13 @@
             }
         </div>
 
-        @* Card-attached extras (the old "Also found" sections now live per item): one calm row of
-           small affordances — brand-site link, reviews, mentions. Expanders grow the card downward. *@
-        @if (BrandHref is not null || Model.Reviews.Count > 0 || Model.Mentions.Count > 0)
-        {
-            <div class="d-flex align-center gap-3 mt-1" style="flex-wrap:wrap;">
-                @if (BrandHref is { } brandHref)
-                {
-                    <MudLink Href="@brandHref" Target="_blank" rel="noopener" Typo="Typo.caption"
-                             Class="d-inline-flex align-center" Style="gap:4px;">
-                        <MudIcon Icon="@Icons.Material.Filled.Language" Size="Size.Small" />
-                        @(string.IsNullOrWhiteSpace(Model.BrandSiteUrl) ? L["ModelCard.BrandSite"] : L["ModelCard.OnBrandSite"])
-                    </MudLink>
-                }
-                @if (Model.Reviews.Count > 0)
-                {
-                    <MudLink Typo="Typo.caption" OnClick="@(() => _reviewsOpen = !_reviewsOpen)"
-                             Class="d-inline-flex align-center" Style="gap:4px;cursor:pointer;">
-                        <MudIcon Icon="@Icons.Material.Filled.RateReview" Size="Size.Small" />
-                        @L["ModelCard.Reviews"] (@Model.Reviews.Count)
-                    </MudLink>
-                }
-                @if (Model.Mentions.Count > 0)
-                {
-                    <MudLink Typo="Typo.caption" OnClick="@(() => _mentionsOpen = !_mentionsOpen)"
-                             Class="d-inline-flex align-center" Style="gap:4px;cursor:pointer;">
-                        <MudIcon Icon="@Icons.Material.Filled.Link" Size="Size.Small" />
-                        @L["ModelCard.MentionedIn"] (@Model.Mentions.Count)
-                    </MudLink>
-                }
-            </div>
-
-            @if (Model.Reviews.Count > 0)
-            {
-                <MudCollapse Expanded="_reviewsOpen">
-                    <div class="mt-1">
-                        @foreach (var review in Model.Reviews)
-                        {
-                            <div class="mb-1">
-                                <MudLink Href="@review.Url" Target="_blank" rel="noopener" Typo="Typo.caption"
-                                         dir="@Catalog.Dir(ReviewTitle(review))">@ReviewTitle(review)</MudLink>
-                                @if (!string.IsNullOrWhiteSpace(review.Snippet))
-                                {
-                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block"
-                                             Style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
-                                             dir="@Catalog.Dir(review.Snippet!)">@review.Snippet</MudText>
-                                }
-                            </div>
-                        }
-                    </div>
-                </MudCollapse>
-            }
-            @if (Model.Mentions.Count > 0)
-            {
-                <MudCollapse Expanded="_mentionsOpen">
-                    <div class="mt-1">
-                        @foreach (var mention in Model.Mentions.Take(5))
-                        {
-                            <div class="mb-1">
-                                <MudLink Href="@mention.Url" Target="_blank" rel="noopener" Typo="Typo.caption"
-                                         dir="@Catalog.Dir(MentionTitle(mention))">@MentionTitle(mention)</MudLink>
-                            </div>
-                        }
-                    </div>
-                </MudCollapse>
-            }
-        }
-
+        @* Deliberately nothing more here: reviews, mentions, brand links, pros/cons and the review
+           summary all live on the detail surfaces ("Details & prices" dialog and the /product page).
+           The card stays compact and NOTHING on it expands. *@
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
             <MudIcon Icon="@Icons.Material.Filled.Storefront" Size="Size.Small" />
             @Model.SellerCount @(Model.SellerCount == 1 ? L["ModelCard.Seller"] : L["Products.Sellers"])
         </MudText>
-
-        @if (!string.IsNullOrWhiteSpace(Model.ReviewSummary))
-        {
-            <MudText Typo="Typo.caption" Class="mt-2 d-block" Style="font-style:italic;"
-                     dir="@Catalog.Dir(Model.ReviewSummary!)">“@Model.ReviewSummary”</MudText>
-        }
-
-        @if (Model.Pros.Count > 0)
-        {
-            <MudList T="string" Dense="true" Class="mt-1 pa-0">
-                @foreach (var pro in Model.Pros.Take(2))
-                {
-                    <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbUp" IconColor="Color.Success"
-                                 Class="pa-0">
-                        <MudText Typo="Typo.caption" dir="@Catalog.Dir(pro)">@pro</MudText>
-                    </MudListItem>
-                }
-            </MudList>
-        }
     </MudCardContent>
 
     <MudCardActions>
@@ -207,33 +124,9 @@
     [Parameter] public EventCallback<bool> SelectedChanged { get; set; }
     [Parameter] public EventCallback OnDetails { get; set; }
 
-    private bool _reviewsOpen;
-    private bool _mentionsOpen;
-
     /// <summary>"Brand · Model" — the sub-caption under the name; empty when neither is set.</summary>
     private string BrandLine =>
         string.Join(" · ", new[] { Model.Brand, Model.Model }.Where(s => !string.IsNullOrWhiteSpace(s)));
-
-    /// <summary>The brand link the card shows: the model's own brand page beats the regional root.</summary>
-    private string? BrandHref =>
-        !string.IsNullOrWhiteSpace(Model.BrandSiteUrl) ? Model.BrandSiteUrl
-        : !string.IsNullOrWhiteSpace(Model.BrandRegionalUrl) ? Model.BrandRegionalUrl
-        : null;
-
-    /// <summary>Display text for a review link: its title, else its source, else the site host.</summary>
-    private static string ReviewTitle(ItemReview review) =>
-        !string.IsNullOrWhiteSpace(review.Title) ? review.Title!
-        : !string.IsNullOrWhiteSpace(review.Source) ? review.Source!
-        : HostOf(review.Url);
-
-    /// <summary>Display text for a mention link: its title, else its source, else the site host.</summary>
-    private static string MentionTitle(ItemLink mention) =>
-        !string.IsNullOrWhiteSpace(mention.Title) ? mention.Title
-        : !string.IsNullOrWhiteSpace(mention.Source) ? mention.Source!
-        : HostOf(mention.Url);
-
-    private static string HostOf(string url) =>
-        Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : url;
 
     private Task OnToggleCompare(bool value) => SelectedChanged.InvokeAsync(value);
     private Task OnDetailsClicked() => OnDetails.InvokeAsync();

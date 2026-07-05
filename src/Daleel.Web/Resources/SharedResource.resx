@@ -656,6 +656,11 @@
   <data name="Admin.Nav.Settings" xml:space="preserve"><value>Settings</value></data>
   <data name="Detail.Specifications" xml:space="preserve"><value>Specifications</value></data>
   <data name="Detail.SpecsUnavailable" xml:space="preserve"><value>Detailed specifications aren't available for this product yet.</value></data>
+  <data name="Detail.Offers" xml:space="preserve"><value>Offers</value></data>
+  <data name="Detail.Specs" xml:space="preserve"><value>Specifications</value></data>
+  <data name="Detail.About" xml:space="preserve"><value>About this product</value></data>
+  <data name="Detail.ProsCons" xml:space="preserve"><value>Pros &amp; cons</value></data>
+  <data name="Detail.StillEnriching" xml:space="preserve"><value>More details may still be arriving — check back shortly</value></data>
   <data name="Search.EmailNotice" xml:space="preserve"><value>We'll email you the results when they're ready.</value></data>
   <data name="Settings.EmailResults" xml:space="preserve"><value>Email me search results</value></data>
   <data name="Settings.EmailResultsHelp" xml:space="preserve"><value>Get a summary email when your search finishes.</value></data>

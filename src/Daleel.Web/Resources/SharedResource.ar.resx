@@ -656,6 +656,11 @@
   <data name="Admin.Nav.Settings" xml:space="preserve"><value>الإعدادات</value></data>
   <data name="Detail.Specifications" xml:space="preserve"><value>المواصفات</value></data>
   <data name="Detail.SpecsUnavailable" xml:space="preserve"><value>لا تتوفر مواصفات تفصيلية لهذا المنتج بعد.</value></data>
+  <data name="Detail.Offers" xml:space="preserve"><value>العروض</value></data>
+  <data name="Detail.Specs" xml:space="preserve"><value>المواصفات</value></data>
+  <data name="Detail.About" xml:space="preserve"><value>عن هذا المنتج</value></data>
+  <data name="Detail.ProsCons" xml:space="preserve"><value>الإيجابيات والسلبيات</value></data>
+  <data name="Detail.StillEnriching" xml:space="preserve"><value>قد تصل تفاصيل إضافية قريبًا — تحقق لاحقًا</value></data>
 
   <data name="Search.EmailNotice" xml:space="preserve"><value>سنرسل إليك النتائج عبر البريد الإلكتروني عند جاهزيتها.</value></data>
   <data name="Settings.EmailResults" xml:space="preserve"><value>أرسل نتائج البحث إلى بريدي الإلكتروني</value></data>

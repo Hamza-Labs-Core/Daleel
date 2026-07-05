@@ -105,6 +105,23 @@ public sealed partial class AgentService
             }
         }
 
+        // FUNNEL VISIBILITY: "are we getting all the results?" must be answerable from a job's log,
+        // not taken on faith. One line: what came in, where it landed, and why drops dropped.
+        {
+            var buyable = classified.Where(c => c.type is ResultType.StorePage or ResultType.Marketplace
+                or ResultType.ProductListing).ToList();
+            var droppedNonCommerce = buyable.Count(c => IsNonCommerceHost(c.r.Url));
+            var droppedNonLocal = buyable.Count(c =>
+                !IsNonCommerceHost(c.r.Url) && !KeepLocal(c.r.Url, false, $"{c.r.Title} {c.r.Snippet}"));
+            var droppedUrlTitle = classified.Count(c => c.type == ResultType.ProductListing &&
+                !IsNonCommerceHost(c.r.Url) && LooksLikeUrl(c.r.Title));
+            Log($"result funnel: {classified.Count} web results → stores {stores.Count}, " +
+                $"marketplaces {marketplaces.Count}, listings {webListings.Count}, brands {brands.Count}, " +
+                $"reviews/articles {reviews.Count}; dropped {droppedNonLocal} non-local, " +
+                $"{droppedNonCommerce} non-commerce(demoted), {droppedUrlTitle} url-titled; " +
+                $"shopping {bundle.ShoppingResults.Count}, places-stores {bundle.Stores.Count}");
+        }
+
         // Shopping hits come from a geo-targeted search (gl=cc) → treated as local.
         var shoppingListings = ListingExtractor.FromShopping(bundle.ShoppingResults);
 

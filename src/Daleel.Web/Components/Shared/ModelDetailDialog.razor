@@ -1,91 +1,20 @@
-@* Concise model preview: image, identity, the lowest price, a compact brand-reputation rating and the
-   top few pros/cons. It deliberately stays small — the full price table, spec sheet and saved details
-   live on the dedicated page, which reads from the database; "View Full Details" links there. *@
+@* "Details & prices" for a model straight from the search results. All content rendering lives in
+   ModelDetailBody (shared with the full /product page so the two surfaces can't drift); this wrapper
+   only adds the dialog chrome and the jump to the dedicated page, which re-reads from the database. *@
 @inject NavigationManager Nav
 @inject IStringLocalizer<SharedResource> L
 
 <MudDialog>
     <TitleContent>
-        @* Translate the model name to the current UI language at display time (names are cached
-           language-agnostically, so an Arabic market surfaces Arabic names under an EN UI). *@
-        <TranslatedText Text="@_model.Name" Typo="Typo.h6" />
-        @if (!string.IsNullOrWhiteSpace(_model.Brand) || !string.IsNullOrWhiteSpace(_model.Model))
-        {
-            <MudText Typo="Typo.caption" Color="Color.Secondary">
-                @string.Join(" · ", new[] { _model.Brand, _model.Model }.Where(s => !string.IsNullOrWhiteSpace(s)))
-            </MudText>
-        }
+        <MudText Typo="Typo.h6">@L["Products.Details"]</MudText>
     </TitleContent>
     <DialogContent>
-        <MudGrid Spacing="3">
-            @if (!string.IsNullOrWhiteSpace(_model.ImageUrl))
-            {
-                <MudItem xs="12" sm="4">
-                    <SafeImage Src="@_model.ImageUrl" Alt="@_model.Name" Style="max-width:100%;object-fit:contain;" />
-                </MudItem>
-            }
-
-            <MudItem xs="12" sm="@(string.IsNullOrWhiteSpace(_model.ImageUrl) ? 12 : 8)">
-                @* Price and currency must come from the SAME offer (LowestOffer) — pairing LowestPrice
-                   with another offer's currency can mint a figure that exists on no offer, and an
-                   indicative (loosely-parsed) price must keep its ≈ marker here too. *@
-                @if (_model.LowestOffer is { Price: not null } lo && lo.Currency is { } cur)
-                {
-                    <MudText Typo="Typo.h5" Color="@(lo.IsIndicative ? Color.Secondary : Color.Primary)">
-                        @(lo.IsIndicative ? "≈ " : "")@(new Money(lo.Price!.Value, cur).ToDisplay())</MudText>
-                    <MudText Typo="Typo.caption" Color="Color.Secondary">
-                        lowest across @_model.SellerCount @(_model.SellerCount == 1 ? "seller" : "sellers")
-                    </MudText>
-                }
-                else if (_model.SellerCount > 0)
-                {
-                    <MudText Typo="Typo.body2" Color="Color.Secondary">Available at @_model.SellerCount @(_model.SellerCount == 1 ? "place" : "places")</MudText>
-                }
-
-                @if (_model.Msrp_ is { } msrp)
-                {
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="mt-2">MSRP @msrp.ToDisplay()</MudChip>
-                }
-
-                @if (_model.BrandReputation is { HasSignal: true })
-                {
-                    <div class="mt-2"><BrandReputationView Reputation="_model.BrandReputation" Compact="true" /></div>
-                }
-            </MudItem>
-        </MudGrid>
-
-        @* Top few pros/cons only — the full list is on the detail page. *@
-        @if (_model.Pros.Count > 0 || _model.Cons.Count > 0)
-        {
-            <MudDivider Class="my-3" />
-            <MudGrid>
-                @if (_model.Pros.Count > 0)
-                {
-                    <MudItem xs="12" sm="6">
-                        <MudText Typo="Typo.subtitle2" Color="Color.Success">Pros</MudText>
-                        @foreach (var p in _model.Pros.Take(3))
-                        {
-                            <MudText Typo="Typo.body2" dir="@Catalog.Dir(p)">＋ @p</MudText>
-                        }
-                    </MudItem>
-                }
-                @if (_model.Cons.Count > 0)
-                {
-                    <MudItem xs="12" sm="6">
-                        <MudText Typo="Typo.subtitle2" Color="Color.Error">Cons</MudText>
-                        @foreach (var c in _model.Cons.Take(3))
-                        {
-                            <MudText Typo="Typo.body2" dir="@Catalog.Dir(c)">－ @c</MudText>
-                        }
-                    </MudItem>
-                }
-            </MudGrid>
-        }
+        <ModelDetailBody Model="_model" />
     </DialogContent>
     <DialogActions>
         <MudButton OnClick="ViewFullDetails" Variant="Variant.Filled" Color="Color.Primary"
                    StartIcon="@Icons.Material.Filled.OpenInFull">View Full Details</MudButton>
-        <MudButton OnClick="Close">Close</MudButton>
+        <MudButton OnClick="Close">@L["Common.Close"]</MudButton>
     </DialogActions>
 </MudDialog>
 
@@ -98,8 +27,8 @@
 
     protected override void OnInitialized() => _model = Model;
 
-    // Close the compact dialog and open the dedicated full page for this model. Routing is by the
-    // model's stable id; the human name (which reconstructs the DB lookup key) and geo travel as params.
+    // Close the dialog and open the dedicated full page for this model. Routing is by the model's
+    // stable id; the human name (which reconstructs the DB lookup key) and geo travel as params.
     private void ViewFullDetails()
     {
         var query = string.IsNullOrWhiteSpace(_model.Model) ? _model.Name : $"{_model.Brand} {_model.Model}".Trim();

@@ -28,7 +28,7 @@ public sealed class AgentOptions
     /// sites the global engines bury — so the planner is asked for 8–10 diverse queries and this cap keeps
     /// them. Kept generous; total cost stays bounded by the per-job API-call cap.
     /// </remarks>
-    public int MaxQueriesPerKind { get; init; } = 10;
+    public int MaxQueriesPerKind { get; init; } = 14;
 
     /// <summary>
     /// Max URLs to deep-read per run. For research-style queries the buying-guide / round-up articles ARE the

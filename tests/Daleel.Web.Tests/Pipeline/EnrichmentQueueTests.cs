@@ -400,7 +400,8 @@ public class EnrichmentHandlerTests
             EnrichmentUnit.ItemDive, EnrichmentUnit.ItemDive, EnrichmentUnit.ItemDive,
             EnrichmentUnit.CatalogAttach, EnrichmentUnit.CatalogAttach,
             EnrichmentUnit.BrandHarvest,
-            EnrichmentUnit.ImageLookup, EnrichmentUnit.Conditions, EnrichmentUnit.Reachability
+            EnrichmentUnit.ImageLookup, EnrichmentUnit.PriceFetch, EnrichmentUnit.Conditions,
+            EnrichmentUnit.Reachability
         });
         queue.Enqueued.Should().OnlyContain(i => i.SearchJobId == 7 && i.UserId == "u1" && i.HistoryEntryId == 3,
             "children must inherit the root's correlation so patches land on the right job");

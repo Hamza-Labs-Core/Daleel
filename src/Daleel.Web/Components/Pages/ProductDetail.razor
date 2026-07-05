@@ -2,14 +2,16 @@
 @inject IProductDetailDbService Details
 @inject NavigationManager Nav
 @inject ILogger<ProductDetail> Logger
-@inject IStringLocalizer<SharedResource> L
 @inject ITranslationService Translator
 
 @* Dedicated full page for a single product model, read entirely from the saved database — never
    re-scraped live. It assembles the harvested catalogue row (specs + R2 image), the deep-dive profile
    (description), the brand's saved reputation and the scraped-price history (where-to-buy + observed
    range). Routing is by a stable id (numeric catalogue id or an identity hash); the human name carried
-   in the query reconstructs the normalized key the price/profile rows are stored under. *@
+   in the query reconstructs the normalized key the price/profile rows are stored under. The content
+   blocks themselves render via ModelDetailBody — shared with the "Details & prices" dialog so the two
+   surfaces can't drift; this page only adds its own chrome plus the saved-data extras the dialog
+   doesn't have (reputation score chip, observed price range, last-updated, deep-dive overview). *@
 
 <PageTitle>دليل · @DisplayTitle</PageTitle>
 
@@ -20,7 +22,7 @@
 {
     <div class="d-flex justify-center pa-8"><MudProgressCircular Indeterminate="true" /></div>
 }
-else if (_view is null)
+else if (_view is null || _model is null)
 {
     <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
         Details not yet available — this product will be profiled on the next search.
@@ -28,129 +30,36 @@ else if (_view is null)
 }
 else
 {
-    @* Search results are cached language-agnostically, so an Arabic-first market yields Arabic product
-       names even under an English UI. Route the name through TranslatedText (as ModelCard does) so it is
-       translated to the current UI language at display time — cache-first, best-effort, dir-aware. *@
-    <TranslatedText Text="@_view.Name" Typo="Typo.h4" CssClass="mb-1" />
-    @if (!string.IsNullOrWhiteSpace(_view.Brand) || !string.IsNullOrWhiteSpace(_view.Model))
+    <ModelDetailBody Model="_model" />
+
+    @* Saved-data extras beyond the shared body: the brand's saved reputation score (linking through
+       to the brand page), the observed price range across the scraped history, and freshness. *@
+    @if (_view.BrandReputationScore is { } score && _view.BrandStableId is { } brandId)
     {
-        <MudText Typo="Typo.subtitle1" Color="Color.Secondary" Class="mb-3">
-            @string.Join(" · ", new[] { _view.Brand, _view.Model }.Where(s => !string.IsNullOrWhiteSpace(s)))
+        <div class="mt-3">
+            <MudChip T="string" Size="Size.Small"
+                     Color="@(score >= 7 ? Color.Success : score >= 4 ? Color.Warning : Color.Error)"
+                     Icon="@Icons.Material.Filled.Verified"
+                     OnClick="@(() => Nav.NavigateTo($"/brand/{brandId}?name={Uri.EscapeDataString(_view.Brand ?? string.Empty)}"))">
+                @_view.Brand @score.ToString("0.#")/10
+            </MudChip>
+        </div>
+    }
+    @if (PriceRange is { } range)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-1">
+            <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Small" Class="mr-1" />Observed range: @range
         </MudText>
     }
-
-    <MudGrid Spacing="4">
-        <MudItem xs="12" md="5">
-            <MudPaper Class="pa-3 d-flex align-center justify-center" Outlined="true" Elevation="0"
-                      Style="min-height:280px;background:var(--mud-palette-background-grey);">
-                @if (!string.IsNullOrWhiteSpace(_view.ImageUrl))
-                {
-                    <SafeImage Src="@_view.ImageUrl" Alt="@_view.Name" Style="max-height:340px;max-width:100%;object-fit:contain;" />
-                }
-                else
-                {
-                    <MudIcon Icon="@Icons.Material.Filled.Image" Style="font-size:5rem;opacity:0.3;" />
-                }
-            </MudPaper>
-
-            <div class="d-flex flex-wrap gap-2 mt-3 align-center">
-                @if (_view.Lowest is { } low)
-                {
-                    <MudText Typo="Typo.h5" Color="Color.Primary">@low.ToDisplay()</MudText>
-                    @if (_view.SellerCount > 0)
-                    {
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">lowest across @_view.SellerCount @(_view.SellerCount == 1 ? "seller" : "sellers")</MudText>
-                    }
-                }
-                @if (_view.BrandReputationScore is { } score && _view.BrandStableId is { } brandId)
-                {
-                    <MudChip T="string" Size="Size.Small"
-                             Color="@(score >= 7 ? Color.Success : score >= 4 ? Color.Warning : Color.Error)"
-                             Icon="@Icons.Material.Filled.Verified"
-                             OnClick="@(() => Nav.NavigateTo($"/brand/{brandId}?name={Uri.EscapeDataString(_view.Brand ?? string.Empty)}"))">
-                        @_view.Brand @score.ToString("0.#")/10
-                    </MudChip>
-                }
-            </div>
-
-            @if (PriceRange is { } range)
-            {
-                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-1">
-                    <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Small" Class="mr-1" />Observed range: @range
-                </MudText>
-            }
-            @if (_view.LastUpdated is { } updated)
-            {
-                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">Prices updated @updated.LocalDateTime.ToString("d MMM yyyy")</MudText>
-            }
-        </MudItem>
-
-        <MudItem xs="12" md="7">
-            <MudText Typo="Typo.subtitle1" Class="mb-2">
-                <MudIcon Icon="@Icons.Material.Filled.PriceCheck" Class="mr-1" />Where to buy
-            </MudText>
-            @if (_view.Offers.Count > 0)
-            {
-                <MudSimpleTable Dense="true" Hover="true" Bordered="true">
-                    <tbody>
-                        @foreach (var offer in _view.Offers)
-                        {
-                            <tr>
-                                <td>
-                                    <MudLink Href="@($"/store/{offer.StoreId}?name={Uri.EscapeDataString(offer.StoreName)}")"
-                                             dir="@Catalog.Dir(offer.StoreName)">@offer.StoreName</MudLink>
-                                </td>
-                                <td>
-                                    @if (AsMoney(offer) is { } m)
-                                    {
-                                        <MudText Typo="Typo.body1" Color="Color.Primary" Style="font-weight:600;">@m.ToDisplay()</MudText>
-                                    }
-                                    else { <span>—</span> }
-                                </td>
-                                <td>
-                                    @if (!string.IsNullOrWhiteSpace(offer.Url))
-                                    {
-                                        <MudButton Href="@offer.Url" Target="_blank" Size="Size.Small" Variant="Variant.Filled"
-                                                   Color="Color.Primary" StartIcon="@Icons.Material.Filled.ShoppingCart">Buy</MudButton>
-                                    }
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </MudSimpleTable>
-            }
-            else
-            {
-                <MudText Typo="Typo.body2" Color="Color.Secondary">No saved prices yet — they'll appear after the next price scan.</MudText>
-            }
-        </MudItem>
-    </MudGrid>
+    @if (_view.LastUpdated is { } updated)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">Prices updated @updated.LocalDateTime.ToString("d MMM yyyy")</MudText>
+    }
 
     @if (!string.IsNullOrWhiteSpace(_view.Description))
     {
         <MudDivider Class="my-4" />
         <ReportView Title="Overview" Text="@_view.Description" />
-    }
-
-    @* Specs come from the persisted catalogue row (already sanitized into clean key/value pairs by
-       ProductDetailDbService) — the raw scraped "details" blob never reaches this page. *@
-    @if (_view.Specs.Count > 0)
-    {
-        <MudDivider Class="my-4" />
-        <MudText Typo="Typo.h6" Class="mb-2">@L["Detail.Specifications"]</MudText>
-        <MudSimpleTable Dense="true" Bordered="true" Style="max-width:560px;">
-            <tbody>
-                @foreach (var (label, value) in _specRows ?? new())
-                {
-                    <tr><td><strong dir="@Catalog.Dir(label)">@label</strong></td><td dir="@Catalog.Dir(value)">@value</td></tr>
-                }
-            </tbody>
-        </MudSimpleTable>
-    }
-    else
-    {
-        <MudDivider Class="my-4" />
-        <MudText Typo="Typo.body2" Color="Color.Secondary">@L["Detail.SpecsUnavailable"]</MudText>
     }
 }
 
@@ -164,11 +73,12 @@ else
     [SupplyParameterFromQuery] public string? Key { get; set; }
 
     private ProductDetailView? _view;
-    private bool _loading = true;
 
-    // Spec rows shown in the table: built from the persisted (Humanized label, value) pairs, then swapped
-    // in place once the batched translation arrives. Null until the view loads.
-    private List<(string Label, string Value)>? _specRows;
+    // The ProductModel handed to the shared detail body — mapped from the saved view so the page and
+    // the search-results dialog render through the exact same component.
+    private ProductModel? _model;
+
+    private bool _loading = true;
     private bool _specsTranslated;
 
     // Routing is by stable id; the name (carried in the query) reconstructs the DB lookup key.
@@ -188,9 +98,6 @@ else
         }
     }
 
-    private static Money? AsMoney(ProductDetailOffer offer) =>
-        offer.Price is { } p && !string.IsNullOrWhiteSpace(offer.Currency) ? new Money(p, offer.Currency!) : null;
-
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender)
@@ -200,7 +107,7 @@ else
                 // Read the assembled view from the database — no live scrape. Works cold from a shared link.
                 _view = await Details.GetAsync(
                     Id, DecodedName, string.IsNullOrWhiteSpace(Geo) ? "jordan" : Geo!, lookupKey: Key);
-                _specRows = _view?.Specs.Select(s => (Label: Humanize(s.Key), Value: s.Value)).ToList();
+                _model = _view is null ? null : BuildModel(_view);
             }
             catch (Exception ex)
             {
@@ -217,10 +124,10 @@ else
             return;
         }
 
-        // Once the table has rendered with the original labels/values, translate the whole spec sheet in a
-        // SINGLE batched DeepL call (cache-first) and swap it in. Runs once; no-op when translation is off
-        // or the content is already in the UI language.
-        if (_view is null || _specRows is not { Count: > 0 } || _specsTranslated)
+        // Once the body has rendered with the original spec labels/values, translate the whole spec sheet
+        // in a SINGLE batched DeepL call (cache-first) and swap it in. Runs once; no-op when translation is
+        // off or the content is already in the UI language.
+        if (_view is null || _model is null || _view.Specs.Count == 0 || _specsTranslated)
         {
             return;
         }
@@ -231,16 +138,35 @@ else
         }
     }
 
-    /// <summary>Translates all spec labels and values as one batch, then swaps the rows in place.</summary>
+    /// <summary>Maps the saved detail view onto the ProductModel the shared body renders. Offers carry
+    /// the internal store route as their StoreUrl so the store cell links through to the store page.</summary>
+    private static ProductModel BuildModel(ProductDetailView view) => new()
+    {
+        Name = view.Name,
+        Brand = view.Brand,
+        Model = view.Model,
+        ImageUrl = view.ImageUrl,
+        Specs = view.Specs,
+        Offers = view.Offers.Select(o => new PriceOffer
+        {
+            Source = o.StoreName,
+            Price = o.Price,
+            Currency = o.Currency,
+            Url = o.Url,
+            StoreUrl = $"/store/{o.StoreId}?name={Uri.EscapeDataString(o.StoreName)}",
+        }).ToList(),
+    };
+
+    /// <summary>Translates all spec labels and values as one batch, then swaps the spec sheet in place.</summary>
     private async Task TranslateSpecsAsync()
     {
-        var rows = _specRows!;
+        var specs = _view!.Specs.ToList();
         var target = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
 
-        // One request: every label followed by every value (DeepL batches up to 50 texts/call).
-        var inputs = new List<string>(rows.Count * 2);
-        inputs.AddRange(rows.Select(r => r.Label));
-        inputs.AddRange(rows.Select(r => r.Value));
+        // One request: every (humanized) label followed by every value (DeepL batches up to 50 texts/call).
+        var inputs = new List<string>(specs.Count * 2);
+        inputs.AddRange(specs.Select(s => ModelDetailBody.Humanize(s.Key)));
+        inputs.AddRange(specs.Select(s => s.Value));
 
         IReadOnlyList<string> translated;
         try
@@ -252,16 +178,14 @@ else
             return; // best-effort: keep the original spec sheet
         }
 
-        var swapped = new List<(string Label, string Value)>(rows.Count);
-        for (var i = 0; i < rows.Count; i++)
+        // Rebuild the model's spec dictionary with the translated pairs (guarding against two labels
+        // translating to the same word) and let the shared body re-render it.
+        var swapped = new Dictionary<string, string>(specs.Count);
+        for (var i = 0; i < specs.Count; i++)
         {
-            swapped.Add((translated[i], translated[rows.Count + i]));
+            swapped.TryAdd(translated[i], translated[specs.Count + i]);
         }
-        _specRows = swapped;
+        _model = _model! with { Specs = swapped };
         await InvokeAsync(StateHasChanged);
     }
-
-    private static string Humanize(string key) =>
-        string.Join(' ', key.Replace('_', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)
-            .Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
 }

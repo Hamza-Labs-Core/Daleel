@@ -1,0 +1,332 @@
+@* The rich product-detail body shared by the "Details & prices" dialog and the full /product page —
+   ONE component so the two surfaces can't drift. Renders, in order: (a) identity header (image beside
+   name/brand/model/rating/reputation + brand links), (b) the offers table, (c) specs (the scraped
+   "details" blob as readable prose, every other key as a two-column table), (d) pros/cons + review
+   summary, (e) reviews, (f) mentions. Every section renders only when it has data; when the model
+   truly has nothing beyond its name and offers, a quiet "still enriching" hint keeps the surface from
+   reading as broken-empty. *@
+@inject IStringLocalizer<SharedResource> L
+
+<MudGrid Spacing="3">
+    @if (!string.IsNullOrWhiteSpace(Model.ImageUrl))
+    {
+        <MudItem xs="12" sm="4">
+            <div class="d-flex align-center justify-center" style="min-height:120px;height:100%;">
+                <SafeImage Src="@Model.ImageUrl" Alt="@Model.Name" Style="max-height:260px;max-width:100%;object-fit:contain;" />
+            </div>
+        </MudItem>
+    }
+
+    <MudItem xs="12" sm="@(string.IsNullOrWhiteSpace(Model.ImageUrl) ? 12 : 8)">
+        @* Names are cached language-agnostically (an Arabic market yields Arabic names under an EN UI),
+           so route them through TranslatedText — cache-first, best-effort, dir-aware. *@
+        <TranslatedText Text="@Model.Name" Typo="Typo.h5" />
+        @if (!string.IsNullOrWhiteSpace(BrandLine))
+        {
+            <TranslatedText Text="@BrandLine" Typo="Typo.subtitle2" Color="Color.Secondary" />
+        }
+
+        @if (Model.Rating is { } rating)
+        {
+            @* Product-level buyer rating — distinct from the brand-reputation chip below (that's the
+               BRAND in-market; this is THIS product). The tooltip disambiguates the two scores. *@
+            <div class="d-flex align-center gap-1 mt-1" title="@L["ModelCard.ProductRating"]">
+                <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small" Color="Color.Warning" />
+                <MudText Typo="Typo.body2">@rating.ToString("0.0")@(Model.RatingCount is { } rc ? $" ({rc:n0})" : "")</MudText>
+            </div>
+        }
+
+        @if (Model.BrandReputation is { HasSignal: true })
+        {
+            <div class="mt-1"><BrandReputationView Reputation="Model.BrandReputation" Compact="true" /></div>
+        }
+
+        @if (Model.Msrp_ is { } msrp)
+        {
+            <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Class="mt-1">MSRP @msrp.ToDisplay()</MudChip>
+        }
+
+        @if (BrandHref is { } brandHref)
+        {
+            <div class="mt-1">
+                <MudLink Href="@brandHref" Target="_blank" rel="noopener" Typo="Typo.body2"
+                         Class="d-inline-flex align-center" Style="gap:4px;">
+                    <MudIcon Icon="@Icons.Material.Filled.Language" Size="Size.Small" />
+                    @(string.IsNullOrWhiteSpace(Model.BrandSiteUrl) ? L["ModelCard.BrandSite"] : L["ModelCard.OnBrandSite"])
+                </MudLink>
+            </div>
+        }
+    </MudItem>
+</MudGrid>
+
+@if (Model.Offers.Count > 0)
+{
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.h6" Class="mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.PriceCheck" Size="Size.Small" Class="mr-1" />@L["Detail.Offers"]
+    </MudText>
+    <div style="overflow-x:auto;">
+        <MudSimpleTable Dense="true" Hover="true" Bordered="true">
+            <tbody>
+                @foreach (var offer in Model.Offers)
+                {
+                    <tr>
+                        <td>
+                            @* The store cell links to the store itself (StoreUrl); the View button at the
+                               end of the row always leads to the offer's own page (Url). *@
+                            @if (offer.StoreUrl is { Length: > 0 } storeUrl)
+                            {
+                                <MudLink Href="@storeUrl" Target="@(IsExternal(storeUrl) ? "_blank" : null)"
+                                         rel="noopener" dir="@Catalog.Dir(offer.Source)">@offer.Source</MudLink>
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.body2" dir="@Catalog.Dir(offer.Source)">@offer.Source</MudText>
+                            }
+                        </td>
+                        <td>
+                            @* Exact prices render firm; indicative (loosely-parsed) ones keep their ≈
+                               marker; a null price stays honest — the store page is the price source. *@
+                            @if (offer.AsMoney is { } money)
+                            {
+                                <MudText Typo="Typo.body1" Style="font-weight:600;white-space:nowrap;"
+                                         Color="@(offer.IsIndicative ? Color.Secondary : Color.Primary)"
+                                         title="@(offer.IsIndicative ? L["ModelCard.PriceOnSite"] : null)">
+                                    @(offer.IsIndicative ? "≈ " : "")@money.ToDisplay()</MudText>
+                            }
+                            else
+                            {
+                                <MudText Typo="Typo.caption" Color="Color.Secondary">@L["ModelCard.PriceOnSite"]</MudText>
+                            }
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrWhiteSpace(offer.Condition))
+                            {
+                                <MudText Typo="Typo.body2">@ConditionLabel(offer.Condition!)</MudText>
+                            }
+                        </td>
+                        <td>
+                            @if (offer.Tags.Count > 0)
+                            {
+                                <div class="d-flex gap-1" style="flex-wrap:wrap;">
+                                    @foreach (var tag in offer.Tags)
+                                    {
+                                        <MudChip T="string" Size="Size.Small" Variant="Variant.Text"
+                                                 Color="@TagColor(tag)">@tag</MudChip>
+                                    }
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            @if (offer.Url is { Length: > 0 } url)
+                            {
+                                <MudButton Href="@url" Target="_blank" Size="Size.Small" Variant="Variant.Text"
+                                           StartIcon="@Icons.Material.Filled.OpenInNew">@L["Products.View"]</MudButton>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    </div>
+}
+
+@if (_detailsText is { } details)
+{
+    @* The scraped "details" spec is a long text blob — prose, never a table row. *@
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.h6" Class="mb-1">@L["Detail.About"]</MudText>
+    <MudText Typo="Typo.body2" dir="@Catalog.Dir(details)" Style="white-space:pre-line;">@details</MudText>
+}
+
+@if (_specRows.Count > 0)
+{
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.h6" Class="mb-2">@L["Detail.Specs"]</MudText>
+    <MudSimpleTable Dense="true" Bordered="true" Style="max-width:560px;">
+        <tbody>
+            @foreach (var (label, value) in _specRows)
+            {
+                <tr>
+                    <td style="width:40%;"><strong dir="@Catalog.Dir(label)">@label</strong></td>
+                    <td dir="@Catalog.Dir(value)">@value</td>
+                </tr>
+            }
+        </tbody>
+    </MudSimpleTable>
+}
+
+@if (Model.Pros.Count > 0 || Model.Cons.Count > 0 || !string.IsNullOrWhiteSpace(Model.ReviewSummary))
+{
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.h6" Class="mb-2">@L["Detail.ProsCons"]</MudText>
+    @if (!string.IsNullOrWhiteSpace(Model.ReviewSummary))
+    {
+        <MudText Typo="Typo.body2" Class="mb-2" Style="font-style:italic;"
+                 dir="@Catalog.Dir(Model.ReviewSummary!)">“@Model.ReviewSummary”</MudText>
+    }
+    <MudGrid Spacing="2">
+        @if (Model.Pros.Count > 0)
+        {
+            <MudItem xs="12" sm="6">
+                <MudText Typo="Typo.subtitle2" Color="Color.Success">@L["Compare.Pros"]</MudText>
+                @foreach (var pro in Model.Pros)
+                {
+                    <MudText Typo="Typo.body2" dir="@Catalog.Dir(pro)">＋ @pro</MudText>
+                }
+            </MudItem>
+        }
+        @if (Model.Cons.Count > 0)
+        {
+            <MudItem xs="12" sm="6">
+                <MudText Typo="Typo.subtitle2" Color="Color.Error">@L["Compare.Cons"]</MudText>
+                @foreach (var con in Model.Cons)
+                {
+                    <MudText Typo="Typo.body2" dir="@Catalog.Dir(con)">－ @con</MudText>
+                }
+            </MudItem>
+        }
+    </MudGrid>
+}
+
+@if (Model.Reviews.Count > 0)
+{
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.h6" Class="mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.RateReview" Size="Size.Small" Class="mr-1" />@L["ModelCard.Reviews"] (@Model.Reviews.Count)
+    </MudText>
+    @foreach (var review in Model.Reviews)
+    {
+        <div class="mb-2">
+            <MudLink Href="@review.Url" Target="_blank" rel="noopener" Typo="Typo.body2"
+                     dir="@Catalog.Dir(ReviewTitle(review))">@ReviewTitle(review)</MudLink>
+            @if (!string.IsNullOrWhiteSpace(review.Snippet))
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block"
+                         dir="@Catalog.Dir(review.Snippet!)">@review.Snippet</MudText>
+            }
+        </div>
+    }
+}
+
+@if (Model.Mentions.Count > 0)
+{
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.h6" Class="mb-2">
+        <MudIcon Icon="@Icons.Material.Filled.Link" Size="Size.Small" Class="mr-1" />@L["ModelCard.MentionedIn"] (@Model.Mentions.Count)
+    </MudText>
+    @foreach (var mention in Model.Mentions)
+    {
+        <div class="mb-1">
+            <MudLink Href="@mention.Url" Target="_blank" rel="noopener" Typo="Typo.body2"
+                     dir="@Catalog.Dir(MentionTitle(mention))">@MentionTitle(mention)</MudLink>
+        </div>
+    }
+}
+
+@if (IsSparse)
+{
+    @* Nothing beyond identity + offers yet (enrichment may still be running or the deep-dive found
+       little) — a quiet hint so the surface never reads as broken-empty. *@
+    <MudDivider Class="my-3" />
+    <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-flex align-center" Style="gap:6px;">
+        <MudIcon Icon="@Icons.Material.Filled.HourglassEmpty" Size="Size.Small" />
+        @L["Detail.StillEnriching"]
+    </MudText>
+}
+
+@code {
+    [Parameter, EditorRequired] public ProductModel Model { get; set; } = default!;
+
+    /// <summary>Cap for the "details" prose blob — enough to read, never a wall of scraped text.</summary>
+    private const int DetailsMaxChars = 1200;
+
+    // Derived per parameter set: the prose blob (truncated) and the remaining key/value spec rows.
+    private string? _detailsText;
+    private List<(string Label, string Value)> _specRows = new();
+
+    protected override void OnParametersSet()
+    {
+        var details = Model.Specs
+            .FirstOrDefault(kv => kv.Key.Equals("details", StringComparison.OrdinalIgnoreCase)).Value;
+        _detailsText = string.IsNullOrWhiteSpace(details) ? null : Truncate(details.Trim(), DetailsMaxChars);
+
+        _specRows = Model.Specs
+            .Where(kv => !kv.Key.Equals("details", StringComparison.OrdinalIgnoreCase)
+                         && !string.IsNullOrWhiteSpace(kv.Value))
+            .Select(kv => (Label: Humanize(kv.Key), kv.Value))
+            .ToList();
+    }
+
+    /// <summary>True when the model carries nothing beyond its identity and offers.</summary>
+    private bool IsSparse =>
+        _detailsText is null && _specRows.Count == 0
+        && Model.Pros.Count == 0 && Model.Cons.Count == 0
+        && string.IsNullOrWhiteSpace(Model.ReviewSummary)
+        && Model.Reviews.Count == 0 && Model.Mentions.Count == 0;
+
+    /// <summary>"Brand · Model" — the sub-caption under the name; empty when neither is set.</summary>
+    private string BrandLine =>
+        string.Join(" · ", new[] { Model.Brand, Model.Model }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+    /// <summary>The brand link shown: the model's own brand page beats the regional root.</summary>
+    private string? BrandHref =>
+        !string.IsNullOrWhiteSpace(Model.BrandSiteUrl) ? Model.BrandSiteUrl
+        : !string.IsNullOrWhiteSpace(Model.BrandRegionalUrl) ? Model.BrandRegionalUrl
+        : null;
+
+    /// <summary>Turns a raw spec key ("battery_capacity") into a display label. Idempotent, so labels
+    /// that arrive already humanized (e.g. the product page's translated spec sheet) pass through.</summary>
+    public static string Humanize(string key) =>
+        string.Join(' ', key.Replace('_', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Select(w => char.ToUpperInvariant(w[0]) + w[1..]));
+
+    /// <summary>Truncates at the last word boundary before <paramref name="max"/> with an ellipsis.</summary>
+    private static string Truncate(string text, int max)
+    {
+        if (text.Length <= max)
+        {
+            return text;
+        }
+
+        var cut = text.LastIndexOf(' ', max);
+        return string.Concat(text.AsSpan(0, cut > 0 ? cut : max).TrimEnd(), "…");
+    }
+
+    // The page's offers link to internal /store routes while search-result offers carry external store
+    // sites — only the latter should open a new tab.
+    private static bool IsExternal(string url) =>
+        url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+        || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Localizes the known offer conditions ("new"/"used"/"refurbished"); unknown pass through.</summary>
+    private string ConditionLabel(string condition) => condition.ToLowerInvariant() switch
+    {
+        "new" => L["Filter.New"],
+        "used" => L["Filter.Used"],
+        "refurbished" => L["Filter.Refurbished"],
+        _ => condition,
+    };
+
+    private static Color TagColor(string tag) => tag switch
+    {
+        "LOWEST" => Color.Success,
+        "SALE" => Color.Error,
+        _ => Color.Default,
+    };
+
+    /// <summary>Display text for a review link: its title, else its source, else the site host.</summary>
+    private static string ReviewTitle(ItemReview review) =>
+        !string.IsNullOrWhiteSpace(review.Title) ? review.Title!
+        : !string.IsNullOrWhiteSpace(review.Source) ? review.Source!
+        : HostOf(review.Url);
+
+    /// <summary>Display text for a mention link: its title, else its source, else the site host.</summary>
+    private static string MentionTitle(ItemLink mention) =>
+        !string.IsNullOrWhiteSpace(mention.Title) ? mention.Title
+        : !string.IsNullOrWhiteSpace(mention.Source) ? mention.Source!
+        : HostOf(mention.Url);
+
+    private static string HostOf(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) ? uri.Host : url;
+}

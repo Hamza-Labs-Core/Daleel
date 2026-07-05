@@ -106,6 +106,9 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
         // they land is a paid SerpAPI lookup saved. Conditions run last for the same reason: they
         // read offers the other units attach.
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.ImageLookup, "{}", notBefore: TimeSpan.FromSeconds(90)));
+        // Offers arrive with URLs but often without figures — fetch the price FROM those pages
+        // (the "you have the site, get the price" rule). After catalogs attach their offers.
+        children.Add(HandlerHelpers.Child(item, EnrichmentUnit.PriceFetch, "{}", notBefore: TimeSpan.FromSeconds(120)));
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Conditions, "{}", notBefore: TimeSpan.FromSeconds(150)));
         // Last on purpose: it prunes the offers every other unit attached, so it must see them all.
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Reachability, "{}", notBefore: TimeSpan.FromSeconds(240)));
@@ -429,6 +432,142 @@ public sealed class ConditionsHandler : IEnrichmentUnitHandler
             answer => answer.Products is null ? null : answer with { Products = answer.Products with { Models = labeled } },
             ct);
         return UnitOutcome.Ok;
+    }
+}
+
+/// <summary>
+/// Fetches prices FROM the offer pages we already hold URLs for: every "See price on store site"
+/// where the site is known is a page fetch away from a figure. Renders the page (edge-preferring),
+/// parses price lines, and stamps the offer whose URL it fetched — exact when the priced line names
+/// the model, indicative otherwise. Bounded batch per execution; enqueues its own continuation
+/// while unpriced offers remain (queue recursion, like the image pass).
+/// </summary>
+public sealed class PriceFetchHandler : IEnrichmentUnitHandler
+{
+    /// <summary>Page fetches per execution — each is a render + parse, seconds apiece.</summary>
+    private const int BatchSize = 6;
+
+    private readonly ILogger<PriceFetchHandler> _logger;
+
+    public PriceFetchHandler(ILogger<PriceFetchHandler> logger) => _logger = logger;
+
+    public string Kind => EnrichmentUnit.PriceFetch;
+    public TimeSpan Budget => TimeSpan.FromSeconds(240);
+
+    public async Task<UnitOutcome> ExecuteAsync(
+        EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
+    {
+        if (await ctx.Results.LoadAsync(item.SearchJobId, ct) is not { Products.Models: { Count: > 0 } models })
+        {
+            return UnitOutcome.Ok;
+        }
+
+        var providers = ctx.Services.GetRequiredService<IProviderApi>();
+
+        // One fetch per distinct unpriced offer URL; the same page may price several duplicates.
+        var targets = models
+            .SelectMany(m => m.Offers.Select(o => (Model: m, Offer: o)))
+            .Where(x => x.Offer.Price is null && !string.IsNullOrWhiteSpace(x.Offer.Url))
+            .GroupBy(x => x.Offer.Url!, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (targets.Count == 0)
+        {
+            return UnitOutcome.Ok;
+        }
+
+        var found = new Dictionary<string, (decimal Price, string Currency, bool Exact)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in targets.Take(BatchSize))
+        {
+            var url = group.Key;
+            var modelName = group.First().Model;
+            Daleel.Search.Abstractions.ScrapedPage? page;
+            try
+            {
+                page = await providers.ScrapePageAsync(url, ct: ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { page = null; }
+
+            if (page is null || string.IsNullOrWhiteSpace(page.Content))
+            {
+                continue;
+            }
+
+            if (PickPrice(page.Content, modelName) is { } picked)
+            {
+                found[url] = picked;
+            }
+        }
+
+        if (found.Count > 0)
+        {
+            _logger.LogInformation(
+                "Price fetch for job {JobId}: {Found}/{Tried} page(s) yielded a figure",
+                item.SearchJobId, found.Count, Math.Min(BatchSize, targets.Count));
+            await ctx.Results.PatchAsync(item, answer =>
+            {
+                if (answer.Products is not { } p)
+                {
+                    return null;
+                }
+
+                var changed = false;
+                var updated = p.Models.Select(m =>
+                {
+                    var offers = m.Offers.Select(o =>
+                    {
+                        if (o.Price is null && o.Url is { } u && found.TryGetValue(u, out var f))
+                        {
+                            changed = true;
+                            return o with { Price = f.Price, Currency = f.Currency, IsIndicative = !f.Exact };
+                        }
+                        return o;
+                    }).ToList();
+                    return m with { Offers = offers };
+                }).ToList();
+                return changed ? answer with { Products = p with { Models = updated } } : null;
+            }, ct);
+        }
+
+        if (targets.Count > BatchSize)
+        {
+            await ctx.Queue.EnqueueAsync(new[]
+            {
+                HandlerHelpers.Child(item, EnrichmentUnit.PriceFetch, "{}", notBefore: TimeSpan.FromSeconds(20))
+            }, ct);
+        }
+
+        return UnitOutcome.Ok;
+    }
+
+    /// <summary>
+    /// The page's most credible price for the model: prefer the priced LINE sharing the most model
+    /// tokens (exact); else the page's first price (a product page leads with its own — indicative).
+    /// </summary>
+    internal static (decimal Price, string Currency, bool Exact)? PickPrice(
+        string content, ProductModel model)
+    {
+        var matches = Daleel.Core.Pricing.PriceParser.Extract(content);
+        if (matches.Count == 0)
+        {
+            return null;
+        }
+
+        var want = $"{model.Brand} {model.Model} {model.Name}"
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(tok => tok.Length >= 3)
+            .Select(tok => tok.ToLowerInvariant())
+            .ToHashSet();
+
+        var best = matches
+            .Select(match => (Match: match, Shared: want.Count(tok =>
+                match.Line.Contains(tok, StringComparison.OrdinalIgnoreCase))))
+            .OrderByDescending(x => x.Shared)
+            .First();
+
+        return best.Shared >= 2
+            ? (best.Match.Price, best.Match.Currency, Exact: true)
+            : (matches[0].Price, matches[0].Currency, Exact: false);
     }
 }
 

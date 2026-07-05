@@ -31,6 +31,9 @@ public static class EnrichmentUnit
     /// <summary>Job-level: classify-worker condition backfill (deliberately last).</summary>
     public const string Conditions = "enrich.conditions";
 
+    /// <summary>Job-level: fetches the PRICE from offer pages we already hold URLs for (batched).</summary>
+    public const string PriceFetch = "enrich.prices";
+
     /// <summary>Job-level: prunes offers whose sites users can't actually reach (deliberately last).</summary>
     public const string Reachability = "enrich.reachability";
 
