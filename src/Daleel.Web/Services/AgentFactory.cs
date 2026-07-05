@@ -99,8 +99,29 @@ public sealed class AgentFactory : IAgentFactory
 
     public string? Resolve(string name)
     {
-        // ONE key source: the server environment. (User-supplied per-request keys were removed —
-        // every provider key is operator-managed configuration.)
+        // Operator-managed configuration only (no per-user keys): the credential VAULT's cached
+        // snapshot wins (admin-managed, rotatable at runtime), the server environment is the
+        // bootstrap fallback. Sync by design — this sits on hot paths.
+        if (_services?.GetService(typeof(Daleel.Web.Data.ICredentialVault))
+                is Daleel.Web.Data.ICredentialVault vault)
+        {
+            // CF_{X}_WORKER_TOKEN names alias the authority-minted worker bearer for THIS
+            // environment (worker:daleel-{x}-worker[-qa]) — the rotatable vault value must win
+            // over any deploy-time env token, or rotation would strand these resolvers on a
+            // token the worker no longer accepts.
+            if (Daleel.Web.Cloudflare.WorkerNames.BearerAlias(
+                    name, Environment.GetEnvironmentVariable("DALEEL_ENV")) is { } bearerName &&
+                vault.TryGetCached(bearerName) is { } bearer)
+            {
+                return bearer;
+            }
+
+            if (vault.TryGetCached(name) is { } fromVault)
+            {
+                return fromVault;
+            }
+        }
+
         var env = Environment.GetEnvironmentVariable(name);
         return string.IsNullOrWhiteSpace(env) ? null : env;
     }

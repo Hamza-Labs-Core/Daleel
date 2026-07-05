@@ -362,6 +362,8 @@ jobs:
             # daleel-poll-work queue's ID. All resolve to empty when unset — the app then runs the
             # inline pipeline exactly as before. Enabling the routing is the separate
             # `cloudflare.execution.enabled` flag in /admin/settings.
+            # Environment discriminator for the token authority (which workers this box owns).
+            DALEEL_ENV=prod
             CF_SCRAPE_WORKER_URL=${{ secrets.CF_SCRAPE_WORKER_URL }}
             CF_SCRAPE_WORKER_TOKEN=${{ secrets.CF_SCRAPE_WORKER_TOKEN }}
             CF_QUEUES_API_TOKEN=${{ secrets.CF_QUEUES_API_TOKEN }}

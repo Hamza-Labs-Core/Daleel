@@ -351,6 +351,27 @@ else
 // deadline still lands. Registered only when the worker endpoint is configured (same optional-capability
 // pattern as R2); whether the pipeline actually routes work there is the admin-editable
 // `cloudflare.execution.enabled` flag, so rollback is a settings toggle.
+// ── Token authority (dynamic app↔worker auth) ───────────────────────────────
+// The VPS mints, stores (encrypted, Postgres) and rotates the bearers that authenticate this app to
+// its Cloudflare workers, pushing them to the workers via the Cloudflare API — GitHub secrets are no
+// longer the bearer store (env values remain only as bootstrap fallback). Vendor API keys are also
+// vault-manageable from /admin/credentials; resolution is vault-snapshot-first, environment second.
+builder.Services.AddSingleton<Daleel.Web.Data.ICredentialVault, Daleel.Web.Data.CredentialVault>();
+builder.Services.AddSingleton<Daleel.Web.Cloudflare.ICloudflareSecretsClient>(sp =>
+    new Daleel.Web.Cloudflare.CloudflareSecretsClient(
+        Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+        sp.GetRequiredService<IConfiguration>(),
+        sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareSecretsClient>>()));
+builder.Services.AddSingleton<Daleel.Web.Cloudflare.CredentialRotationService>();
+builder.Services.AddSingleton<Daleel.Web.Cloudflare.ICredentialRotationService>(sp =>
+    sp.GetRequiredService<Daleel.Web.Cloudflare.CredentialRotationService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Daleel.Web.Cloudflare.CredentialRotationService>());
+
+// Vault-first bearer lookup for a worker script of THIS environment ("worker:<script>").
+var workerSuffix = Daleel.Web.Cloudflare.WorkerNames.Suffix(builder.Configuration);
+Func<IServiceProvider, string, string?> vaultBearer = (sp, baseName) =>
+    sp.GetRequiredService<Daleel.Web.Data.ICredentialVault>().TryGetCached($"worker:{baseName}{workerSuffix}");
+
 var cfWorkerOptions = Daleel.Web.Cloudflare.CloudflareWorkerOptions.FromConfiguration(builder.Configuration);
 if (cfWorkerOptions is not null && r2Options is null)
 {
@@ -369,7 +390,8 @@ if (cfWorkerOptions is not null)
             Daleel.Search.Http.SharedHttpHandler.CreateClient(),
             cfWorkerOptions,
             sp.GetRequiredService<Daleel.Web.Storage.IR2StorageService>(),
-            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareWorkerClient>>()));
+            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareWorkerClient>>(),
+            bearer: () => vaultBearer(sp, "daleel-scrape-worker")));
     builder.Services.AddSingleton<Daleel.Web.Cloudflare.IQueuePullClient>(sp =>
         new Daleel.Web.Cloudflare.QueuePullClient(
             Daleel.Search.Http.SharedHttpHandler.CreateClient(),
@@ -498,7 +520,8 @@ if (Daleel.Web.Cloudflare.CloudflareFleetOptions.FromConfiguration(builder.Confi
         new Daleel.Web.Cloudflare.CloudflareFleetClient(
             fleetOptions,
             Daleel.Search.Http.SharedHttpHandler.CreateClient,
-            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareFleetClient>>()));
+            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareFleetClient>>(),
+            bearer: capability => vaultBearer(sp, $"daleel-{capability}-worker")));
 }
 
 // THE provider gateway: every provider call made outside an AgentService flows through this — metered

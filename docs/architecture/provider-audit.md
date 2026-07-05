@@ -29,9 +29,23 @@ searches fail while a Bing key sits unused. Bing remains the no-SerpAPI-anywhere
 **CLI (`Daleel.Cli/Composition.cs`):** constructs providers directly and unmetered — accepted:
 it is a developer tool with no job context, no cost cap, and no usage dashboard.
 
-**Key policy:** there are NO per-user/browser API keys — every provider key is server-environment
+**Key policy:** there are NO per-user/browser API keys — every provider key is operator-managed
 configuration, full stop. The former two-tier resolution (`AgentRequest.Keys`, `BrowserStore`
 key storage, keyed `Resolve/HasLlm/Describe` overloads) has been removed entirely.
+
+**Token authority (app-to-app auth):** worker bearers are no longer static CI secrets. The VPS
+mints, encrypts (Data-Protection) and stores them in Postgres (`ServiceCredentials` via
+`ICredentialVault`), and `CredentialRotationService` pushes them to each worker's secrets over the
+Cloudflare API (`PUT /workers/scripts/{script}/secrets`) — bootstrap on startup, re-push heartbeat,
+optional scheduled rotation (`credentials.rotation_days`, default manual-only). Rotation has a
+grace window: the old value is pushed as `AUTH_TOKEN_PREVIOUS` *before* the new `AUTH_TOKEN`, and
+every worker's `authorize()` accepts both, so in-flight callers never 401. Each box owns only its
+own environment's scripts (`DALEEL_ENV=qa` → the `-qa` fleet). Resolution order everywhere is
+vault-snapshot first (sync, hot-path safe), env var as bootstrap fallback — `CF_{X}_WORKER_TOKEN`
+names alias `worker:daleel-{x}-worker[-qa]` in the vault, so legacy resolvers pick up rotated
+bearers automatically. Admin surface: `/admin/credentials` (rotate/sync bearers, set vendor keys —
+values are never displayed). Vendor keys (SerpAPI, Context.dev, Places…) can also live in the
+vault; CI still uploads them at worker deploy time as the bootstrap set.
 
 ## 2. Cloudflare worker fleet
 

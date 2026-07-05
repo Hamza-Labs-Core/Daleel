@@ -65,10 +65,17 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
     private readonly HttpClient? _filter;
     private readonly ILogger<CloudflareFleetClient> _logger;
 
+    private readonly Func<string, string?>? _bearer;
+
     public CloudflareFleetClient(
-        CloudflareFleetOptions options, Func<HttpClient> clientFactory, ILogger<CloudflareFleetClient> logger)
+        CloudflareFleetOptions options, Func<HttpClient> clientFactory, ILogger<CloudflareFleetClient> logger,
+        Func<string, string?>? bearer = null)
     {
         _logger = logger;
+        // Per-capability bearer provider ("classify" | "extract" | "filter") — vault snapshot first,
+        // so a rotated token applies to these long-lived clients without a restart; the endpoint's
+        // env-configured token stays as the DefaultRequestHeaders fallback.
+        _bearer = bearer;
         _classify = Build(options.Classify, clientFactory);
         _extract = Build(options.Extract, clientFactory);
         _filter = Build(options.Filter, clientFactory);
@@ -96,7 +103,7 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
     public async Task<IReadOnlyList<ClassifyVerdict>> ClassifyTextAsync(
         IReadOnlyList<(string Id, string Text)> items, IReadOnlyList<string> labels, CancellationToken ct = default)
     {
-        var result = await PostAsync<ClassifyResponse>(_classify, "/classify/text", new
+        var result = await PostAsync<ClassifyResponse>(_classify, "classify", "/classify/text", new
         {
             items = items.Select(i => new { id = i.Id, text = i.Text }),
             labels
@@ -107,7 +114,7 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
     public async Task<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>> ExtractProductsAsync(
         string content, string? market = null, CancellationToken ct = default)
     {
-        var result = await PostAsync<ExtractResponse>(_extract, "/extract/products", new
+        var result = await PostAsync<ExtractResponse>(_extract, "extract", "/extract/products", new
         {
             content,
             market
@@ -118,7 +125,7 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
     public async Task<IReadOnlyList<FilterFindingDto>> FilterTextAsync(
         IReadOnlyList<(string Id, string Text, string? SourceUrl)> items, CancellationToken ct = default)
     {
-        var result = await PostAsync<FilterResponse>(_filter, "/filter/text", new
+        var result = await PostAsync<FilterResponse>(_filter, "filter", "/filter/text", new
         {
             items = items.Select(i => new { id = i.Id, text = i.Text, sourceUrl = i.SourceUrl })
         }, ct).ConfigureAwait(false);
@@ -128,13 +135,14 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
     public async Task<IReadOnlyList<FilterFindingDto>> FilterImagesAsync(
         IReadOnlyList<string> urls, CancellationToken ct = default)
     {
-        var result = await PostAsync<FilterResponse>(_filter, "/filter/images", new { urls }, ct)
+        var result = await PostAsync<FilterResponse>(_filter, "filter", "/filter/images", new { urls }, ct)
             .ConfigureAwait(false);
         return result?.Findings ?? (IReadOnlyList<FilterFindingDto>)Array.Empty<FilterFindingDto>();
     }
 
     /// <summary>POSTs to a fleet host and unwraps the {ok, result} envelope; null on any failure.</summary>
-    private async Task<T?> PostAsync<T>(HttpClient? client, string path, object body, CancellationToken ct)
+    private async Task<T?> PostAsync<T>(
+        HttpClient? client, string capability, string path, object body, CancellationToken ct)
         where T : class
     {
         if (client is null)
@@ -144,9 +152,15 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
 
         try
         {
-            using var response = await client.PostAsync(
-                path, new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"), ct)
-                .ConfigureAwait(false);
+            using var request = new HttpRequestMessage(HttpMethod.Post, path)
+            {
+                Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json")
+            };
+            if (_bearer?.Invoke(capability) is { } token)
+            {
+                request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            }
+            using var response = await client.SendAsync(request, ct).ConfigureAwait(false);
             var text = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
             var envelope = JsonSerializer.Deserialize<Envelope<T>>(text, CloudflareJson.Options);
             if (envelope is not { Ok: true })

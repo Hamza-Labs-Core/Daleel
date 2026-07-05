@@ -45,6 +45,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<BrandModel> BrandModels => Set<BrandModel>();
     public DbSet<ScrapedPrice> ScrapedPrices => Set<ScrapedPrice>();
 
+    /// <summary>The VPS token authority: minted worker bearers + admin-stored vendor keys (encrypted).</summary>
+    public DbSet<ServiceCredential> ServiceCredentials => Set<ServiceCredential>();
+
     /// <summary>Index over the R2-stored entity documents (products/services/places). See <see cref="EntityRecord"/>.</summary>
     public DbSet<EntityRecord> EntityRecords => Set<EntityRecord>();
     public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
@@ -53,6 +56,8 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.ApplyConfiguration(new ServiceCredentialConfiguration());
 
         // Stores a string list as a JSON text column. The accompanying ValueComparer lets EF detect
         // in-place mutations to the list (without it, change tracking treats the reference as constant).

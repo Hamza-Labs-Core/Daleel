@@ -84,6 +84,9 @@ public sealed class SystemConfigService : ISystemConfigService
         // cap applies to edge catalogue crawls; 0 ⇒ uncapped (the vendor's own ceiling applies).
         new SystemConfig { Key = Cloudflare.CloudflareWorkerOptions.EnabledFlag, Value = "false", Type = "bool" },
         new SystemConfig { Key = Cloudflare.CloudflareWorkerOptions.CatalogMaxProductsKey, Value = "0", Type = "int" },
+
+        // Token authority: rotate worker bearers every N days; 0 = manual-only (/admin/credentials).
+        new SystemConfig { Key = Cloudflare.CredentialRotationService.RotationDaysKey, Value = "0", Type = "int" },
     };
 
     public async Task<string?> GetAsync(string key, CancellationToken ct = default) =>

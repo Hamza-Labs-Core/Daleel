@@ -234,6 +234,10 @@ function authorize(request, env) {
   }
 
   if (presented && timingSafeEqual(presented, expected)) return null;
+  // Rotation grace: the VPS token authority rotates bearers with a grace window —
+  // the previous token stays valid until the next rotation, so in-flight callers
+  // and the app's cached clients never 401 mid-rotation. Unset is the normal case.
+  if (presented && env.AUTH_TOKEN_PREVIOUS && timingSafeEqual(presented, env.AUTH_TOKEN_PREVIOUS)) return null;
 
   return new Response(JSON.stringify({ ok: false, error: err("unauthorized", "bad or missing token", false) }), {
     status: 401,

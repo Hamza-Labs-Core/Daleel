@@ -64,19 +64,50 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
     private readonly IR2StorageService _r2;
     private readonly ILogger<CloudflareWorkerClient> _logger;
 
+    private readonly Func<string?>? _bearer;
+
     public CloudflareWorkerClient(
         HttpClient http, CloudflareWorkerOptions options, IR2StorageService r2,
-        ILogger<CloudflareWorkerClient> logger)
+        ILogger<CloudflareWorkerClient> logger,
+        Func<string?>? bearer = null)
     {
         _http = http;
         _options = options;
         _r2 = r2;
         _logger = logger;
+        _bearer = bearer;
         _http.BaseAddress = options.ScrapeWorkerUrl;
+        // Fallback bearer; when a vault provider is supplied it OVERRIDES per request, so a rotated
+        // token applies to a long-lived client without a restart.
         _http.DefaultRequestHeaders.Authorization =
             new AuthenticationHeaderValue("Bearer", options.ScrapeWorkerToken);
         // Submits and status checks are small control-plane calls; the heavy work runs on the edge.
         _http.Timeout = TimeSpan.FromSeconds(30);
+    }
+
+    /// <summary>POST with the per-request bearer (vault snapshot first, env-configured fallback).</summary>
+    private Task<HttpResponseMessage> PostAsync(string path, string json, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        if (_bearer?.Invoke() is { } token)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+        return _http.SendAsync(request, ct);
+    }
+
+    /// <summary>GET with the per-request bearer.</summary>
+    private Task<HttpResponseMessage> GetAsync(string path, CancellationToken ct)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        if (_bearer?.Invoke() is { } token)
+        {
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        }
+        return _http.SendAsync(request, ct);
     }
 
     /// <summary>
@@ -102,10 +133,8 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
         {
             using var submitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             submitCts.CancelAfter(SubmitTimeout);
-            using var response = await _http.PostAsync(
-                "/scrape/catalog",
-                new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
-                submitCts.Token).ConfigureAwait(false);
+            using var response = await PostAsync(
+                "/scrape/catalog", JsonSerializer.Serialize(body), submitCts.Token).ConfigureAwait(false);
             var text = await response.Content.ReadAsStringAsync(submitCts.Token).ConfigureAwait(false);
             var dto = JsonSerializer.Deserialize<WorkerSubmitResponse>(text, CloudflareJson.Options);
 
@@ -145,10 +174,8 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
             // A page scrape is a real vendor call, not a control-plane ping — allow the vendor's
             // ~45s budget but never the sub-workflow's whole allowance.
             scrapeCts.CancelAfter(TimeSpan.FromSeconds(25));
-            using var response = await _http.PostAsync(
-                "/scrape/page",
-                new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
-                scrapeCts.Token).ConfigureAwait(false);
+            using var response = await PostAsync(
+                "/scrape/page", JsonSerializer.Serialize(body), scrapeCts.Token).ConfigureAwait(false);
             var text = await response.Content.ReadAsStringAsync(scrapeCts.Token).ConfigureAwait(false);
             var dto = JsonSerializer.Deserialize<PageScrapeResponse>(text, CloudflareJson.Options);
             return dto is { Ok: true, Result: not null } ? dto.Result : null;
@@ -183,10 +210,8 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
         {
             using var submitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             submitCts.CancelAfter(SubmitTimeout);
-            using var response = await _http.PostAsync(
-                "/scrape/brand",
-                new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
-                submitCts.Token).ConfigureAwait(false);
+            using var response = await PostAsync(
+                "/scrape/brand", JsonSerializer.Serialize(body), submitCts.Token).ConfigureAwait(false);
             var text = await response.Content.ReadAsStringAsync(submitCts.Token).ConfigureAwait(false);
             var dto = JsonSerializer.Deserialize<WorkerSubmitResponse>(text, CloudflareJson.Options);
 
@@ -214,7 +239,7 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
         {
             using var statusCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             statusCts.CancelAfter(TimeSpan.FromSeconds(10));
-            using var response = await _http.GetAsync($"/jobs/{Uri.EscapeDataString(jobId)}", statusCts.Token)
+            using var response = await GetAsync($"/jobs/{Uri.EscapeDataString(jobId)}", statusCts.Token)
                 .ConfigureAwait(false);
             var text = await response.Content.ReadAsStringAsync(statusCts.Token).ConfigureAwait(false);
             return JsonSerializer.Deserialize<WorkerJobStatus>(text, CloudflareJson.Options);

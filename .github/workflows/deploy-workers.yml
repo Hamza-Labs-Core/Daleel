@@ -10,8 +10,8 @@
 # Required GitHub secrets:
 #   CLOUDFLARE_API_TOKEN              — Workers Scripts: Edit + R2 + Queues + KV + Workers AI.
 #   CLOUDFLARE_ACCOUNT_ID             — account id.
-#   CF_{SCRAPE|SEARCH|CLASSIFY|EXTRACT|FILTER}_WORKER_TOKEN — prod bearer per worker
-#   (deploy.yml renders the same values into the app's .env)
+#   (worker BEARERS are NOT CI secrets any more: the VPS token authority mints and pushes
+#   AUTH_TOKEN/AUTH_TOKEN_PREVIOUS via the Cloudflare API — see /admin/credentials)
 #   CONTEXT_DEV_API_KEY               — scrape-worker's vendor key
 #   SERPAPI_KEY, GOOGLE_PLACES_API_KEY — search-worker's vendor keys
 name: Deploy workers (prod)
@@ -41,28 +41,18 @@ jobs:
       matrix:
         include:
           - worker: scrape-worker
-            token: CF_SCRAPE_WORKER_TOKEN
             worker_secrets: |
-              AUTH_TOKEN
               CONTEXT_DEV_API_KEY
           - worker: search-worker
-            token: CF_SEARCH_WORKER_TOKEN
             worker_secrets: |
-              AUTH_TOKEN
               SERPAPI_KEY
               GOOGLE_PLACES_API_KEY
           - worker: classify-worker
-            token: CF_CLASSIFY_WORKER_TOKEN
-            worker_secrets: |
-              AUTH_TOKEN
+            worker_secrets: ""
           - worker: extract-worker
-            token: CF_EXTRACT_WORKER_TOKEN
-            worker_secrets: |
-              AUTH_TOKEN
+            worker_secrets: ""
           - worker: filter-worker
-            token: CF_FILTER_WORKER_TOKEN
-            worker_secrets: |
-              AUTH_TOKEN
+            worker_secrets: ""
     defaults:
       run:
         working-directory: workers/${{ matrix.worker }}
@@ -74,12 +64,10 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          WORKER_TOKEN: ${{ secrets[matrix.token] }}
         run: |
           missing=""
           [ -z "$CLOUDFLARE_API_TOKEN" ] && missing="$missing CLOUDFLARE_API_TOKEN"
           [ -z "$CLOUDFLARE_ACCOUNT_ID" ] && missing="$missing CLOUDFLARE_ACCOUNT_ID"
-          [ -z "$WORKER_TOKEN" ] && missing="$missing ${{ matrix.token }}"
           if [ -n "$missing" ]; then
             echo "::error::${{ matrix.worker }} prod deploy aborted — required secrets unset/empty:$missing"
             echo "Set each with: gh secret set <NAME> --body '<value>' --repo Hamza-Labs-Core/Daleel" >&2
@@ -111,7 +99,6 @@ jobs:
           command: deploy
           secrets: ${{ matrix.worker_secrets }}
         env:
-          AUTH_TOKEN: ${{ secrets[matrix.token] }}
           CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
