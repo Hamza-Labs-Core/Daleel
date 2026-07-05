@@ -28,6 +28,36 @@ public interface IItemEnrichmentService
     Task<ItemEnrichmentResult> EnrichAsync(
         AgentService agent, ProductSearchResult products, Action<string> progress,
         string? searchId, CancellationToken ct);
+
+    /// <summary>Phase 0 as a unit: brand-DB read-through over the whole list. Null = nothing changed.</summary>
+    Task<List<ProductModel>?> FillFromBrandDatabaseUnitAsync(List<ProductModel> models, string? geo, CancellationToken ct);
+
+    /// <summary>Phase 0.5 as a unit: vision identification, internal candidate selection + caps preserved. Null = nothing changed.</summary>
+    Task<List<ProductModel>?> IdentifyViaVisionUnitAsync(List<ProductModel> models, string? geo, CancellationToken ct);
+
+    /// <summary>Phases 1–3 for ONE item: fresh-profile reuse, else official-page scrape + ProductProfile upsert. Null = unchanged.</summary>
+    Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
+
+    /// <summary>Phase 4 for ONE store domain over the whole list (inline Context.dev extract + browser fallback + persist observations + match). Models null = unchanged.</summary>
+    Task<(List<ProductModel>? Models, int Priced)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, CancellationToken ct);
+
+    /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
+    Task<(List<ProductModel>? Models, int Priced)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, CancellationToken ct);
+
+    /// <summary>Phase 5 for ONE brand + immediate brand-DB refill of the list. Null = unchanged.</summary>
+    Task<List<ProductModel>?> HarvestBrandAndRefillAsync(AgentService agent, string brand, List<ProductModel> models, string? geo, string? searchId, CancellationToken ct);
+
+    /// <summary>Phase 6 for ONE item: paid image lookup. Null = none found.</summary>
+    Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
+
+    /// <summary>Phase 7 as a unit: condition backfill over the whole list. Null = unchanged.</summary>
+    Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct);
+
+    /// <summary>Store domains Phase 4 would crawl for this result (pure selection, no I/O).</summary>
+    IReadOnlyList<(string Domain, string? StoreName)> SelectCatalogDomains(ProductSearchResult products);
+
+    /// <summary>Brands Phase 5 would harvest for this result (pure selection incl. the MaxBrandCatalogs cap, no I/O).</summary>
+    IReadOnlyList<string> SelectBrandsForHarvest(ProductSearchResult products);
 }
 
 public sealed class ItemEnrichmentService : IItemEnrichmentService
@@ -48,6 +78,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
     /// <summary>Per-catalogue crawl budget — kept under the background enrichment timeout.</summary>
     private const int CatalogTimeoutMs = 30_000;
+
+    /// <summary>
+    /// How far back <see cref="AttachScrapedPricesAsync"/> trusts a persisted observation (e.g. a
+    /// drained edge-scrape result) as a current price. Prices drift, so an older row is history to
+    /// chart, not an offer to attach.
+    /// </summary>
+    private const int ScrapedPriceReuseWindowMinutes = 60;
 
     /// <summary>
     /// Absolute floor on shared significant tokens (brand/model/SKU) before a price is attributed to an
@@ -160,7 +197,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // item then fills image/specs/price from its canonical BrandModel row and gains the canonical
         // model name — the strategy that works precisely where token matching fails. Capped: each
         // identification can spend catalogue crawls plus paid vision comparisons.
-        var visionFills = await IdentifyViaVisionAsync(models, products.Geo, progress, Record, ct);
+        var (visionFills, _) = await IdentifyViaVisionAsync(models, products.Geo, progress, Record, ct);
 
         // Phase 1 — price comparison + DB-first reuse (sequential: scoped DbContext isn't concurrency-safe).
         var toScrape = new List<(ProductModel m, int idx, string url, string key)>();
@@ -205,9 +242,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             {
                 progress($"Fetching official specs for {t.m.Name}…");
                 var page = await agent.ReadPageAsync(t.url, ct);
-                var content = page is null
-                    ? null
-                    : page.Content.Length <= MaxDetailChars ? page.Content : page.Content[..MaxDetailChars];
+                var content = page is null ? null : TruncateDetail(page.Content);
                 return (t.idx, t.url, t.key, t.m, content);
             }));
 
@@ -233,15 +268,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         // Merge any fresh/cached spec details into the working models.
         var withSpecs = models
-            .Select((m, idx) =>
-            {
-                if (!enriched.TryGetValue(idx, out var detail))
-                {
-                    return m;
-                }
-                var specs = new Dictionary<string, string>(m.Specs) { ["details"] = detail };
-                return m with { Specs = specs };
-            })
+            .Select((m, idx) => enriched.TryGetValue(idx, out var detail) ? WithDetail(m, detail) : m)
             .ToList();
 
         // Phase 4 — STORE catalogues (Context.dev /v1/brand/ai/products, browser-render fallback):
@@ -280,13 +307,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
             imageAttempts++;
 
-            var imageQuery = string.Join(' ', new[]
-            {
-                m.Brand,
-                string.IsNullOrWhiteSpace(m.Model) ? m.Name : m.Model
-            }.Where(s => !string.IsNullOrWhiteSpace(s)));
-
-            if (await agent.FindProductImageAsync(imageQuery, ct) is not { } img)
+            if (await FindImageForItemAsync(agent, m, ct) is not { } img)
             {
                 continue;
             }
@@ -332,6 +353,270 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return new ItemEnrichmentResult(products with { Models = pricedModels }, events);
     }
 
+    // The *UnitAsync members below re-expose the phases one queued work item at a time for the
+    // durable enrichment consumer. Units record no PipelineEvents (the consumer meters paid calls
+    // via AmbientApiObserver); progress lines become _logger calls. Cancellation of the caller's
+    // token always surfaces as OperationCanceledException — the consumer owns retries and timeouts.
+
+    public async Task<List<ProductModel>?> FillFromBrandDatabaseUnitAsync(
+        List<ProductModel> models, string? geo, CancellationToken ct)
+    {
+        var (filled, images, prices, specs) = await FillFromBrandDatabaseAsync(models, geo, ct);
+        if (images + prices + specs == 0)
+        {
+            return null;
+        }
+
+        _logger.LogInformation("Matched {Count} detail(s) from the product database", images + prices + specs);
+        return filled;
+    }
+
+    public async Task<List<ProductModel>?> IdentifyViaVisionUnitAsync(
+        List<ProductModel> models, string? geo, CancellationToken ct)
+    {
+        var (fills, changed) = await IdentifyViaVisionAsync(models, geo, progress: null, record: null, ct);
+        if (fills > 0)
+        {
+            _logger.LogInformation("Identified {Count} item(s) by product photo", fills);
+        }
+
+        // An identification can change a model (canonical name) without a countable fill.
+        return changed ? models : null;
+    }
+
+    public async Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct)
+    {
+        var now = _options.Now();
+        var key = ProductProfile.KeyFor(item.Brand, item.Model, item.Name);
+        if (key.Length == 0)
+        {
+            return null;
+        }
+
+        var saved = await SafeGet(key, ct);
+        if (saved is { } s && !s.IsStale(now, _options.Ttl) && !string.IsNullOrWhiteSpace(s.Details))
+        {
+            return WithDetail(item, s.Details!);
+        }
+
+        // Same scrape gate as the orchestrated phase: a URL to read and a thin item worth reading for.
+        var url = OfficialOrCheapestUrl(item);
+        if (url is null || item.Specs.Count >= ThinSpecThreshold)
+        {
+            return null;
+        }
+
+        _logger.LogInformation("Fetching official specs for {Item}", item.Name);
+        var page = await agent.ReadPageAsync(url, ct);
+        var content = page is null ? null : TruncateDetail(page.Content);
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return null;
+        }
+
+        await SafeUpsert(new ProductProfile
+        {
+            Name = item.Name, Brand = item.Brand, Model = item.Model, NameKey = key,
+            Details = content, SourceUrl = url, LastRefreshed = now
+        }, ct);
+        return WithDetail(item, content!);
+    }
+
+    public async Task<(List<ProductModel>? Models, int Priced)> AttachCatalogForDomainAsync(
+        AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo,
+        string? searchId, CancellationToken ct)
+    {
+        // geo/searchId ride on the queue contract; this unit needs neither (events are dropped here).
+        // Same phase gate as the orchestrated path: a catalogue has something to offer only while an
+        // item still lacks a price, an image, or meaningful specs.
+        if (!models.Any(m => !HasPrice(m) || string.IsNullOrWhiteSpace(m.ImageUrl) || m.Specs.Count < ThinSpecThreshold))
+        {
+            return (null, 0);
+        }
+
+        // No internal phase-budget CancellationTokenSource (unlike AttachCatalogDataAsync's
+        // catalogCts): the queue consumer owns this unit's timeout, so cancelling ct must surface
+        // as a plain OperationCanceledException instead of faulting a shared multi-domain phase.
+        var pool = new List<CatalogProduct>();
+        if (_providers.HasScraper)
+        {
+            _logger.LogInformation("Reading the {Domain} catalogue for live prices", domain);
+            pool = (await SafeCatalog(_providers, domain, _logger, ct)).ToList();
+        }
+
+        // Browser fallback fires exactly when the orchestrated path's would: nothing PRICED came
+        // out of the structured extract for this domain (including the no-scraper case).
+        var browserPrices = pool.All(p => p.Price is null)
+            ? await HarvestViaBrowserAsync(agent, new[] { domain }, CatalogQueryFor(models), record: null, ct)
+            : Array.Empty<BrowserPrice>();
+
+        if (pool.Count == 0 && browserPrices.Count == 0)
+        {
+            return (null, 0);
+        }
+
+        var (updated, priced, images, specsFilled, observations) =
+            AttachPoolToModels(models, pool, browserPrices, storeName);
+        await PersistObservations(observations, record: null, ct);
+
+        if (priced + images + specsFilled == 0)
+        {
+            return (null, 0);
+        }
+
+        _logger.LogInformation(
+            "Store catalogue {Domain} matched {Priced} price(s), {Images} image(s), {Specs} spec set(s)",
+            domain, priced, images, specsFilled);
+        return (updated, priced);
+    }
+
+    public async Task<(List<ProductModel>? Models, int Priced)> AttachScrapedPricesAsync(
+        List<ProductModel> models, string domain, string? storeName, CancellationToken ct)
+    {
+        var since = _options.Now().AddMinutes(-ScrapedPriceReuseWindowMinutes);
+
+        // Persisted rows may be keyed by either identity — the scrape paths store the source domain,
+        // saved stores a display name — so read both when they differ (distinct keys can't collide).
+        var rows = new List<ScrapedPrice>(await _scrapedPrices.ListRecentByStoreAsync(domain, since, ct));
+        if (!string.IsNullOrWhiteSpace(storeName) &&
+            !string.Equals(storeName, domain, StringComparison.OrdinalIgnoreCase))
+        {
+            rows.AddRange(await _scrapedPrices.ListRecentByStoreAsync(storeName!, since, ct));
+        }
+
+        // The exact shape the shared matcher consumes: name/price/currency/sourceUrl — no image, so
+        // this path can only contribute offers, like the browser fallback it rides through. That
+        // branch also marks the offer indicative, which is right here too: an up-to-an-hour-old
+        // observation is a lead to verify at the store, not a live quote.
+        var pool = rows
+            .Where(r => r.Price is not null && !string.IsNullOrWhiteSpace(r.ProductName))
+            .Select(r => new BrowserPrice(
+                r.Price!.Value, r.Currency ?? string.Empty, r.ProductName,
+                string.IsNullOrWhiteSpace(r.StoreName) ? domain : r.StoreName, r.SourceUrl ?? string.Empty))
+            .ToList();
+        if (pool.Count == 0)
+        {
+            return (null, 0);
+        }
+
+        // Observations from the matcher are DISCARDED: these prices came out of the history table,
+        // and persisting them again would duplicate the append-only series.
+        var (updated, priced, _, _, _) = AttachPoolToModels(models, new List<CatalogProduct>(), pool, storeName);
+        return priced > 0 ? (updated, priced) : (null, 0);
+    }
+
+    public async Task<List<ProductModel>?> HarvestBrandAndRefillAsync(
+        AgentService agent, string brand, List<ProductModel> models, string? geo, string? searchId,
+        CancellationToken ct)
+    {
+        // agent/searchId ride on the queue contract; the harvest crawls through IBrandCatalogService.
+        ct.ThrowIfCancellationRequested();
+        var harvested = await HarvestOneBrandAsync(brand, ct);
+        if (harvested > 0)
+        {
+            _logger.LogInformation("Catalogued {Count} {Brand} model(s) from the brand site", harvested, brand);
+        }
+
+        // Refill even on a zero harvest: another unit (or an earlier run) may have populated the
+        // brand DB since this result last read it, and the read-through is cheap and local.
+        var (filled, images, prices, specs) = await FillFromBrandDatabaseAsync(models, geo, ct);
+        if (images + prices + specs == 0)
+        {
+            return null;
+        }
+
+        _logger.LogInformation("Filled {Count} detail(s) from brand catalogues", images + prices + specs);
+        return filled;
+    }
+
+    public async Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
+        await agent.FindProductImageAsync(BrandModelQuery(item), ct);
+
+    public async Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct)
+    {
+        if (!_providers.HasEdgeClassify)
+        {
+            return null;
+        }
+
+        var applied = await BackfillConditionsAsync(models, ct);
+        if (applied == 0)
+        {
+            return null;
+        }
+
+        _logger.LogInformation("Labeled condition on {Count} item(s)", applied);
+        return models;
+    }
+
+    public IReadOnlyList<(string Domain, string? StoreName)> SelectCatalogDomains(ProductSearchResult products)
+    {
+        // No site-count cap, mirroring the phase: every distinct store domain is a candidate —
+        // budgets decide how many crawls complete. The first store to claim a domain names it.
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var selected = new List<(string Domain, string? StoreName)>();
+        foreach (var store in products.Stores)
+        {
+            if (DomainOf(store.Url) is not { } domain || !seen.Add(domain))
+            {
+                continue;
+            }
+
+            selected.Add((domain, string.IsNullOrWhiteSpace(store.Name) ? null : store.Name));
+        }
+
+        return selected;
+    }
+
+    public IReadOnlyList<string> SelectBrandsForHarvest(ProductSearchResult products) =>
+        products.Brands
+            .Select(b => b.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxBrandCatalogs)
+            .ToList();
+
+    /// <summary>Detail blobs are capped to the entity column budget wherever a page is scraped.</summary>
+    private static string TruncateDetail(string content) =>
+        content.Length <= MaxDetailChars ? content : content[..MaxDetailChars];
+
+    /// <summary>The deep-dive's output shape: the scraped/cached blob rides in Specs["details"].</summary>
+    private static ProductModel WithDetail(ProductModel m, string detail)
+    {
+        var specs = new Dictionary<string, string>(m.Specs) { ["details"] = detail };
+        return m with { Specs = specs };
+    }
+
+    /// <summary>The lookup text for an item: brand + model, the name standing in for a blank model.</summary>
+    private static string BrandModelQuery(ProductModel m) =>
+        string.Join(' ', new[]
+        {
+            m.Brand,
+            string.IsNullOrWhiteSpace(m.Model) ? m.Name : m.Model
+        }.Where(s => !string.IsNullOrWhiteSpace(s)));
+
+    /// <summary>
+    /// The browser fallback needs an on-site search query and the per-domain unit runs without the
+    /// originating search text — so target the first still-priceless item. An empty query would
+    /// render the homepage, whose featured/deal prices get mis-attributed to our items.
+    /// </summary>
+    private static string CatalogQueryFor(IReadOnlyList<ProductModel> models)
+    {
+        var gap = models.FirstOrDefault(m => !HasPrice(m)) ?? models.FirstOrDefault();
+        return gap is null ? string.Empty : BrandModelQuery(gap);
+    }
+
+    /// <summary>Best-effort single-brand harvest: a failed crawl contributes zero models, never a fault.</summary>
+    private async Task<int> HarvestOneBrandAsync(string name, CancellationToken ct)
+    {
+        try
+        {
+            return await _brandCatalog.HarvestAsync(name, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return 0; }
+    }
+
     /// <summary>
     /// For items that still have no price, harvest the top found stores' product catalogues and attach a
     /// matching priced offer — and, for EVERY strong match, the catalogue product's image and its
@@ -355,11 +640,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         // No site-count cap: every distinct store domain is a candidate — the phase's catalogCts
         // wall-clock budget below decides how many crawls actually complete, and keeps what finished.
-        var domains = products.Stores
-            .Select(s => DomainOf(s.Url))
-            .Where(d => d is not null).Select(d => d!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var domains = SelectCatalogDomains(products).Select(d => d.Domain).ToList();
         if (domains.Count == 0)
         {
             return (models, 0, 0, 0);
@@ -403,6 +684,31 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             return (models, 0, 0, 0);
         }
 
+        var (updated, priced, images, specsFilled, observations) =
+            AttachPoolToModels(models, pool, browserPrices, fallbackStoreName: null);
+
+        // Persist the observations as a timestamped batch — the price history the comparison view reads.
+        await PersistObservations(observations, record, ct);
+
+        if (priced + images + specsFilled > 0)
+        {
+            progress($"Store catalogues matched {priced} price(s), {images} image(s), {specsFilled} spec set(s).");
+        }
+        return (updated, priced, images, specsFilled);
+    }
+
+    /// <summary>
+    /// The token-ratio matching core shared by the whole-result phase, the per-domain unit, and the
+    /// persisted-price re-attach: every item is matched against the catalogue pool (price when
+    /// missing, image, specs), then — still priceless — against the browser price lines. The
+    /// observations the matches produce are returned, not persisted: the CALLER decides (the
+    /// re-attach path reads rows that already live in the history and must not write them back).
+    /// </summary>
+    private (List<ProductModel> Models, int Priced, int Images, int Specs, List<ScrapedPrice> Observations)
+        AttachPoolToModels(
+            List<ProductModel> models, List<CatalogProduct> pool, IReadOnlyList<BrowserPrice> browserPrices,
+            string? fallbackStoreName)
+    {
         var now = _options.Now();
         var observations = new List<ScrapedPrice>();
         var priced = 0;
@@ -421,7 +727,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 {
                     var offer = new PriceOffer
                     {
-                        Source = DomainOf(c.Url) ?? "Store", SourceType = ResultType.StorePage,
+                        Source = DomainOf(c.Url) ?? fallbackStoreName ?? "Store", SourceType = ResultType.StorePage,
                         Price = c.Price, Currency = c.Currency, Url = c.Url, IsLocal = true
                     };
                     item = item with { Offers = item.Offers.Append(offer).ToList() };
@@ -486,14 +792,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             updated.Add(item);
         }
 
-        // Persist the observations as a timestamped batch — the price history the comparison view reads.
-        await PersistObservations(observations, record, ct);
-
-        if (priced + images + specsFilled > 0)
-        {
-            progress($"Store catalogues matched {priced} price(s), {images} image(s), {specsFilled} spec set(s).");
-        }
-        return (updated, priced, images, specsFilled);
+        return (updated, priced, images, specsFilled, observations);
     }
 
     /// <summary>Merges a catalogue product's structured fields into the model's specs (existing keys win).</summary>
@@ -598,16 +897,18 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// vague/listing-style title) and fills them from their identified canonical BrandModel row.
     /// The identifier's chain is cheapest-first (text → catalogue discovery → vision compare, with
     /// the vision verdicts memoized), so repeat searches get the same identification for free.
-    /// Best-effort per item; capped per run.
+    /// Best-effort per item; capped per run. Null callbacks (the unit path) drop the progress line
+    /// and the PipelineEvents; Changed reports ANY model mutation, countable fill or not.
     /// </summary>
-    private async Task<int> IdentifyViaVisionAsync(
-        List<ProductModel> models, string? geo, Action<string> progress,
-        Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
+    private async Task<(int Fills, bool Changed)> IdentifyViaVisionAsync(
+        List<ProductModel> models, string? geo, Action<string>? progress,
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?>? record, CancellationToken ct)
     {
         var marketCurrency = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo).Currency;
         var now = _options.Now();
         var attempts = 0;
         var fills = 0;
+        var changed = false;
 
         // Hard PHASE budget (same pattern as the store-catalogue phase's catalogCts): the identifier's
         // inner limits are partly advisory — the discovery crawl's "20s" rides in the request body only
@@ -668,10 +969,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 if (!ReferenceEquals(filled, m))
                 {
                     models[i] = filled;
+                    changed = true;
                     if (img || price || specs) fills++;
                 }
 
-                record(EventCategory.Extract, "item.identify", "vision",
+                record?.Invoke(EventCategory.Extract, "item.identify", "vision",
                     new Dictionary<string, object?>
                     {
                         ["item"] = m.Name, ["method"] = id.Method, ["confidence"] = id.Confidence,
@@ -695,10 +997,10 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         if (fills > 0)
         {
-            progress($"Identified {fills} item(s) by product photo.");
+            progress?.Invoke($"Identified {fills} item(s) by product photo.");
         }
 
-        return fills;
+        return (fills, changed);
     }
 
     /// <summary>
@@ -884,12 +1186,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         ProductSearchResult products, Action<string> progress,
         Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
     {
-        var brands = products.Brands
-            .Select(b => b.Name)
-            .Where(n => !string.IsNullOrWhiteSpace(n))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(MaxBrandCatalogs)
-            .ToList();
+        var brands = SelectBrandsForHarvest(products);
         if (brands.Count == 0)
         {
             return;
@@ -898,14 +1195,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         foreach (var name in brands)
         {
             ct.ThrowIfCancellationRequested();
-            int harvested;
-            try
-            {
-                harvested = await _brandCatalog.HarvestAsync(name, ct);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch { harvested = 0; }
-
+            var harvested = await HarvestOneBrandAsync(name, ct);
             if (harvested > 0)
             {
                 progress($"Catalogued {harvested} {name} model(s) from the brand site.");
@@ -975,7 +1265,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
     private async Task<IReadOnlyList<BrowserPrice>> HarvestViaBrowserAsync(
         AgentService agent, IReadOnlyList<string> domains, string query,
-        Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?>? record, CancellationToken ct)
     {
         if (domains.Count == 0)
         {
@@ -1023,7 +1313,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 }
             }
 
-            record(EventCategory.Extract, "catalog.browser", page?.Provider ?? "cloudflare-browser",
+            record?.Invoke(EventCategory.Extract, "catalog.browser", page?.Provider ?? "cloudflare-browser",
                 new Dictionary<string, object?>
                 {
                     ["domain"] = domain, ["url"] = url, ["prices"] = prices.Count,
@@ -1086,7 +1376,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
     private async Task PersistObservations(
         List<ScrapedPrice> observations,
-        Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?>? record, CancellationToken ct)
     {
         if (observations.Count == 0)
         {
@@ -1096,7 +1386,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         try
         {
             await _scrapedPrices.AddRangeAsync(observations, ct);
-            record(EventCategory.Profile, "price.persist", "pipeline",
+            record?.Invoke(EventCategory.Profile, "price.persist", "pipeline",
                 new Dictionary<string, object?> { ["count"] = observations.Count });
         }
         catch (OperationCanceledException) { throw; }

@@ -48,6 +48,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     /// <summary>The VPS token authority: minted worker bearers + admin-stored vendor keys (encrypted).</summary>
     public DbSet<ServiceCredential> ServiceCredentials => Set<ServiceCredential>();
 
+    /// <summary>The durable enrichment work queue — the table IS the queue. See <see cref="EnrichmentWorkItem"/>.</summary>
+    public DbSet<EnrichmentWorkItem> EnrichmentWorkItems => Set<EnrichmentWorkItem>();
+
     /// <summary>Index over the R2-stored entity documents (products/services/places). See <see cref="EntityRecord"/>.</summary>
     public DbSet<EntityRecord> EntityRecords => Set<EntityRecord>();
     public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
@@ -294,6 +297,23 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.HasIndex(x => new { x.UserId, x.Status });
             e.Property(x => x.Status).HasMaxLength(20);
             e.Property(x => x.Query).HasMaxLength(2000);
+        });
+
+        builder.Entity<EnrichmentWorkItem>(e =>
+        {
+            // The claim query's exact shape: pending-and-eligible (or lease-expired running) by Id.
+            // Timestamps are Unix-ms bigints so the raw FOR-UPDATE-SKIP-LOCKED SQL can compare them
+            // as plain integers (see EnrichmentWorkQueue.ClaimAsync).
+            e.HasIndex(x => new { x.Status, x.NotBefore });
+            e.HasIndex(x => x.SearchJobId);
+            e.Property(x => x.Kind).HasMaxLength(40);
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.ResultType).HasMaxLength(40);
+            e.Property(x => x.LastError).HasMaxLength(1000);
+            e.Property(x => x.NotBefore).HasConversion(toUnixMs);
+            e.Property(x => x.LeaseUntil).HasConversion(toNullableUnixMs);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            e.Property(x => x.CompletedAt).HasConversion(toNullableUnixMs);
         });
 
         builder.Entity<ApiCallLog>(e =>

@@ -43,14 +43,9 @@ public interface ISearchRunner
 {
     Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct);
 
-    /// <summary>
-    /// Optional post-result enrichment: deep-dives the items in an already-returned base result
-    /// (official-brand-site specs, price comparison) and returns an updated result to stream to the
-    /// UI, or null when there's nothing to enrich. Default is a no-op so legacy/test runners opt out.
-    /// </summary>
-    Task<SearchRunResult?> EnrichAsync(
-        SearchJob job, SearchRunResult baseResult, Action<string> progress, CancellationToken ct) =>
-        Task.FromResult<SearchRunResult?>(null);
+    // Full post-result enrichment is no longer a runner concern: it fans out through the durable
+    // enrichment work queue (Pipeline/Enrichment), one unit per API dive, each saved as it lands.
+    // Only the smart-cache gap refill below remains here, wrapped by the queue's CacheGapRefill unit.
 
     /// <summary>
     /// Partial re-enrichment of a cache hit that scored below the full-quality bar: re-scrapes only the

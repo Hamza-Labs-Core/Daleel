@@ -138,12 +138,28 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
         return result?.Findings ?? (IReadOnlyList<FilterFindingDto>)Array.Empty<FilterFindingDto>();
     }
 
+    // Mirrors MAX_IMAGE_URLS in workers/filter-worker/src/index.js — the worker 400s any larger
+    // batch, so both constants must move together.
+    private const int MaxImageUrlsPerCall = 20;
+
     public async Task<IReadOnlyList<FilterFindingDto>> FilterImagesAsync(
         IReadOnlyList<string> urls, CancellationToken ct = default)
     {
-        var result = await PostAsync<FilterResponse>(_filter, "filter", "/filter/images", new { urls }, ct)
-            .ConfigureAwait(false);
-        return result?.Findings ?? (IReadOnlyList<FilterFindingDto>)Array.Empty<FilterFindingDto>();
+        // Callers may hand over more urls than the worker accepts per call (the vision budget is
+        // 24); chunks go out sequentially, and a failed chunk loses only its own findings.
+        List<FilterFindingDto>? findings = null;
+        for (var offset = 0; offset < urls.Count; offset += MaxImageUrlsPerCall)
+        {
+            var chunk = urls.Skip(offset).Take(MaxImageUrlsPerCall).ToArray();
+            var result = await PostAsync<FilterResponse>(_filter, "filter", "/filter/images", new { urls = chunk }, ct)
+                .ConfigureAwait(false);
+            if (result?.Findings is { Count: > 0 })
+            {
+                (findings ??= new List<FilterFindingDto>()).AddRange(result.Findings);
+            }
+        }
+
+        return findings ?? (IReadOnlyList<FilterFindingDto>)Array.Empty<FilterFindingDto>();
     }
 
     /// <summary>POSTs to a fleet host and unwraps the {ok, result} envelope; null on any failure.</summary>

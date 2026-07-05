@@ -44,7 +44,8 @@ public class ConversationBackendTests : IDisposable
 
     private SearchJobService Worker() => new(
         _provider.GetRequiredService<IServiceScopeFactory>(), _broadcaster,
-        NullLogger<SearchJobService>.Instance, new ConfigurationBuilder().Build());
+        NullLogger<SearchJobService>.Instance,
+        new Daleel.Web.Pipeline.Enrichment.EnrichmentWorkQueue(_provider.GetRequiredService<IServiceScopeFactory>()));
 
     private async Task<int> SeedJobAsync(string userId = "u1")
     {

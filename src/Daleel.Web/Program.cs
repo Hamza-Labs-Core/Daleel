@@ -547,6 +547,33 @@ builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 // OrphanedJobReconciler so a job can never spin forever between restarts. See JobReconciliationService.
 builder.Services.AddHostedService<Daleel.Web.Conversation.JobReconciliationService>();
 
+// Enrichment WORK QUEUE (Pipeline/Enrichment): post-result deep-dives run as durable per-unit work
+// items — one API dive per item, own retries/budget, saved the moment each lands. The EnrichmentWorkItems
+// table IS the queue (FOR UPDATE SKIP LOCKED claims, lease-expiry crash recovery); there is deliberately
+// no job- or phase-level enrichment timeout anywhere. Handlers are stateless singletons that resolve
+// scoped services per execution.
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentWorkQueue,
+    Daleel.Web.Pipeline.Enrichment.EnrichmentWorkQueue>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichedResultStore,
+    Daleel.Web.Pipeline.Enrichment.EnrichedResultStore>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.PlanEnrichmentHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ItemDiveHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.VisionUnitHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.CatalogAttachHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.BrandHarvestHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ImageLookupHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ConditionsHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.CacheGapRefillHandler>();
+builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
+
 // Search cache: Postgres-backed store (singleton — opens its own DbContext scope per call, since the
 // agent runs providers in parallel) plus a weekly background sweep of expired entries.
 builder.Services.AddSingleton<Daleel.Core.Caching.ICacheStore, Daleel.Web.Data.PostgresCacheStore>();

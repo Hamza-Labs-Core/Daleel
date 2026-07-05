@@ -41,6 +41,14 @@ public static class PipelineLimits
     /// </summary>
     public static int ConcurrentJobs { get; } = FromEnv("PIPELINE_MAX_CONCURRENT_JOBS", fallback: int.MaxValue);
 
+    /// <summary>
+    /// Enrichment work items executed concurrently by one app instance. A throughput WIDTH like
+    /// <see cref="SubWorkflowConcurrency"/> — nothing is dropped, units just wait for a claim slot;
+    /// the default bounds this box's own scrape/DB pressure while the queue drains at its own pace.
+    /// Restrainable/widen-able via <c>PIPELINE_ENRICH_CONCURRENCY</c>.
+    /// </summary>
+    public static int EnrichmentConcurrency { get; } = FromEnv("PIPELINE_ENRICH_CONCURRENCY", fallback: 6);
+
     private static int FromEnv(string name, int fallback)
     {
         var raw = Environment.GetEnvironmentVariable(name);

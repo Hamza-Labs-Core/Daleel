@@ -75,6 +75,55 @@ public class CloudflareFleetTests
     }
 
     [Fact]
+    public async Task FilterImages_ChunksToTheWorkerCap_AndMergesFindings()
+    {
+        // The filter worker rejects batches over 20 urls, but the VPS vision budget is 24 — the
+        // client must split (20 + 4) and merge, never send the oversized batch.
+        var bodies = new List<string>();
+        var handler = new StubHandler(request =>
+        {
+            // Captured inside the responder — the client disposes the request (and its content)
+            // right after sending. ReadAsStream keeps the xUnit blocking-task analyzer quiet.
+            using var reader = new StreamReader(request.Content!.ReadAsStream());
+            bodies.Add(reader.ReadToEnd());
+            return (HttpStatusCode.OK, bodies.Count == 1
+                ? """{ "ok": true, "result": { "findings": [ { "url": "https://img.test/0", "category": "alcohol", "confidence": 0.9, "source": "vision" } ] } }"""
+                : """{ "ok": true, "result": { "findings": [ { "url": "https://img.test/20", "category": "pork", "confidence": 0.8, "source": "vision" } ] } }""");
+        });
+        var client = Client(handler, filter: true);
+
+        var findings = await client.FilterImagesAsync(
+            Enumerable.Range(0, 24).Select(i => $"https://img.test/{i}").ToArray());
+
+        handler.Requests.Should().HaveCount(2, "24 urls exceed the worker's 20-url cap and must split");
+        handler.Requests.Should().OnlyContain(r => r.RequestUri!.AbsolutePath == "/filter/images");
+        UrlCount(bodies[0]).Should().Be(20);
+        UrlCount(bodies[1]).Should().Be(4);
+        findings.Select(f => f.Category).Should().Equal("alcohol", "pork");
+    }
+
+    [Fact]
+    public async Task FilterImages_FailedChunkLosesOnlyItsOwnFindings()
+    {
+        var calls = 0;
+        var handler = new StubHandler(_ => ++calls == 1
+            ? (HttpStatusCode.BadRequest,
+                """{ "ok": false, "error": { "code": "bad_request", "message": "too many urls (max 20)", "retryable": false } }""")
+            : (HttpStatusCode.OK,
+                """{ "ok": true, "result": { "findings": [ { "url": "https://img.test/21", "category": "alcohol", "confidence": 0.9, "source": "vision" } ] } }"""));
+        var client = Client(handler, filter: true);
+
+        var findings = await client.FilterImagesAsync(
+            Enumerable.Range(0, 24).Select(i => $"https://img.test/{i}").ToArray());
+
+        handler.Requests.Should().HaveCount(2, "a rejected chunk must not stop the remaining chunks");
+        findings.Should().ContainSingle(f => f.Url == "https://img.test/21" && f.Category == "alcohol");
+    }
+
+    private static int UrlCount(string body) =>
+        System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("urls").GetArrayLength();
+
+    [Fact]
     public async Task ExtractProducts_DeserializesIntoCatalogProducts()
     {
         var client = Client(new StubHandler(_ => (HttpStatusCode.OK,
