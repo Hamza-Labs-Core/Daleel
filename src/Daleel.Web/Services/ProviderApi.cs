@@ -74,10 +74,10 @@ public sealed class ProviderApi : IProviderApi
             return Array.Empty<CatalogProduct>();
         }
 
+        // No bytes selector: a product COUNT must not masquerade as ResponseBytes in the usage log.
         return await MeterAsync(
             "Context.dev", "catalog/extract", domain,
-            () => ctx.ExtractProductsAsync(domain, maxProducts, timeoutMs, ct),
-            r => r.Count).ConfigureAwait(false);
+            () => ctx.ExtractProductsAsync(domain, maxProducts, timeoutMs, ct)).ConfigureAwait(false);
     }
 
     public async Task<BrandProfile?> GetBrandAsync(string domain, CancellationToken ct = default)
@@ -115,13 +115,29 @@ public sealed class ProviderApi : IProviderApi
             return null;
         }
 
-        // Metered as the crawl it triggers ("Context.dev"-family provider name keeps the cost
+        // Metered as the crawl it triggers ("context.dev"-family provider name keeps the cost
         // estimator's extract rate), so edge and inline crawls hit the cap and the usage log
-        // identically. The drain records outcome/actuals as timeline events; it does NOT record a
-        // second ApiCall — this one is the whole crawl's accounting.
-        return await MeterAsync(
-            "scrape-worker/context.dev", "catalog/extract", domain,
-            () => _edge.SubmitCatalogAsync(domain, store, searchJobId, maxProducts, ct)).ConfigureAwait(false);
+        // identically. Recorded ONLY on an accepted submit: a failed/rejected submit costs nothing
+        // and falls back to the inline path, whose own metering then records the crawl — recording
+        // here too would double-charge the same crawl. The drain records outcome/actuals as timeline
+        // events; it does NOT record a second ApiCall — this one is the whole crawl's accounting.
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var handle = await _edge.SubmitCatalogAsync(domain, store, searchJobId, maxProducts, ct).ConfigureAwait(false);
+        if (handle is not null && AmbientApiObserver.Observer is { } observer)
+        {
+            var estimator = AmbientApiObserver.Estimator ?? new CostEstimator();
+            observer.Record(new ApiCall
+            {
+                Timestamp = DateTimeOffset.UtcNow,
+                Provider = "scrape-worker/context.dev",
+                Endpoint = "catalog/extract",
+                RequestSummary = domain,
+                ResponseTimeMs = started.ElapsedMilliseconds,
+                Status = ApiCallStatus.Success,
+                EstimatedCost = estimator.EstimateCall("scrape-worker/context.dev", "catalog/extract")
+            });
+        }
+        return handle;
     }
 
     /// <summary>Cached Context.dev provider (rebuilt only if the resolved key changes).</summary>

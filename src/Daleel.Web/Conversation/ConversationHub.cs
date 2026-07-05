@@ -80,11 +80,13 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
 
     public SignalRConversationBroadcaster(IHubContext<ConversationHub> hub) => _hub = hub;
 
-    // Latest progress signal per user, so a device that loads/reloads mid-search can seed its stepper
-    // with the job's current stage rather than waiting for the next live broadcast. Held in memory on
-    // purpose: the job queue is itself in-process (a restart loses running jobs), so this shares that
-    // durability model — and a lost entry just degrades to the first-stage seed, never an error.
-    private readonly ConcurrentDictionary<string, (int JobId, string Signal)> _latestProgress = new();
+    // Latest progress signal per (user, job), so a device that loads/reloads mid-search can seed its
+    // stepper with the job's current stage rather than waiting for the next live broadcast. Keyed by
+    // BOTH ids: jobs run concurrently now, so two of one user's searches must not clobber each other's
+    // cached signal (and completing job A must not wipe job B's). Held in memory on purpose: the job
+    // queue is itself in-process (a restart loses running jobs), so this shares that durability model —
+    // and a lost entry just degrades to the first-stage seed, never an error.
+    private readonly ConcurrentDictionary<(string UserId, int JobId), string> _latestProgress = new();
 
     public event Action<string, int, string>? Progress;
     public event Action<string, int, string, string?, string?, string?>? Completed;
@@ -92,20 +94,20 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
     public event Action<string, int, string, string>? Partial;
 
     public string? LatestProgress(string userId, int jobId) =>
-        _latestProgress.TryGetValue(userId, out var p) && p.JobId == jobId ? p.Signal : null;
+        _latestProgress.TryGetValue((userId, jobId), out var signal) ? signal : null;
 
     public Task ProgressAsync(string userId, int jobId, string message)
     {
-        _latestProgress[userId] = (jobId, message);
+        _latestProgress[(userId, jobId)] = message;
         Progress?.Invoke(userId, jobId, message);
         return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Progress", jobId, message);
     }
 
     public Task CompletedAsync(string userId, int jobId, string status, string? resultJson, string? resultType, string? error)
     {
-        // The job is finished — drop its cached progress so a later page load seeds from the completed
-        // result, never a stale "running" stage.
-        _latestProgress.TryRemove(userId, out _);
+        // THIS job is finished — drop its cached progress so a later page load seeds from the completed
+        // result, never a stale "running" stage. Other concurrent jobs' entries are untouched.
+        _latestProgress.TryRemove((userId, jobId), out _);
         Completed?.Invoke(userId, jobId, status, resultJson, resultType, error);
         return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Completed", jobId, status, resultJson, resultType, error);
     }

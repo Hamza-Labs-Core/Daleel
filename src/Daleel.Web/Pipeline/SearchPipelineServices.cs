@@ -64,7 +64,9 @@ public sealed class SearchPipelineServices
 
         try
         {
-            if (Conversation.WorkflowSearchRunner.SalvageResultJson(state) is { } json)
+            // Lean payload: partials repeat every ~800ms and the partial UI renders only the products,
+            // so the heavy research bundle (scraped pages, social posts) stays out of the push.
+            if (Conversation.WorkflowSearchRunner.SalvageResultJson(state, includeResearch: false) is { } json)
             {
                 await PushPartial(json, "ask").ConfigureAwait(false);
             }

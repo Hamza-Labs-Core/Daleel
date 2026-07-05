@@ -422,7 +422,10 @@ public sealed class DispatchEnrichmentWorkflowsActivity : CancellableActivity
         }
 
         // Advance the stepper through all three enrichment phases up-front — they genuinely run at once.
-        services.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", brandSlots.Length, storeSlots.Length);
+        if (brandSlots.Length > 0)
+        {
+            services.Report(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", brandSlots.Length, storeSlots.Length);
+        }
         if (storeSlots.Length > 0)
         {
             services.Report(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", storeSlots.Length);
@@ -455,7 +458,8 @@ public sealed class DispatchEnrichmentWorkflowsActivity : CancellableActivity
                         Merge();
                     }
                     await StreamAsync();
-                });
+                },
+                onAggregateEvent: e => { lock (gate) { state.Events.Add(e); } });
 
         var storeTask = storeSlots.Length == 0
             ? Task.CompletedTask
@@ -480,7 +484,8 @@ public sealed class DispatchEnrichmentWorkflowsActivity : CancellableActivity
                         Merge();
                     }
                     await StreamAsync();
-                });
+                },
+                onAggregateEvent: e => { lock (gate) { state.Events.Add(e); } });
 
         var itemTask = itemSlots.Length == 0
             ? Task.CompletedTask
@@ -508,7 +513,8 @@ public sealed class DispatchEnrichmentWorkflowsActivity : CancellableActivity
                         Merge();
                     }
                     await StreamAsync();
-                });
+                },
+                onAggregateEvent: e => { lock (gate) { state.Events.Add(e); } });
 
         await Task.WhenAll(brandTask, storeTask, itemTask);
 

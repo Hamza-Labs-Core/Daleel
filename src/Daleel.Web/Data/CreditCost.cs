@@ -45,7 +45,11 @@ public static class CreditCost
         }
         if (p.Contains("context"))
         {
-            return e.Contains("product") || e.Contains("brand/ai") ? ContextCatalogue : ContextScrape;
+            // "catalog" covers the gateway's canonical "catalog/extract" endpoint — a full catalogue
+            // crawl must bill at the catalogue rate, not as a single page scrape.
+            return e.Contains("product") || e.Contains("brand/ai") || e.Contains("catalog")
+                ? ContextCatalogue
+                : ContextScrape;
         }
 
         return (int)Math.Ceiling(Math.Max(0m, estimatedCost) * 1000m);

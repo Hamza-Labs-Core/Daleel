@@ -120,7 +120,7 @@ public sealed class JobReconciliationService : BackgroundService
             // Here we just mirror the terminal state onto the user's conversation + live UI so a watching
             // tab stops spinning.
             var isCancel = job.Status == JobStatus.Cancelled;
-            await convos.CompleteAsync(job.UserId, isCancel ? "cancelled" : "error", null, null, now, ct)
+            await convos.CompleteAsync(job.UserId, job.Id, isCancel ? "cancelled" : "error", null, null, now, ct)
                 .ConfigureAwait(false);
             await _broadcaster.CompletedAsync(
                 job.UserId, job.Id, job.Status, null, null,

@@ -51,7 +51,8 @@ public static class SubWorkflowDispatcher
         Action<string>? progress,
         TimeSpan timeout,
         CancellationToken ct,
-        Func<int, TState, Task>? onCompleted = null)
+        Func<int, TState, Task>? onCompleted = null,
+        Action<Daleel.Web.Events.PipelineEvent>? onAggregateEvent = null)
         where TWorkflow : IWorkflow, new()
         where TState : SubWorkflowState
     {
@@ -99,13 +100,27 @@ public static class SubWorkflowDispatcher
         if (items.Count > 0 && faults >= Math.Max(2, (int)Math.Ceiling(items.Count * SystematicFailureRatio)))
         {
             progress?.Invoke($"⚠️ {faults}/{items.Count} {typeof(TWorkflow).Name} sub-workflows failed — possible systematic enrichment failure.");
-            states.FirstOrDefault()?.RecordEvent("pipeline", "subworkflow_failures", "dispatcher", success: false,
+            var evt = Daleel.Web.Events.PipelineEventFactory.Custom(
+                "pipeline", "subworkflow_failures", "dispatcher",
+                states.FirstOrDefault()?.SearchId, success: false,
                 metadata: new Dictionary<string, object?>
                 {
                     ["workflow"] = typeof(TWorkflow).Name,
                     ["failed"] = faults,
                     ["total"] = items.Count
                 });
+            // When per-entity streaming is on, the children's event buffers were ALREADY harvested by
+            // onCompleted — appending to a child state here would silently drop the event. The caller's
+            // aggregate sink delivers it to the parent's stream instead; the child-state fallback keeps
+            // the non-streaming callers (background re-enrichment) unchanged.
+            if (onAggregateEvent is not null)
+            {
+                onAggregateEvent(evt);
+            }
+            else
+            {
+                states.FirstOrDefault()?.Events.Add(evt);
+            }
         }
 
         return states;

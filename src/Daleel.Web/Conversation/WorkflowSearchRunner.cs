@@ -335,8 +335,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     /// the aggregate step assembled; falls back to a fresh answer over the extracted products. If the full
     /// answer won't serialize (the heavy research bundle — scraped pages / social posts — is the likeliest
     /// culprit), it retries without that bundle. Returns null when there is nothing worth surfacing.
+    /// <paramref name="includeResearch"/> = false skips the heavy bundle outright — used by the streamed
+    /// PARTIAL pushes, which repeat every ~800ms and whose UI renders only the products.
     /// </summary>
-    internal static string? SalvageResultJson(SearchPipelineState state)
+    internal static string? SalvageResultJson(SearchPipelineState state, bool includeResearch = true)
     {
         var answer = state.Answer ?? new AgentAnswer
         {
@@ -344,7 +346,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             Geo = state.GeoProfile?.Key ?? state.Geo,
             QueryType = state.Strategy?.QueryType ?? Daleel.Core.Models.QueryType.General,
             Summary = state.Summary,
-            Research = state.Bundle ?? new ResearchBundle(),
+            Research = includeResearch ? state.Bundle ?? new ResearchBundle() : new ResearchBundle(),
             Products = state.Products,
             GeneratedAt = DateTimeOffset.UtcNow
         };

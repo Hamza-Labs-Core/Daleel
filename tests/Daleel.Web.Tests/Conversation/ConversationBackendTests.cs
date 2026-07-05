@@ -255,9 +255,12 @@ public class ConversationBackendTests : IDisposable
         {
             var job = new SearchJob { UserId = "u1", Query = "x", Status = JobStatus.Running, CancelRequested = true, CreatedAt = now, StartedAt = now };
             seed.SearchJobs.Add(job);
-            seed.UserConversations.Add(new UserConversation { UserId = "u1", CurrentStatus = "running", CurrentJobId = 0, StartedAt = now });
             await seed.SaveChangesAsync();
             jobId = job.Id;
+            // The conversation must reference the REAL job id (as SetRunningAsync does in production):
+            // terminal conversation writes are job-scoped now, so a mismatched id is a deliberate no-op.
+            seed.UserConversations.Add(new UserConversation { UserId = "u1", CurrentStatus = "running", CurrentJobId = jobId, StartedAt = now });
+            await seed.SaveChangesAsync();
         }
 
         await Reconciler().SweepAsync(CancellationToken.None);

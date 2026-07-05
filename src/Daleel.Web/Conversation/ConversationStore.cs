@@ -8,7 +8,14 @@ public interface IConversationStore
 {
     Task<UserConversation?> GetAsync(string userId, CancellationToken ct = default);
     Task SetRunningAsync(string userId, int jobId, string query, DateTimeOffset now, CancellationToken ct = default);
-    Task CompleteAsync(string userId, string status, string? resultJson, string? resultType, DateTimeOffset now, CancellationToken ct = default);
+
+    /// <summary>
+    /// Terminal write for the conversation — applied ONLY while the row still belongs to
+    /// <paramref name="jobId"/>. With jobs running concurrently, a slow/old job (or its detached
+    /// enrichment, up to minutes later) must never overwrite the conversation a NEWER search owns —
+    /// that mislabeled one search's results with another's query.
+    /// </summary>
+    Task CompleteAsync(string userId, int jobId, string status, string? resultJson, string? resultType, DateTimeOffset now, CancellationToken ct = default);
 }
 
 public sealed class ConversationStore : IConversationStore
@@ -38,9 +45,12 @@ public sealed class ConversationStore : IConversationStore
         await _db.SaveChangesAsync(ct);
     }
 
-    public async Task CompleteAsync(string userId, string status, string? resultJson, string? resultType, DateTimeOffset now, CancellationToken ct = default)
+    public async Task CompleteAsync(string userId, int jobId, string status, string? resultJson, string? resultType, DateTimeOffset now, CancellationToken ct = default)
     {
-        var convo = await _db.UserConversations.FirstOrDefaultAsync(c => c.UserId == userId, ct);
+        // Job-scoped guard: only the job that still OWNS the conversation may finalize it. A stale
+        // job finishing (or late-enriching) after a newer search started is a silent no-op.
+        var convo = await _db.UserConversations
+            .FirstOrDefaultAsync(c => c.UserId == userId && c.CurrentJobId == jobId, ct);
         if (convo is null)
         {
             return;

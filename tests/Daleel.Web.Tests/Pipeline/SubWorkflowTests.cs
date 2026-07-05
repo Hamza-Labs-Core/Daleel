@@ -351,6 +351,70 @@ public class SubWorkflowTests
     }
 
     [Fact]
+    public async Task DispatchEnrichment_RunsAllThreeFanOutsConcurrently_MergingAndStreaming()
+    {
+        // The merged dispatch stage: brands, stores and models enrich concurrently; every finished
+        // entity merges into state.Products in place; partials stream while the run is still going.
+        var researcher = new FakeResearcher
+        {
+            Brand = name => new Brand
+            {
+                Name = name, NameKey = Brand.Normalize(name), ReputationScore = 8, Description = "Solid"
+            },
+            Store = name => new Store
+            {
+                Name = name, NameKey = Store.Normalize(name), GoogleRating = 4.2, GoogleReviewCount = 10
+            }
+        };
+        using var provider = BuildProvider(s =>
+        {
+            s.AddSingleton<IProfileResearcher>(researcher);
+            s.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
+            s.AddScoped<Daleel.Web.Pipeline.SearchPipelineServices>();
+        });
+
+        using var scope = provider.CreateScope();
+        var state = scope.ServiceProvider.GetRequiredService<Daleel.Web.Pipeline.SearchPipelineState>();
+        var services = scope.ServiceProvider.GetRequiredService<Daleel.Web.Pipeline.SearchPipelineServices>();
+        services.Agent = BuildAgent();
+        var partials = new List<string>();
+        services.PushPartial = (json, _) => { lock (partials) { partials.Add(json); } return Task.CompletedTask; };
+
+        state.Query = "coffee makers";
+        state.Geo = "jordan";
+        state.Strategy = new SearchStrategy { QueryType = QueryType.ProductResearch, Subject = "coffee maker" };
+        state.Products = new ProductSearchResult
+        {
+            Query = "coffee makers", Geo = "jordan",
+            Brands = new[] { new BrandInfo { Name = "Delonghi" }, new BrandInfo { Name = "Conti" } },
+            Stores = new[] { new StoreInfo { Name = "ABC Store" } },
+            Models = new[] { new ProductModel { Name = "Conti CM3037", Brand = "Conti", Model = "CM3037",
+                Specs = new Dictionary<string, string> { ["type"] = "espresso" } } }
+        };
+
+        var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
+        var run = await runner.RunAsync(
+            new Daleel.Web.Pipeline.DispatchEnrichmentWorkflowsActivity(), cancellationToken: default);
+        run.WorkflowState.Status.Should().Be(WorkflowStatus.Finished);
+
+        // Every entity kind enriched in the single concurrent stage.
+        state.Products.Brands.Should().HaveCount(2);
+        state.Products.Brands.Should().OnlyContain(b => b.Reputation != null,
+            "each brand's sub-workflow result merged into its slot");
+        state.Products.Stores.Single().Rating.Should().Be(4.2, "the store sub-workflow verified it");
+        state.Products.Models.Should().ContainSingle(m => m.Name == "Conti CM3037");
+
+        // Results streamed while running: at least the unconditional trailing push landed, and every
+        // pushed payload is a deserializable answer carrying products.
+        partials.Should().NotBeEmpty("finished entities stream to the UI without waiting for the stage");
+        var last = Daleel.Web.Services.ResultSerialization.Deserialize<AgentAnswer>(partials[^1]);
+        last!.Products!.Brands.Should().HaveCount(2);
+
+        state.Events.Should().Contain(e => e.EventType == "profile.brand");
+        state.Events.Should().Contain(e => e.EventType == "profile.store");
+    }
+
+    [Fact]
     public async Task RunManyAsync_SurvivesAThrowingStreamCallback()
     {
         using var provider = BuildProvider(_ => { });

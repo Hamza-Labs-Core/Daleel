@@ -85,7 +85,12 @@ public sealed class SearchJobService : BackgroundService
                 break; // host shutdown
             }
 
+            // The claim try-block must contain NOTHING that runs after the permit was returned —
+            // otherwise a shutdown-cancelled Delay lands in a catch that Releases a second time
+            // (SemaphoreFullException) and the drain below never runs. Idle/backoff waits happen
+            // OUTSIDE the try, each with its own cancellation-safe break.
             int jobId;
+            var backOff = false;
             try
             {
                 if (await ClaimNextQueuedJobAsync(stoppingToken) is not { } claimed)
@@ -93,10 +98,13 @@ public sealed class SearchJobService : BackgroundService
                     // Nothing waiting — idle a beat, then poll again. Source of truth is the DB, so a job
                     // queued by another process (or a restart's leftover work) is picked up next tick.
                     jobGate.Release();
-                    await Task.Delay(PollInterval, stoppingToken);
-                    continue;
+                    backOff = true;
+                    jobId = 0;
                 }
-                jobId = claimed;
+                else
+                {
+                    jobId = claimed;
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -108,7 +116,20 @@ public sealed class SearchJobService : BackgroundService
                 // A claim failure (transient DB blip) must never take the worker down — back off and retry.
                 jobGate.Release();
                 _logger.LogError(ex, "Failed to claim the next queued search job");
-                await Task.Delay(PollInterval, stoppingToken);
+                backOff = true;
+                jobId = 0;
+            }
+
+            if (backOff)
+            {
+                try
+                {
+                    await Task.Delay(PollInterval, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break; // host shutdown — fall through to the in-flight-job drain
+                }
                 continue;
             }
 
@@ -130,7 +151,10 @@ public sealed class SearchJobService : BackgroundService
                 }
                 finally
                 {
-                    jobGate.Release();
+                    // Shutdown race: a job outliving the 10s drain finds ExecuteAsync gone and the
+                    // gate disposed — nothing waits on it anymore, so the ODE is meaningless noise.
+                    try { jobGate.Release(); }
+                    catch (ObjectDisposedException) { }
                 }
             }, CancellationToken.None);
             running[task] = 0;
@@ -284,7 +308,7 @@ public sealed class SearchJobService : BackgroundService
                 _logger.LogWarning(ex, "Failed to charge {Credits} credits for job {JobId}", result.Credits, job.Id);
             }
 
-            await convos.CompleteAsync(job.UserId, "completed", result.ResultJson, result.ResultType, job.CompletedAt.Value, stoppingToken);
+            await convos.CompleteAsync(job.UserId, job.Id, "completed", result.ResultJson, result.ResultType, job.CompletedAt.Value, stoppingToken);
             // Keep the generated Id: the background enrichers update THIS exact row when they finish,
             // so a late-landing enrichment can never overwrite a newer same-query history entry.
             var historyEntry = await history.AddAsync(new SearchHistoryEntry
@@ -440,7 +464,7 @@ public sealed class SearchJobService : BackgroundService
             job.ResultJson = enriched.ResultJson;
             await db.SaveChangesAsync(timeout.Token);
             await convos.CompleteAsync(
-                userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+                userId, jobId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
             // Keep the history row in sync — without this, "open from history" replays the pre-enrichment
             // (image/price/spec-less) result forever while a repeat search serves the enriched cache entry.
             await sp.GetRequiredService<ISearchHistoryRepository>()
@@ -505,7 +529,7 @@ public sealed class SearchJobService : BackgroundService
             job.ResultJson = enriched.ResultJson;
             await db.SaveChangesAsync(timeout.Token);
             await convos.CompleteAsync(
-                userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
+                userId, jobId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
             // Keep the history row in sync with the refilled result (see EnrichInBackgroundAsync).
             await sp.GetRequiredService<ISearchHistoryRepository>()
                 .UpdateResultAsync(userId, historyId, enriched.ResultJson, timeout.Token);
@@ -534,6 +558,6 @@ public sealed class SearchJobService : BackgroundService
         job.Error = error;
         job.CompletedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        await convos.CompleteAsync(job.UserId, convoStatus, null, null, job.CompletedAt.Value, ct);
+        await convos.CompleteAsync(job.UserId, job.Id, convoStatus, null, null, job.CompletedAt.Value, ct);
     }
 }
