@@ -2,8 +2,12 @@ using Microsoft.Extensions.Configuration;
 
 namespace Daleel.Web.Cloudflare;
 
-/// <summary>One worker endpoint: base URL + its AUTH_TOKEN bearer.</summary>
-public sealed record WorkerEndpoint(Uri BaseUrl, string Token);
+/// <summary>
+/// One worker endpoint: base URL + an optional env-configured bearer. Under the token authority the
+/// bearer normally comes from the credential vault per request (rotatable without a restart), so a
+/// null Token here just means "no static fallback" — the URL alone configures the endpoint.
+/// </summary>
+public sealed record WorkerEndpoint(Uri BaseUrl, string? Token);
 
 /// <summary>
 /// Endpoints for the wider worker fleet (docs/architecture/cloudflare-workers-pipeline.md §3):
@@ -36,11 +40,14 @@ public sealed record CloudflareFleetOptions
 
     private static WorkerEndpoint? Endpoint(IConfiguration config, string urlKey, string tokenKey)
     {
+        // Only the URL is mandatory: the token authority serves bearers from the vault at request
+        // time, so the _TOKEN env var is merely an optional static fallback. Requiring it here
+        // would disable the whole endpoint on exactly the deployments that manage tokens
+        // dynamically (which render the env token empty on purpose).
         var url = config[urlKey]?.Trim();
         var token = config[tokenKey]?.Trim();
-        return !string.IsNullOrWhiteSpace(url) && !string.IsNullOrWhiteSpace(token) &&
-               Uri.TryCreate(url, UriKind.Absolute, out var parsed)
-            ? new WorkerEndpoint(parsed, token)
+        return !string.IsNullOrWhiteSpace(url) && Uri.TryCreate(url, UriKind.Absolute, out var parsed)
+            ? new WorkerEndpoint(parsed, string.IsNullOrWhiteSpace(token) ? null : token)
             : null;
     }
 }

@@ -34,7 +34,7 @@ public class CloudflareExecutionTests
     // ── Options ─────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Options_RequireWorkerUrlAndToken()
+    public void Options_RequireWorkerUrl_TokenOptional()
     {
         CloudflareWorkerOptions.FromConfiguration(Config(new())).Should().BeNull(
             "an unconfigured environment must leave the app exactly as before");
@@ -44,6 +44,16 @@ public class CloudflareExecutionTests
             ["CF_SCRAPE_WORKER_URL"] = "https://scrape.test",
             ["CF_SCRAPE_WORKER_TOKEN"] = "t"
         })).Should().NotBeNull();
+
+        // Token-authority deployments render CF_SCRAPE_WORKER_TOKEN empty on purpose — the vault
+        // serves the bearer per request. URL alone MUST configure the layer, or the poll drain and
+        // every edge client would silently never register on exactly those boxes.
+        var vaultEra = CloudflareWorkerOptions.FromConfiguration(Config(new()
+        {
+            ["CF_SCRAPE_WORKER_URL"] = "https://scrape.test"
+        }));
+        vaultEra.Should().NotBeNull("the vault supplies bearers at request time");
+        vaultEra!.ScrapeWorkerToken.Should().BeNull();
 
         CloudflareWorkerOptions.FromConfiguration(Config(new()
         {

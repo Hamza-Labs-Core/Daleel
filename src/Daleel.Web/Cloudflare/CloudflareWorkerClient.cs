@@ -78,9 +78,13 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
         _bearer = bearer;
         _http.BaseAddress = options.ScrapeWorkerUrl;
         // Fallback bearer; when a vault provider is supplied it OVERRIDES per request, so a rotated
-        // token applies to a long-lived client without a restart.
-        _http.DefaultRequestHeaders.Authorization =
-            new AuthenticationHeaderValue("Bearer", options.ScrapeWorkerToken);
+        // token applies to a long-lived client without a restart. No env token is the normal case
+        // under the token authority — requests then rely on the vault entirely.
+        if (!string.IsNullOrWhiteSpace(options.ScrapeWorkerToken))
+        {
+            _http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", options.ScrapeWorkerToken);
+        }
         // Submits and status checks are small control-plane calls; the heavy work runs on the edge.
         _http.Timeout = TimeSpan.FromSeconds(30);
     }

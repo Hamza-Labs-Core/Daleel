@@ -90,7 +90,13 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
 
         var client = factory();
         client.BaseAddress = endpoint.BaseUrl;
-        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.Token);
+        // Static fallback only — the per-request vault bearer overrides this; both may be absent
+        // briefly at boot (before the vault snapshot loads), in which case the worker 401s and the
+        // caller keeps its inline path.
+        if (!string.IsNullOrWhiteSpace(endpoint.Token))
+        {
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", endpoint.Token);
+        }
         // Workers-AI inference is seconds, not minutes; a hung call must degrade, never wedge a phase.
         client.Timeout = TimeSpan.FromSeconds(60);
         return client;

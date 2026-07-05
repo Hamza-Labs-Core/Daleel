@@ -25,14 +25,19 @@ public class CloudflareFleetTests
         {
             ["CF_FILTER_WORKER_URL"] = "https://filter.test",
             ["CF_FILTER_WORKER_TOKEN"] = "t",
-            ["CF_CLASSIFY_WORKER_URL"] = "https://classify.test" // token missing ⇒ endpoint null
+            ["CF_CLASSIFY_WORKER_URL"] = "https://classify.test", // token missing ⇒ vault-era endpoint
+            ["CF_EXTRACT_WORKER_URL"] = "not a url"               // malformed ⇒ endpoint null
         }));
 
         options.Should().NotBeNull();
         options!.Filter.Should().NotBeNull();
-        options.Classify.Should().BeNull("a URL without its token is a half-configuration, not an endpoint");
+        options.Filter!.Token.Should().Be("t");
+        // Token-authority deployments render the _TOKEN env vars empty on purpose — the vault
+        // serves bearers per request, so the URL alone configures the endpoint.
+        options.Classify.Should().NotBeNull("the vault supplies bearers at request time");
+        options.Classify!.Token.Should().BeNull();
         options.Search.Should().BeNull();
-        options.Extract.Should().BeNull();
+        options.Extract.Should().BeNull("a malformed URL is not an endpoint");
     }
 
     [Fact]

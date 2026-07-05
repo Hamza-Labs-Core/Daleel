@@ -25,8 +25,11 @@ public sealed record CloudflareWorkerOptions
     /// <summary>Base URL of the scrape-worker, e.g. https://daleel-scrape-worker.example.workers.dev.</summary>
     public required Uri ScrapeWorkerUrl { get; init; }
 
-    /// <summary>Bearer token for the scrape-worker (its AUTH_TOKEN secret).</summary>
-    public required string ScrapeWorkerToken { get; init; }
+    /// <summary>
+    /// Optional env-configured bearer for the scrape-worker. Under the token authority the bearer
+    /// normally comes from the credential vault per request; this is only the static fallback.
+    /// </summary>
+    public string? ScrapeWorkerToken { get; init; }
 
     /// <summary>Cloudflare account id (shared with the R2 configuration).</summary>
     public string? AccountId { get; init; }
@@ -44,16 +47,17 @@ public sealed record CloudflareWorkerOptions
         !string.IsNullOrWhiteSpace(PollQueueId);
 
     /// <summary>
-    /// Reads the settings from configuration/environment. Returns null unless the worker URL and token are
-    /// both present — the minimum needed to submit anything. Queue settings are optional on top (submits
-    /// still work; the drain service just reports itself unconfigured).
+    /// Reads the settings from configuration/environment. Returns null unless the worker URL is
+    /// present — the minimum needed to submit anything. The bearer is optional (the token authority
+    /// serves it from the vault per request; the env var is only a static fallback), and queue
+    /// settings are optional on top (submits still work; the drain service just reports itself
+    /// unconfigured).
     /// </summary>
     public static CloudflareWorkerOptions? FromConfiguration(IConfiguration config)
     {
         var url = config["CF_SCRAPE_WORKER_URL"]?.Trim();
         var token = config["CF_SCRAPE_WORKER_TOKEN"]?.Trim();
-        if (string.IsNullOrWhiteSpace(url) || string.IsNullOrWhiteSpace(token) ||
-            !Uri.TryCreate(url, UriKind.Absolute, out var parsed))
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var parsed))
         {
             return null;
         }
@@ -61,7 +65,7 @@ public sealed record CloudflareWorkerOptions
         return new CloudflareWorkerOptions
         {
             ScrapeWorkerUrl = parsed,
-            ScrapeWorkerToken = token,
+            ScrapeWorkerToken = string.IsNullOrWhiteSpace(token) ? null : token,
             AccountId = config["CLOUDFLARE_ACCOUNT_ID"]?.Trim(),
             QueuesApiToken = config["CF_QUEUES_API_TOKEN"]?.Trim(),
             PollQueueId = config["CF_POLL_QUEUE_ID"]?.Trim()
