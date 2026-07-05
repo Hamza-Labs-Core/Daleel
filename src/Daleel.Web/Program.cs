@@ -508,7 +508,9 @@ builder.Services.AddSingleton<Daleel.Web.Services.IProviderApi>(sp =>
     new Daleel.Web.Services.ProviderApi(
         sp.GetRequiredService<Daleel.Web.Services.IAgentFactory>(),
         sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(),
-        sp.GetService<Daleel.Web.Cloudflare.ICloudflareFleetClient>()));
+        sp.GetService<Daleel.Web.Cloudflare.ICloudflareFleetClient>(),
+        sp.GetService<Daleel.Web.Cloudflare.CloudflareWorkerOptions>(),
+        sp.GetService<Daleel.Web.Storage.IR2StorageService>()));
 // Smart cache: scores a cache hit's completeness so CheckCache can serve, serve-and-refill, or reject it.
 // Stateless + side-effect-free, so a singleton is fine (resolved by the Elsa activity from its context).
 builder.Services.AddSingleton<Daleel.Web.Pipeline.ICacheQualityValidator, Daleel.Web.Pipeline.CacheQualityValidator>();

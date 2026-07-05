@@ -432,6 +432,14 @@ public class CloudflareExecutionTests
         public Task<WorkerJobStatus?> GetJobStatusAsync(string jobId, CancellationToken ct = default) =>
             Task.FromResult<WorkerJobStatus?>(new WorkerJobStatus { Ok = true, Status = "done", JobId = jobId });
 
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitBrandAsync(
+            string domain, string brandName, string? searchJobId, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(null);
+
+        public Task<Daleel.Search.Abstractions.ScrapedPage?> ScrapePageAsync(
+            string url, Daleel.Search.Abstractions.ScrapeFormat format, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Search.Abstractions.ScrapedPage?>(null);
+
         public Task<T?> ReadResultAsync<T>(string resultKey, CancellationToken ct = default) where T : class =>
             Task.FromResult(Results.TryGetValue(resultKey, out var doc) ? doc as T : null);
     }

@@ -136,7 +136,7 @@ public sealed class MonitorService
             return 0;
         }
 
-        if (!_providers.HasSocial)
+        if (!_providers.HasSocial(keys))
         {
             return -1;
         }
@@ -157,7 +157,7 @@ public sealed class MonitorService
         var matcher = new ArabicMatcher();
         var keywords = new[] { monitor.Keyword };
 
-        var posts = await _providers.FetchSocialPostsAsync(source, monitor.Keyword, ct).ConfigureAwait(false);
+        var posts = await _providers.FetchSocialPostsAsync(source, monitor.Keyword, keys, ct).ConfigureAwait(false);
         var hits = posts
             .Where(p => matcher.Match(p.Text, keywords, MatchMode.Contains).IsMatch)
             .Select(p => new MonitorHit

@@ -29,9 +29,9 @@ searches fail while a Bing key sits unused. Bing remains the no-SerpAPI-anywhere
 **CLI (`Daleel.Cli/Composition.cs`):** constructs providers directly and unmetered — accepted:
 it is a developer tool with no job context, no cost cap, and no usage dashboard.
 
-**Known metering-fidelity gap (accepted):** monitor social fetches now meter with env-resolved
-keys; the previous per-user key override for monitor runs was dropped (the gateway is env-keyed;
-agent builds keep two-tier user-key resolution).
+**Metering fidelity:** monitor social fetches keep the two-tier key resolution — the gateway's
+`FetchSocialPostsAsync`/`HasSocial` accept the caller's key dict, so a user-supplied APIFY_TOKEN
+still wins over the server's (the earlier regression is fixed).
 
 ## 2. Cloudflare worker fleet
 
@@ -39,29 +39,34 @@ agent builds keep two-tier user-key resolution).
 |---|---|---|---|---|
 | **scrape-worker** | Catalogue/brand crawls, async + R2-durable (§3.1) | `ScrapePricesActivity` → `IProviderApi.SubmitEdgeCatalogAsync`; results persisted by `CloudflarePollDrainService` | **Wired, flag-gated** | `CF_SCRAPE_WORKER_URL/TOKEN` + queue creds + R2 + `cloudflare.execution.enabled` |
 | **search-worker** | KV-cached proxy for SerpAPI/Places (§3.5) | `AgentFactory.EdgeSearchClient` (agent providers) + `ProviderApi.SearchProxyClient` (gateway Places) | **Wired** — zero behavior change (Axis A) | `CF_SEARCH_WORKER_URL/TOKEN` |
-| **classify-worker** | Commodity labeling on Workers AI (§3.2) | none — `IProviderApi.ClassifyTextAsync` has zero production callers | **Dormant (deliberate)** | `CF_CLASSIFY_WORKER_URL/TOKEN` + a consumer |
-| **extract-worker** | Content → product JSON on Workers AI (§3.3) | none — `IProviderApi.ExtractProductsFromContentAsync` unreached | **Dormant (deliberate)** | `CF_EXTRACT_WORKER_URL/TOKEN` + a consumer |
-| **filter-worker** | Halal findings-only signals (§3.4) | none — `FilterTextFindingsAsync`/`FilterImageFindingsAsync` unreached | **Dormant — A/B-gated** | `CF_FILTER_WORKER_URL/TOKEN` + the Phase-3 A/B |
+| **classify-worker** | Commodity labeling on Workers AI (§3.2) | `ItemEnrichmentService.BackfillConditionsAsync` — condition (used/refurbished) labeling for offers carrying none | **Wired** | `CF_CLASSIFY_WORKER_URL/TOKEN` |
+| **extract-worker** | Content → product JSON on Workers AI (§3.3) | Browser-price fallback in `HarvestViaBrowserAsync` — rendered markdown → structured products when regex parsing finds nothing | **Wired** | `CF_EXTRACT_WORKER_URL/TOKEN` |
+| **filter-worker** | Halal findings-only signals (§3.4) | `ShadowHalalClassifier`/`ShadowHalalImageClassifier` — detached A/B shadow on every moderation batch (`halal-shadow` log lines are the comparison dataset) | **Wired as SHADOW** — default routing still A/B-gated | `CF_FILTER_WORKER_URL/TOKEN`; flipping defaults still requires the accumulated A/B evidence |
 | **log-viewer** | Admin read view over `daleel-logs` R2 | admin panel | **Active** | `LOG_VIEWER_URL/AUTH_TOKEN` |
 
-Dormant worker **endpoints** on wired workers: scrape-worker `/scrape/page` and `/scrape/brand`
-(only `/scrape/catalog` is submitted today); extract-worker `/extract/structured`.
+Also wired since the first audit pass: scrape-worker `/scrape/page` (the gateway's
+`ScrapePageAsync` prefers the edge and degrades inline) and `/scrape/brand`
+(`BrandCatalogService.HarvestAsync` submit-and-forget; the drain's brand handler persists the
+`BrandModel` rows). The single remaining consumer-less endpoint is extract-worker
+`/extract/structured` — the generic schema surface that /extract/products is a specialization of;
+it gains callers when schema-driven extraction cases arrive, and adding one goes through
+`IProviderApi` (metered on day one).
 
 Every fleet capability is reachable **only** through `IProviderApi`, so the first consumer of each
 is metered on day one (`workers-ai/*` provider names in the usage log).
 
-## 3. Why the dormant three are dormant — and their activation paths
+## 3. Formerly-dormant capabilities — now wired (2026-07-05)
 
-These are **Phase 2/3 of the architecture doc's own migration plan (§6)**, not oversights. Each
-routes provider work onto *new models* (Workers AI), which is Axis B — the doc mandates
-shadow-compare/A-B validation before defaults flip. Concrete next consumers, by effort:
+Every capability from the first audit pass now has a production consumer; all remain **fail-open
+and advisory** so a dead edge host changes nothing:
 
-| Capability | Best first consumer (seam) | Effort | Risk / gate |
-|---|---|---|---|
-| **extract-worker** | Browser-price fallback: when `ItemEnrichmentService.HarvestViaBrowserAsync` has rendered markdown but regex price-parsing found nothing, feed the markdown to `ExtractProductsFromContentAsync` and merge structured products (additive — can only add results) | **S** | Low — additive, fail-open |
-| **classify-worker** | Listing condition labeling (new/used/refurb) where `NormalizeCondition`'s keyword match returns null; later: pre-gate for the LLM relevance gate to cut its input size | **S–M** | Low–medium — verdicts advisory |
-| **filter-worker** | **Shadow mode** inside `HalalModerator`: call `FilterTextFindingsAsync` alongside `LlmHalalClassifier` (`HalalModerator.cs` stage 3 seam), log agreement/divergence to `FilteredContentLog` — flip nothing | **M** | Moderation precision is a tracked metric; the shadow IS the A/B the doc requires. Worker-side guarantees already in place: riba can never be emitted; llama-guard confidence pinned below removal thresholds |
-| **scrape-worker `/scrape/brand`** | `BrandCatalogService.HarvestAsync` submit-and-forget (mirror of the store-catalogue path, drain persists `BrandModel`s) | **M** | Needs a brand drain handler |
+| Capability | Consumer (implemented) | Behavior |
+|---|---|---|
+| **extract-worker** | Browser-price fallback (`ItemEnrichmentService.HarvestViaBrowserAsync`) | Fires only when regex parsing of a rendered page found nothing; extracted priced products become browser-price observations. Strictly additive |
+| **classify-worker** | Condition backfill (`ItemEnrichmentService.BackfillConditionsAsync`, Phase 7) | Models whose offers all lack a condition get used/refurbished labels — only high-confidence non-"new" verdicts apply |
+| **filter-worker** | `ShadowHalalClassifier` + `ShadowHalalImageClassifier` (wrapped in `AgentFactory.Build` when the host is configured) | Detached shadow per moderation batch; `halal-shadow` log lines carry agreement/divergence — the A/B dataset. Inner classifiers stay authoritative; **default routing flips only on accumulated evidence** |
+| **scrape-worker `/scrape/brand`** | `BrandCatalogService.HarvestAsync` edge path + the drain's brand handler | Submit-and-forget; drain upserts the `BrandModel` rows whenever the crawl lands |
+| **scrape-worker `/scrape/page`** | `IProviderApi.ScrapePageAsync` edge preference | Edge first (key off the VPS), inline Context.dev fallback |
 
 ## 4. Resource provisioning (CI check-or-create)
 

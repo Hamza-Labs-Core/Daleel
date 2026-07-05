@@ -31,6 +31,12 @@ public interface IProviderApi
     /// <summary>True when the Cloudflare execution layer is registered (edge submits possible).</summary>
     bool HasEdge { get; }
 
+    /// <summary>
+    /// True when the FULL edge return path exists (poll-queue credentials + R2): a submit replaces
+    /// inline persistence, so handing work off without a drain would strand results permanently.
+    /// </summary>
+    bool EdgeDrainReady { get; }
+
     /// <summary>A store/brand catalogue with pricing. maxProducts ≤ 0 ⇒ uncapped (vendor ceiling).</summary>
     Task<IReadOnlyList<CatalogProduct>> ExtractCatalogAsync(
         string domain, int maxProducts = 0, int timeoutMs = 45_000, CancellationToken ct = default);
@@ -53,12 +59,16 @@ public interface IProviderApi
     /// <summary>Full place details (hours/reviews field mask); null when unconfigured/failed.</summary>
     Task<StoreLocation?> GetPlaceDetailsAsync(string placeId, CancellationToken ct = default);
 
-    /// <summary>True when the social fetcher (Apify) is configured.</summary>
-    bool HasSocial { get; }
+    /// <summary>True when the social fetcher (Apify) is configured (user keys considered).</summary>
+    bool HasSocial(IReadOnlyDictionary<string, string>? keys = null);
 
-    /// <summary>Social posts for a source/keyword; empty when unconfigured/failed.</summary>
+    /// <summary>
+    /// Social posts for a source/keyword; empty when unconfigured/failed. <paramref name="keys"/>
+    /// preserves the two-tier key resolution (a user-supplied APIFY_TOKEN wins over the server's).
+    /// </summary>
     Task<IReadOnlyList<SocialPost>> FetchSocialPostsAsync(
-        Source source, string? keyword = null, CancellationToken ct = default);
+        Source source, string? keyword = null, IReadOnlyDictionary<string, string>? keys = null,
+        CancellationToken ct = default);
 
     /// <summary>
     /// Submits a catalogue crawl to the edge scrape-worker, metering the submit with the same
@@ -67,6 +77,17 @@ public interface IProviderApi
     /// </summary>
     Task<WorkerHandle?> SubmitEdgeCatalogAsync(
         string domain, string? store, string? searchJobId, int maxProducts = 0, CancellationToken ct = default);
+
+    /// <summary>
+    /// Submits a BRAND crawl (profile + catalogue) to the edge scrape-worker; the drain persists the
+    /// harvested models into the brand-model DB when the result lands. Same metering/fallback
+    /// contract as <see cref="SubmitEdgeCatalogAsync"/>.
+    /// </summary>
+    Task<WorkerHandle?> SubmitEdgeBrandAsync(
+        string domain, string brandName, string? searchJobId, CancellationToken ct = default);
+
+    /// <summary>True when the edge extract host is configured.</summary>
+    bool HasEdgeExtract { get; }
 
     // ── Workers-AI fleet (doc §3.2–3.4) — signals only, metered, best-effort ────────────────────
     // Callers own thresholds/policy; empty results mean "no verdict, keep the inline behavior".
@@ -109,17 +130,26 @@ public sealed class ProviderApi : IProviderApi
     private ApifyPostFetcher? _social;
     private string? _socialToken;
 
+    private readonly CloudflareWorkerOptions? _edgeOptions;
+    private readonly Daleel.Web.Storage.IR2StorageService? _r2;
+
     public ProviderApi(
-        IAgentFactory factory, ICloudflareWorkerClient? edge = null, ICloudflareFleetClient? fleet = null)
+        IAgentFactory factory, ICloudflareWorkerClient? edge = null, ICloudflareFleetClient? fleet = null,
+        CloudflareWorkerOptions? edgeOptions = null, Daleel.Web.Storage.IR2StorageService? r2 = null)
     {
         _factory = factory;
         _edge = edge;
         _fleet = fleet;
+        _edgeOptions = edgeOptions;
+        _r2 = r2;
     }
 
     public bool HasScraper => _factory.Resolve("CONTEXT_DEV_API_KEY") is not null;
 
     public bool HasEdge => _edge is not null;
+
+    public bool EdgeDrainReady =>
+        _edge is not null && _edgeOptions is { CanDrainQueue: true } && _r2 is { IsConfigured: true };
 
     public async Task<IReadOnlyList<CatalogProduct>> ExtractCatalogAsync(
         string domain, int maxProducts = 0, int timeoutMs = 45_000, CancellationToken ct = default)
@@ -150,6 +180,20 @@ public sealed class ProviderApi : IProviderApi
     public async Task<ScrapedPage?> ScrapePageAsync(
         string url, ScrapeFormat format = ScrapeFormat.Markdown, CancellationToken ct = default)
     {
+        // Edge first when available: same vendor call from the worker (key lives on the edge),
+        // metered identically; any edge failure degrades to the inline provider below.
+        if (_edge is not null)
+        {
+            var edgePage = await MeterAsync(
+                "scrape-worker/context.dev", $"scrape/{format.ToString().ToLowerInvariant()}", url,
+                () => _edge.ScrapePageAsync(url, format, ct),
+                p => p?.Content?.Length ?? 0).ConfigureAwait(false);
+            if (edgePage is { Success: true })
+            {
+                return edgePage;
+            }
+        }
+
         if (ContextDev() is not { } ctx)
         {
             return null;
@@ -224,12 +268,14 @@ public sealed class ProviderApi : IProviderApi
             () => places.GetPlaceDetailsAsync(placeId, ct)).ConfigureAwait(false);
     }
 
-    public bool HasSocial => _factory.Resolve("APIFY_TOKEN") is not null;
+    public bool HasSocial(IReadOnlyDictionary<string, string>? keys = null) =>
+        _factory.Resolve("APIFY_TOKEN", keys) is not null;
 
     public async Task<IReadOnlyList<SocialPost>> FetchSocialPostsAsync(
-        Source source, string? keyword = null, CancellationToken ct = default)
+        Source source, string? keyword = null, IReadOnlyDictionary<string, string>? keys = null,
+        CancellationToken ct = default)
     {
-        if (Social() is not { } social)
+        if (Social(keys) is not { } social)
         {
             return Array.Empty<SocialPost>();
         }
@@ -239,6 +285,8 @@ public sealed class ProviderApi : IProviderApi
             () => social.FetchAsync(source, keyword, ct),
             r => r.Count).ConfigureAwait(false);
     }
+
+    public bool HasEdgeExtract => _fleet?.HasExtract ?? false;
 
     public bool HasEdgeClassify => _fleet?.HasClassify ?? false;
 
@@ -344,9 +392,9 @@ public sealed class ProviderApi : IProviderApi
     }
 
     /// <summary>Cached social fetcher (rebuilt only if the resolved token changes).</summary>
-    private ApifyPostFetcher? Social()
+    private ApifyPostFetcher? Social(IReadOnlyDictionary<string, string>? keys = null)
     {
-        var token = _factory.Resolve("APIFY_TOKEN");
+        var token = _factory.Resolve("APIFY_TOKEN", keys);
         if (token is null)
         {
             return null;
@@ -361,6 +409,36 @@ public sealed class ProviderApi : IProviderApi
             }
             return _social;
         }
+    }
+
+    public async Task<WorkerHandle?> SubmitEdgeBrandAsync(
+        string domain, string brandName, string? searchJobId, CancellationToken ct = default)
+    {
+        if (_edge is null)
+        {
+            return null;
+        }
+
+        // Same accounting contract as the catalogue submit: recorded only on an accepted 202 (a
+        // failed submit costs nothing and the inline harvest's own metering takes over). Estimated
+        // at the brand-lookup rate + the catalogue crawl it triggers is covered by the same call.
+        var started = System.Diagnostics.Stopwatch.StartNew();
+        var handle = await _edge.SubmitBrandAsync(domain, brandName, searchJobId, ct).ConfigureAwait(false);
+        if (handle is not null && AmbientApiObserver.Observer is { } observer)
+        {
+            var estimator = AmbientApiObserver.Estimator ?? new CostEstimator();
+            observer.Record(new ApiCall
+            {
+                Timestamp = DateTimeOffset.UtcNow,
+                Provider = "scrape-worker/context.dev",
+                Endpoint = "brand/ai/products",
+                RequestSummary = domain,
+                ResponseTimeMs = started.ElapsedMilliseconds,
+                Status = ApiCallStatus.Success,
+                EstimatedCost = estimator.EstimateCall("scrape-worker/context.dev", "brand/ai/products")
+            });
+        }
+        return handle;
     }
 
     /// <summary>Cached Context.dev provider (rebuilt only if the resolved key changes).</summary>

@@ -302,10 +302,25 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             progress($"Found product images for {imagesFound} item(s).");
         }
 
+        // Phase 7 — EDGE CONDITION BACKFILL (classify-worker): models whose offers all lack a
+        // condition get a commodity used/refurbished label from their listing names. Advisory and
+        // conservative: only high-confidence non-"new" labels apply ("new" is the default reading
+        // of an unlabeled listing, so stamping it adds nothing), and any failure changes nothing.
+        var conditionsLabeled = 0;
+        if (_providers.HasEdgeClassify)
+        {
+            conditionsLabeled = await BackfillConditionsAsync(pricedModels, ct);
+            if (conditionsLabeled > 0)
+            {
+                progress($"Labeled condition on {conditionsLabeled} item(s).");
+            }
+        }
+
         var touched = enriched.Count + priced + imagesFound + visionFills
                       + dbImages + dbPrices + dbSpecs
                       + storeImages + storeSpecs
-                      + brandImages + brandPrices + brandSpecs;
+                      + brandImages + brandPrices + brandSpecs
+                      + conditionsLabeled;
         if (touched == 0)
         {
             return new ItemEnrichmentResult(null, events);
@@ -908,7 +923,57 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// items. This is the path that earns the Cloudflare integration — JS-heavy/anti-bot stores the structured
     /// endpoint can't read still yield prices here. Best-effort: any failure just yields no prices.
     /// </summary>
-    private static async Task<IReadOnlyList<BrowserPrice>> HarvestViaBrowserAsync(
+    /// <summary>
+    /// classify-worker consumer: batch-labels condition (used/refurbished) for models whose offers
+    /// carry none, from listing names alone. Returns how many models were stamped. Best-effort.
+    /// </summary>
+    private async Task<int> BackfillConditionsAsync(List<ProductModel> models, CancellationToken ct)
+    {
+        var candidates = models
+            .Select((m, idx) => (m, idx))
+            .Where(t => t.m.Offers.Count > 0 && t.m.Offers.All(o => o.Condition is null))
+            .ToList();
+        if (candidates.Count == 0)
+        {
+            return 0;
+        }
+
+        try
+        {
+            var items = candidates
+                .Select(t => (t.idx.ToString(), $"{t.m.Name} {t.m.Model}".Trim()))
+                .ToList();
+            var verdicts = await _providers.ClassifyTextAsync(
+                items, new[] { "new", "used", "refurbished", "unknown" }, ct);
+
+            var applied = 0;
+            foreach (var v in verdicts)
+            {
+                if (v.Label is not ("used" or "refurbished") || v.Confidence < 0.7 ||
+                    !int.TryParse(v.Id, out var idx) || idx < 0 || idx >= models.Count)
+                {
+                    continue;
+                }
+
+                var m = models[idx];
+                models[idx] = m with
+                {
+                    Offers = m.Offers
+                        .Select(o => o.Condition is null ? o with { Condition = v.Label } : o)
+                        .ToList()
+                };
+                applied++;
+            }
+            return applied;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return 0; // advisory phase — never fails the enrichment
+        }
+    }
+
+    private async Task<IReadOnlyList<BrowserPrice>> HarvestViaBrowserAsync(
         AgentService agent, IReadOnlyList<string> domains, string query,
         Action<string, string, string, IReadOnlyDictionary<string, object?>?> record, CancellationToken ct)
     {
@@ -934,8 +999,36 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                     .Select(p => new BrowserPrice(p.Price, p.Currency, p.Line, domain, page.Url))
                     .ToList();
 
+            // EDGE EXTRACT FALLBACK (extract-worker): the regex parser found nothing on a page we
+            // DID render — hand the markdown to the Workers-AI extract host; structured products
+            // with prices become browser-price observations. Strictly additive: only fires when the
+            // inline parse came up empty, and its own failure just keeps the empty list.
+            var usedEdgeExtract = false;
+            if (prices.Count == 0 && page is { Content.Length: > 0 } && _providers.HasEdgeExtract)
+            {
+                try
+                {
+                    var extracted = await _providers.ExtractProductsFromContentAsync(page.Content, ct: ct);
+                    prices = extracted
+                        .Where(p => p.Price is not null && !string.IsNullOrWhiteSpace(p.Name))
+                        .Select(p => new BrowserPrice(
+                            p.Price!.Value, p.Currency ?? string.Empty, p.Name, domain, p.Url ?? page.Url))
+                        .ToList();
+                    usedEdgeExtract = prices.Count > 0;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch
+                {
+                    // best-effort fallback — the empty inline result stands
+                }
+            }
+
             record(EventCategory.Extract, "catalog.browser", page?.Provider ?? "cloudflare-browser",
-                new Dictionary<string, object?> { ["domain"] = domain, ["url"] = url, ["prices"] = prices.Count });
+                new Dictionary<string, object?>
+                {
+                    ["domain"] = domain, ["url"] = url, ["prices"] = prices.Count,
+                    ["edgeExtract"] = usedEdgeExtract
+                });
             return (IReadOnlyList<BrowserPrice>)prices;
         }));
 

@@ -21,8 +21,22 @@ public interface ICloudflareWorkerClient
         string domain, string? store, string? searchJobId, int maxProducts = 0,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Submits a brand crawl (profile + catalogue) — same handle/fallback contract as the catalogue
+    /// submit; the drain's brand handler persists the models when the result lands.
+    /// </summary>
+    Task<WorkerHandle?> SubmitBrandAsync(
+        string domain, string brandName, string? searchJobId, CancellationToken ct = default);
+
     /// <summary>The worker's status for an async job, or null when it can't be reached.</summary>
     Task<WorkerJobStatus?> GetJobStatusAsync(string jobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Synchronous single-page scrape on the edge (POST /scrape/page). Null on rejection/transport
+    /// failure — callers degrade to their inline provider.
+    /// </summary>
+    Task<Daleel.Search.Abstractions.ScrapedPage?> ScrapePageAsync(
+        string url, Daleel.Search.Abstractions.ScrapeFormat format, CancellationToken ct = default);
 
     /// <summary>Reads and deserializes a finished result from R2 by key; null when absent/unreadable.</summary>
     Task<T?> ReadResultAsync<T>(string resultKey, CancellationToken ct = default) where T : class;
@@ -34,7 +48,9 @@ public static class CloudflareJson
     public static readonly JsonSerializerOptions Options = new()
     {
         PropertyNameCaseInsensitive = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // Workers emit enum-valued fields (e.g. ScrapedPage.format) as their string names.
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
     };
 }
 
@@ -110,6 +126,84 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
         {
             // Unreachable/slow worker must degrade to the inline path, never fault a search.
             _logger.LogWarning(ex, "scrape-worker catalog submit failed for {Domain}", domain);
+            return null;
+        }
+    }
+
+    public async Task<Daleel.Search.Abstractions.ScrapedPage?> ScrapePageAsync(
+        string url, Daleel.Search.Abstractions.ScrapeFormat format, CancellationToken ct = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["url"] = url,
+            ["format"] = format == Daleel.Search.Abstractions.ScrapeFormat.Html ? "html" : "markdown"
+        };
+
+        try
+        {
+            using var scrapeCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            // A page scrape is a real vendor call, not a control-plane ping — allow the vendor's
+            // ~45s budget but never the sub-workflow's whole allowance.
+            scrapeCts.CancelAfter(TimeSpan.FromSeconds(25));
+            using var response = await _http.PostAsync(
+                "/scrape/page",
+                new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+                scrapeCts.Token).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(scrapeCts.Token).ConfigureAwait(false);
+            var dto = JsonSerializer.Deserialize<PageScrapeResponse>(text, CloudflareJson.Options);
+            return dto is { Ok: true, Result: not null } ? dto.Result : null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "edge page scrape failed for {Url}; degrading to inline", url);
+            return null;
+        }
+    }
+
+    private sealed record PageScrapeResponse
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("ok")] public bool Ok { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("result")]
+        public Daleel.Search.Abstractions.ScrapedPage? Result { get; init; }
+    }
+
+    public async Task<WorkerHandle?> SubmitBrandAsync(
+        string domain, string brandName, string? searchJobId, CancellationToken ct = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["domain"] = domain,
+            ["store"] = brandName, // the worker's generic entity label; the drain reads it back as the brand name
+            ["searchJobId"] = searchJobId,
+            ["withCatalog"] = true
+        };
+
+        try
+        {
+            using var submitCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            submitCts.CancelAfter(SubmitTimeout);
+            using var response = await _http.PostAsync(
+                "/scrape/brand",
+                new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"),
+                submitCts.Token).ConfigureAwait(false);
+            var text = await response.Content.ReadAsStringAsync(submitCts.Token).ConfigureAwait(false);
+            var dto = JsonSerializer.Deserialize<WorkerSubmitResponse>(text, CloudflareJson.Options);
+
+            if (dto is not { Ok: true, JobId.Length: > 0, ResultKey.Length: > 0 })
+            {
+                _logger.LogWarning(
+                    "scrape-worker rejected brand submit for {Domain}: {Status} {Error}",
+                    domain, (int)response.StatusCode, dto?.Error?.Message ?? Truncate(text));
+                return null;
+            }
+
+            return new WorkerHandle { JobId = dto.JobId!, ResultKey = dto.ResultKey! };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "scrape-worker brand submit failed for {Domain}", domain);
             return null;
         }
     }

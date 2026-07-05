@@ -97,6 +97,12 @@ public interface IAgentFactory
 /// </summary>
 public sealed class AgentFactory : IAgentFactory
 {
+    // Lazily resolved (never a ctor dependency): IProviderApi itself depends on IAgentFactory, so a
+    // constructor injection here would be a DI cycle. Build() runs long after the container exists.
+    private readonly IServiceProvider? _services;
+
+    public AgentFactory(IServiceProvider? services = null) => _services = services;
+
     public string? Resolve(string name, IReadOnlyDictionary<string, string>? keys = null)
     {
         if (keys is not null && keys.TryGetValue(name, out var v) && !string.IsNullOrWhiteSpace(v))
@@ -176,10 +182,26 @@ public sealed class AgentFactory : IAgentFactory
         // The moderation pipeline: deterministic keyword baseline + LLM adjudication over the SAME
         // (already logging-wrapped) client, so classification calls are metered and cost-capped like
         // every other LLM call. Vision image screening is optional and injected by the caller.
+        // The filter-worker A/B SHADOW (doc §6 Phase 3): when the edge filter host is configured,
+        // decorate both classifiers so every moderation batch also produces an agreement log line —
+        // the labeled dataset that decides whether edge classification can ever take default
+        // traffic. The inner classifiers stay authoritative; the shadow is detached and swallowed.
+        IHalalClassifier classifier = new LlmHalalClassifier(llm);
+        var imageClassifier = request.ImageClassifier;
+        if (_services?.GetService(typeof(IProviderApi)) is IProviderApi { HasEdgeFilter: true } providerApi &&
+            _services.GetService(typeof(ILogger<AgentFactory>)) is ILogger<AgentFactory> shadowLog)
+        {
+            classifier = new Daleel.Web.Moderation.ShadowHalalClassifier(classifier, providerApi, shadowLog);
+            if (imageClassifier is not null)
+            {
+                imageClassifier = new Daleel.Web.Moderation.ShadowHalalImageClassifier(imageClassifier, providerApi, shadowLog);
+            }
+        }
+
         var moderator = new HalalModerator(
             filter,
-            classifier: new LlmHalalClassifier(llm),
-            imageClassifier: request.ImageClassifier,
+            classifier: classifier,
+            imageClassifier: imageClassifier,
             policy: request.HalalPolicy,
             log: request.Log);
 

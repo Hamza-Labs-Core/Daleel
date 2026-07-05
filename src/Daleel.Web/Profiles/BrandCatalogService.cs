@@ -37,19 +37,21 @@ public sealed class BrandCatalogService : IBrandCatalogService
     private readonly ProfileOptions _options;
     private readonly ILogger<BrandCatalogService> _logger;
     private readonly Services.IProviderApi _providers;
+    private readonly Data.ISystemConfigService? _config;
 
     public BrandCatalogService(
         IBrandRepository brands, IBrandModelRepository models,
         IAgentFactory factory, ProfileOptions options, ILogger<BrandCatalogService> logger,
-        Services.IProviderApi? providers = null)
+        Services.IProviderApi? providers = null, Data.ISystemConfigService? config = null)
     {
         _brands = brands;
         _models = models;
         _factory = factory;
         _options = options;
         _logger = logger;
-        // Optional so existing test wiring keeps working; production DI always supplies the gateway.
+        // Optional so existing test wiring keeps working; production DI always supplies both.
         _providers = providers ?? new Services.ProviderApi(factory);
+        _config = config;
     }
 
     public async Task<int> HarvestAsync(string brandName, CancellationToken ct = default)
@@ -66,7 +68,7 @@ public sealed class BrandCatalogService : IBrandCatalogService
             return 0;
         }
 
-        if (!_providers.HasScraper)
+        if (!_providers.HasScraper && !_providers.HasEdge)
         {
             return 0;
         }
@@ -79,6 +81,31 @@ public sealed class BrandCatalogService : IBrandCatalogService
         if (existing.Count > 0 && existing.All(m => !m.IsStale(now, _options.Ttl)))
         {
             return 0;
+        }
+
+        // EDGE PATH (scrape-worker /scrape/brand): submit-and-forget — the crawl runs on the edge
+        // with no local timeout racing it, and the drain's brand handler persists the models when
+        // the result lands (even after this enrichment pass is long gone). Same gate as the store
+        // crawl: full drain path + the admin flag; anything less falls through to inline.
+        if (_providers.HasEdge && _providers.EdgeDrainReady &&
+            _config is not null &&
+            await _config.GetBoolAsync(
+                Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag, false, ct).ConfigureAwait(false))
+        {
+            var handle = await _providers.SubmitEdgeBrandAsync(domain, brand.Name, searchJobId: null, ct)
+                .ConfigureAwait(false);
+            if (handle is not null)
+            {
+                _logger.LogInformation(
+                    "Brand catalogue harvest for {Brand} ({Domain}) submitted to scrape-worker as job {JobId}",
+                    brand.Name, domain, handle.JobId);
+                return 0; // the drain persists the models whenever the edge job lands
+            }
+        }
+
+        if (!_providers.HasScraper)
+        {
+            return 0; // edge unavailable and no inline scraper either
         }
 
         IReadOnlyList<CatalogProduct> catalogue;

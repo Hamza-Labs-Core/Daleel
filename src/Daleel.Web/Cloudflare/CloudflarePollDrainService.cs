@@ -141,7 +141,8 @@ public sealed class CloudflarePollDrainService : BackgroundService
 
         return msg.Kind?.ToLowerInvariant() switch
         {
-            "catalog" or "brand" => await PersistCatalogAsync(msg, msg.ResultKey!, ct).ConfigureAwait(false),
+            "catalog" => await PersistCatalogAsync(msg, msg.ResultKey!, ct).ConfigureAwait(false),
+            "brand" => await PersistBrandAsync(msg, msg.ResultKey!, ct).ConfigureAwait(false),
             _ => AckUnknown(msg)
         };
     }
@@ -241,6 +242,122 @@ public sealed class CloudflarePollDrainService : BackgroundService
             "Drained edge {Kind} result for {Store}: {Total} product(s), {Priced} priced (job {JobId})",
             msg.Kind, store, doc.ProductCount, rows.Count, msg.JobId);
         return Outcome.Ack;
+    }
+
+    /// <summary>
+    /// Persists a finished edge BRAND crawl (profile + catalogue) into the brand-model DB — the same
+    /// <see cref="Data.BrandModel"/> rows the inline BrandCatalogService harvest writes, so brand
+    /// pages and product identification read edge results with zero changes. The brand row must
+    /// already exist (the submit happens from a path that owns it); an unknown brand is surfaced as
+    /// a failure event, never guessed.
+    /// </summary>
+    private async Task<Outcome> PersistBrandAsync(PollMessage msg, string resultKey, CancellationToken ct)
+    {
+        var markerKey = resultKey + ".persisted";
+        if (await _r2.ReadTextAsync(markerKey, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is not null)
+        {
+            return Outcome.Ack; // redelivery of an already-persisted result
+        }
+
+        var doc = await _client.ReadResultAsync<CatalogResultDoc>(resultKey, ct).ConfigureAwait(false);
+        if (doc is null)
+        {
+            if (msg.DeadlineAt > 0 && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > msg.DeadlineAt)
+            {
+                await PublishEventAsync(msg, success: false,
+                    summary: $"Edge brand result for {msg.Store ?? msg.Domain} could not be read before its " +
+                             "deadline — harvest discarded",
+                    ct).ConfigureAwait(false);
+                await _r2.StoreJsonAsync(
+                    JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unreadable past deadline" }),
+                    markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
+                return Outcome.Ack;
+            }
+            return Outcome.Retry;
+        }
+
+        var brandName = FirstNonEmpty(msg.Store, doc.Store);
+        var harvested = 0;
+        using (var scope = _scopeFactory.CreateScope())
+        {
+            var brands = scope.ServiceProvider.GetRequiredService<Data.IBrandRepository>();
+            var models = scope.ServiceProvider.GetRequiredService<Data.IBrandModelRepository>();
+            var brand = brandName is null
+                ? null
+                : await SafeGetBrand(brands, brandName, ct).ConfigureAwait(false);
+            if (brand is null)
+            {
+                await PublishEventAsync(msg, success: false,
+                    summary: $"Edge brand harvest for '{brandName ?? msg.Domain}' had no matching brand row — models discarded",
+                    ct).ConfigureAwait(false);
+                await _r2.StoreJsonAsync(
+                    JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unknown brand" }),
+                    markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
+                return Outcome.Ack;
+            }
+
+            try
+            {
+                foreach (var product in doc.Products.Where(p => !string.IsNullOrWhiteSpace(p.Name)))
+                {
+                    // Same mapping as BrandCatalogService.HarvestAsync — one canonical shape.
+                    await models.UpsertAsync(new Data.BrandModel
+                    {
+                        BrandId = brand.Id,
+                        ModelName = product.Name,
+                        ModelKey = Data.BrandModel.Normalize(product.Name),
+                        Category = product.Category,
+                        SpecsJson = BuildBrandSpecs(product),
+                        ImageUrl = string.IsNullOrWhiteSpace(product.ImageUrl) ? null : product.ImageUrl!.Trim(),
+                        LocalPrice = product.Price,
+                        Currency = product.Currency,
+                        IsAvailable = true,
+                        SourceUrl = product.Url,
+                        LastRefreshed = doc.CapturedAt == default ? DateTimeOffset.UtcNow : doc.CapturedAt
+                    }, ct).ConfigureAwait(false);
+                    harvested++;
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Persisting drained brand models for {Brand} failed after {Count}; will retry",
+                    brand.Name, harvested);
+                return Outcome.Retry;
+            }
+        }
+
+        await _r2.StoreJsonAsync(
+            JsonSerializer.Serialize(new { persistedAt = DateTimeOffset.UtcNow, models = harvested }),
+            markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
+        await PublishEventAsync(msg, success: true,
+            summary: $"Edge brand harvest for {brandName}: {harvested} model(s) persisted",
+            ct).ConfigureAwait(false);
+        return Outcome.Ack;
+    }
+
+    private static async Task<Data.Brand?> SafeGetBrand(
+        Data.IBrandRepository brands, string name, CancellationToken ct)
+    {
+        try { return await brands.GetByNameAsync(name, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    /// <summary>Mirror of BrandCatalogService.BuildSpecs — description + sku into the specs blob.</summary>
+    private static string? BuildBrandSpecs(Daleel.Search.Providers.CatalogProduct product)
+    {
+        var specs = new Dictionary<string, string>();
+        if (!string.IsNullOrWhiteSpace(product.Description))
+        {
+            specs["description"] = product.Description!;
+        }
+        if (!string.IsNullOrWhiteSpace(product.Sku))
+        {
+            specs["sku"] = product.Sku!;
+        }
+        return specs.Count == 0 ? null : JsonSerializer.Serialize(specs);
     }
 
     /// <summary>Timeline visibility for drained results (they run outside any workflow's event buffer).</summary>

@@ -573,7 +573,10 @@ public class SubWorkflowTests
         services.AddSingleton<Daleel.Web.Services.IProviderApi>(sp =>
             new Daleel.Web.Services.ProviderApi(
                 sp.GetRequiredService<IAgentFactory>(),
-                sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>()));
+                sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(),
+                fleet: null,
+                edgeOptions: sp.GetService<Daleel.Web.Cloudflare.CloudflareWorkerOptions>(),
+                r2: sp.GetService<IR2StorageService>()));
         // Smart-identification dependencies the item deep-dive now resolves. A no-op identifier keeps these
         // sequencing tests focused on the original behavior; the identifier itself is covered separately.
         services.AddSingleton<IProductIdentifier>(new NoOpProductIdentifier());
@@ -887,6 +890,14 @@ public class SubWorkflowTests
 
         public Task<Daleel.Web.Cloudflare.WorkerJobStatus?> GetJobStatusAsync(string jobId, CancellationToken ct = default) =>
             Task.FromResult<Daleel.Web.Cloudflare.WorkerJobStatus?>(null);
+
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitBrandAsync(
+            string domain, string brandName, string? searchJobId, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(null);
+
+        public Task<Daleel.Search.Abstractions.ScrapedPage?> ScrapePageAsync(
+            string url, Daleel.Search.Abstractions.ScrapeFormat format, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Search.Abstractions.ScrapedPage?>(null);
 
         public Task<T?> ReadResultAsync<T>(string resultKey, CancellationToken ct = default) where T : class =>
             Task.FromResult<T?>(null);
