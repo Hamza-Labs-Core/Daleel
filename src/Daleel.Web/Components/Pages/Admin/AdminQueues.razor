@@ -116,6 +116,25 @@ else
                     <div><MudText Typo="Typo.caption" Color="Color.Secondary">Failed</MudText><MudText Typo="Typo.h6" Color="@(d.Jobs.Failed > 0 ? Color.Error : Color.Default)">@d.Jobs.Failed</MudText></div>
                     <div><MudText Typo="Typo.caption" Color="Color.Secondary">Cancelled</MudText><MudText Typo="Typo.h6">@d.Jobs.Cancelled</MudText></div>
                 </div>
+                @if (d.Jobs.RecentFailed.Count > 0)
+                {
+                    <MudDivider Class="my-2" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">Recent failures</MudText>
+                    @foreach (var job in d.Jobs.RecentFailed)
+                    {
+                        <div class="mt-1">
+                            <MudText Typo="Typo.body2">
+                                <b>#@job.Id</b> @job.Query
+                                <MudText Typo="Typo.caption" Color="Color.Secondary" Inline="true">
+                                    · @job.At.ToLocalTime().ToString("g")
+                                </MudText>
+                            </MudText>
+                            <MudText Typo="Typo.caption" Color="Color.Error" Style="word-break:break-word;">
+                                @(job.Error ?? "no error recorded")
+                            </MudText>
+                        </div>
+                    }
+                }
             </MudPaper>
         </MudItem>
         <MudItem xs="12" md="6" Class="d-flex flex-column">
@@ -127,6 +146,30 @@ else
                         <div><MudText Typo="Typo.caption" Color="Color.Secondary">Results drained</MudText><MudText Typo="Typo.h6" Color="Color.Success">@drain.Drained</MudText></div>
                         <div><MudText Typo="Typo.caption" Color="Color.Secondary">Edge failures</MudText><MudText Typo="Typo.h6" Color="@(drain.Failed > 0 ? Color.Warning : Color.Default)">@drain.Failed</MudText></div>
                     </div>
+                    @if (drain.RecentFailures.Count > 0)
+                    {
+                        <MudDivider Class="my-2" />
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">Recent failures</MudText>
+                        @foreach (var f in drain.RecentFailures)
+                        {
+                            <div class="mt-1">
+                                <MudText Typo="Typo.body2">
+                                    <b>@(f.Store ?? f.Domain ?? "unknown store")</b>
+                                    @if (f.Domain is not null)
+                                    {
+                                        <MudText Typo="Typo.caption" Color="Color.Secondary" Inline="true"
+                                                 Style="font-family:monospace;"> @f.Domain</MudText>
+                                    }
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary" Inline="true">
+                                        · @f.At.ToLocalTime().ToString("g")@(f.SearchJobId is null ? "" : $" · job #{f.SearchJobId}")
+                                    </MudText>
+                                </MudText>
+                                <MudText Typo="Typo.caption" Color="Color.Warning" Style="word-break:break-word;">
+                                    @(f.Error ?? "no error payload")
+                                </MudText>
+                            </div>
+                        }
+                    }
                 }
                 else
                 {

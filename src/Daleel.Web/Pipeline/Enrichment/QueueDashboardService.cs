@@ -13,11 +13,20 @@ public sealed record KindStats(
 public sealed record DeadItem(
     long Id, string Kind, int SearchJobId, int Attempts, string? LastError, DateTimeOffset? CompletedAt);
 
+/// <summary>One failed search job with its server-side error — the admin's diagnosis line.</summary>
+public sealed record FailedJob(int Id, string Query, string? Error, DateTimeOffset At);
+
 /// <summary>Search-job counters: live states now + terminal outcomes within the window.</summary>
-public sealed record JobStats(int Queued, int Running, int Completed, int Failed, int Cancelled);
+public sealed record JobStats(
+    int Queued, int Running, int Completed, int Failed, int Cancelled,
+    IReadOnlyList<FailedJob> RecentFailed);
+
+/// <summary>One failed edge crawl, decoded from the drain's event payload.</summary>
+public sealed record DrainFailure(
+    DateTimeOffset At, string? Store, string? Domain, string? Error, string? SearchJobId);
 
 /// <summary>Edge poll-drain counters from the system event log (null when the log is disabled).</summary>
-public sealed record DrainStats(int Drained, int Failed);
+public sealed record DrainStats(int Drained, int Failed, IReadOnlyList<DrainFailure> RecentFailures);
 
 /// <summary>Everything the /admin/queues live dashboard renders, computed in one pass.</summary>
 public sealed record QueueDashboard(
@@ -111,6 +120,14 @@ public sealed class QueueDashboardService : IQueueDashboardService
             .ToListAsync(ct);
         int JobCount(string status) => jobs.FirstOrDefault(j => j.Status == status)?.Count ?? 0;
 
+        // The failed jobs themselves, error included — a count with no detail can't be diagnosed.
+        var recentFailed = await _db.SearchJobs.AsNoTracking()
+            .Where(j => j.Status == JobStatus.Failed && j.CreatedAt >= since)
+            .OrderByDescending(j => j.CreatedAt)
+            .Take(10)
+            .Select(j => new FailedJob(j.Id, j.Query, j.Error, j.CreatedAt))
+            .ToListAsync(ct);
+
         return new QueueDashboard(
             At: now,
             Window: window,
@@ -130,7 +147,8 @@ public sealed class QueueDashboardService : IQueueDashboardService
                 Running: JobCount(JobStatus.Running),
                 Completed: JobCount(JobStatus.Completed),
                 Failed: JobCount(JobStatus.Failed),
-                Cancelled: JobCount(JobStatus.Cancelled)),
+                Cancelled: JobCount(JobStatus.Cancelled),
+                RecentFailed: recentFailed),
             Drain: await DrainSnapshotAsync(since, ct));
     }
 
@@ -152,15 +170,37 @@ public sealed class QueueDashboardService : IQueueDashboardService
             {
                 Since = since, Text = "store.prices.drained", PageSize = 1
             }, ct);
+            // The failure EVENTS ride along, decoded — the admin diagnoses from the dashboard, not
+            // from a bare count that points nowhere.
             var failed = await _systemLog.QueryAsync(new SystemEventQuery
             {
-                Since = since, Text = "store.prices.edge_failed", PageSize = 1
+                Since = since, Text = "store.prices.edge_failed", PageSize = 10
             }, ct);
-            return new DrainStats(drained.Total, failed.Total);
+            return new DrainStats(drained.Total, failed.Total,
+                failed.Items.Select(DecodeFailure).ToList());
         }
         catch
         {
             return null; // the dashboard must render even when the event backend hiccups
+        }
+    }
+
+    /// <summary>Structured fields from the drain event's payload; the raw summary is the fallback.</summary>
+    private static DrainFailure DecodeFailure(SystemEvent ev)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(ev.DetailsJson);
+            var root = doc.RootElement;
+            string? Get(string name) =>
+                root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.String
+                    ? v.GetString()
+                    : null;
+            return new DrainFailure(ev.Timestamp, Get("Store"), Get("Domain"), Get("Error"), ev.CorrelationId);
+        }
+        catch
+        {
+            return new DrainFailure(ev.Timestamp, null, null, ev.Summary, ev.CorrelationId);
         }
     }
 }

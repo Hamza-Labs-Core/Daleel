@@ -42,6 +42,11 @@ public class QueueDashboardServiceTests : IDisposable
         var now = DateTimeOffset.UtcNow;
         using var scope = _provider.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+        db.SearchJobs.Add(new SearchJob
+        {
+            UserId = "u1", Query = "broken search", Status = JobStatus.Failed,
+            Error = "provider exploded", CreatedAt = now
+        });
         db.EnrichmentWorkItems.AddRange(
             Item(EnrichmentUnit.ItemDive, WorkItemStatus.Done, completed: now),
             Item(EnrichmentUnit.ItemDive, WorkItemStatus.Done, attempts: 3, completed: now), // recovered
@@ -67,6 +72,9 @@ public class QueueDashboardServiceTests : IDisposable
         d.RecentDead.Should().ContainSingle()
             .Which.LastError.Should().Be("awaiting edge drain for x.jo");
         d.Drain.Should().BeNull("the null event log must read as 'not configured', never zeros");
+        d.Jobs.Failed.Should().Be(1);
+        d.Jobs.RecentFailed.Should().ContainSingle()
+            .Which.Error.Should().Be("provider exploded", "a bare count can't be diagnosed");
     }
 
     [Fact]
