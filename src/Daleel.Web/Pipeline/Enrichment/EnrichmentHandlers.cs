@@ -88,12 +88,12 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
                 EnrichmentWorkQueue.Payload(new ItemPayload(i, products.Models[i].Name))));
         }
 
-        foreach (var (domain, storeName) in svc.SelectCatalogDomains(products))
+        foreach (var (domain, storeName, entryUrl) in svc.SelectCatalogDomains(products))
         {
             // Extra attempts on purpose: the first ones may be spent politely waiting for the edge
             // drain to land this domain's rows before falling back to an inline crawl.
             children.Add(HandlerHelpers.Child(item, EnrichmentUnit.CatalogAttach,
-                EnrichmentWorkQueue.Payload(new CatalogPayload(domain, storeName)), maxAttempts: 6));
+                EnrichmentWorkQueue.Payload(new CatalogPayload(domain, storeName, entryUrl)), maxAttempts: 6));
         }
 
         foreach (var brand in svc.SelectBrandsForHarvest(products))
@@ -246,7 +246,7 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
 
         var (inline, inlinePriced, inlineCreated) = await svc.AttachCatalogForDomainAsync(
             ctx.Agent(), products.Models.ToList(), payload.Domain, payload.StoreName,
-            products.Geo, item.SearchJobId.ToString(), ctx.Job.Query, ct);
+            products.Geo, item.SearchJobId.ToString(), ctx.Job.Query, payload.EntryUrl, ct);
         if (inline is not null && inlinePriced >= 0)
         {
             await Patch(ctx, item, inline, ct);

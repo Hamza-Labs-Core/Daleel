@@ -38,8 +38,8 @@ public interface IItemEnrichmentService
     /// <summary>Phases 1–3 for ONE item: fresh-profile reuse, else official-page scrape + ProductProfile upsert. Null = unchanged.</summary>
     Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
-    /// <summary>Phase 4 for ONE store domain over the whole list (inline Context.dev extract + browser fallback + persist observations + match). Models null = unchanged.</summary>
-    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, CancellationToken ct);
+    /// <summary>Phase 4 for ONE store domain over the whole list (inline Context.dev extract + browser fallback + persist observations + match; entryUrl = the DISCOVERED page, second-chance harvested when the domain pass creates nothing). Models null = unchanged.</summary>
+    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct);
 
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
     Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
@@ -54,7 +54,7 @@ public interface IItemEnrichmentService
     Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct);
 
     /// <summary>Store domains Phase 4 would crawl for this result (pure selection, no I/O).</summary>
-    IReadOnlyList<(string Domain, string? StoreName)> SelectCatalogDomains(ProductSearchResult products);
+    IReadOnlyList<(string Domain, string? StoreName, string? EntryUrl)> SelectCatalogDomains(ProductSearchResult products);
 
     /// <summary>Brands Phase 5 would harvest for this result (pure selection incl. the MaxBrandCatalogs cap, no I/O).</summary>
     IReadOnlyList<string> SelectBrandsForHarvest(ProductSearchResult products);
@@ -424,7 +424,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
     public async Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
         AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo,
-        string? searchId, string? query, CancellationToken ct)
+        string? searchId, string? query, string? entryUrl, CancellationToken ct)
     {
         // geo/searchId ride on the queue contract; this unit needs neither (events are dropped here).
         // The gap gate only short-circuits when there's no query to discover NEW models for — a store
@@ -469,6 +469,29 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 .Concat(browserPrices.Select(b =>
                     (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true))),
             storeName, query);
+
+        // Second chance on the DISCOVERED page: a general store's root crawl can return inventory
+        // that has nothing to do with the query (jo-cell.com root is phones; its espresso machines
+        // live under /collections/espresso-machines — the very url Google handed us). When the
+        // domain-level pass created nothing, render/extract that page directly.
+        if (created.Count == 0 && !string.IsNullOrWhiteSpace(entryUrl) &&
+            SignificantQueryTokens(query).Count > 0)
+        {
+            var entryPrices = await HarvestPageAsync(agent, domain, entryUrl!, ct);
+            if (entryPrices.Count > 0)
+            {
+                (withNew, var entryPriced, _, _, _) =
+                    AttachPoolToModels(withNew, new List<CatalogProduct>(), entryPrices, storeName);
+                priced += entryPriced;
+                var (withEntry, entryCreated) = AppendCatalogDiscoveries(
+                    withNew,
+                    entryPrices.Select(b =>
+                        (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)),
+                    storeName, query);
+                withNew = withEntry;
+                created = created.Concat(entryCreated).ToList();
+            }
+        }
 
         if (priced + images + specsFilled == 0 && created.Count == 0)
         {
@@ -569,12 +592,15 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return models;
     }
 
-    public IReadOnlyList<(string Domain, string? StoreName)> SelectCatalogDomains(ProductSearchResult products)
+    public IReadOnlyList<(string Domain, string? StoreName, string? EntryUrl)> SelectCatalogDomains(ProductSearchResult products)
     {
         // No site-count cap, mirroring the phase: every distinct store domain is a candidate —
         // budgets decide how many crawls complete. The first store to claim a domain names it.
+        // The DISCOVERED url rides along when it points somewhere specific: Google returned
+        // jo-cell.com/collections/espresso-machines — crawling the domain ROOT of a general store
+        // finds phones, not espresso machines; the deep link is the query-relevant inventory.
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var selected = new List<(string Domain, string? StoreName)>();
+        var selected = new List<(string Domain, string? StoreName, string? EntryUrl)>();
         foreach (var store in products.Stores)
         {
             if (DomainOf(store.Url) is not { } domain || !seen.Add(domain))
@@ -582,7 +608,10 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 continue;
             }
 
-            selected.Add((domain, string.IsNullOrWhiteSpace(store.Name) ? null : store.Name));
+            var entryUrl = Uri.TryCreate(store.Url, UriKind.Absolute, out var u) && u.AbsolutePath.Length > 1
+                ? store.Url
+                : null;
+            selected.Add((domain, string.IsNullOrWhiteSpace(store.Name) ? null : store.Name, entryUrl));
         }
 
         return selected;
@@ -1343,6 +1372,51 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         }));
 
         return harvested.SelectMany(h => h).ToList();
+    }
+
+    /// <summary>
+    /// Renders and extracts ONE explicit page (the store url discovery actually returned — e.g. a
+    /// query-relevant collection page) into browser-price lines. Same parse → edge-extract fallback
+    /// chain as <see cref="HarvestViaBrowserAsync"/>; best-effort, empty on any failure.
+    /// </summary>
+    private async Task<IReadOnlyList<BrowserPrice>> HarvestPageAsync(
+        AgentService agent, string domain, string url, CancellationToken ct)
+    {
+        ScrapedPage? page;
+        try
+        {
+            page = await agent.ReadPageAsync(url, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { page = null; }
+
+        if (page is null || string.IsNullOrWhiteSpace(page.Content))
+        {
+            return Array.Empty<BrowserPrice>();
+        }
+
+        var prices = PriceParser.Extract(page.Content)
+            .Select(p => new BrowserPrice(p.Price, p.Currency, p.Line, domain, page.Url))
+            .ToList();
+        if (prices.Count == 0 && _providers.HasEdgeExtract)
+        {
+            try
+            {
+                var extracted = await _providers.ExtractProductsFromContentAsync(page.Content, ct: ct);
+                prices = extracted
+                    .Where(p => p.Price is not null && !string.IsNullOrWhiteSpace(p.Name))
+                    .Select(p => new BrowserPrice(
+                        p.Price!.Value, p.Currency ?? string.Empty, p.Name, domain, p.Url ?? page.Url))
+                    .ToList();
+            }
+            catch (OperationCanceledException) { throw; }
+            catch
+            {
+                // best-effort — the empty parse stands
+            }
+        }
+
+        return prices;
     }
 
     /// <summary>

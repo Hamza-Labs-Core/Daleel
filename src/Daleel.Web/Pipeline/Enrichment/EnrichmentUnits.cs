@@ -44,7 +44,7 @@ public sealed record PlanPayload(string? QualityJson = null, int FilteredCount =
 /// <summary>One-item payload. Name double-checks the index — items move when vision renames models.</summary>
 public sealed record ItemPayload(int Index, string Name);
 
-public sealed record CatalogPayload(string Domain, string? StoreName);
+public sealed record CatalogPayload(string Domain, string? StoreName, string? EntryUrl = null);
 
 public sealed record BrandPayload(string Brand);
 

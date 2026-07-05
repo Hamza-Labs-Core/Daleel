@@ -328,7 +328,7 @@ public class EnrichmentHandlerTests
             Task.FromResult<ProductModel?>(null);
 
         public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
-            AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, CancellationToken ct)
+            AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct)
         {
             InlineCatalogCalls++;
             return Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>)>((null, 0, Array.Empty<string>()));
@@ -346,8 +346,8 @@ public class EnrichmentHandlerTests
         public Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct) =>
             Task.FromResult<List<ProductModel>?>(null);
 
-        public IReadOnlyList<(string Domain, string? StoreName)> SelectCatalogDomains(ProductSearchResult products) =>
-            new[] { ("store-a.jo", (string?)"Store A"), ("store-b.jo", (string?)"Store B") };
+        public IReadOnlyList<(string Domain, string? StoreName, string? EntryUrl)> SelectCatalogDomains(ProductSearchResult products) =>
+            new[] { ("store-a.jo", (string?)"Store A", (string?)null), ("store-b.jo", (string?)"Store B", (string?)null) };
         public IReadOnlyList<string> SelectBrandsForHarvest(ProductSearchResult products) => new[] { "Krups" };
     }
 
