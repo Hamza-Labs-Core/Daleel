@@ -1,0 +1,237 @@
+@page "/admin/queues"
+@attribute [Authorize(Roles = "Admin")]
+@using Daleel.Web.Pipeline.Enrichment
+@implements IDisposable
+@inject IServiceScopeFactory ScopeFactory
+
+<PageTitle>دليل · Admin · Queues</PageTitle>
+
+<AdminNav />
+<div class="d-flex align-center mb-1">
+    <MudText Typo="Typo.h4">Queues</MudText>
+    <MudSpacer />
+    <MudSelect T="int" Value="_windowHours" ValueChanged="SetWindowAsync" Dense="true" Margin="Margin.Dense"
+               Variant="Variant.Outlined" Style="max-width:140px;" Class="me-3">
+        <MudSelectItem T="int" Value="1">Last hour</MudSelectItem>
+        <MudSelectItem T="int" Value="24">Last 24h</MudSelectItem>
+        <MudSelectItem T="int" Value="168">Last 7 days</MudSelectItem>
+    </MudSelect>
+    <MudSwitch T="bool" Value="_live" ValueChanged="ToggleLive" Color="Color.Success" Label="Live" Class="ma-0" />
+</div>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Enrichment work queue, search jobs and the edge poll drain — refreshed every @(RefreshSeconds)s while Live is on.
+    @if (_dashboard is { } d0)
+    {
+        <text>Updated @d0.At.ToLocalTime().ToString("HH:mm:ss").</text>
+    }
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load queue stats: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="RefreshAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_dashboard is null)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    var d = _dashboard;
+
+    <MudText Typo="Typo.h6" Class="mb-2">Enrichment work queue</MudText>
+    <MudGrid Spacing="2" Class="mb-4">
+        <MudItem xs="6" sm="4" md="2">
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Pending</MudText>
+                <MudText Typo="Typo.h5">@d.Pending</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Running</MudText>
+                <MudText Typo="Typo.h5" Color="@(d.Running > 0 ? Color.Info : Color.Default)">@d.Running</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Processed</MudText>
+                <MudText Typo="Typo.h5" Color="Color.Success">@d.Done</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Recovered (retried → done)</MudText>
+                <MudText Typo="Typo.h5">@d.Recovered</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Dead</MudText>
+                <MudText Typo="Typo.h5" Color="@(d.Dead > 0 ? Color.Error : Color.Default)">@d.Dead</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="6" sm="4" md="2">
+            <MudPaper Class="pa-3" Outlined="true">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Oldest pending</MudText>
+                <MudText Typo="Typo.h5">@AgeText(d.OldestPendingAge)</MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    <MudTable Items="d.Kinds" Hover="true" Dense="true" Striped="true" Class="mb-6">
+        <HeaderContent>
+            <MudTh>Unit kind</MudTh>
+            <MudTh>Pending</MudTh>
+            <MudTh>Running</MudTh>
+            <MudTh>Processed</MudTh>
+            <MudTh>Dead</MudTh>
+            <MudTh>Avg attempts</MudTh>
+            <MudTh>Avg time to done</MudTh>
+        </HeaderContent>
+        <RowTemplate>
+            <MudTd><MudText Typo="Typo.body2" Style="font-family:monospace;">@context.Kind</MudText></MudTd>
+            <MudTd>@context.Pending</MudTd>
+            <MudTd>@context.Running</MudTd>
+            <MudTd>@context.Done</MudTd>
+            <MudTd>
+                @if (context.Dead > 0)
+                {
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error">@context.Dead</MudChip>
+                }
+                else
+                {
+                    <text>0</text>
+                }
+            </MudTd>
+            <MudTd>@context.AvgAttempts</MudTd>
+            <MudTd>@(context.AvgSecondsToDone is { } s ? $"{s:n1}s" : "—")</MudTd>
+        </RowTemplate>
+        <NoRecordsContent>
+            <MudText Typo="Typo.body2" Color="Color.Secondary">No work items in this window yet.</MudText>
+        </NoRecordsContent>
+    </MudTable>
+
+    @if (d.RecentDead.Count > 0)
+    {
+        <MudText Typo="Typo.h6" Class="mb-2">Dead units (most recent)</MudText>
+        <MudTable Items="d.RecentDead" Hover="true" Dense="true" Striped="true" Class="mb-6">
+            <HeaderContent>
+                <MudTh>Kind</MudTh>
+                <MudTh>Job</MudTh>
+                <MudTh>Attempts</MudTh>
+                <MudTh>Reason</MudTh>
+                <MudTh>When</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd><MudText Typo="Typo.body2" Style="font-family:monospace;">@context.Kind</MudText></MudTd>
+                <MudTd>#@context.SearchJobId</MudTd>
+                <MudTd>@context.Attempts</MudTd>
+                <MudTd><MudText Typo="Typo.caption">@(context.LastError ?? "—")</MudText></MudTd>
+                <MudTd><MudText Typo="Typo.caption">@(context.CompletedAt?.ToLocalTime().ToString("g") ?? "—")</MudText></MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+
+    <MudGrid Spacing="2" Class="mb-4">
+        <MudItem xs="12" md="6">
+            <MudText Typo="Typo.h6" Class="mb-2">Search jobs</MudText>
+            <MudPaper Class="pa-3" Outlined="true">
+                <div class="d-flex flex-wrap gap-4">
+                    <div><MudText Typo="Typo.caption" Color="Color.Secondary">Queued</MudText><MudText Typo="Typo.h6">@d.Jobs.Queued</MudText></div>
+                    <div><MudText Typo="Typo.caption" Color="Color.Secondary">Running</MudText><MudText Typo="Typo.h6">@d.Jobs.Running</MudText></div>
+                    <div><MudText Typo="Typo.caption" Color="Color.Secondary">Completed</MudText><MudText Typo="Typo.h6" Color="Color.Success">@d.Jobs.Completed</MudText></div>
+                    <div><MudText Typo="Typo.caption" Color="Color.Secondary">Failed</MudText><MudText Typo="Typo.h6" Color="@(d.Jobs.Failed > 0 ? Color.Error : Color.Default)">@d.Jobs.Failed</MudText></div>
+                    <div><MudText Typo="Typo.caption" Color="Color.Secondary">Cancelled</MudText><MudText Typo="Typo.h6">@d.Jobs.Cancelled</MudText></div>
+                </div>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" md="6">
+            <MudText Typo="Typo.h6" Class="mb-2">Edge poll drain</MudText>
+            <MudPaper Class="pa-3" Outlined="true">
+                @if (d.Drain is { } drain)
+                {
+                    <div class="d-flex flex-wrap gap-4">
+                        <div><MudText Typo="Typo.caption" Color="Color.Secondary">Results drained</MudText><MudText Typo="Typo.h6" Color="Color.Success">@drain.Drained</MudText></div>
+                        <div><MudText Typo="Typo.caption" Color="Color.Secondary">Edge failures</MudText><MudText Typo="Typo.h6" Color="@(drain.Failed > 0 ? Color.Warning : Color.Default)">@drain.Failed</MudText></div>
+                    </div>
+                }
+                else
+                {
+                    <MudText Typo="Typo.body2" Color="Color.Secondary">
+                        Event log not configured — drain counters unavailable (see /admin/timeline).
+                    </MudText>
+                }
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+}
+
+@code {
+    private const int RefreshSeconds = 5;
+
+    private QueueDashboard? _dashboard;
+    private string? _error;
+    private int _windowHours = 24;
+    private bool _live = true;
+    private Timer? _timer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await RefreshAsync();
+        StartTimer();
+    }
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            // A fresh scope per tick: the service (and its DbContext) must never live on the circuit.
+            using var scope = ScopeFactory.CreateScope();
+            var stats = scope.ServiceProvider.GetRequiredService<IQueueDashboardService>();
+            _dashboard = await stats.SnapshotAsync(TimeSpan.FromHours(_windowHours));
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SetWindowAsync(int hours)
+    {
+        _windowHours = hours;
+        await RefreshAsync();
+    }
+
+    private void ToggleLive(bool on)
+    {
+        _live = on;
+        StartTimer();
+    }
+
+    private void StartTimer()
+    {
+        _timer?.Dispose();
+        _timer = null;
+        if (_live)
+        {
+            _timer = new Timer(
+                _ => _ = InvokeAsync(RefreshAsync), null,
+                TimeSpan.FromSeconds(RefreshSeconds), TimeSpan.FromSeconds(RefreshSeconds));
+        }
+    }
+
+    private static string AgeText(TimeSpan? age) => age is not { } a
+        ? "—"
+        : a.TotalHours >= 1 ? $"{(int)a.TotalHours}h {a.Minutes}m"
+        : a.TotalMinutes >= 1 ? $"{(int)a.TotalMinutes}m {a.Seconds}s"
+        : $"{a.Seconds}s";
+
+    public void Dispose() => _timer?.Dispose();
+}

@@ -573,6 +573,9 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.CacheGapRefillHandler>();
 builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
+// Read-side of /admin/queues (scoped: one DbContext per dashboard refresh tick).
+builder.Services.AddScoped<Daleel.Web.Pipeline.Enrichment.IQueueDashboardService,
+    Daleel.Web.Pipeline.Enrichment.QueueDashboardService>();
 
 // Search cache: Postgres-backed store (singleton — opens its own DbContext scope per call, since the
 // agent runs providers in parallel) plus a weekly background sweep of expired entries.
