@@ -191,6 +191,7 @@ public sealed class SaveStoreProfileActivity : CancellableActivity
 [Activity("Daleel", "Store", "Scrape prices: harvest the store's catalogue prices via Context.dev")]
 public sealed class ScrapePricesActivity : CancellableActivity
 {
+
     protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<StoreResearchState>();

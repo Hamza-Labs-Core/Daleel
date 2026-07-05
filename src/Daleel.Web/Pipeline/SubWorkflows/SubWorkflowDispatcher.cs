@@ -30,6 +30,14 @@ public static class SubWorkflowDispatcher
     public static int MaxConcurrency => PipelineLimits.SubWorkflowConcurrency;
 
     /// <summary>
+    /// Longer budget for the store sub-workflow specifically: its last step submits/crawls the store's
+    /// whole product catalogue, which legitimately outlives the 30s default — under the default the
+    /// crawl was silently timed out and the store's catalogue lost. Bounded by <see cref="MaxConcurrency"/>
+    /// and the per-job cost cap, so it can't run away.
+    /// </summary>
+    public static readonly TimeSpan StoreResearchTimeout = TimeSpan.FromSeconds(75);
+
+    /// <summary>
     /// When at least this fraction of the fanned-out children fault, the failure is treated as systematic
     /// (e.g. Context.dev 401 on every call) rather than one bad entity, and surfaced as a WARN-level event.
     /// </summary>

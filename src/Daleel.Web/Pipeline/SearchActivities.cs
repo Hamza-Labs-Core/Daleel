@@ -474,7 +474,8 @@ public sealed class DispatchEnrichmentWorkflowsActivity : CancellableActivity
                     s.Store = store;
                     s.Result = store;
                 },
-                services.Progress, SubWorkflowDispatcher.DefaultTimeout, context.CancellationToken,
+                // Stores get the longer budget: the catalogue step needs more than the 30s default.
+                services.Progress, SubWorkflowDispatcher.StoreResearchTimeout, context.CancellationToken,
                 onCompleted: async (i, s) =>
                 {
                     lock (gate)
