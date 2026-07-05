@@ -572,6 +572,10 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
     Daleel.Web.Pipeline.Enrichment.ConditionsHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.CacheGapRefillHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IReachabilityProbe>(_ =>
+    new Daleel.Web.Pipeline.Enrichment.ReachabilityProbe(Daleel.Search.Http.SharedHttpHandler.CreateClient()));
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ReachabilityHandler>();
 builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
 // Read-side of /admin/queues (scoped: one DbContext per dashboard refresh tick).
 builder.Services.AddScoped<Daleel.Web.Pipeline.Enrichment.IQueueDashboardService,

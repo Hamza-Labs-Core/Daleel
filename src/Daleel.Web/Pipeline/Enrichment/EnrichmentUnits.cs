@@ -31,6 +31,9 @@ public static class EnrichmentUnit
     /// <summary>Job-level: classify-worker condition backfill (deliberately last).</summary>
     public const string Conditions = "enrich.conditions";
 
+    /// <summary>Job-level: prunes offers whose sites users can't actually reach (deliberately last).</summary>
+    public const string Reachability = "enrich.reachability";
+
     /// <summary>Job-level: smart-cache gap refill (the ServeAndEnrich path) as one durable unit.</summary>
     public const string CacheGapRefill = "enrich.regaps";
 }

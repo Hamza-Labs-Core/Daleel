@@ -107,6 +107,8 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
         // read offers the other units attach.
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.ImageLookup, "{}", notBefore: TimeSpan.FromSeconds(90)));
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Conditions, "{}", notBefore: TimeSpan.FromSeconds(150)));
+        // Last on purpose: it prunes the offers every other unit attached, so it must see them all.
+        children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Reachability, "{}", notBefore: TimeSpan.FromSeconds(240)));
 
         await ctx.Queue.EnqueueAsync(children, ct);
         return UnitOutcome.Ok;
@@ -404,6 +406,99 @@ public sealed class ConditionsHandler : IEnrichmentUnitHandler
         await ctx.Results.PatchAsync(item,
             answer => answer.Products is null ? null : answer with { Products = answer.Products with { Models = labeled } },
             ct);
+        return UnitOutcome.Ok;
+    }
+}
+
+/// <summary>
+/// Prunes offers whose sites a user can't actually open — dead DNS, refused connections, gone
+/// pages (the "clicked View and the site is blocked/dead" complaint). Conservative by design: the
+/// probe treats bot-defenses as reachable, and a model that loses every offer stays in the grid as
+/// an informational card — evidence of the product's existence isn't invalidated by a dead shop.
+/// </summary>
+public sealed class ReachabilityHandler : IEnrichmentUnitHandler
+{
+    /// <summary>Distinct offer URLs probed per execution — hosts are cached, so this is generous.</summary>
+    private const int MaxProbes = 40;
+
+    private readonly IReachabilityProbe _probe;
+    private readonly ILogger<ReachabilityHandler> _logger;
+
+    public ReachabilityHandler(IReachabilityProbe probe, ILogger<ReachabilityHandler> logger)
+    {
+        _probe = probe;
+        _logger = logger;
+    }
+
+    public string Kind => EnrichmentUnit.Reachability;
+    public TimeSpan Budget => TimeSpan.FromSeconds(120);
+
+    public async Task<UnitOutcome> ExecuteAsync(
+        EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
+    {
+        if (await ctx.Results.LoadAsync(item.SearchJobId, ct) is not { Products.Models: { Count: > 0 } models })
+        {
+            return UnitOutcome.Ok;
+        }
+
+        var urls = models.SelectMany(m => m.Offers)
+            .Select(o => o.Url)
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(MaxProbes)
+            .ToList();
+        if (urls.Count == 0)
+        {
+            return UnitOutcome.Ok;
+        }
+
+        var verdicts = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        // Bounded fan-out: hosts repeat across offers and the probe caches per host, so this stays
+        // a handful of real network calls even on a big grid.
+        foreach (var chunk in urls.Chunk(8))
+        {
+            var results = await Task.WhenAll(chunk.Select(async u => (Url: u!, Ok: await _probe.IsReachableAsync(u!, ct))));
+            foreach (var (url, ok) in results)
+            {
+                verdicts[url] = ok;
+            }
+        }
+
+        var deadUrls = verdicts.Where(v => !v.Value).Select(v => v.Key).ToList();
+        if (deadUrls.Count == 0)
+        {
+            return UnitOutcome.Ok;
+        }
+
+        _logger.LogInformation(
+            "Reachability for job {JobId}: pruning {Dead}/{Total} offer url(s) users can't open",
+            item.SearchJobId, deadUrls.Count, verdicts.Count);
+
+        await ctx.Results.PatchAsync(item, answer =>
+        {
+            if (answer.Products is not { } p)
+            {
+                return null;
+            }
+
+            var changed = false;
+            var pruned = p.Models.Select(m =>
+            {
+                var keep = m.Offers
+                    .Where(o => string.IsNullOrWhiteSpace(o.Url) ||
+                                !verdicts.TryGetValue(o.Url!, out var ok) || ok)
+                    .ToList();
+                if (keep.Count == m.Offers.Count)
+                {
+                    return m;
+                }
+
+                changed = true;
+                return m with { Offers = keep };
+            }).ToList();
+
+            return changed ? answer with { Products = p with { Models = pruned } } : null;
+        }, ct);
         return UnitOutcome.Ok;
     }
 }
