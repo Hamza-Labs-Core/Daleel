@@ -49,8 +49,13 @@ public sealed partial class AgentService
         var countryName = geo.Country;
         var includeIntl = LocalityClassifier.QueryWantsInternational(query);
 
+        // Web results were fetched with gl={cc} whenever the market is known (SerpApiProvider),
+        // so the classifier may apply its geo-scoped generic-gTLD rule: Google already constrained
+        // these hits to the market — jo-cell.com must not die for lacking a ".jo".
+        var geoScopedSearch = !string.IsNullOrWhiteSpace(cc);
+
         bool KeepLocal(string? url, bool geoTargeted) =>
-            includeIntl || LocalityClassifier.IsLocal(url, cc, countryName, geoTargeted);
+            includeIntl || LocalityClassifier.IsLocal(url, cc, countryName, geoTargeted, geoScopedSearch);
 
         var classified = bundle.WebResults
             .Select(r => (r, type: ResultClassifier.Classify(r.Url, r.Title, r.Snippet)))
@@ -526,7 +531,8 @@ public sealed partial class AgentService
 
         var targets = classified
             .Where(c => c.type is ResultType.Marketplace or ResultType.StorePage && !string.IsNullOrWhiteSpace(c.r.Url))
-            .Where(c => includeIntl || LocalityClassifier.IsLocal(c.r.Url, geo.CountryCode, geo.Country))
+            .Where(c => includeIntl || LocalityClassifier.IsLocal(
+                c.r.Url, geo.CountryCode, geo.Country, fromGeoScopedSearch: !string.IsNullOrWhiteSpace(geo.CountryCode)))
             .Select(c => (c.r.Url!, Source: SourceName(c.r), c.type))
             .Take(_options.MaxListingUrls)
             .ToList();
@@ -619,7 +625,9 @@ public sealed partial class AgentService
             var localOffers = (p.Offers ?? new List<ExtractedOfferDto>())
                 .Select(o => (o, url: string.IsNullOrWhiteSpace(o.Url) ? null : o.Url!.Trim()))
                 .Where(t => t.url is null || includeIntl ||
-                            LocalityClassifier.IsLocal(t.url, geo.CountryCode, geo.Country))
+                            LocalityClassifier.IsLocal(
+                                t.url, geo.CountryCode, geo.Country,
+                                fromGeoScopedSearch: !string.IsNullOrWhiteSpace(geo.CountryCode)))
                 .Select(t => (t.o, t.url, price: ParsePrice(t.o.Price)))
                 .ToList();
 

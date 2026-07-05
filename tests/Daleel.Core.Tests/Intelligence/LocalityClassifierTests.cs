@@ -84,3 +84,42 @@ public class LocalityClassifierTests
         LocalityClassifier.QueryWantsInternational(query).Should().Be(expected);
     }
 }
+
+/// <summary>
+/// Pins the generalized geo-scoped generic-gTLD rule (the jo-cell case): real local stores live on
+/// bare .com in every market, and when Google was queried WITH gl=cc it already constrained the
+/// results — the classifier must not veto them for lacking a ccTLD.
+/// </summary>
+public class GeoScopedLocalityTests
+{
+    [Theory]
+    [InlineData("https://jo-cell.com/collections/espresso-machines")]
+    [InlineData("https://dumyah.com/en/home-and-kitchen")]
+    [InlineData("https://smartbuy-me.com/collections/coffee-maker")]
+    [InlineData("https://wholeandall.com/collections/coffee-makers")]
+    public void Geo_scoped_generic_gtlds_are_local(string url) =>
+        Assert.True(LocalityClassifier.IsLocal(url, "jo", "Jordan", fromGeoScopedSearch: true));
+
+    [Theory]
+    [InlineData("https://www.amazon.de/dp/1")]          // foreign ccTLD — not a generic gTLD
+    [InlineData("https://www.noon.com/uae-en/machine")] // foreign locale path on a generic gTLD
+    public void Foreign_signals_still_veto_even_when_geo_scoped(string url) =>
+        Assert.False(LocalityClassifier.IsLocal(url, "jo", "Jordan", fromGeoScopedSearch: true));
+
+    [Fact]
+    public void Own_market_locale_paths_survive_the_foreign_veto() =>
+        Assert.True(LocalityClassifier.IsLocal(
+            "https://souqprice.com/jo/en-jo/product/search", "jo", "Jordan", fromGeoScopedSearch: true));
+
+    [Fact]
+    public void Host_name_country_token_is_local_even_unscoped()
+    {
+        // A seller that put the market in its own domain name advertises its market — no gl needed.
+        Assert.True(LocalityClassifier.IsLocal("https://jo-cell.com/products/x", "jo", "Jordan"));
+        Assert.True(LocalityClassifier.IsLocal("https://jordanmall.com/shop", "jo", "Jordan"));
+    }
+
+    [Fact]
+    public void Unscoped_bare_com_without_any_signal_stays_non_local() =>
+        Assert.False(LocalityClassifier.IsLocal("https://dumyah.com/en/home", "jo", "Jordan"));
+}

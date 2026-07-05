@@ -25,7 +25,8 @@ public static class LocalityClassifier
     /// that came from a geo-constrained provider (shopping/places).
     /// </summary>
     public static bool IsLocal(
-        string? url, string countryCode, string? countryName = null, bool fromGeoTargetedSource = false)
+        string? url, string countryCode, string? countryName = null, bool fromGeoTargetedSource = false,
+        bool fromGeoScopedSearch = false)
     {
         if (fromGeoTargetedSource)
         {
@@ -48,20 +49,36 @@ public static class LocalityClassifier
             return true;
         }
 
-        // US special case: unlike the Arab markets (where local sellers carry a ".jo"/".ae" ccTLD,
-        // a "jo." subdomain, or a "/jordan/" path), the US's de-facto local commerce namespace is the
-        // bare generic gTLD — amazon.com, walmart.com, rei.com, away.com all live on plain .com with no
-        // "us" signal at all. Without this, every US retailer fails the country checks below and is
-        // dropped as "non-local", so a "best carry on USA" search keeps only thin geo-targeted shopping
-        // hits and returns no real products or brands. So for the US, a generic-gTLD host counts as
-        // local UNLESS the URL carries another country's signal (a foreign ccTLD is already excluded by
-        // IsGenericGTld; a foreign locale path like "/uae-en/" is excluded explicitly).
-        if (cc == "us" && IsGenericGTld(host) && !HasForeignLocalePath(path))
+        // Generic-gTLD rule. Born as a US special case (amazon.com, walmart.com carry no "us"
+        // signal at all), it proved just as true elsewhere: real Jordanian stores live on bare .com
+        // too (jo-cell.com, dumyah.com, smartbuy-me.com) and were all dropped as "non-local" while
+        // Google — queried WITH gl=jo — had already ranked them for the market. So when the result
+        // came from a geo-SCOPED search (gl=cc — weaker than the geo-TARGETED shopping/places
+        // short-circuit above), a generic-gTLD host counts as local UNLESS the URL carries another
+        // country's signal (a foreign ccTLD is already excluded by IsGenericGTld; a foreign locale
+        // path like "/uae-en/" is excluded explicitly). The US keeps the rule unconditionally —
+        // its sellers are on .com even in un-scoped searches.
+        if ((cc == "us" || fromGeoScopedSearch) && IsGenericGTld(host) && !HasForeignLocalePath(path, cc))
         {
             return true;
         }
 
         var labels = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
+
+        // Host NAME carrying the country as a hyphenated token or the country name itself
+        // (jo-cell.com, cell-jo.com, jordanmall.com) — an unconditional signal: a seller that put
+        // the country in its own domain name is advertising its market.
+        if (labels.Length >= 2)
+        {
+            var registrable = labels[^2];
+            if (registrable.StartsWith(cc + "-", StringComparison.Ordinal) ||
+                registrable.EndsWith("-" + cc, StringComparison.Ordinal) ||
+                (!string.IsNullOrWhiteSpace(countryName) &&
+                 registrable.Contains(countryName!.ToLowerInvariant(), StringComparison.Ordinal)))
+            {
+                return true;
+            }
+        }
 
         // Country subdomain: the left-most host label is the country code (e.g. jo.example.com).
         if (labels.Length > 2 && labels[0] == cc)
@@ -113,12 +130,13 @@ public static class LocalityClassifier
     }
 
     /// <summary>
-    /// True when a path carries a non-US locale/region segment (e.g. "/uae-en/", "/en-gb/"). Such a
-    /// segment marks a generic-gTLD seller as foreign even for the US (noon.com/uae-en is a UAE store).
-    /// Only the hyphenated locale form is treated as a signal — a bare segment is too ambiguous, and
-    /// the target country's own "/us/" path is matched by the locale loop below regardless.
+    /// True when a path carries ANOTHER market's locale/region segment (e.g. "/uae-en/" for a
+    /// Jordan search, "/en-gb/" for a US one). Such a segment marks a generic-gTLD seller as
+    /// foreign (noon.com/uae-en is a UAE store). Only the hyphenated locale form is treated as a
+    /// signal — a bare segment is too ambiguous, and the target country's own "/jo/" path is
+    /// matched by the locale loop in IsLocal regardless. Language tokens (en/ar) are never foreign.
     /// </summary>
-    private static bool HasForeignLocalePath(string path)
+    private static bool HasForeignLocalePath(string path, string cc)
     {
         foreach (var seg in path.Split('/', StringSplitOptions.RemoveEmptyEntries))
         {
@@ -128,10 +146,8 @@ public static class LocalityClassifier
                 continue;
             }
 
-            // Locale-shaped "xx-yy" / "uae-en" where each part is a 2–3 letter alpha token, and it
-            // names neither the US nor plain English → a foreign market locale.
             var localeShaped = parts.All(p => p.Length is 2 or 3 && p.All(char.IsLetter));
-            if (localeShaped && parts.Any(p => p is not ("us" or "en")))
+            if (localeShaped && parts.Any(p => p != cc && p is not ("en" or "ar")))
             {
                 return true;
             }
