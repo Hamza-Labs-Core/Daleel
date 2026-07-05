@@ -65,7 +65,8 @@ public sealed class EnrichmentQueueService : BackgroundService
                     {
                         var task = Task.Run(() => ExecuteOneAsync(item, stoppingToken), CancellationToken.None);
                         _running[item.Id] = task;
-                        _ = task.ContinueWith(_ => _running.TryRemove(item.Id, out _), CancellationToken.None);
+                        _ = task.ContinueWith(
+                            _ => _running.TryRemove(item.Id, out Task? _), CancellationToken.None);
                     }
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
