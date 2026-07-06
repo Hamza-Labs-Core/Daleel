@@ -12,18 +12,19 @@ namespace Daleel.Web.Pipeline.Enrichment;
 
 /// <summary>
 /// The enrichment queue consumer: claims work items, dispatches each to its kind's handler in its
-/// own DI scope with its own metering and its own wall-clock budget, and records the outcome. There
-/// is deliberately NO job- or phase-level timeout — a slow unit retries alone, a dead container's
-/// claims lease-expire back to pending, and completed work is already persisted by the handlers'
-/// patches, so nothing is ever abandoned wholesale.
+/// own DI scope with its own metering, and records the outcome. The ONLY attempt bound is derived
+/// from the claim lease (an attempt must end before its lease can expire, or another consumer could
+/// claim the unit mid-run); there is deliberately NO job- or phase-level timeout — a slow unit
+/// retries alone, a dead container's claims lease-expire back to pending, and completed work is
+/// already persisted by the handlers' patches, so nothing is ever abandoned wholesale.
 /// </summary>
 public sealed class EnrichmentQueueService : BackgroundService
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromSeconds(2);
 
     /// <summary>
-    /// Claim lease — must exceed every handler's Budget so a live execution is never re-claimed.
-    /// Lease expiry is the crash-recovery path, not a working-time limit.
+    /// Claim lease — the system's ONE liveness number: crash recovery (an expired lease re-queues
+    /// the unit) and, minus a write margin, the per-attempt bound derived from it.
     /// </summary>
     private static readonly TimeSpan Lease = TimeSpan.FromMinutes(10);
 
@@ -153,7 +154,10 @@ public sealed class EnrichmentQueueService : BackgroundService
 
         using var capTrip = new CancellationTokenSource();
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, capTrip.Token);
-        budget.CancelAfter(handler.Budget);
+        // The ONLY attempt bound, DERIVED, never invented: an attempt must finish before its lease
+        // can expire, or a second consumer could claim the unit while this one still runs it. The
+        // margin covers the outcome/spend writes after the handler returns.
+        budget.CancelAfter(Lease - TimeSpan.FromMinutes(1));
 
         var collector = new JobApiCallCollector(
             line => _logger.LogInformation(
@@ -198,7 +202,7 @@ public sealed class EnrichmentQueueService : BackgroundService
         }
         catch (OperationCanceledException)
         {
-            outcome = new UnitOutcome.Retry($"unit budget exceeded ({handler.Budget.TotalSeconds:n0}s)");
+            outcome = new UnitOutcome.Retry("attempt outlived its lease bound");
         }
         catch (Exception ex)
         {

@@ -50,8 +50,6 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
     public BrandResearchHandler(ILogger<BrandResearchHandler> logger) => _logger = logger;
 
     public string Kind => EnrichmentUnit.BrandResearch;
-    public TimeSpan Budget => TimeSpan.FromSeconds(300);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {

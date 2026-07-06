@@ -102,11 +102,5 @@ public interface IEnrichmentUnitHandler
 {
     string Kind { get; }
 
-    /// <summary>
-    /// Wall-clock budget for ONE attempt of this unit. Expiry retries THIS unit only — there is no
-    /// phase- or job-level enrichment timeout anywhere, by design.
-    /// </summary>
-    TimeSpan Budget { get; }
-
     Task<UnitOutcome> ExecuteAsync(EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct);
 }

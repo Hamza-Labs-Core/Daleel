@@ -58,8 +58,6 @@ internal static class HandlerHelpers
 public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
 {
     public string Kind => EnrichmentUnit.Plan;
-    public TimeSpan Budget => TimeSpan.FromSeconds(60);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
@@ -125,8 +123,6 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
 public sealed class ItemDiveHandler : IEnrichmentUnitHandler
 {
     public string Kind => EnrichmentUnit.ItemDive;
-    public TimeSpan Budget => TimeSpan.FromSeconds(90);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
@@ -177,8 +173,6 @@ public sealed class ItemDiveHandler : IEnrichmentUnitHandler
 public sealed class VisionUnitHandler : IEnrichmentUnitHandler
 {
     public string Kind => EnrichmentUnit.Vision;
-    public TimeSpan Budget => TimeSpan.FromSeconds(240);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
@@ -212,8 +206,6 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
     private const int DrainWaitAttempts = 3;
 
     public string Kind => EnrichmentUnit.CatalogAttach;
-    public TimeSpan Budget => TimeSpan.FromSeconds(120);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
@@ -300,8 +292,6 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
     private const int BatchSize = 12;
 
     public string Kind => EnrichmentUnit.ImageLookup;
-    public TimeSpan Budget => TimeSpan.FromSeconds(180);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
@@ -375,8 +365,6 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
 public sealed class ConditionsHandler : IEnrichmentUnitHandler
 {
     public string Kind => EnrichmentUnit.Conditions;
-    public TimeSpan Budget => TimeSpan.FromSeconds(60);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
@@ -439,8 +427,6 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
     public OfferVerificationHandler(ILogger<OfferVerificationHandler> logger) => _logger = logger;
 
     public string Kind => EnrichmentUnit.PriceFetch;
-    public TimeSpan Budget => TimeSpan.FromSeconds(240);
-
     /// <summary>Everything one fetched page said, keyed by the model names it was judged for.</summary>
     private sealed record PageVerdict(
         HashSet<string> Judged,
@@ -734,8 +720,6 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
     public VerifyPageHandler(ILogger<VerifyPageHandler> logger) => _logger = logger;
 
     public string Kind => EnrichmentUnit.VerifyPage;
-    public TimeSpan Budget => TimeSpan.FromSeconds(90);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
@@ -915,8 +899,6 @@ public sealed class ReachabilityHandler : IEnrichmentUnitHandler
     }
 
     public string Kind => EnrichmentUnit.Reachability;
-    public TimeSpan Budget => TimeSpan.FromSeconds(120);
-
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
@@ -995,8 +977,6 @@ public sealed class ReachabilityHandler : IEnrichmentUnitHandler
 public sealed class CacheGapRefillHandler : IEnrichmentUnitHandler
 {
     public string Kind => EnrichmentUnit.CacheGapRefill;
-    public TimeSpan Budget => TimeSpan.FromSeconds(480);
-
     private readonly ILogger<CacheGapRefillHandler> _logger;
 
     public CacheGapRefillHandler(ILogger<CacheGapRefillHandler> logger) => _logger = logger;
