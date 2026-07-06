@@ -165,6 +165,31 @@ public class SynthesisTests
     }
 
     [Fact]
+    public async Task Unrelated_specs_are_dropped_and_wrong_condition_is_corrected()
+    {
+        // The owner's live complaint: a NEW product shown as "used", with an unrelated spec attached.
+        var model = new ProductModel
+        {
+            Name = "DeLonghi Dedica EC685", Brand = "DeLonghi", Model = "EC685",
+            Specs = new Dictionary<string, string> { ["ram"] = "16GB", ["watts"] = "1450" },
+            Offers = new[] { new PriceOffer { Source = "Store", Price = 175m, Currency = "JOD", Condition = "used" } }
+        };
+        var answer = new AgentAnswer
+        {
+            Question = "espresso", Geo = "jordan",
+            Products = new ProductSearchResult { Summary = "placeholder", Models = new[] { model }, Brands = Array.Empty<BrandInfo>() }
+        };
+        var (handler, ctx, item, store, _, _) = Build(answer, openCount: 1, llm: new CorrectingLlm());
+
+        await handler.ExecuteAsync(item, ctx, default);
+
+        var fixedModel = store.Current.Products!.Models.Single();
+        fixedModel.Specs.Should().NotContainKey("ram", "an unrelated spec is dropped");
+        fixedModel.Specs.Should().ContainKey("watts", "a real spec is kept");
+        fixedModel.Offers.Single().Condition.Should().Be("new", "the wrong 'used' label is corrected from the facts");
+    }
+
+    [Fact]
     public async Task Two_models_sharing_a_stable_id_do_not_throw()
     {
         // (Sony, "WH-1000") and (Sony, "WH1000") collapse to the same StableId (punctuation dropped) —
@@ -305,6 +330,38 @@ public class SynthesisTests
             else if (systemPrompt.Contains("brand's facts"))
             {
                 content = "[" + string.Join(",", ids.Select(k => $"{{\"nameKey\":\"{k}\",\"narrative\":\"NARRATIVE:{k}\"}}")) + "]";
+            }
+            else
+            {
+                content = "{\"overview\":\"" + SearchOverview + "\"}";
+            }
+
+            return Task.FromResult(new LlmResponse { Content = content });
+        }
+    }
+
+    /// <summary>Returns corrections (drop "ram", set condition "new") for every product — for the reconcile test.</summary>
+    private sealed class CorrectingLlm : ICountedLlm
+    {
+        public int Calls { get; private set; }
+        public string Provider => "stub";
+
+        public Task<LlmResponse> CompleteAsync(
+            string systemPrompt, IReadOnlyList<LlmMessage> messages, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            var ids = Regex.Matches(messages[0].Content, @"^### (.+)$", RegexOptions.Multiline)
+                .Select(m => m.Groups[1].Value.Trim()).ToList();
+
+            string content;
+            if (systemPrompt.Contains("CORRECT obvious errors"))
+            {
+                content = "[" + string.Join(",", ids.Select(id =>
+                    $"{{\"id\":\"{id}\",\"summary\":\"SUMMARY:{id}\",\"dropSpecs\":[\"ram\"],\"condition\":\"new\"}}")) + "]";
+            }
+            else if (systemPrompt.Contains("brand's facts"))
+            {
+                content = "[]";
             }
             else
             {
