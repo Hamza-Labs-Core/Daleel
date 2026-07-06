@@ -272,22 +272,42 @@ public sealed class EnrichmentQueueService : BackgroundService
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
         var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
-        AgentService? agent = null;
+
+        // One agent per distinct model, all wired to THIS unit's cost collector so every LLM call is
+        // billed the same regardless of model. The actor loops pin a capable model (they can't run their
+        // JSON reason-act loop on the weak free-tier default); everything else uses the job's model.
+        var agents = new Dictionary<string, AgentService>(StringComparer.Ordinal);
+        AgentService BuildAgent(string? modelOverride)
+        {
+            var model = string.IsNullOrWhiteSpace(modelOverride)
+                ? (string.IsNullOrWhiteSpace(job.Model) ? null : job.Model)
+                : modelOverride;
+            var key = model ?? string.Empty;
+            if (!agents.TryGetValue(key, out var built))
+            {
+                built = sp.GetRequiredService<IAgentFactory>().Build(new AgentRequest
+                {
+                    Geo = job.Geo,
+                    Model = model,
+                    Language = language,
+                    Log = message => _logger.LogDebug("Enrich unit {ItemId}: {Message}", item.Id, message),
+                    ApiObserver = collector,
+                    CostEstimator = estimator,
+                    Cache = _cache,
+                    CacheTtl = TimeSpan.FromDays(30)
+                });
+                agents[key] = built;
+            }
+
+            return built;
+        }
+
         var ctx = new EnrichmentUnitContext
         {
             Services = sp,
             Job = job,
-            Agent = () => agent ??= sp.GetRequiredService<IAgentFactory>().Build(new AgentRequest
-            {
-                Geo = job.Geo,
-                Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model,
-                Language = language,
-                Log = message => _logger.LogDebug("Enrich unit {ItemId}: {Message}", item.Id, message),
-                ApiObserver = collector,
-                CostEstimator = estimator,
-                Cache = _cache,
-                CacheTtl = TimeSpan.FromDays(30)
-            }),
+            Agent = () => BuildAgent(null),
+            AgentForModel = BuildAgent,
             Results = _results,
             Queue = _queue
         };

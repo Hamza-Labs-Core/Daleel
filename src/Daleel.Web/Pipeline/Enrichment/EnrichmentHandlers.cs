@@ -388,7 +388,9 @@ public sealed class ItemDiveHandler : IEnrichmentUnitHandler
         CancellationToken ct)
     {
         var actor = ctx.Services.GetRequiredService<Actor.ItemDiveActor>();
-        var dive = await actor.RunAsync(ctx.Agent(), model, ctx.Job.Geo, ct);
+        var actorAgent = await Actor.ActorFlags.AgentAsync(
+            ctx, ctx.Services.GetService<Daleel.Web.Data.ISystemConfigService>(), ct);
+        var dive = await actor.RunAsync(actorAgent, model, ctx.Job.Geo, ct);
         if (dive is null || dive.Specs.Count == 0)
         {
             return UnitOutcome.Ok;
@@ -1074,8 +1076,9 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
         Actor.VerifyPageActor.PageJudgment? judged = null;
         if (config is not null && await config.GetBoolAsync(Actor.ActorFlags.VerifyPage, false, ct))
         {
+            var vAgent = await Actor.ActorFlags.AgentAsync(ctx, config, ct);
             judged = await ctx.Services.GetRequiredService<Actor.VerifyPageActor>()
-                .JudgeAsync(ctx.Agent(), content, named, ct);
+                .JudgeAsync(vAgent, content, named, ct);
         }
 
         if (judged is not null)

@@ -14,6 +14,30 @@ public static class ActorFlags
     public const string VerifyPage = "actor.verifypage";
     public const string Catalog = "actor.catalog";
     public const string BrandResearch = "actor.brandresearch";
+
+    /// <summary>Config key for the model the actor loops run on — a capable model, NOT the user's tier default.</summary>
+    public const string Model = "actor.model";
+
+    /// <summary>Fallback actor model when the config row is absent/empty (a strong, JSON-reliable model).</summary>
+    public const string DefaultModel = "openai/gpt-4o";
+
+    /// <summary>
+    /// Resolves the capable actor agent: reads <see cref="Model"/> from config (default
+    /// <see cref="DefaultModel"/>) and builds an agent pinned to it via the context's model-aware
+    /// builder, so the reason→act loop never runs on the weak free-tier default. Falls back to the
+    /// job agent only when the context can't build per-model (test wiring).
+    /// </summary>
+    public static async Task<AgentService> AgentAsync(
+        EnrichmentUnitContext ctx, Daleel.Web.Data.ISystemConfigService? config, CancellationToken ct)
+    {
+        var model = config is null ? null : await config.GetAsync(Model, ct);
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            model = DefaultModel;
+        }
+
+        return ctx.AgentForModel?.Invoke(model) ?? ctx.Agent();
+    }
 }
 
 /// <summary>

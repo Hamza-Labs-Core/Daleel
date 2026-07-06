@@ -104,6 +104,13 @@ public sealed class EnrichmentUnitContext
     /// <summary>Built on first use; wired to this execution's cost collector + ambient observer.</summary>
     public required Func<AgentService> Agent { get; init; }
 
+    /// <summary>
+    /// Builds an agent for a SPECIFIC model (same cost collector), or the job's model when null. The
+    /// actor loops pin a capable model here — an agentic reason→act JSON loop can't run on the weak
+    /// free-tier default. Optional so test contexts that only set <see cref="Agent"/> keep working.
+    /// </summary>
+    public Func<string?, AgentService>? AgentForModel { get; init; }
+
     public required IEnrichedResultStore Results { get; init; }
     public required IEnrichmentWorkQueue Queue { get; init; }
 }

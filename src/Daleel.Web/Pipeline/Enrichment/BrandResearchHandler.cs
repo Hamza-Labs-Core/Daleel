@@ -105,8 +105,9 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
             attempted++;
             try
             {
+                var brandAgent = await Actor.ActorFlags.AgentAsync(ctx, actorCfg, ct);
                 var found = await ctx.Services.GetRequiredService<Actor.BrandSiteActor>()
-                    .FindAsync(ctx.Agent(), payload.Brand, geo, ct);
+                    .FindAsync(brandAgent, payload.Brand, geo, ct);
                 if (found is not null)
                 {
                     if (string.IsNullOrWhiteSpace(row.Website) && !string.IsNullOrWhiteSpace(found.Website))

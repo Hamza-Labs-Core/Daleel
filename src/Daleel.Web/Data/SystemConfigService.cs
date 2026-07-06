@@ -72,6 +72,9 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "actor.verifypage", Value = ActorStepsDefault, Type = "bool" },
         new SystemConfig { Key = "actor.brandresearch", Value = ActorStepsDefault, Type = "bool" },
         new SystemConfig { Key = "actor.catalog", Value = "false", Type = "bool" },
+        // The model the actor reason→act loops run on — a capable, JSON-reliable model, NOT the user's
+        // free-tier default (gpt-4o-mini can't sustain the multi-turn action protocol). Admin-editable.
+        new SystemConfig { Key = "actor.model", Value = "openai/gpt-4o", Type = "string" },
 
         new SystemConfig { Key = "ratelimit.page_per_minute", Value = "100", Type = "int" },
         new SystemConfig { Key = "ratelimit.api_per_minute", Value = "10", Type = "int" },
