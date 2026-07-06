@@ -459,239 +459,66 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
             return UnitOutcome.Ok;
         }
 
-        var providers = ctx.Services.GetRequiredService<IProviderApi>();
+        // ONE PAGE = ONE UNIT: this dispatcher only decides WHICH pages need verifying and enqueues
+        // a VerifyPage unit per page. Each fetch then retries alone, fails alone, and runs as wide
+        // as the consumer allows — no batches, no continuation chains (a chain once ran away live).
+        var offerTargets = models
+            .SelectMany(m => m.Offers.Select(o => (Model: m, o.Url)))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Url) &&
+                        NeedsVerification(x.Model, x.Model.Offers.First(o => o.Url == x.Url)))
+            .GroupBy(x => x.Url!, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Url: g.Key, Names: g.Select(x => x.Model.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                FromMention: false));
 
-        // One fetch per distinct offer URL needing ANY verification; the same page may settle
-        // several duplicate offers.
-        var targets = models
-            .SelectMany(m => m.Offers.Select(o => (Model: m, Offer: o)))
-            .Where(x => !string.IsNullOrWhiteSpace(x.Offer.Url) && NeedsVerification(x.Model, x.Offer))
-            .GroupBy(x => x.Offer.Url!, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        // Mention pages are price sources too: a model with NO priced offer whose "Mentioned in"
-        // link carries the figure (multi-SKU brand pages especially) gets that page fetched, and a
-        // related+priced page BECOMES an offer.
-        var offerUrls = new HashSet<string>(targets.Select(g => g.Key), StringComparer.OrdinalIgnoreCase);
+        var offerUrls = new HashSet<string>(
+            models.SelectMany(m => m.Offers).Select(o => o.Url).Where(u => !string.IsNullOrWhiteSpace(u))!,
+            StringComparer.OrdinalIgnoreCase);
         var mentionTargets = models
             .Where(m => !m.Offers.Any(o => o.Price is not null))
             .SelectMany(m => m.Mentions
                 .Where(link => !string.IsNullOrWhiteSpace(link.Url) && !offerUrls.Contains(link.Url))
-                .Take(2)
                 .Select(link => (Model: m, link.Url)))
             .GroupBy(x => x.Url, StringComparer.OrdinalIgnoreCase)
+            .Select(g => (Url: g.Key, Names: g.Select(x => x.Model.Name).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                FromMention: true));
+
+        // Never enqueue the same page twice for the same job — the queue itself is the ledger of
+        // what's already been tried (any status counts: pending, running, done or dead).
+        var db = ctx.Services.GetRequiredService<Daleel.Web.Data.DaleelDbContext>();
+        var known = (await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToListAsync(
+                db.EnrichmentWorkItems
+                    .Where(i => i.SearchJobId == item.SearchJobId && i.Kind == EnrichmentUnit.VerifyPage)
+                    .Select(i => i.Payload), ct))
+            .Select(payload => EnrichmentWorkQueue.ReadPayload<VerifyPagePayload>(payload)?.Url)
+            .Where(u => u is not null)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+
+        var children = offerTargets.Concat(mentionTargets)
+            .Where(x => !known.Contains(x.Url))
+            .Select(x => HandlerHelpers.Child(item, EnrichmentUnit.VerifyPage,
+                EnrichmentWorkQueue.Payload(new VerifyPagePayload(x.Url, x.Names, x.FromMention)),
+                maxAttempts: 2))
             .ToList();
 
-        if (targets.Count == 0 && mentionTargets.Count == 0)
+        if (children.Count > 0)
         {
-            return UnitOutcome.Ok;
-        }
-
-        var verdicts = new Dictionary<string, PageVerdict>(StringComparer.OrdinalIgnoreCase);
-        var mentionModelsByUrl = mentionTargets.ToDictionary(
-            g => g.Key, g => g.Select(x => x.Model).ToList(), StringComparer.OrdinalIgnoreCase);
-        var fetchSet = targets.Take(BatchSize)
-            .Select(g => (Url: g.Key, Models: g.Select(x => x.Model).ToList()))
-            .Concat(mentionTargets.Take(Math.Max(0, BatchSize - Math.Min(BatchSize, targets.Count)))
-                .Select(g => (Url: g.Key, Models: g.Select(x => x.Model).ToList())))
-            .ToList();
-        foreach (var group in fetchSet)
-        {
-            var url = group.Url;
-            Daleel.Search.Abstractions.ScrapedPage? page;
-            try
-            {
-                page = await providers.ScrapePageAsync(url, ct: ct);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch { page = null; }
-
-            if (page is null || string.IsNullOrWhiteSpace(page.Content))
-            {
-                continue; // fetch failures verify nothing — never remove an offer we couldn't check
-            }
-
-            var content = page.Content;
-            var judged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var related = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            foreach (var model in group.Models.DistinctBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
-            {
-                judged.Add(model.Name);
-                if (IsRelatedPage(content, model))
-                {
-                    related.Add(model.Name);
-                }
-            }
-
-            verdicts[url] = new PageVerdict(
-                judged, related,
-                PickPrice(content, group.Models[0]),
-                ExtractCondition(content),
-                ExtractDescription(content),
-                content, url);
-        }
-
-        var unrelated = targets.Take(BatchSize)
-            .Where(g => verdicts.ContainsKey(g.Key))
-            .Sum(g => g.Count(x => !verdicts[g.Key].Related.Contains(x.Model.Name)));
-        if (unrelated > 0)
-        {
-            _logger.LogInformation(
-                "Offer verification for job {JobId}: removing {Count} offer(s) whose pages aren't about their model",
-                item.SearchJobId, unrelated);
-        }
-
-        var pricesFound = verdicts.Values.Count(v => v.Price is not null);
-        if (pricesFound > 0)
-        {
-            _logger.LogInformation(
-                "Offer verification for job {JobId}: {Found}/{Tried} page(s) yielded a figure",
-                item.SearchJobId, pricesFound, Math.Min(BatchSize, targets.Count));
-        }
-
-        var patched = verdicts.Count > 0 && await ctx.Results.PatchAsync(item, answer =>
-        {
-            if (answer.Products is not { } p)
-            {
-                return null;
-            }
-
-            var changed = false;
-            var updated = p.Models.Select(m =>
-            {
-                var modelChanged = false;
-                var offers = new List<PriceOffer>(m.Offers.Count);
-
-                // Mention pages that proved related AND priced become OFFERS — the model had none.
-                if (!m.Offers.Any(o => o.Price is not null) &&
-                    mentionModelsByUrl.Count > 0)
-                {
-                    foreach (var (mentionUrl, mentionModels) in mentionModelsByUrl)
-                    {
-                        if (mentionModels.Any(mm => mm.Name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) &&
-                            verdicts.TryGetValue(mentionUrl, out var mv) &&
-                            mv.Related.Contains(m.Name) && mv.Price is { } mp &&
-                            !m.Offers.Any(o => string.Equals(o.Url, mentionUrl, StringComparison.OrdinalIgnoreCase)))
-                        {
-                            offers.Add(new PriceOffer
-                            {
-                                Source = AgentService.HostLabel(mentionUrl) ?? "Store",
-                                SourceType = Daleel.Core.Intelligence.ResultType.StorePage,
-                                Price = mp.Price,
-                                Currency = mp.Currency,
-                                Url = mentionUrl,
-                                IsIndicative = !mp.Exact,
-                                IsLocal = true
-                            });
-                            modelChanged = true;
-                        }
-                    }
-                }
-
-                foreach (var o in m.Offers)
-                {
-                    if (o.Url is not { } u || !verdicts.TryGetValue(u, out var v) || !v.Judged.Contains(m.Name))
-                    {
-                        offers.Add(o);
-                        continue;
-                    }
-
-                    if (!v.Related.Contains(m.Name))
-                    {
-                        modelChanged = true; // unrelated page: drop the offer, don't keep the lie
-                        continue;
-                    }
-
-                    var next = o;
-                    if (next.Price is null && v.Price is { } f)
-                    {
-                        next = next with { Price = f.Price, Currency = f.Currency, IsIndicative = !f.Exact };
-                    }
-
-                    var condition = ApplyConditionEvidence(next.Condition, v.Condition);
-                    if (!string.Equals(condition, next.Condition, StringComparison.OrdinalIgnoreCase))
-                    {
-                        next = next with { Condition = condition };
-                    }
-
-                    modelChanged |= !ReferenceEquals(next, o);
-                    offers.Add(next);
-                }
-
-                var result = modelChanged ? m with { Offers = offers } : m;
-
-                // Description from the offer's own site: the (surviving) first URL-carrying offer's
-                // page fills an empty-or-junk "details" blob, but only when that page is related.
-                if (NeedsDetails(result) &&
-                    offers.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Url))?.Url is { } firstUrl &&
-                    verdicts.TryGetValue(firstUrl, out var fv) &&
-                    fv.Related.Contains(m.Name) && fv.Description is { } prose)
-                {
-                    var key = result.Specs.Keys.FirstOrDefault(
-                        k => k.Equals("details", StringComparison.OrdinalIgnoreCase)) ?? "details";
-                    var specs = result.Specs.ToDictionary(kv => kv.Key, kv => kv.Value);
-                    specs[key] = prose;
-                    result = result with { Specs = specs };
-                    modelChanged = true;
-                }
-
-                changed |= modelChanged;
-                return result;
-            }).ToList();
-
-            // Multi-SKU pages: the fetched page's OTHER priced lines are sibling variants (2 vs
-            // 3 ton) — they become distinct products through the same creation path as catalogue
-            // discoveries (query-gated, variant-aware dedupe).
-            foreach (var v in verdicts.Values.Where(v => v.Related.Count > 0))
-            {
-                var lines = Daleel.Core.Pricing.PriceParser.Extract(v.Content);
-                if (lines.Count < 2)
-                {
-                    continue;
-                }
-
-                var (withSiblings, createdNames) = ItemEnrichmentService.AppendCatalogDiscoveries(
-                    updated,
-                    lines.Select(l => (Name: l.Line, (decimal?)l.Price, (string?)l.Currency,
-                        (string?)v.Url, (string?)null, Indicative: true)),
-                    storeName: AgentService.HostLabel(v.Url), query: ctx.Job.Query, geo: ctx.Job.Geo);
-                if (createdNames.Count > 0)
-                {
-                    updated = withSiblings;
-                    changed = true;
-                }
-            }
-
-            return changed ? answer with { Products = p with { Models = updated } } : null;
-        }, ct);
-
-        // Anti-runaway guard, learned live (job 15): a continuation is only earned by PROGRESS.
-        // "Unpriced offers remain" is not progress — pages that never yield a figure re-selected
-        // themselves forever, chaining fetches of the same dead ends. Untried targets beyond this
-        // batch justify one more link; a batch that changed nothing ends the chain.
-        var untriedRemain = targets.Count > BatchSize;
-        if (patched && untriedRemain)
-        {
-            await ctx.Queue.EnqueueAsync(new[]
-            {
-                HandlerHelpers.Child(item, EnrichmentUnit.PriceFetch, "{}", notBefore: TimeSpan.FromSeconds(20))
-            }, ct);
-        }
-        else if (!patched && untriedRemain)
-        {
-            // Nothing moved but genuinely-unfetched pages exist: one more attempt, spaced out —
-            // and only one, because the next zero-progress batch stops the chain here again.
+            await ctx.Queue.EnqueueAsync(children, ct);
+            // Offers keep arriving (catalogue units, mention discoveries): one more dispatch pass
+            // later — and only when THIS pass found new pages, so an idle dispatch ends the chain.
             await ctx.Queue.EnqueueAsync(new[]
             {
                 HandlerHelpers.Child(item, EnrichmentUnit.PriceFetch, "{}",
-                    notBefore: TimeSpan.FromSeconds(90), maxAttempts: 1)
+                    notBefore: TimeSpan.FromSeconds(120), maxAttempts: 1)
             }, ct);
+            _logger.LogInformation(
+                "Offer verification for job {JobId}: dispatched {Count} page unit(s)",
+                item.SearchJobId, children.Count);
         }
 
         return UnitOutcome.Ok;
     }
 
-    /// <summary>An offer's page is worth fetching when any of the four facts is still in doubt.</summary>
+    /// <summary>An offer's page is worth fetching when any of the four facts is still in doubt.</summary>    /// <summary>An offer's page is worth fetching when any of the four facts is still in doubt.</summary>
     private static bool NeedsVerification(ProductModel model, PriceOffer offer) =>
         offer.Price is null
         || IsSecondhand(offer.Condition)
@@ -704,7 +531,7 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
         string.Equals(condition, "used", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(condition, "refurbished", StringComparison.OrdinalIgnoreCase);
 
-    private static bool NeedsDetails(ProductModel model)
+    internal static bool NeedsDetails(ProductModel model)
     {
         var details = model.Specs
             .FirstOrDefault(kv => kv.Key.Equals("details", StringComparison.OrdinalIgnoreCase)).Value;
@@ -891,6 +718,180 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
 
     [GeneratedRegex(@"https?://\S+")]
     private static partial Regex BareUrlRegex();
+}
+
+/// <summary>
+/// ONE page's verification — the atom of the "you have the site, get the facts" rule. Fetches the
+/// page once and applies everything it says: relatedness (an unrelated offer is REMOVED), a missing
+/// price, condition truth (secondhand claims need on-page evidence), the model's description, an
+/// offer CREATED when the page was reached via a mention, and sibling-SKU discovery (a 3-listing
+/// page yields 3 distinct products). Retries alone; a dead page never costs any other unit.
+/// </summary>
+public sealed class VerifyPageHandler : IEnrichmentUnitHandler
+{
+    private readonly ILogger<VerifyPageHandler> _logger;
+
+    public VerifyPageHandler(ILogger<VerifyPageHandler> logger) => _logger = logger;
+
+    public string Kind => EnrichmentUnit.VerifyPage;
+    public TimeSpan Budget => TimeSpan.FromSeconds(90);
+
+    public async Task<UnitOutcome> ExecuteAsync(
+        EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
+    {
+        if (EnrichmentWorkQueue.ReadPayload<VerifyPagePayload>(item.Payload) is not { } payload ||
+            string.IsNullOrWhiteSpace(payload.Url))
+        {
+            return new UnitOutcome.Kill("unreadable verify-page payload");
+        }
+
+        if (await ctx.Results.LoadAsync(item.SearchJobId, ct) is not { Products.Models: { Count: > 0 } models })
+        {
+            return UnitOutcome.Ok;
+        }
+
+        var named = models
+            .Where(m => payload.ModelNames.Contains(m.Name, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+        if (named.Count == 0)
+        {
+            return UnitOutcome.Ok; // the models this page was selected for no longer exist
+        }
+
+        var providers = ctx.Services.GetRequiredService<IProviderApi>();
+        Daleel.Search.Abstractions.ScrapedPage? page;
+        try
+        {
+            page = await providers.ScrapePageAsync(payload.Url, ct: ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            return new UnitOutcome.Retry($"page fetch failed: {ex.Message}");
+        }
+
+        if (page is null || string.IsNullOrWhiteSpace(page.Content))
+        {
+            return new UnitOutcome.Retry("page fetch returned nothing");
+        }
+
+        var content = page.Content;
+        var related = named
+            .Where(m => OfferVerificationHandler.IsRelatedPage(content, m))
+            .Select(m => m.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var price = related.Count > 0 ? OfferVerificationHandler.PickPrice(content, named[0]) : null;
+        var condition = OfferVerificationHandler.ExtractCondition(content);
+        var description = OfferVerificationHandler.ExtractDescription(content);
+
+        await ctx.Results.PatchAsync(item, answer =>
+        {
+            if (answer.Products is not { } p)
+            {
+                return null;
+            }
+
+            var changed = false;
+            var updated = p.Models.Select(m =>
+            {
+                if (!payload.ModelNames.Contains(m.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    return m;
+                }
+
+                var modelChanged = false;
+                var offers = new List<PriceOffer>(m.Offers.Count + 1);
+
+                // A related, priced MENTION page becomes an offer the model didn't have.
+                if (payload.FromMention && related.Contains(m.Name) && price is { } mp &&
+                    !m.Offers.Any(o => o.Price is not null) &&
+                    !m.Offers.Any(o => string.Equals(o.Url, payload.Url, StringComparison.OrdinalIgnoreCase)))
+                {
+                    offers.Add(new PriceOffer
+                    {
+                        Source = AgentService.HostLabel(payload.Url) ?? "Store",
+                        SourceType = Daleel.Core.Intelligence.ResultType.StorePage,
+                        Price = mp.Price, Currency = mp.Currency, Url = payload.Url,
+                        IsIndicative = !mp.Exact, IsLocal = true
+                    });
+                    modelChanged = true;
+                }
+
+                foreach (var o in m.Offers)
+                {
+                    if (!string.Equals(o.Url, payload.Url, StringComparison.OrdinalIgnoreCase))
+                    {
+                        offers.Add(o);
+                        continue;
+                    }
+
+                    if (!related.Contains(m.Name))
+                    {
+                        modelChanged = true; // the page isn't about this model: drop the lie
+                        continue;
+                    }
+
+                    var next = o;
+                    if (next.Price is null && price is { } f)
+                    {
+                        next = next with { Price = f.Price, Currency = f.Currency, IsIndicative = !f.Exact };
+                    }
+
+                    var evidenced = OfferVerificationHandler.ApplyConditionEvidence(next.Condition, condition);
+                    if (!string.Equals(evidenced, next.Condition, StringComparison.OrdinalIgnoreCase))
+                    {
+                        next = next with { Condition = evidenced };
+                    }
+
+                    modelChanged |= !ReferenceEquals(next, o);
+                    offers.Add(next);
+                }
+
+                var result = modelChanged ? m with { Offers = offers } : m;
+
+                if (related.Contains(m.Name) && description is { } prose &&
+                    OfferVerificationHandler.NeedsDetails(result))
+                {
+                    var key = result.Specs.Keys.FirstOrDefault(
+                        k => k.Equals("details", StringComparison.OrdinalIgnoreCase)) ?? "details";
+                    var specs = result.Specs.ToDictionary(kv => kv.Key, kv => kv.Value);
+                    specs[key] = prose;
+                    result = result with { Specs = specs };
+                    modelChanged = true;
+                }
+
+                changed |= modelChanged;
+                return result;
+            }).ToList();
+
+            // Sibling SKUs: the page's OTHER priced lines become distinct products (variant-aware).
+            if (related.Count > 0)
+            {
+                var lines = Daleel.Core.Pricing.PriceParser.Extract(content);
+                if (lines.Count >= 2)
+                {
+                    var (withSiblings, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
+                        updated,
+                        lines.Select(l => (Name: l.Line, (decimal?)l.Price, (string?)l.Currency,
+                            (string?)payload.Url, (string?)null, Indicative: true)),
+                        storeName: AgentService.HostLabel(payload.Url),
+                        query: ctx.Job.Query, geo: ctx.Job.Geo);
+                    if (created.Count > 0)
+                    {
+                        updated = withSiblings;
+                        changed = true;
+                        _logger.LogInformation(
+                            "Verify page for job {JobId}: {Url} yielded {Count} sibling product(s)",
+                            item.SearchJobId, payload.Url, created.Count);
+                    }
+                }
+            }
+
+            return changed ? answer with { Products = p with { Models = updated } } : null;
+        }, ct);
+
+        return UnitOutcome.Ok;
+    }
 }
 
 /// <summary>

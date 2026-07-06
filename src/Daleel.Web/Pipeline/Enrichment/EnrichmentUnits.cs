@@ -36,10 +36,14 @@ public static class EnrichmentUnit
     public const string Conditions = "enrich.conditions";
 
     /// <summary>
-    /// Job-level: verifies offers AGAINST their own pages (batched) — relatedness (unrelated
-    /// offers are removed), missing prices, condition truth, and the model's "details" prose.
+    /// Job-level DISPATCHER: finds offer/mention pages needing verification and enqueues one
+    /// <see cref="VerifyPage"/> unit per page — one page, one unit, no batches, no chains.
     /// </summary>
     public const string PriceFetch = "enrich.prices";
+
+    /// <summary>ONE page: fetch, judge relatedness (unrelated offers removed), price, condition
+    /// truth, description, mention-offer creation and sibling-SKU discovery.</summary>
+    public const string VerifyPage = "enrich.verifypage";
 
     /// <summary>Job-level: prunes offers whose sites users can't actually reach (deliberately last).</summary>
     public const string Reachability = "enrich.reachability";
@@ -57,6 +61,9 @@ public sealed record ItemPayload(int Index, string Name);
 public sealed record CatalogPayload(string Domain, string? StoreName, string? EntryUrl = null);
 
 public sealed record BrandPayload(string Brand);
+
+/// <summary>One page to verify + the models it was selected for (mention pages create offers).</summary>
+public sealed record VerifyPagePayload(string Url, List<string> ModelNames, bool FromMention = false);
 
 /// <summary>What a handler execution decided. Exactly one of these per attempt.</summary>
 public abstract record UnitOutcome
