@@ -27,6 +27,9 @@ public static class CostConfig
             PerPlaces = await Dec("pricing.places", defaults.PerPlaces),
             PerSocial = await Dec("pricing.social", defaults.PerSocial),
             PerRender = await Dec("pricing.render", defaults.PerRender),
+            PerWorkersAi = await Dec("pricing.workers_ai", defaults.PerWorkersAi),
+            PerEdgeRequest = await Dec("pricing.edge_request", defaults.PerEdgeRequest),
+            PerEdgeDrain = await Dec("pricing.edge_drain", defaults.PerEdgeDrain),
             // LLM token rates keep the built-in defaults.
         };
 

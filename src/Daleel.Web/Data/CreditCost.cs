@@ -13,6 +13,8 @@ public static class CreditCost
     public const int ContextScrape = 2;
     public const int ContextCatalogue = 10; // /v1/brand/ai/products — a full-site product crawl
     public const int LlmPer1KTokens = 1;
+    public const int WorkersAiCall = 1;     // one Workers-AI inference batch (classify/extract/filter)
+    public const int EdgeDrain = 1;         // landing one drained edge result (queue ops + R2 read)
 
     /// <summary>
     /// Credits for one call. LLM usage bills by tokens (1 credit / 1K, min 1); known providers bill a
@@ -35,15 +37,30 @@ public static class CreditCost
         {
             return 0; // a cache hit made no external call
         }
+        // Edge execution bills at fixed weights — routing work to the workers must never change a
+        // user's bill via the dollar fall-through. "cloudflare/" (the drain) is prefix-matched so the
+        // browser-render provider ("cloudflare-browser") keeps its existing pricing.
+        if (p.StartsWith("workers-ai", StringComparison.Ordinal))
+        {
+            return WorkersAiCall;
+        }
+        if (p.StartsWith("cloudflare/", StringComparison.Ordinal))
+        {
+            return EdgeDrain;
+        }
         if (p.Contains("serp"))
         {
             return SerpApiPage;
         }
+        // "place" also matches the edge-proxied "search-worker/google-places" — a proxied Places
+        // call must cost the user exactly what a direct one does.
         if (p.Contains("place") || p.Contains("maps"))
         {
             return GooglePlaces;
         }
-        if (p.Contains("context"))
+        // "scrape-worker" covers edge-submitted crawls/page fetches — they bill as their inline
+        // Context.dev equivalents, whatever vendor the worker fronts.
+        if (p.Contains("context") || p.Contains("scrape-worker"))
         {
             // "catalog" covers the gateway's canonical "catalog/extract" endpoint — a full catalogue
             // crawl must bill at the catalogue rate, not as a single page scrape.

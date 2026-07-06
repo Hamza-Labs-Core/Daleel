@@ -210,12 +210,13 @@ public sealed class ProviderApi : IProviderApi
             return null;
         }
 
-        // Metered as the crawl it triggers ("context.dev"-family provider name keeps the cost
-        // estimator's extract rate), so edge and inline crawls hit the cap and the usage log
-        // identically. Recorded ONLY on an accepted submit: a failed/rejected submit costs nothing
-        // and falls back to the inline path, whose own metering then records the crawl — recording
-        // here too would double-charge the same crawl. The drain records outcome/actuals as timeline
-        // events; it does NOT record a second ApiCall — this one is the whole crawl's accounting.
+        // Metered as the crawl it triggers (the "context.dev"-family name keeps the vendor extract
+        // rate; the "-worker/" name adds the pricing.edge_request hop on top), so edge and inline
+        // crawls hit the cap and the usage log identically. Recorded ONLY on an accepted submit: a
+        // failed/rejected submit costs nothing and falls back to the inline path, whose own metering
+        // then records the crawl — recording here too would double-charge the same crawl. The drain
+        // meters only its own queue+R2 overhead ("cloudflare/drain"); this call stays the crawl's
+        // whole vendor accounting.
         var started = System.Diagnostics.Stopwatch.StartNew();
         var handle = await _edge.SubmitCatalogAsync(domain, store, searchJobId, maxProducts, ct).ConfigureAwait(false);
         if (handle is not null && AmbientApiObserver.Observer is { } observer)
@@ -247,7 +248,7 @@ public sealed class ProviderApi : IProviderApi
         }
 
         return await MeterAsync(
-            "Google Places", "places/text-search", query,
+            PlacesProviderName, "places/text-search", query,
             () => places.SearchStoresAsync(query, near, radiusMeters, languageCode, ct),
             r => r.Count).ConfigureAwait(false);
     }
@@ -260,9 +261,19 @@ public sealed class ProviderApi : IProviderApi
         }
 
         return await MeterAsync(
-            "Google Places", "places/details", placeId,
+            PlacesProviderName, "places/details", placeId,
             () => places.GetPlaceDetailsAsync(placeId, ct)).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Proxied Places calls are named for the worker hop they ride ("search-worker/…") so the
+    /// estimator adds pricing.edge_request on top of the Places rate and the usage log shows the
+    /// route; the name still says "places", so user credits match a direct call exactly.
+    /// </summary>
+    private string PlacesProviderName =>
+        _factory.Resolve("GOOGLE_PLACES_API_KEY") is null && HasSearchProxy
+            ? "search-worker/google-places"
+            : "Google Places";
 
     public bool HasSocial => _factory.Resolve("APIFY_TOKEN") is not null;
 

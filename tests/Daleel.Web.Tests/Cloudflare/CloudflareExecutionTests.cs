@@ -224,6 +224,55 @@ public class CloudflareExecutionTests
 
         (await fixture.Prices.CountAsync()).Should().Be(0, "at-least-once redelivery must not duplicate rows");
         fixture.Queue.Acked.Should().ContainSingle();
+        fixture.ApiLog.Rows.Should().BeEmpty("a marker short-circuit did no drain work — nothing to bill");
+    }
+
+    [Fact]
+    public async Task Drain_MetersEachDrainedResult_AsACloudflareDrainRow()
+    {
+        var fixture = new DrainFixture();
+        fixture.Worker.Results["qa/r.json"] = new CatalogResultDoc
+        {
+            Kind = "catalog", Domain = "store.example", Store = "ABC Store", SearchJobId = "42",
+            CapturedAt = new DateTimeOffset(2026, 7, 4, 10, 0, 0, TimeSpan.Zero),
+            ProductCount = 1,
+            Products = { new() { Name = "Espresso X", Price = 139m, Currency = "JOD" } }
+        };
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        var row = fixture.ApiLog.Rows.Should().ContainSingle().Subject;
+        row.Provider.Should().Be("cloudflare/drain");
+        row.Endpoint.Should().Be("catalog");
+        row.JobId.Should().Be(42, "the drain spend belongs to the originating search job");
+        row.EstimatedCost.Should().Be(0.0005m, "queue ops + the R2 result read price at pricing.edge_drain");
+        row.Status.Should().Be("success");
+
+        // A redelivery short-circuits on the marker — the drain cost must never be billed twice.
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+        fixture.ApiLog.Rows.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Drain_SurvivesMeteringFailure()
+    {
+        var fixture = new DrainFixture();
+        fixture.ApiLog.Throw = true;
+        fixture.Worker.Results["qa/r.json"] = new CatalogResultDoc
+        {
+            Kind = "catalog", Domain = "store.example", Store = "ABC Store",
+            CapturedAt = new DateTimeOffset(2026, 7, 4, 10, 0, 0, TimeSpan.Zero),
+            ProductCount = 1,
+            Products = { new() { Name = "Espresso X", Price = 139m, Currency = "JOD" } }
+        };
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        (await fixture.Prices.CountAsync()).Should().Be(1, "the persisted result must not be lost to metering");
+        fixture.Queue.Acked.Should().ContainSingle("metering is best-effort and must never fail the drain");
     }
 
     [Fact]
@@ -359,6 +408,7 @@ public class CloudflareExecutionTests
         public FakeR2 R2 { get; } = new();
         public InMemoryScrapedPriceRepo Prices { get; } = new();
         public FakeEventLog Events { get; } = new();
+        public FakeApiCallLog ApiLog { get; } = new();
         public CloudflarePollDrainService Service { get; }
 
         public DrainFixture()
@@ -366,6 +416,7 @@ public class CloudflareExecutionTests
             var services = new ServiceCollection();
             services.AddSingleton<IScrapedPriceRepository>(Prices);
             services.AddSingleton<ISystemEventLog>(Events);
+            services.AddSingleton<IApiCallLogRepository>(ApiLog);
             var provider = services.BuildServiceProvider();
 
             Service = new CloudflarePollDrainService(
@@ -486,6 +537,41 @@ public class CloudflareExecutionTests
                 : null);
 
         public string? DownloadUrl(string key, R2Bucket bucket = R2Bucket.Data, TimeSpan? expiry = null) => null;
+    }
+
+    private sealed class FakeApiCallLog : IApiCallLogRepository
+    {
+        public List<ApiCallLog> Rows { get; } = new();
+        public bool Throw { get; set; }
+
+        public Task AddBatchAsync(IEnumerable<ApiCallLog> calls, CancellationToken ct = default)
+        {
+            if (Throw)
+            {
+                throw new InvalidOperationException("usage log down");
+            }
+            Rows.AddRange(calls);
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<ApiCallLog>> ListByJobAsync(int jobId, string userId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<(int Calls, decimal Cost)> UserUsageSinceAsync(string userId, DateTimeOffset since, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<IReadOnlyList<QueryCost>> RecentJobUsageAsync(string userId, int take, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<IReadOnlyList<ProviderUsage>> ProviderUsageAsync(DateTimeOffset since, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<IReadOnlyList<(DateTime Day, decimal Cost)>> CostPerDayAsync(int days, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<decimal> TotalCostAsync(DateTimeOffset since, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<double> AverageCostPerJobAsync(DateTimeOffset since, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<IReadOnlyList<QueryCost>> MostExpensiveQueriesAsync(DateTimeOffset since, int top, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<IReadOnlyList<TokenUsage>> TokenUsageAsync(DateTimeOffset since, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class FakeEventLog : ISystemEventLog

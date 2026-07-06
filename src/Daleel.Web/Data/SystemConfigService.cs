@@ -77,6 +77,11 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "pricing.places", Value = "0.017", Type = "decimal" },
         new SystemConfig { Key = "pricing.social", Value = "0.01", Type = "decimal" },
         new SystemConfig { Key = "pricing.render", Value = "0.01", Type = "decimal" },
+        // Edge execution pricing: Workers-AI inference, the worker HTTP hop itself (billed on top of
+        // the vendor work it fronts), and the queue+R2 cost of landing one drained result.
+        new SystemConfig { Key = "pricing.workers_ai", Value = "0.002", Type = "decimal" },
+        new SystemConfig { Key = "pricing.edge_request", Value = "0.0002", Type = "decimal" },
+        new SystemConfig { Key = "pricing.edge_drain", Value = "0.0005", Type = "decimal" },
 
         // Cloudflare execution layer (docs/architecture/cloudflare-workers-pipeline.md). The enable flag
         // routes eligible pipeline work (store catalogue crawls) to the edge workers when the CF_* env

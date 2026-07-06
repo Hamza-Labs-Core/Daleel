@@ -3,6 +3,7 @@ using System.Text.Json;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
 using Daleel.Web.Storage;
+using Microsoft.EntityFrameworkCore;
 
 namespace Daleel.Web.Cloudflare;
 
@@ -234,6 +235,8 @@ public sealed class CloudflarePollDrainService : BackgroundService
             JsonSerializer.Serialize(new { persistedAt = DateTimeOffset.UtcNow, rows = rows.Count }),
             markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
 
+        await MeterDrainAsync(msg, ct).ConfigureAwait(false);
+
         await PublishEventAsync(msg, success: true,
             summary: $"Edge catalogue crawl for {store}: {doc.ProductCount} product(s), {rows.Count} priced",
             ct).ConfigureAwait(false);
@@ -331,10 +334,68 @@ public sealed class CloudflarePollDrainService : BackgroundService
         await _r2.StoreJsonAsync(
             JsonSerializer.Serialize(new { persistedAt = DateTimeOffset.UtcNow, models = harvested }),
             markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
+        await MeterDrainAsync(msg, ct).ConfigureAwait(false);
         await PublishEventAsync(msg, success: true,
             summary: $"Edge brand harvest for {brandName}: {harvested} model(s) persisted",
             ct).ConfigureAwait(false);
         return Outcome.Ack;
+    }
+
+    /// <summary>
+    /// Usage-log accounting for one successfully drained result: the queue lease/ack and the R2
+    /// result read are real infrastructure spend, priced at pricing.edge_drain and attributed to
+    /// the originating search job. Best-effort by contract — a metering failure must never fail
+    /// (or retry) a drain that already persisted — and it rides the persist path, so marker
+    /// short-circuits on redelivery never double-bill.
+    /// </summary>
+    private async Task MeterDrainAsync(PollMessage msg, CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            if (scope.ServiceProvider.GetService<IApiCallLogRepository>() is not { } apiLog)
+            {
+                return;
+            }
+
+            var jobId = int.TryParse(msg.SearchJobId, out var parsed) ? parsed : (int?)null;
+
+            // Usage rows store a hashed owner id (see Anonymizer) — resolve it from the job when the
+            // message carries one; ad-hoc jobs stay unattributed rather than guessed.
+            string? userHash = null;
+            if (jobId is not null && scope.ServiceProvider.GetService<DaleelDbContext>() is { } db)
+            {
+                var owner = await db.SearchJobs.AsNoTracking()
+                    .Where(j => j.Id == jobId.Value)
+                    .Select(j => j.UserId)
+                    .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+                userHash = Anonymizer.HashUserId(owner);
+            }
+
+            var estimator = scope.ServiceProvider.GetService<ISystemConfigService>() is { } config
+                ? await CostConfig.BuildEstimatorAsync(config, ct).ConfigureAwait(false)
+                : new Daleel.Core.Observability.CostEstimator();
+
+            await apiLog.AddBatchAsync(new[]
+            {
+                new ApiCallLog
+                {
+                    UserId = userHash,
+                    JobId = jobId,
+                    Provider = "cloudflare/drain",
+                    Endpoint = msg.Kind ?? "unknown",
+                    RequestSummary = msg.ResultKey,
+                    Status = "success",
+                    EstimatedCost = estimator.EstimateCall("cloudflare/drain", msg.Kind ?? string.Empty),
+                    CreatedAt = DateTimeOffset.UtcNow
+                }
+            }, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Metering drained result failed (best-effort)");
+        }
     }
 
     private static async Task<Data.Brand?> SafeGetBrand(
