@@ -139,6 +139,27 @@ public class ActorLoopTests
     }
 
     [Fact]
+    public async Task Lenient_parse_accepts_tool_alias_and_top_level_args()
+    {
+        // Weak-model variations seen on QA: "tool" instead of "action", and the args at the top level
+        // (no nested "args" object). The loop must still dispatch the tool with the right arguments.
+        var llm = new ScriptedLlm(
+            "{\"thought\":\"open it\",\"tool\":\"fetch_page\",\"url\":\"https://x\"}",
+            "{\"action\":\"done\",\"result\":{\"ok\":true}}");
+        string? seenUrl = null;
+        ActorToolDispatch dispatch = (t, a, ct) =>
+        {
+            seenUrl = a.ValueKind == JsonValueKind.Object && a.TryGetProperty("url", out var u) ? u.GetString() : null;
+            return Task.FromResult("page");
+        };
+
+        var result = await Loop().RunAsync(Agent(llm), "GOAL", "x", new[] { Fetch }, dispatch, new ActorBounds(5, 6), default);
+
+        result.Completed.Should().BeTrue();
+        seenUrl.Should().Be("https://x", "the tool alias and top-level args are understood");
+    }
+
+    [Fact]
     public async Task Item_dive_actor_drives_the_loop_and_extracts_specs()
     {
         // The actor "opens" a page (tool observation is empty here — providers aren't wired in the test),

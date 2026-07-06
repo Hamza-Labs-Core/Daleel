@@ -69,18 +69,21 @@ public sealed class ActorLoop : IActorLoop
             var user = transcript.ToString() + "\nReply with EXACTLY one action JSON object now.";
 
             var text = await agent.SynthesizeAsync(system, user, ct);
-            var action = LlmJson.Deserialize<ActorAction>(text);
+            var action = ParseAction(text);
 
             if (action is null || string.IsNullOrWhiteSpace(action.Action))
             {
-                // Two consecutive unparsable turns ⇒ give up producing a result; the unit re-runs.
-                if (++parseFails >= 2)
+                // Log the raw reply so a weak model's malformed output is diagnosable, then correct it.
+                _logger.LogInformation("Actor parse-fail (turn {Turn}): {Raw}", turn, Truncate(text ?? string.Empty, 400));
+                // A few consecutive unparsable turns ⇒ give up producing a result; the unit re-runs.
+                if (++parseFails >= 3)
                 {
                     _logger.LogInformation("Actor loop abandoned after repeated unparsable turns");
                     return new ActorResult(false, null, trace);
                 }
 
-                transcript.Append("SYSTEM: your last reply was not valid action JSON. Reply with ONE action object.\n");
+                transcript.Append("SYSTEM: your previous reply was not valid JSON. Reply with ONLY a JSON object, ")
+                          .Append("no prose, e.g. {\"thought\":\"...\",\"action\":\"done\",\"result\":{...}}.\n");
                 continue;
             }
 
@@ -90,7 +93,7 @@ public sealed class ActorLoop : IActorLoop
                 trace.Add(action.Thought!.Trim());
             }
 
-            if (string.Equals(action.Action, "done", StringComparison.OrdinalIgnoreCase))
+            if (IsDone(action.Action!))
             {
                 return new ActorResult(true, action.Result, trace);
             }
@@ -133,8 +136,86 @@ public sealed class ActorLoop : IActorLoop
         var forceText = await agent.SynthesizeAsync(
             BuildSystem(guidingSystem, catalog, mustFinish: true),
             transcript + "\nYou are out of steps. Return your best 'done' result now as JSON.", ct);
-        var forced = LlmJson.Deserialize<ActorAction>(forceText);
+        var forced = ParseAction(forceText);
         return new ActorResult(forced?.Result is not null, forced?.Result, trace);
+    }
+
+    /// <summary>
+    /// Lenient action parse: strips fences/prose (LlmJson.ExtractJson), then reads the action under any
+    /// of the keys a weak model tends to use ("action"/"tool"/"name"), the args under
+    /// ("args"/"arguments"/"input"/"parameters") — falling back to the whole object when a tool call put
+    /// its arguments at the top level — and the done result under ("result"/"output"/"answer"). Returns
+    /// null only when no JSON object is present at all. Elements are cloned so they outlive the document.
+    /// </summary>
+    private static ActorAction? ParseAction(string? text)
+    {
+        var json = LlmJson.ExtractJson(text);
+        if (json is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var action = FirstString(root, "action", "tool", "tool_name", "name");
+            var thought = FirstString(root, "thought", "reasoning", "reason");
+            var args = FirstElement(root, "args", "arguments", "input", "parameters");
+            var result = FirstElement(root, "result", "output", "answer");
+
+            // Model put the tool's arguments at the top level (no nested args object) — pass the whole
+            // object; the dispatchers read named fields off it either way.
+            if (action is not null && !IsDone(action) && args is null)
+            {
+                args = root.Clone();
+            }
+
+            return new ActorAction(thought, action, args, result);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsDone(string action) =>
+        action.Equals("done", StringComparison.OrdinalIgnoreCase) ||
+        action.Equals("finish", StringComparison.OrdinalIgnoreCase) ||
+        action.Equals("complete", StringComparison.OrdinalIgnoreCase) ||
+        action.Equals("final", StringComparison.OrdinalIgnoreCase);
+
+    private static string? FirstString(JsonElement obj, params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            if (obj.TryGetProperty(k, out var v) && v.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(v.GetString()))
+            {
+                return v.GetString();
+            }
+        }
+
+        return null;
+    }
+
+    private static JsonElement? FirstElement(JsonElement obj, params string[] keys)
+    {
+        foreach (var k in keys)
+        {
+            if (obj.TryGetProperty(k, out var v) &&
+                v.ValueKind is JsonValueKind.Object or JsonValueKind.Array or JsonValueKind.String)
+            {
+                return v.Clone(); // outlive the JsonDocument dispose
+            }
+        }
+
+        return null;
     }
 
     private static string BuildCatalog(IReadOnlyList<ActorTool> tools) =>
