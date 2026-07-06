@@ -261,9 +261,100 @@ public sealed class GatherSourcesActivity : CancellableActivity
         services.Report(SearchStep.SearchingWeb, "Progress.Msg.Expanding");
         state.Bundle = await services.Agent.GatherAsync(state.Strategy, state.GeoProfile, context.CancellationToken);
 
+        // LLM-ACTOR coverage (flag actor.gather, default off): after the fixed strategy runs, an LLM
+        // looks at what came back and — like a researcher noticing a gap — proposes a few FOLLOW-UP
+        // queries, which run once and merge in. Bounded (one LLM call + one gather round), ADDITIVE
+        // (only ever adds results, never removes), so it can't regress a search. This is the synchronous
+        // path, so it stays deliberately light; deep multi-turn research lives in the enrichment queue.
+        var config = context.GetService<Daleel.Web.Data.ISystemConfigService>();
+        if (config is not null &&
+            await config.GetBoolAsync(Daleel.Web.Pipeline.Enrichment.Actor.ActorFlags.Gather, false, context.CancellationToken))
+        {
+            var extra = await CoverAsync(services.Agent, state, context.CancellationToken);
+            if (extra is not null)
+            {
+                state.Bundle = MergeCoverage(state.Bundle!, extra);
+            }
+        }
+
         var b = state.Bundle;
         services.Report(SearchStep.SearchingWeb, "Progress.Msg.Gathered",
             b.WebResults.Count, b.ShoppingResults.Count, b.Stores.Count);
+    }
+
+    /// <summary>Proposes follow-up queries from the gathered results and runs ONE more gather round with them.</summary>
+    private static async Task<ResearchBundle?> CoverAsync(
+        Daleel.Agent.AgentService agent, SearchPipelineState state, CancellationToken ct)
+    {
+        var b = state.Bundle;
+        if (b is null)
+        {
+            return null;
+        }
+
+        var titles = b.WebResults.Concat(b.ShoppingResults)
+            .Select(r => r.Title).Where(t => !string.IsNullOrWhiteSpace(t)).Distinct().Take(20).ToList();
+
+        const string system =
+            "You are a shopping researcher reviewing a search's first-round results. Propose UP TO 3 " +
+            "additional web/shopping search queries that would surface RELEVANT sellers, models, or prices " +
+            "this round likely MISSED (other local stores, specific model numbers, price pages). Stay on " +
+            "the same product/topic. Return STRICT JSON only: {\"queries\":[\"...\"]}. Empty if coverage looks complete.";
+        var user = "Search: " + state.Query + "\nMarket: " + (state.GeoProfile?.Country ?? state.Geo) +
+            "\nResults so far:\n" + string.Join("\n", titles.Select(t => "- " + t));
+
+        string text;
+        try
+        {
+            text = await agent.SynthesizeAsync(system, user, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; } // coverage is best-effort — never fail the search
+
+        var parsed = Daleel.Core.Llm.LlmJson.Deserialize<CoverageQueries>(text);
+        var queries = (parsed?.Queries ?? new List<string>())
+            .Where(q => !string.IsNullOrWhiteSpace(q)).Select(q => q.Trim()).Distinct().Take(3).ToList();
+        if (queries.Count == 0 || state.Strategy is null || state.GeoProfile is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await agent.GatherAsync(
+                new Daleel.Core.Models.SearchStrategy { WebQueries = queries, ShoppingQueries = queries },
+                state.GeoProfile, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { return null; }
+    }
+
+    private sealed record CoverageQueries(List<string>? Queries);
+
+    /// <summary>Additive merge: appends the follow-up round's web/shopping results (deduped by URL) and prices/sources.</summary>
+    private static ResearchBundle MergeCoverage(ResearchBundle primary, ResearchBundle extra)
+    {
+        static IReadOnlyList<Daleel.Search.Abstractions.SearchResult> Dedupe(
+            IReadOnlyList<Daleel.Search.Abstractions.SearchResult> a,
+            IReadOnlyList<Daleel.Search.Abstractions.SearchResult> b)
+        {
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var merged = new List<Daleel.Search.Abstractions.SearchResult>();
+            foreach (var r in a.Concat(b))
+            {
+                var key = r.Url ?? (r.Title + "|" + r.Seller);
+                if (seen.Add(key)) merged.Add(r);
+            }
+            return merged;
+        }
+
+        return primary with
+        {
+            WebResults = Dedupe(primary.WebResults, extra.WebResults),
+            ShoppingResults = Dedupe(primary.ShoppingResults, extra.ShoppingResults),
+            Prices = primary.Prices.Concat(extra.Prices).ToList(),
+            Sources = primary.Sources.Concat(extra.Sources).Distinct(StringComparer.OrdinalIgnoreCase).ToList()
+        };
     }
 }
 

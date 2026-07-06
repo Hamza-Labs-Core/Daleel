@@ -14,6 +14,7 @@ public static class ActorFlags
     public const string VerifyPage = "actor.verifypage";
     public const string Catalog = "actor.catalog";
     public const string BrandResearch = "actor.brandresearch";
+    public const string Gather = "actor.gather";
 
     /// <summary>Config key for the model the actor loops run on — a capable model, NOT the user's tier default.</summary>
     public const string Model = "actor.model";
