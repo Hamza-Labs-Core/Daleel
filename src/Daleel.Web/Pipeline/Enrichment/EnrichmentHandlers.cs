@@ -665,22 +665,26 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
             return changed ? answer with { Products = p with { Models = updated } } : null;
         }, ct);
 
-        // Anti-refetch guard: when this batch changed nothing and no offer still awaits a figure,
-        // every remaining target is a verification that already ran and confirmed the status quo —
-        // done, no continuation. (Unrelated-removed offers don't count as awaiting.)
-        var unpricedRemain = targets.Any(g => g.Any(x => x.Offer.Price is null &&
-            (!verdicts.TryGetValue(g.Key, out var v) ||
-             (v.Price is null && v.Related.Contains(x.Model.Name)))));
-        if (!patched && !unpricedRemain)
-        {
-            return UnitOutcome.Ok;
-        }
-
-        if (targets.Count > BatchSize)
+        // Anti-runaway guard, learned live (job 15): a continuation is only earned by PROGRESS.
+        // "Unpriced offers remain" is not progress — pages that never yield a figure re-selected
+        // themselves forever, chaining fetches of the same dead ends. Untried targets beyond this
+        // batch justify one more link; a batch that changed nothing ends the chain.
+        var untriedRemain = targets.Count > BatchSize;
+        if (patched && untriedRemain)
         {
             await ctx.Queue.EnqueueAsync(new[]
             {
                 HandlerHelpers.Child(item, EnrichmentUnit.PriceFetch, "{}", notBefore: TimeSpan.FromSeconds(20))
+            }, ct);
+        }
+        else if (!patched && untriedRemain)
+        {
+            // Nothing moved but genuinely-unfetched pages exist: one more attempt, spaced out —
+            // and only one, because the next zero-progress batch stops the chain here again.
+            await ctx.Queue.EnqueueAsync(new[]
+            {
+                HandlerHelpers.Child(item, EnrichmentUnit.PriceFetch, "{}",
+                    notBefore: TimeSpan.FromSeconds(90), maxAttempts: 1)
             }, ct);
         }
 
