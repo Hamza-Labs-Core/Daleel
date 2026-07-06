@@ -636,7 +636,7 @@ public class SubWorkflowTests
             return Task.FromResult(Brand(brandName));
         }
 
-        public Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default) =>
+        public Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default, string? siteUrlHint = null) =>
             Task.FromResult(Store(storeName));
     }
 

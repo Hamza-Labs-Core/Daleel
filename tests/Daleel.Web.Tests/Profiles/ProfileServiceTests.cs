@@ -192,7 +192,7 @@ public class ProfileServiceTests
             });
         }
 
-        public Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default)
+        public Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default, string? siteUrlHint = null)
         {
             StoreCalls++;
             return Task.FromResult(_store);

@@ -252,6 +252,22 @@ public class ActorLoopTests
         related.Should().BeEquivalentTo(new[] { "A", "B" }, "a bad/empty response must not strip the catalogue");
     }
 
+    [Fact]
+    public async Task Store_site_actor_returns_verified_url_or_null()
+    {
+        var found = new ScriptedLlm(
+            "{\"action\":\"web_search\",\"args\":{\"query\":\"Smart Buy Jordan official site\"}}",
+            "{\"action\":\"done\",\"result\":{\"website\":\"https://smartbuy-me.com/jo\"}}");
+        var geo = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault("jordan");
+
+        var url = await new StoreSiteActor(Loop()).FindSiteAsync(Agent(found), "Smart Buy", geo, default);
+        url.Should().Be("https://smartbuy-me.com/jo");
+
+        // A non-URL / null website ⇒ null (fall back to GuessDomain).
+        var none = new ScriptedLlm("{\"action\":\"done\",\"result\":{\"website\":null}}");
+        (await new StoreSiteActor(Loop()).FindSiteAsync(Agent(none), "No Site Store", geo, default)).Should().BeNull();
+    }
+
     /// <summary>An ILlmClient that replays a fixed script of completions, one per call.</summary>
     private sealed class ScriptedLlm : ILlmClient
     {

@@ -55,7 +55,8 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         return await new ProfileSynthesizer(llm).SynthesizeBrandAsync(brandName, context, ct).ConfigureAwait(false);
     }
 
-    public async Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default)
+    public async Task<Store?> ResearchStoreAsync(
+        string storeName, string? geo, CancellationToken ct = default, string? siteUrlHint = null)
     {
         var llm = _factory.TryBuildLlm();
         if (llm is null)
@@ -70,7 +71,7 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
             return null;
         }
 
-        var context = await GatherStoreContextAsync(storeName, geo, ct).ConfigureAwait(false);
+        var context = await GatherStoreContextAsync(storeName, geo, siteUrlHint, ct).ConfigureAwait(false);
         var store = await new ProfileSynthesizer(llm).SynthesizeStoreAsync(storeName, context, ct).ConfigureAwait(false);
 
         // Fall back to contact details scraped from the store page when the LLM didn't surface them.
@@ -173,11 +174,15 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         return sb.ToString();
     }
 
-    private async Task<string> GatherStoreContextAsync(string storeName, string? geo, CancellationToken ct)
+    private async Task<string> GatherStoreContextAsync(
+        string storeName, string? geo, string? siteUrlHint, CancellationToken ct)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Store: {storeName}{(string.IsNullOrWhiteSpace(geo) ? "" : $" ({geo})")}");
-        await AppendScrapeAsync($"https://{GuessDomain(storeName)}", sb, ct).ConfigureAwait(false);
+        // Prefer an actor-VERIFIED site (the LLM confirmed it is really this store's own domain) over the
+        // GuessDomain heuristic (strip punctuation + ".com"), which misses rebranded/abbreviated domains.
+        var url = !string.IsNullOrWhiteSpace(siteUrlHint) ? siteUrlHint! : $"https://{GuessDomain(storeName)}";
+        await AppendScrapeAsync(url, sb, ct).ConfigureAwait(false);
         return sb.ToString();
     }
 

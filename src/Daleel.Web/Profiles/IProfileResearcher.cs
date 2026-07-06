@@ -15,5 +15,10 @@ public interface IProfileResearcher
 
     Task<Brand?> ResearchBrandAsync(string brandName, string? geo, CancellationToken ct = default);
 
-    Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default);
+    /// <summary>
+    /// <paramref name="siteUrlHint"/>, when supplied, is an actor-verified store website scraped
+    /// instead of the GuessDomain heuristic (which misses rebranded/abbreviated domains).
+    /// </summary>
+    Task<Store?> ResearchStoreAsync(
+        string storeName, string? geo, CancellationToken ct = default, string? siteUrlHint = null);
 }

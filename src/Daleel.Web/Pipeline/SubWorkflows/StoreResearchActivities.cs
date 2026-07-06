@@ -43,7 +43,27 @@ public sealed class ScrapeStoreSiteActivity : CancellableActivity
         }
 
         services.Report(SearchStep.FindingStores, "Progress.Msg.ScrapingStoreSite", state.Store.Name);
-        state.Researched = await SafeResearch(researcher, state.Store.Name, state.Geo, context.CancellationToken);
+
+        // LLM-ACTOR site discovery (flag actor.storeresearch, default off): find + CONFIRM the store's
+        // own website via search/read, replacing the GuessDomain heuristic (which misses rebranded/
+        // abbreviated domains). The verified URL is scraped instead of the guess. Best-effort → null.
+        string? siteHint = null;
+        var config = context.GetService<Daleel.Web.Data.ISystemConfigService>();
+        if (config is not null &&
+            await config.GetBoolAsync(Daleel.Web.Pipeline.Enrichment.Actor.ActorFlags.StoreResearch, false, context.CancellationToken) &&
+            context.GetService<Daleel.Web.Pipeline.Enrichment.Actor.StoreSiteActor>() is { } storeActor)
+        {
+            try
+            {
+                siteHint = await storeActor.FindSiteAsync(
+                    services.Agent, state.Store.Name,
+                    Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(state.Geo), context.CancellationToken);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { /* best-effort — fall back to GuessDomain */ }
+        }
+
+        state.Researched = await SafeResearch(researcher, state.Store.Name, state.Geo, siteHint, context.CancellationToken);
         state.Saved = state.Researched ?? state.Existing;
         state.RecordEvent(EventCategory.Profile, "profile.store", "context.dev",
             success: state.Researched is not null,
@@ -62,9 +82,9 @@ public sealed class ScrapeStoreSiteActivity : CancellableActivity
     }
 
     private static async Task<Data.Store?> SafeResearch(
-        IProfileResearcher researcher, string name, string geo, CancellationToken ct)
+        IProfileResearcher researcher, string name, string geo, string? siteHint, CancellationToken ct)
     {
-        try { return await researcher.ResearchStoreAsync(name, geo, ct); }
+        try { return await researcher.ResearchStoreAsync(name, geo, ct, siteHint); }
         catch (OperationCanceledException) { throw; }
         catch { return null; }
     }
