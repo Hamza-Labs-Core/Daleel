@@ -559,6 +559,10 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichedResultStor
     Daleel.Web.Pipeline.Enrichment.EnrichedResultStore>();
 // Per-search/product/brand work contexts: findings ledger + LLM synthesis (opens its own scope per call).
 builder.Services.AddSingleton<Daleel.Web.Data.IWorkContextStore, Daleel.Web.Data.WorkContextStore>();
+// The LLM-as-actor engine: a bounded reason→act→observe loop reused by converted provider-calling steps.
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.IActorLoop,
+    Daleel.Web.Pipeline.Enrichment.Actor.ActorLoop>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.ItemDiveActor>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.PlanEnrichmentHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,

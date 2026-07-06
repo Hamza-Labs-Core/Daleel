@@ -339,6 +339,16 @@ public sealed class ItemDiveHandler : IEnrichmentUnitHandler
             return UnitOutcome.Ok; // item no longer in the result (superseded by a rename/merge)
         }
 
+        // LLM-ACTOR path (flag-gated, default off): the LLM researches the item like a human — picks the
+        // authoritative page, confirms the SKU, extracts structured specs, goes deeper only when thin —
+        // instead of the deterministic single-scrape below. Bounded inside the unit's cost cap + lease.
+        // GetService (not Required): absent config ⇒ flag off ⇒ deterministic path (keeps test wiring simple).
+        var config = ctx.Services.GetService<Daleel.Web.Data.ISystemConfigService>();
+        if (config is not null && await config.GetBoolAsync(Actor.ActorFlags.ItemDive, false, ct))
+        {
+            return await RunActorDiveAsync(item, ctx, payload, models[index], ct);
+        }
+
         var svc = ctx.Services.GetRequiredService<IItemEnrichmentService>();
         if (await svc.DeepDiveItemAsync(ctx.Agent(), models[index], ct) is not { } dived)
         {
@@ -365,6 +375,62 @@ public sealed class ItemDiveHandler : IEnrichmentUnitHandler
 
         await HandlerHelpers.NoteAsync(ctx, item.SearchJobId, WorkContextScope.Product, dived.Id,
             "itemdive", $"deep-dive: {dived.Specs.Count} specs, {dived.Offers.Count} offers");
+        return UnitOutcome.Ok;
+    }
+
+    /// <summary>
+    /// The LLM-actor deep-dive: run the bounded research loop, then fill the model's specs ADDITIVELY
+    /// (never overwrite a spec another unit set) via the same row-locked patch. A run that yields nothing
+    /// usable returns Ok (the durable unit already recorded its spend; no data to apply).
+    /// </summary>
+    private static async Task<UnitOutcome> RunActorDiveAsync(
+        EnrichmentWorkItem item, EnrichmentUnitContext ctx, ItemPayload payload, ProductModel model,
+        CancellationToken ct)
+    {
+        var actor = ctx.Services.GetRequiredService<Actor.ItemDiveActor>();
+        var dive = await actor.RunAsync(ctx.Agent(), model, ctx.Job.Geo, ct);
+        if (dive is null || dive.Specs.Count == 0)
+        {
+            return UnitOutcome.Ok;
+        }
+
+        await ctx.Results.PatchAsync(item, answer =>
+        {
+            if (answer.Products is not { } p)
+            {
+                return null;
+            }
+
+            var current = p.Models.ToList();
+            var at = HandlerHelpers.Locate(current, payload);
+            if (at < 0)
+            {
+                return null;
+            }
+
+            var m = current[at];
+            var specs = m.Specs.ToDictionary(kv => kv.Key, kv => kv.Value);
+            var added = false;
+            foreach (var kv in dive.Specs)
+            {
+                if (!specs.ContainsKey(kv.Key))
+                {
+                    specs[kv.Key] = kv.Value;
+                    added = true;
+                }
+            }
+
+            if (!added)
+            {
+                return null;
+            }
+
+            current[at] = m with { Specs = specs };
+            return answer with { Products = p with { Models = current } };
+        }, ct);
+
+        await HandlerHelpers.NoteAsync(ctx, item.SearchJobId, WorkContextScope.Product, model.Id,
+            "itemdive", string.IsNullOrWhiteSpace(dive.Note) ? $"actor: {dive.Specs.Count} specs" : "actor: " + dive.Note);
         return UnitOutcome.Ok;
     }
 }
