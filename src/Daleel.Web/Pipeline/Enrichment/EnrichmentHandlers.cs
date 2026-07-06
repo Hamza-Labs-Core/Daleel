@@ -36,6 +36,25 @@ internal static class HandlerHelpers
         return -1;
     }
 
+    /// <summary>
+    /// Best-effort advisory note into the work-context findings ledger — the narrative the synthesis
+    /// unit later reads. Resolves the store from the execution scope and SWALLOWS any failure: a lost
+    /// finding only weakens the summary, it must never fail the unit that produced the real data.
+    /// </summary>
+    public static async Task NoteAsync(
+        EnrichmentUnitContext ctx, int jobId, string scope, string key, string step, string note)
+    {
+        try
+        {
+            await ctx.Services.GetRequiredService<IWorkContextStore>()
+                .AppendFindingAsync(jobId, scope, key, step, note);
+        }
+        catch
+        {
+            // advisory only
+        }
+    }
+
     public static EnrichmentWorkItem Child(EnrichmentWorkItem parent, string kind, string payload,
         TimeSpan? notBefore = null, int maxAttempts = 4) => new()
     {
@@ -240,6 +259,10 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
             }, ct);
         }
 
+        // Seed the search-scope context so the final synthesis has the shape of what it's summarizing.
+        await HandlerHelpers.NoteAsync(ctx, item.SearchJobId, WorkContextScope.Search, string.Empty,
+            "plan", $"{products.Models.Count} products, {products.Brands.Count} brands");
+
         var children = new List<EnrichmentWorkItem>
         {
             HandlerHelpers.Child(item, EnrichmentUnit.Vision, "{}")
@@ -277,6 +300,13 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Conditions, "{}", notBefore: TimeSpan.FromSeconds(150)));
         // Last on purpose: it prunes the offers every other unit attached, so it must see them all.
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Reachability, "{}", notBefore: TimeSpan.FromSeconds(240)));
+
+        // Deliberately LAST: an LLM makes sense of the settled result (3 batched calls — products,
+        // brands, search). It settle-gates internally on OpenCount, so notBefore is only a floor;
+        // the high maxAttempts (× the 30s settle backoff) holds the barrier through a long verify/
+        // reachability tail without the unit Dead-ing before it can synthesize.
+        children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Synthesize, "{}",
+            notBefore: TimeSpan.FromSeconds(270), maxAttempts: 10));
 
         // Idempotent: a Plan row that re-leases after a crash (children already enqueued, its own
         // Complete never written) must not duplicate the entire deep-dive tree and re-spend on every
@@ -332,6 +362,9 @@ public sealed class ItemDiveHandler : IEnrichmentUnitHandler
             current[at] = dived;
             return answer with { Products = p with { Models = current } };
         }, ct);
+
+        await HandlerHelpers.NoteAsync(ctx, item.SearchJobId, WorkContextScope.Product, dived.Id,
+            "itemdive", $"deep-dive: {dived.Specs.Count} specs, {dived.Offers.Count} offers");
         return UnitOutcome.Ok;
     }
 }
@@ -1085,6 +1118,14 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
 
             return changed ? answer with { Products = p with { Models = updated } } : null;
         }, ct);
+
+        // Advisory: record the page's condition evidence + relatedness per model, so the synthesis
+        // reconciler can flag a "used offer vs new page" contradiction in the product summary.
+        foreach (var m in named)
+        {
+            await HandlerHelpers.NoteAsync(ctx, item.SearchJobId, WorkContextScope.Product, m.Id,
+                "verifypage", $"page condition={condition ?? "none"}; related={related.Contains(m.Name)}");
+        }
 
         return UnitOutcome.Ok;
     }

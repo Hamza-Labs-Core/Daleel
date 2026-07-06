@@ -54,6 +54,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     /// <summary>The durable enrichment work queue — the table IS the queue. See <see cref="EnrichmentWorkItem"/>.</summary>
     public DbSet<EnrichmentWorkItem> EnrichmentWorkItems => Set<EnrichmentWorkItem>();
 
+    /// <summary>Per-search/product/brand work contexts: findings ledger + LLM synthesis. See <see cref="WorkContext"/>.</summary>
+    public DbSet<WorkContext> WorkContexts => Set<WorkContext>();
+
     /// <summary>Index over the R2-stored entity documents (products/services/places). See <see cref="EntityRecord"/>.</summary>
     public DbSet<EntityRecord> EntityRecords => Set<EntityRecord>();
     public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
@@ -340,6 +343,22 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.LeaseUntil).HasConversion(toNullableUnixMs);
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
             e.Property(x => x.CompletedAt).HasConversion(toNullableUnixMs);
+        });
+
+        builder.Entity<WorkContext>(e =>
+        {
+            // The append/upsert target — one row per scope-entity per job. This UNIQUE index IS the
+            // idempotency backbone: a re-run (synthesis retry, Plan re-lease) updates the same row,
+            // never inserts a second. The plain SearchJobId index serves load-all-for-job (page
+            // render, prune). Timestamps are Unix-ms bigints like the queue's, for range-filter prunes.
+            e.HasIndex(x => new { x.SearchJobId, x.Scope, x.Key }).IsUnique();
+            e.HasIndex(x => x.SearchJobId);
+            e.Property(x => x.Scope).HasMaxLength(16);
+            e.Property(x => x.Key).HasMaxLength(200); // p_<8hex> or a Brand NameKey (also 200)
+            e.Property(x => x.FindingsJson).HasMaxLength(8000);
+            e.Property(x => x.Synthesis).HasMaxLength(4000);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            e.Property(x => x.SynthesizedAt).HasConversion(toNullableUnixMs);
         });
 
         builder.Entity<ApiCallLog>(e =>

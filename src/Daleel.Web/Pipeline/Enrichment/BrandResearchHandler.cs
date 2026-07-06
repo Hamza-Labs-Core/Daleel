@@ -340,6 +340,11 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
 
         // (e) Refill THIS result from whatever is now known (this run's findings or a prior run's).
         await RefillResultAsync(ctx, item, payload, row, products, ct);
+
+        // Advisory: what this brand pass turned up, for the final synthesis narrative.
+        await HandlerHelpers.NoteAsync(ctx, item.SearchJobId, WorkContextScope.Brand,
+            Brand.Normalize(payload.Brand), "brandresearch",
+            $"sites={sites.Count}; sources ok={attempted - failed}/{attempted}");
         return UnitOutcome.Ok;
     }
 

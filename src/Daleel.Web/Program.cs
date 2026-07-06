@@ -557,6 +557,8 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentWorkQueu
     Daleel.Web.Pipeline.Enrichment.EnrichmentWorkQueue>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichedResultStore,
     Daleel.Web.Pipeline.Enrichment.EnrichedResultStore>();
+// Per-search/product/brand work contexts: findings ledger + LLM synthesis (opens its own scope per call).
+builder.Services.AddSingleton<Daleel.Web.Data.IWorkContextStore, Daleel.Web.Data.WorkContextStore>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.PlanEnrichmentHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
@@ -581,6 +583,8 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IReachabilityProbe>
     new Daleel.Web.Pipeline.Enrichment.ReachabilityProbe(Daleel.Search.Http.SharedHttpHandler.CreateClient()));
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.ReachabilityHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.SynthesisHandler>();
 builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
 // Read-side of /admin/queues (scoped: one DbContext per dashboard refresh tick).
 builder.Services.AddScoped<Daleel.Web.Pipeline.Enrichment.IQueueDashboardService,

@@ -25,6 +25,9 @@ public sealed class DataCleanupService : BackgroundService
     private static readonly TimeSpan Interval = TimeSpan.FromHours(6);
     private static readonly TimeSpan StartupDelay = TimeSpan.FromMinutes(3);
 
+    /// <summary>Work contexts (findings ledger + synthesis) outlive their usefulness with the result — drop past this age.</summary>
+    private static readonly TimeSpan WorkContextTtl = TimeSpan.FromDays(30);
+
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<DataCleanupService> _logger;
 
@@ -86,6 +89,14 @@ public sealed class DataCleanupService : BackgroundService
             else
             {
                 _logger.LogDebug("Data cleanup found nothing to remove");
+            }
+
+            // Prune work contexts tied to searches older than the result TTL — same cadence, own store scope.
+            var pruned = await scope.ServiceProvider.GetRequiredService<IWorkContextStore>()
+                .PruneAsync(DateTimeOffset.UtcNow - WorkContextTtl, ct).ConfigureAwait(false);
+            if (pruned > 0)
+            {
+                _logger.LogInformation("Data cleanup pruned {Count} stale work context(s)", pruned);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

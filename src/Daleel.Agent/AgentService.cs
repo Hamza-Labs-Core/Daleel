@@ -249,6 +249,18 @@ public sealed partial class AgentService
             .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// A raw metered completion for an arbitrary system+user prompt — the entry point the enrichment
+    /// synthesis units use to "make sense of" a settled result. It runs on the SAME <c>_llm</c> this
+    /// service was built with, which is the metered/credit-charged/cost-capped wrapper whenever the
+    /// service was built via AgentFactory with an ApiObserver (the enrichment consumer always does),
+    /// so this call is billed exactly like every other pipeline LLM call. Unlike
+    /// <see cref="AnalyzeAsync"/> it prepends no analyst context and returns the model's text verbatim.
+    /// </summary>
+    public Task<string> SynthesizeAsync(
+        string systemPrompt, string userPrompt, CancellationToken cancellationToken = default) =>
+        _llm.CompleteTextAsync(systemPrompt, userPrompt, cancellationToken);
+
     private async Task<IReadOnlyList<CustomerOpinion>> ExtractOpinionsAsync(
         string subject, ResearchBundle bundle, CancellationToken cancellationToken)
     {

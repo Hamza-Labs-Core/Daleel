@@ -50,6 +50,14 @@ public static class EnrichmentUnit
 
     /// <summary>Job-level: smart-cache gap refill (the ServeAndEnrich path) as one durable unit.</summary>
     public const string CacheGapRefill = "enrich.regaps";
+
+    /// <summary>
+    /// Job-level, settle-gated LAST unit: an LLM "makes sense of" the finished result with exactly
+    /// three batched calls (one over all products, one over all brands, one for the search), each
+    /// reduction written back to an existing summary field. Size-independent cost; deliberately runs
+    /// after the world has settled (waits on the queue's OpenCount) so it reads the final grid.
+    /// </summary>
+    public const string Synthesize = "enrich.synthesize";
 }
 
 /// <summary>Payload of <see cref="EnrichmentUnit.Plan"/> and <see cref="EnrichmentUnit.CacheGapRefill"/>.</summary>
