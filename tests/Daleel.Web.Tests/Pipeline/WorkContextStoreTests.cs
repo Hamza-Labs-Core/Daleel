@@ -90,6 +90,41 @@ public class WorkContextStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Mark_synthesized_records_the_hwm_without_a_synthesis()
+    {
+        await _store.AppendFindingAsync(5, WorkContextScope.Product, "p_y", "itemdive", "specs");
+        await _store.MarkSynthesizedAsync(5, WorkContextScope.Product, "p_y", foldedCount: 1);
+
+        var row = await _store.GetAsync(5, WorkContextScope.Product, "p_y");
+        row!.SynthesizedFindingCount.Should().Be(1, "the entity was considered — its ledger is folded");
+        row.Synthesis.Should().BeNull("no summary was produced for it");
+        row.SynthesizedAt.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Mark_synthesized_never_lowers_an_existing_hwm()
+    {
+        await _store.SetSynthesisAsync(6, WorkContextScope.Brand, "beko", "A narrative.", foldedCount: 3);
+        await _store.MarkSynthesizedAsync(6, WorkContextScope.Brand, "beko", foldedCount: 1); // lower — must not regress
+
+        var row = await _store.GetAsync(6, WorkContextScope.Brand, "beko");
+        row!.SynthesizedFindingCount.Should().Be(3, "a richer prior synthesis stays authoritative");
+        row.Synthesis.Should().Be("A narrative.");
+    }
+
+    [Fact]
+    public async Task Over_long_key_is_clamped_not_faulted()
+    {
+        // A pathological >200-char brand key must never fault the write on the varchar(200) column.
+        var longKey = new string('x', 500);
+        var act = async () => await _store.SetSynthesisAsync(7, WorkContextScope.Brand, longKey, "N", 0);
+
+        await act.Should().NotThrowAsync();
+        // The clamped key round-trips: looking it up by the same clamp finds the row.
+        (await _store.GetAsync(7, WorkContextScope.Brand, new string('x', 200))).Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task Prune_removes_only_rows_older_than_the_cutoff()
     {
         await _store.AppendFindingAsync(3, WorkContextScope.Search, "", "step", "note");

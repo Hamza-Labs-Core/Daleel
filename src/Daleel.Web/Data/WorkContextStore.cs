@@ -34,6 +34,15 @@ public interface IWorkContextStore
     Task SetSynthesisAsync(
         int jobId, string scope, string key, string synthesis, int foldedCount, CancellationToken ct = default);
 
+    /// <summary>
+    /// Records the high-water mark for an entity the reducer CONSIDERED but produced no summary for
+    /// (the LLM omitted it, or it was past the batch head cap this round) — leaving
+    /// <see cref="WorkContext.Synthesis"/> untouched. This is what stops a retry from re-billing an
+    /// unchanged entity: without it, an entity with no synthesis stays eligible forever.
+    /// </summary>
+    Task MarkSynthesizedAsync(
+        int jobId, string scope, string key, int foldedCount, CancellationToken ct = default);
+
     /// <summary>Deletes rows created before <paramref name="olderThan"/> (TTL sweep). Returns the count removed.</summary>
     Task<int> PruneAsync(DateTimeOffset olderThan, CancellationToken ct = default);
 }
@@ -45,6 +54,17 @@ public sealed class WorkContextStore : IWorkContextStore
 
     /// <summary>Per-note cap: a single finding is a short advisory line, not a document.</summary>
     private const int MaxNoteChars = 240;
+
+    /// <summary>Per-step-label cap — a short producer tag, not free text.</summary>
+    private const int MaxStepChars = 40;
+
+    /// <summary>Column limits (see the entity config). Keys/scopes are capped defensively so an over-long
+    /// value (a pathological LLM-extracted brand name) can never fault a write on the varchar bound.</summary>
+    private const int MaxKeyChars = 200;
+    private const int MaxScopeChars = 16;
+
+    /// <summary>Serialized FindingsJson budget, kept safely under the 8000-char column even at the cap.</summary>
+    private const int MaxFindingsJsonChars = 7000;
 
     private static readonly JsonSerializerOptions Json = new()
     {
@@ -61,9 +81,8 @@ public sealed class WorkContextStore : IWorkContextStore
     public async Task AppendFindingAsync(
         int jobId, string scope, string key, string step, string note, CancellationToken ct = default)
     {
-        var trimmed = string.IsNullOrWhiteSpace(note) ? string.Empty
-            : (note.Length <= MaxNoteChars ? note.Trim() : note[..MaxNoteChars].Trim());
-        var finding = new Finding(step, trimmed, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        var finding = new Finding(Clip(step, MaxStepChars), Clip(note, MaxNoteChars),
+            DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
         await UpsertAsync(jobId, scope, key, row =>
         {
@@ -75,7 +94,16 @@ public sealed class WorkContextStore : IWorkContextStore
                 findings.RemoveRange(0, findings.Count - MaxFindings);
             }
 
-            row.FindingsJson = JsonSerializer.Serialize(findings, Json);
+            // Also bound the SERIALIZED size under the varchar(8000) column — drop oldest until it fits,
+            // so no caller (however long its notes) can ever overflow the column and fault the write.
+            var json = JsonSerializer.Serialize(findings, Json);
+            while (json.Length > MaxFindingsJsonChars && findings.Count > 1)
+            {
+                findings.RemoveAt(0);
+                json = JsonSerializer.Serialize(findings, Json);
+            }
+
+            row.FindingsJson = json;
         }, ct);
     }
 
@@ -87,6 +115,20 @@ public sealed class WorkContextStore : IWorkContextStore
             row.Synthesis = synthesis;
             row.SynthesizedFindingCount = foldedCount;
             row.SynthesisVersion++;
+            row.SynthesizedAt = DateTimeOffset.UtcNow;
+        }, ct);
+    }
+
+    public async Task MarkSynthesizedAsync(
+        int jobId, string scope, string key, int foldedCount, CancellationToken ct = default)
+    {
+        await UpsertAsync(jobId, scope, key, row =>
+        {
+            // HWM only — no Synthesis text. Never LOWER the mark (a prior richer synthesis stays authoritative).
+            if (foldedCount > row.SynthesizedFindingCount)
+            {
+                row.SynthesizedFindingCount = foldedCount;
+            }
             row.SynthesizedAt = DateTimeOffset.UtcNow;
         }, ct);
     }
@@ -126,6 +168,12 @@ public sealed class WorkContextStore : IWorkContextStore
     private async Task UpsertAsync(
         int jobId, string scope, string key, Action<WorkContext> mutate, CancellationToken ct)
     {
+        // Defensive column-bound clamps: identity is by (job, scope, key), so a value over the varchar
+        // limit would fault every write. Clamp consistently here so the same over-long key always maps
+        // to the same row (and the handler, which clamps brand keys the same way, agrees).
+        scope = Clip(scope, MaxScopeChars);
+        key = Clip(key, MaxKeyChars);
+
         for (var attempt = 0; attempt < 2; attempt++)
         {
             using var dbScope = _scopeFactory.CreateScope();
@@ -155,6 +203,17 @@ public sealed class WorkContextStore : IWorkContextStore
                 // loop finds the existing row and applies the mutation onto it.
             }
         }
+    }
+
+    private static string Clip(string? s, int max)
+    {
+        if (string.IsNullOrEmpty(s))
+        {
+            return string.Empty;
+        }
+
+        var t = s.Trim();
+        return t.Length <= max ? t : t[..max];
     }
 
     private static List<Finding> Deserialize(string json)

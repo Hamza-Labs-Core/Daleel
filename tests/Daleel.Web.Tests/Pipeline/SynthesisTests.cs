@@ -47,14 +47,15 @@ public class SynthesisTests
         };
     }
 
+    private interface ICountedLlm : ILlmClient { int Calls { get; } }
+
     private static (SynthesisHandler Handler, EnrichmentUnitContext Ctx, EnrichmentWorkItem Item,
-        RecordingResultStore Store, CountingLlm Llm, CountingQueue Queue)
+        RecordingResultStore Store, ICountedLlm Llm, CountingQueue Queue)
         Build(AgentAnswer answer, int openCount = 1, int attempts = 1, ILlmClient? llm = null)
     {
         var store = new RecordingResultStore(answer);
         var queue = new CountingQueue(openCount);
-        var stub = (CountingLlm?)null;
-        var effectiveLlm = llm ?? (stub = new CountingLlm());
+        var effectiveLlm = llm ?? new CountingLlm();
 
         var services = new ServiceCollection();
         services.AddSingleton<IWorkContextStore>(new FakeWorkContextStore());
@@ -75,7 +76,8 @@ public class SynthesisTests
             Queue = queue
         };
 
-        return (new SynthesisHandler(NullLogger<SynthesisHandler>.Instance), ctx, item, store, stub!, queue);
+        return (new SynthesisHandler(NullLogger<SynthesisHandler>.Instance), ctx, item, store,
+            (effectiveLlm as ICountedLlm)!, queue);
     }
 
     [Fact]
@@ -121,7 +123,7 @@ public class SynthesisTests
 
         await handler.ExecuteAsync(item, ctx, default);
 
-        store.Current.Products!.Summary.Should().Be("MARKET-NARRATIVE",
+        store.Current.Products!.Summary.Should().Be(SearchOverview,
             "the settled overview must replace the base-run placeholder to reach the UI");
     }
 
@@ -160,6 +162,47 @@ public class SynthesisTests
         await handler.ExecuteAsync(item, ctx, default);
 
         llm.Calls.Should().Be(afterFirst, "a re-run whose findings ledger hasn't grown makes zero LLM calls");
+    }
+
+    [Fact]
+    public async Task Two_models_sharing_a_stable_id_do_not_throw()
+    {
+        // (Sony, "WH-1000") and (Sony, "WH1000") collapse to the same StableId (punctuation dropped) —
+        // the aggregator keeps them distinct but ProductModel.Id is identical. Must not throw.
+        var m1 = new ProductModel { Name = "Sony WH-1000", Brand = "Sony", Model = "WH-1000" };
+        var m2 = new ProductModel { Name = "Sony WH1000", Brand = "Sony", Model = "WH1000" };
+        m1.Id.Should().Be(m2.Id, "punctuation-only differences collapse to one StableId");
+
+        var answer = new AgentAnswer
+        {
+            Question = "headphones", Geo = "jordan",
+            Products = new ProductSearchResult
+            {
+                Summary = "placeholder",
+                Models = new[] { m1, m2 },
+                Brands = new[] { new BrandInfo { Name = "Sony" } }
+            }
+        };
+        var (handler, ctx, item, store, _, _) = Build(answer, openCount: 1);
+
+        var outcome = await handler.ExecuteAsync(item, ctx, default);
+
+        outcome.Should().BeOfType<UnitOutcome.Done>("duplicate StableIds must not fault the unit");
+        store.Current.Products!.Models.First(m => m.Id == m1.Id).ReviewSummary.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task An_entity_the_llm_omits_is_marked_considered_and_not_re_billed()
+    {
+        // Run 1: the LLM returns a product summary for only the FIRST of two products. The omitted one
+        // must be marked considered so a re-run (with an unchanged ledger) makes ZERO calls.
+        var (handler, ctx, item, _, llm, _) = Build(Answer(products: 2, brands: 1), openCount: 1, llm: new PartialLlm());
+
+        await handler.ExecuteAsync(item, ctx, default);
+        llm.Calls.Should().Be(3, "products + brands + search, one batch each");
+
+        await handler.ExecuteAsync(item, ctx, default);
+        llm.Calls.Should().Be(3, "the omitted product was marked considered — a re-run re-bills nothing");
     }
 
     [Fact]
@@ -207,7 +250,9 @@ public class SynthesisTests
     /// Echoes the entity ids/keys it sees in the "### &lt;id&gt;" headers of the user prompt back as valid
     /// JSON, so its output always matches the handler's computed StableIds. Counts calls.
     /// </summary>
-    private sealed class CountingLlm : ILlmClient
+    private const string SearchOverview = "A solid range of espresso machines across price tiers.";
+
+    private sealed class CountingLlm : ICountedLlm
     {
         public int Calls { get; private set; }
         public string Provider => "stub";
@@ -231,7 +276,39 @@ public class SynthesisTests
             }
             else
             {
-                content = "MARKET-NARRATIVE";
+                content = "{\"overview\":\"" + SearchOverview + "\"}";
+            }
+
+            return Task.FromResult(new LlmResponse { Content = content });
+        }
+    }
+
+    /// <summary>Returns a product summary for only the FIRST product; full brand/search — for the omitted-entity test.</summary>
+    private sealed class PartialLlm : ICountedLlm
+    {
+        public int Calls { get; private set; }
+        public string Provider => "stub";
+
+        public Task<LlmResponse> CompleteAsync(
+            string systemPrompt, IReadOnlyList<LlmMessage> messages, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            var user = messages[0].Content;
+            var ids = Regex.Matches(user, @"^### (.+)$", RegexOptions.Multiline)
+                .Select(m => m.Groups[1].Value.Trim()).ToList();
+
+            string content;
+            if (systemPrompt.Contains("product's per-source"))
+            {
+                content = ids.Count == 0 ? "[]" : $"[{{\"id\":\"{ids[0]}\",\"summary\":\"SUMMARY:{ids[0]}\"}}]";
+            }
+            else if (systemPrompt.Contains("brand's facts"))
+            {
+                content = "[" + string.Join(",", ids.Select(k => $"{{\"nameKey\":\"{k}\",\"narrative\":\"NARRATIVE:{k}\"}}")) + "]";
+            }
+            else
+            {
+                content = "{\"overview\":\"" + SearchOverview + "\"}";
             }
 
             return Task.FromResult(new LlmResponse { Content = content });
@@ -326,6 +403,13 @@ public class SynthesisTests
             r.Synthesis = synthesis;
             r.SynthesizedFindingCount = folded;
             r.SynthesisVersion++;
+            return Task.CompletedTask;
+        }
+
+        public Task MarkSynthesizedAsync(int j, string s, string k, int folded, CancellationToken ct = default)
+        {
+            var r = Row(j, s, k);
+            if (folded > r.SynthesizedFindingCount) r.SynthesizedFindingCount = folded;
             return Task.CompletedTask;
         }
 
