@@ -80,7 +80,7 @@ public interface IProviderApi
     /// contract as <see cref="SubmitEdgeCatalogAsync"/>.
     /// </summary>
     Task<WorkerHandle?> SubmitEdgeBrandAsync(
-        string domain, string brandName, string? searchJobId, CancellationToken ct = default);
+        string domain, string brandName, string? searchJobId, bool refresh = false, CancellationToken ct = default);
 
     /// <summary>True when the edge extract host is configured.</summary>
     bool HasEdgeExtract { get; }
@@ -430,7 +430,7 @@ public sealed class ProviderApi : IProviderApi
     }
 
     public async Task<WorkerHandle?> SubmitEdgeBrandAsync(
-        string domain, string brandName, string? searchJobId, CancellationToken ct = default)
+        string domain, string brandName, string? searchJobId, bool refresh = false, CancellationToken ct = default)
     {
         if (_edge is null)
         {
@@ -441,7 +441,7 @@ public sealed class ProviderApi : IProviderApi
         // failed submit costs nothing and the inline harvest's own metering takes over). Estimated
         // at the brand-lookup rate + the catalogue crawl it triggers is covered by the same call.
         var started = System.Diagnostics.Stopwatch.StartNew();
-        var handle = await _edge.SubmitBrandAsync(domain, brandName, searchJobId, ct).ConfigureAwait(false);
+        var handle = await _edge.SubmitBrandAsync(domain, brandName, searchJobId, refresh, ct).ConfigureAwait(false);
         if (handle is not null && AmbientApiObserver.Observer is { } observer)
         {
             var estimator = AmbientApiObserver.Estimator ?? new CostEstimator();

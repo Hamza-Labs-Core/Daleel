@@ -35,6 +35,13 @@ public class BrandResearchTests
             return Task.CompletedTask;
         }
 
+        public Task<bool> EnqueueFanOutAsync(
+            int searchJobId, string selfKind, IReadOnlyList<EnrichmentWorkItem> children, CancellationToken ct = default)
+        {
+            Enqueued.AddRange(children);
+            return Task.FromResult(children.Count > 0);
+        }
+
         public Task<IReadOnlyList<EnrichmentWorkItem>> ClaimAsync(int max, TimeSpan lease, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<EnrichmentWorkItem>>(Array.Empty<EnrichmentWorkItem>());
         public Task CompleteAsync(long id, CancellationToken ct = default) => Task.CompletedTask;
@@ -223,7 +230,7 @@ public class BrandResearchTests
             Task.FromResult<IReadOnlyList<SocialPost>>(Array.Empty<SocialPost>());
         public Task<WorkerHandle?> SubmitEdgeCatalogAsync(string domain, string? store, string? searchJobId, int maxProducts = 0, CancellationToken ct = default) =>
             Task.FromResult<WorkerHandle?>(null);
-        public Task<WorkerHandle?> SubmitEdgeBrandAsync(string domain, string brandName, string? searchJobId, CancellationToken ct = default) =>
+        public Task<WorkerHandle?> SubmitEdgeBrandAsync(string domain, string brandName, string? searchJobId, bool refresh, CancellationToken ct = default) =>
             Task.FromResult<WorkerHandle?>(null);
         public Task<IReadOnlyList<ClassifyVerdict>> ClassifyTextAsync(IReadOnlyList<(string Id, string Text)> items, IReadOnlyList<string> labels, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ClassifyVerdict>>(Array.Empty<ClassifyVerdict>());

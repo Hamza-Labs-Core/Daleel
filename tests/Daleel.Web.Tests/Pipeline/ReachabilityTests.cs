@@ -113,6 +113,9 @@ public class ReachabilityHandlerTests
     private sealed class NoQueue : IEnrichmentWorkQueue
     {
         public Task EnqueueAsync(IReadOnlyList<EnrichmentWorkItem> items, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<bool> EnqueueFanOutAsync(
+            int searchJobId, string selfKind, IReadOnlyList<EnrichmentWorkItem> children, CancellationToken ct = default) =>
+            Task.FromResult(children.Count > 0);
         public Task<IReadOnlyList<EnrichmentWorkItem>> ClaimAsync(int max, TimeSpan lease, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<EnrichmentWorkItem>>(Array.Empty<EnrichmentWorkItem>());
         public Task CompleteAsync(long id, CancellationToken ct = default) => Task.CompletedTask;

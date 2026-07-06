@@ -120,6 +120,40 @@ public class EnrichmentWorkQueueTests : IDisposable
     public void Dispose() => _provider.Dispose();
 
     [Fact]
+    public async Task Fan_out_is_idempotent_across_a_plan_replay()
+    {
+        // First fan-out from a Plan row: children land.
+        var children = new[] { Item(kind: EnrichmentUnit.Vision), Item(kind: EnrichmentUnit.ItemDive) };
+        (await _queue.EnqueueFanOutAsync(searchJobId: 1, selfKind: EnrichmentUnit.Plan, children))
+            .Should().BeTrue();
+
+        // The Plan row re-leases after a crash (its Complete was never written) and re-runs its whole
+        // fan-out. The guard must refuse — duplicating the tree re-spends on every paid scrape.
+        var replay = new[] { Item(kind: EnrichmentUnit.Vision), Item(kind: EnrichmentUnit.ItemDive) };
+        (await _queue.EnqueueFanOutAsync(searchJobId: 1, selfKind: EnrichmentUnit.Plan, replay))
+            .Should().BeFalse("a re-run Plan must not re-spawn the deep-dive tree");
+
+        await using var db = NewDb();
+        var count = await db.EnrichmentWorkItems.CountAsync(i => i.SearchJobId == 1);
+        count.Should().Be(2, "exactly one fan-out's worth of children exists after the replay");
+    }
+
+    [Fact]
+    public async Task Fan_out_is_scoped_per_job()
+    {
+        await _queue.EnqueueFanOutAsync(1, EnrichmentUnit.Plan, new[] { Item(kind: EnrichmentUnit.Vision) });
+
+        // A DIFFERENT job's fan-out is unaffected by job 1 already having children.
+        var other = new EnrichmentWorkItem
+        {
+            SearchJobId = 2, UserId = "u1", HistoryEntryId = 1, ResultType = "products",
+            Kind = EnrichmentUnit.Vision, Payload = "{}", MaxAttempts = 4
+        };
+        (await _queue.EnqueueFanOutAsync(2, EnrichmentUnit.Plan, new[] { other }))
+            .Should().BeTrue("the guard is per-job, not global");
+    }
+
+    [Fact]
     public async Task Lease_expired_with_attempts_exhausted_is_not_reclaimed_and_gets_reaped()
     {
         await _queue.EnqueueAsync(new[] { Item(maxAttempts: 1) });
@@ -301,6 +335,13 @@ public class EnrichmentHandlerTests
         {
             Enqueued.AddRange(items);
             return Task.CompletedTask;
+        }
+
+        public Task<bool> EnqueueFanOutAsync(
+            int searchJobId, string selfKind, IReadOnlyList<EnrichmentWorkItem> children, CancellationToken ct = default)
+        {
+            Enqueued.AddRange(children);
+            return Task.FromResult(children.Count > 0);
         }
 
         public Task<IReadOnlyList<EnrichmentWorkItem>> ClaimAsync(int max, TimeSpan lease, CancellationToken ct = default) =>

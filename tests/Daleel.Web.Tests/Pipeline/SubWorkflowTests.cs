@@ -892,7 +892,7 @@ public class SubWorkflowTests
             Task.FromResult<Daleel.Web.Cloudflare.WorkerJobStatus?>(null);
 
         public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitBrandAsync(
-            string domain, string brandName, string? searchJobId, CancellationToken ct = default) =>
+            string domain, string brandName, string? searchJobId, bool refresh, CancellationToken ct = default) =>
             Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(null);
 
         public Task<Daleel.Search.Abstractions.ScrapedPage?> ScrapePageAsync(

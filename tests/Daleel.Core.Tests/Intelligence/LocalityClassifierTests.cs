@@ -125,12 +125,20 @@ public class GeoScopedLocalityTests
             "https://souqprice.com/jo/en-jo/product/search", "jo", "Jordan", fromGeoScopedSearch: true));
 
     [Fact]
-    public void Host_name_country_token_is_local_even_unscoped()
+    public void Host_name_country_segment_is_local_even_unscoped()
     {
-        // A seller that put the market in its own domain name advertises its market — no gl needed.
+        // A seller that put the market as a BOUNDED segment of its domain advertises its market.
         Assert.True(LocalityClassifier.IsLocal("https://jo-cell.com/products/x", "jo", "Jordan"));
-        Assert.True(LocalityClassifier.IsLocal("https://jordanmall.com/shop", "jo", "Jordan"));
+        Assert.True(LocalityClassifier.IsLocal("https://cell-jo.com/x", "jo", "Jordan"));
+        Assert.True(LocalityClassifier.IsLocal("https://jordan-mall.com/shop", "jo", "Jordan"));
     }
+
+    [Theory]
+    // Mid-word substrings are NOT the country: Nike Air Jordan, a US dentist named Jordan.
+    [InlineData("https://airjordan.com/shoes")]
+    [InlineData("https://jordandental.com/book")]
+    public void Country_name_as_a_mid_word_substring_is_not_local(string url) =>
+        Assert.False(LocalityClassifier.IsLocal(url, "jo", "Jordan"));
 
     [Fact]
     public void Unscoped_bare_com_without_any_signal_stays_non_local() =>

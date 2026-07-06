@@ -15,6 +15,18 @@ public interface IEnrichmentWorkQueue
     Task EnqueueAsync(IReadOnlyList<EnrichmentWorkItem> items, CancellationToken ct = default);
 
     /// <summary>
+    /// Idempotent fan-out: inserts <paramref name="children"/> only if the job has no enrichment
+    /// unit yet whose kind differs from <paramref name="selfKind"/> — i.e. a previous fan-out from
+    /// the same parent kind hasn't already populated it. This is what makes the Plan unit safe to
+    /// re-run: a Plan row that re-leases after a crash (its children enqueued, its own Complete never
+    /// written) must not duplicate the whole deep-dive tree and re-spend on every scrape. Returns
+    /// true when it enqueued, false when a prior fan-out already populated the job.
+    /// </summary>
+    Task<bool> EnqueueFanOutAsync(
+        int searchJobId, string selfKind, IReadOnlyList<EnrichmentWorkItem> children,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Atomically claims up to <paramref name="max"/> eligible units (pending and due, or running
     /// with an expired lease) and flips them to running with a fresh lease. FOR UPDATE SKIP LOCKED —
     /// no unit is ever handed to two consumers, across containers included.
@@ -85,6 +97,46 @@ public sealed class EnrichmentWorkQueue : IEnrichmentWorkQueue
 
         db.EnrichmentWorkItems.AddRange(items);
         await db.SaveChangesAsync(ct);
+    }
+
+    public async Task<bool> EnqueueFanOutAsync(
+        int searchJobId, string selfKind, IReadOnlyList<EnrichmentWorkItem> children,
+        CancellationToken ct = default)
+    {
+        if (children.Count == 0)
+        {
+            return false;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+
+        // Any unit for this job whose kind differs from the fanning-out unit's own means a previous
+        // fan-out already ran (the children, or grandchildren those children spawned) — regardless of
+        // whether they are still pending, done, or dead. Re-inserting would duplicate the tree and
+        // its paid API spend, so skip. (Not fully atomic against a concurrent second executor, but
+        // a re-lease only happens after the multi-minute lease expires, by which point the first
+        // executor is gone; the practically-important window is closed.)
+        var alreadyFannedOut = await db.EnrichmentWorkItems
+            .AnyAsync(i => i.SearchJobId == searchJobId && i.Kind != selfKind, ct);
+        if (alreadyFannedOut)
+        {
+            return false;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var item in children)
+        {
+            item.CreatedAt = now;
+            if (item.NotBefore == default)
+            {
+                item.NotBefore = now;
+            }
+        }
+
+        db.EnrichmentWorkItems.AddRange(children);
+        await db.SaveChangesAsync(ct);
+        return true;
     }
 
     public async Task<IReadOnlyList<EnrichmentWorkItem>> ClaimAsync(

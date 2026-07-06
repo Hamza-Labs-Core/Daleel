@@ -75,16 +75,17 @@ public static class LocalityClassifier
 
         var labels = host.Split('.', StringSplitOptions.RemoveEmptyEntries);
 
-        // Host NAME carrying the country as a hyphenated token or the country name itself
-        // (jo-cell.com, cell-jo.com, jordanmall.com) — an unconditional signal: a seller that put
-        // the country in its own domain name is advertising its market.
+        // Host NAME carrying the country as a hyphen-delimited SEGMENT or the whole label
+        // (jo-cell.com, cell-jo.com, jordan-store.com, store.jordan.com) — a seller that put the
+        // country in its own domain is advertising its market. The country must be a bounded
+        // segment, NOT a mid-word substring: "airjordan.com" (Nike) and "jordandental.com" (a US
+        // dentist named Jordan) merely CONTAIN "jordan" and are not local.
         if (labels.Length >= 2)
         {
             var registrable = labels[^2];
-            if (registrable.StartsWith(cc + "-", StringComparison.Ordinal) ||
-                registrable.EndsWith("-" + cc, StringComparison.Ordinal) ||
-                (!string.IsNullOrWhiteSpace(countryName) &&
-                 registrable.Contains(countryName!.ToLowerInvariant(), StringComparison.Ordinal)))
+            var name = countryName?.ToLowerInvariant();
+            var segments = registrable.Split('-', StringSplitOptions.RemoveEmptyEntries);
+            if (segments.Any(s => s == cc || (!string.IsNullOrWhiteSpace(name) && s == name)))
             {
                 return true;
             }

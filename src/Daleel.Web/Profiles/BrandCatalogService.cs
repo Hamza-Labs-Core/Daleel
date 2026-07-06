@@ -120,7 +120,11 @@ public sealed class BrandCatalogService : IBrandCatalogService
             await _config.GetBoolAsync(
                 Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag, false, ct).ConfigureAwait(false))
         {
-            var handle = await _providers.SubmitEdgeBrandAsync(domain, brand.Name, searchJobId: null, ct)
+            // refresh:true — this method only reaches the submit after its own TTL gate expired, so
+            // it always wants a FRESH crawl. Without it the worker's idempotency short-circuit would
+            // reply "done" from the frozen R2 object (brand resultKeys are eternal) and the catalogue
+            // would never update.
+            var handle = await _providers.SubmitEdgeBrandAsync(domain, brand.Name, searchJobId: null, refresh: true, ct: ct)
                 .ConfigureAwait(false);
             if (handle is not null)
             {

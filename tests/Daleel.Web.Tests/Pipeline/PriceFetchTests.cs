@@ -56,6 +56,23 @@ public class OfferVerificationTests
             .Should().BeNull();
     }
 
+    [Fact]
+    public void Distinct_models_on_one_page_each_get_their_own_price()
+    {
+        // A mention page listing several distinct SKUs. VerifyPageHandler now calls PickPrice per
+        // related model instead of once for named[0], so model B must NOT inherit model A's number.
+        var page = """
+            DeLonghi Dedica Style EC685 espresso maker — 175.00 JOD in stock
+            DeLonghi Magnifica ESAM4200 bean-to-cup machine — 420.00 JOD in stock
+            Delivery from 3.00 JOD
+            """;
+        var magnifica = new ProductModel { Name = "DeLonghi Magnifica ESAM4200", Brand = "DeLonghi", Model = "ESAM4200" };
+
+        OfferVerificationHandler.PickPrice(page, Dedica)!.Value.Price.Should().Be(175.00m);
+        OfferVerificationHandler.PickPrice(page, magnifica)!.Value.Price.Should().Be(420.00m,
+            "each model resolves to the line naming it, not the first priced line on the page");
+    }
+
     // ── Relatedness gate ────────────────────────────────────────────────────────────────────
 
     [Fact]

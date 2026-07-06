@@ -26,7 +26,7 @@ public interface ICloudflareWorkerClient
     /// submit; the drain's brand handler persists the models when the result lands.
     /// </summary>
     Task<WorkerHandle?> SubmitBrandAsync(
-        string domain, string brandName, string? searchJobId, CancellationToken ct = default);
+        string domain, string brandName, string? searchJobId, bool refresh = false, CancellationToken ct = default);
 
     /// <summary>The worker's status for an async job, or null when it can't be reached.</summary>
     Task<WorkerJobStatus?> GetJobStatusAsync(string jobId, CancellationToken ct = default);
@@ -200,14 +200,18 @@ public sealed class CloudflareWorkerClient : ICloudflareWorkerClient
     }
 
     public async Task<WorkerHandle?> SubmitBrandAsync(
-        string domain, string brandName, string? searchJobId, CancellationToken ct = default)
+        string domain, string brandName, string? searchJobId, bool refresh = false, CancellationToken ct = default)
     {
         var body = new Dictionary<string, object?>
         {
             ["domain"] = domain,
             ["store"] = brandName, // the worker's generic entity label; the drain reads it back as the brand name
             ["searchJobId"] = searchJobId,
-            ["withCatalog"] = true
+            ["withCatalog"] = true,
+            // Brand harvests have an eternal resultKey (searchJobId:null); without this the worker's
+            // idempotency short-circuit would freeze the catalogue after the first crawl. The VPS only
+            // re-submits after its own TTL, so it always wants a fresh crawl.
+            ["refresh"] = refresh
         };
 
         try

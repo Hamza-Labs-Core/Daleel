@@ -278,7 +278,10 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
         // Last on purpose: it prunes the offers every other unit attached, so it must see them all.
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Reachability, "{}", notBefore: TimeSpan.FromSeconds(240)));
 
-        await ctx.Queue.EnqueueAsync(children, ct);
+        // Idempotent: a Plan row that re-leases after a crash (children already enqueued, its own
+        // Complete never written) must not duplicate the entire deep-dive tree and re-spend on every
+        // scrape. EnqueueFanOutAsync skips when the job already has any non-Plan unit.
+        await ctx.Queue.EnqueueFanOutAsync(item.SearchJobId, item.Kind, children, ct);
         return UnitOutcome.Ok;
     }
 }
@@ -963,7 +966,16 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
             .Where(m => OfferVerificationHandler.IsRelatedPage(content, m))
             .Select(m => m.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var price = related.Count > 0 ? OfferVerificationHandler.PickPrice(content, named[0]) : null;
+        // Price each related model from ITS OWN best-matching line on the page. A mention page can
+        // list several distinct models (the "3 SKUs on one page" case), and named[0]'s price must
+        // not be stamped onto its siblings — PickPrice already scores lines by per-model token
+        // overlap, so calling it per model is what attributes the right number to each.
+        var pricesByModel = named
+            .Where(m => related.Contains(m.Name))
+            .ToDictionary(
+                m => m.Name,
+                m => OfferVerificationHandler.PickPrice(content, m),
+                StringComparer.OrdinalIgnoreCase);
         var condition = OfferVerificationHandler.ExtractCondition(content);
         var description = OfferVerificationHandler.ExtractDescription(content);
 
@@ -984,6 +996,7 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
 
                 var modelChanged = false;
                 var offers = new List<PriceOffer>(m.Offers.Count + 1);
+                var price = pricesByModel.GetValueOrDefault(m.Name);
 
                 // A related, priced MENTION page becomes an offer the model didn't have.
                 if (payload.FromMention && related.Contains(m.Name) && price is { } mp &&
