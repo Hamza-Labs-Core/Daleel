@@ -53,9 +53,26 @@ public sealed class SystemConfigService : ISystemConfigService
     private async Task<IReadOnlyDictionary<string, string>> LoadAsync(CancellationToken ct) =>
         await _db.SystemConfig.AsNoTracking().ToDictionaryAsync(c => c.Key, c => c.Value, ct);
 
+    /// <summary>
+    /// Default for the LLM-actor step flags: ON where the environment opts in (QA sets
+    /// <c>ACTOR_STEPS_DEFAULT=true</c>), OFF everywhere else (production). Read once at load; the seeded
+    /// row can still be flipped per-flag at /admin/settings afterwards.
+    /// </summary>
+    private static readonly string ActorStepsDefault =
+        string.Equals(Environment.GetEnvironmentVariable("ACTOR_STEPS_DEFAULT"), "true",
+            StringComparison.OrdinalIgnoreCase) ? "true" : "false";
+
     /// <summary>Defaults seeded on first run; admins can override any of these at /admin/settings.</summary>
     public static readonly IReadOnlyList<SystemConfig> Defaults = new[]
     {
+        // LLM-actor steps (guided process, LLM is the actor at each provider-calling step). Seeded so
+        // they appear as toggles in Admin → Settings; default ON in QA, OFF in prod. actor.catalog has
+        // no handler yet, so it stays off regardless.
+        new SystemConfig { Key = "actor.itemdive", Value = ActorStepsDefault, Type = "bool" },
+        new SystemConfig { Key = "actor.verifypage", Value = ActorStepsDefault, Type = "bool" },
+        new SystemConfig { Key = "actor.brandresearch", Value = ActorStepsDefault, Type = "bool" },
+        new SystemConfig { Key = "actor.catalog", Value = "false", Type = "bool" },
+
         new SystemConfig { Key = "ratelimit.page_per_minute", Value = "100", Type = "int" },
         new SystemConfig { Key = "ratelimit.api_per_minute", Value = "10", Type = "int" },
         new SystemConfig { Key = "ratelimit.search_per_hour", Value = "5", Type = "int" },

@@ -340,6 +340,9 @@ jobs:
             R2_PUBLIC_URL=${{ secrets.R2_PUBLIC_URL }}
             # QA runs the PR-scoped image tag (not production's latest).
             DALEEL_IMAGE=ghcr.io/hamza-labs-core/daleel:${{ env.QA_TAG }}
+            # QA exercises the LLM-actor steps by default (prod leaves this unset ⇒ off). Seeds the
+            # actor.* flags ON on first boot; each stays admin-toggleable at /admin/settings.
+            ACTOR_STEPS_DEFAULT=true
             # QA exercises the PostgreSQL event store (the bundled `postgres` compose
             # service). Password seeds that service AND the connection string below.
             POSTGRES_PASSWORD=${{ secrets.QA_POSTGRES_PASSWORD || 'daleel-qa-events' }}
