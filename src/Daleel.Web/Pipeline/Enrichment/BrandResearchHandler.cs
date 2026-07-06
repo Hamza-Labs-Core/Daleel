@@ -95,6 +95,53 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
             ? (await siteRepo.GetForBrandAsync(row.Id, ct)).ToList()
             : new List<BrandSite>();
 
+        // LLM-ACTOR site discovery (flag-gated, default off): the LLM searches and READS candidate pages
+        // to pick the brand's real official/local/regional sites — replacing host-substring matching that
+        // misses rebranded/abbreviated domains and can't tell official from reseller. It runs FIRST and
+        // records what it finds, so the deterministic blocks below self-skip (Website/HasFreshSite set).
+        var actorCfg = ctx.Services.GetService<Daleel.Web.Data.ISystemConfigService>();
+        if (actorCfg is not null && await actorCfg.GetBoolAsync(Actor.ActorFlags.BrandResearch, false, ct))
+        {
+            attempted++;
+            try
+            {
+                var found = await ctx.Services.GetRequiredService<Actor.BrandSiteActor>()
+                    .FindAsync(ctx.Agent(), payload.Brand, geo, ct);
+                if (found is not null)
+                {
+                    if (string.IsNullOrWhiteSpace(row.Website) && !string.IsNullOrWhiteSpace(found.Website))
+                    {
+                        row.Website = found.Website;
+                    }
+                    if (string.IsNullOrWhiteSpace(row.Description) && !string.IsNullOrWhiteSpace(found.Description))
+                    {
+                        row.Description = Truncate(found.Description!);
+                    }
+                    foreach (var link in found.Social)
+                    {
+                        if (!row.SocialLinks.Contains(link)) row.SocialLinks.Add(link);
+                    }
+
+                    row = await SaveAsync(repo, row, ct);
+                    if (row.Id > 0)
+                    {
+                        if (!string.IsNullOrWhiteSpace(row.Website) && !HasFreshSite(sites, BrandSiteLevel.Global, null))
+                            await RecordSiteAsync(siteRepo, sites, row.Id, BrandSiteLevel.Global, null, row.Website!, ct);
+                        if (!string.IsNullOrWhiteSpace(found.LocalUrl) && !HasFreshSite(sites, BrandSiteLevel.Local, geo.CountryCode))
+                            await RecordSiteAsync(siteRepo, sites, row.Id, BrandSiteLevel.Local, geo.CountryCode, found.LocalUrl!, ct);
+                        if (!string.IsNullOrWhiteSpace(found.RegionalUrl) && !HasFreshSite(sites, BrandSiteLevel.Regional, geo.CountryCode))
+                            await RecordSiteAsync(siteRepo, sites, row.Id, BrandSiteLevel.Regional, geo.CountryCode, found.RegionalUrl!, ct);
+                    }
+                }
+            }
+            catch (OperationCanceledException) { throw; }
+            catch (Exception ex)
+            {
+                failed++;
+                _logger.LogWarning(ex, "Brand {Brand}: actor site discovery failed", payload.Brand);
+            }
+        }
+
         // (a) WEB — official site + a snippet description. Skipped when the row already knows them.
         if (string.IsNullOrWhiteSpace(row.Website))
         {

@@ -11,6 +11,9 @@ namespace Daleel.Web.Pipeline.Enrichment.Actor;
 public static class ActorFlags
 {
     public const string ItemDive = "actor.itemdive";
+    public const string VerifyPage = "actor.verifypage";
+    public const string Catalog = "actor.catalog";
+    public const string BrandResearch = "actor.brandresearch";
 }
 
 /// <summary>

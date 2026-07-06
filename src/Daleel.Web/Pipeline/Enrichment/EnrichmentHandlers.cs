@@ -1061,22 +1061,47 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
         }
 
         var content = page.Content;
-        var related = named
-            .Where(m => OfferVerificationHandler.IsRelatedPage(content, m))
-            .Select(m => m.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        // Price each related model from ITS OWN best-matching line on the page. A mention page can
-        // list several distinct models (the "3 SKUs on one page" case), and named[0]'s price must
-        // not be stamped onto its siblings — PickPrice already scores lines by per-model token
-        // overlap, so calling it per model is what attributes the right number to each.
-        var pricesByModel = named
-            .Where(m => related.Contains(m.Name))
-            .ToDictionary(
-                m => m.Name,
-                m => OfferVerificationHandler.PickPrice(content, m),
-                StringComparer.OrdinalIgnoreCase);
-        var condition = OfferVerificationHandler.ExtractCondition(content);
-        var description = OfferVerificationHandler.ExtractDescription(content);
+
+        HashSet<string> related;
+        Dictionary<string, (decimal Price, string Currency, bool Exact)?> pricesByModel;
+        string? condition;
+        string? description;
+
+        // LLM-ACTOR judgment (flag-gated, default off): one turn over the already-fetched page decides
+        // relatedness / price / condition / description, replacing the token-counting heuristics whose
+        // misses can DELETE a real offer. Falls back to the deterministic parsers when off or empty.
+        var config = ctx.Services.GetService<Daleel.Web.Data.ISystemConfigService>();
+        Actor.VerifyPageActor.PageJudgment? judged = null;
+        if (config is not null && await config.GetBoolAsync(Actor.ActorFlags.VerifyPage, false, ct))
+        {
+            judged = await ctx.Services.GetRequiredService<Actor.VerifyPageActor>()
+                .JudgeAsync(ctx.Agent(), content, named, ct);
+        }
+
+        if (judged is not null)
+        {
+            related = judged.Related;
+            pricesByModel = judged.PricesByModel;
+            condition = judged.Condition;
+            description = judged.Description;
+        }
+        else
+        {
+            related = named
+                .Where(m => OfferVerificationHandler.IsRelatedPage(content, m))
+                .Select(m => m.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Price each related model from ITS OWN best-matching line — a mention page can list several
+            // distinct models, and named[0]'s price must not be stamped onto its siblings.
+            pricesByModel = named
+                .Where(m => related.Contains(m.Name))
+                .ToDictionary(
+                    m => m.Name,
+                    m => OfferVerificationHandler.PickPrice(content, m),
+                    StringComparer.OrdinalIgnoreCase);
+            condition = OfferVerificationHandler.ExtractCondition(content);
+            description = OfferVerificationHandler.ExtractDescription(content);
+        }
 
         await ctx.Results.PatchAsync(item, answer =>
         {

@@ -162,6 +162,52 @@ public class ActorLoopTests
         res.SourceUrl.Should().Be("https://delonghi/ec685");
     }
 
+    [Fact]
+    public async Task Verify_page_actor_judges_relatedness_price_and_condition()
+    {
+        var llm = new ScriptedLlm(
+            "{\"action\":\"done\",\"result\":{" +
+              "\"models\":[" +
+                "{\"name\":\"DeLonghi Dedica EC685\",\"related\":true,\"price\":{\"value\":175.0,\"currency\":\"JOD\",\"exact\":true}}," +
+                "{\"name\":\"Random Blender X\",\"related\":false,\"price\":null}]," +
+              "\"condition\":\"new\",\"description\":\"A slim 15-bar espresso machine.\"}}");
+        var actor = new VerifyPageActor(Loop());
+        var named = new[]
+        {
+            new ProductModel { Name = "DeLonghi Dedica EC685", Brand = "DeLonghi", Model = "EC685" },
+            new ProductModel { Name = "Random Blender X", Brand = "Acme" }
+        };
+
+        var j = await actor.JudgeAsync(Agent(llm), "PAGE MARKDOWN about the Dedica...", named, default);
+
+        j.Should().NotBeNull();
+        j!.Related.Should().Contain("DeLonghi Dedica EC685");
+        j.Related.Should().NotContain("Random Blender X", "an unrelated model is not marked related");
+        j.PricesByModel["DeLonghi Dedica EC685"]!.Value.Price.Should().Be(175.0m);
+        j.Condition.Should().Be("new");
+        j.Description.Should().Contain("15-bar");
+    }
+
+    [Fact]
+    public async Task Brand_site_actor_returns_official_and_local_sites()
+    {
+        var llm = new ScriptedLlm(
+            "{\"action\":\"web_search\",\"args\":{\"query\":\"DeLonghi official site Jordan\"}}",
+            "{\"action\":\"done\",\"result\":{\"website\":\"https://www.delonghi.com\"," +
+                "\"localUrl\":\"https://www.delonghi.com/en-jo\",\"regionalUrl\":null," +
+                "\"description\":\"Italian small-appliance maker.\",\"social\":[\"https://instagram.com/delonghi\",\"not-a-url\"]}}");
+        var actor = new BrandSiteActor(Loop());
+        var geo = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault("jordan");
+
+        var sites = await actor.FindAsync(Agent(llm), "DeLonghi", geo, default);
+
+        sites.Should().NotBeNull();
+        sites!.Website.Should().Be("https://www.delonghi.com");
+        sites.LocalUrl.Should().Be("https://www.delonghi.com/en-jo");
+        sites.Social.Should().ContainSingle().Which.Should().Be("https://instagram.com/delonghi");
+        sites.Social.Should().NotContain("not-a-url", "non-URL social entries are dropped");
+    }
+
     /// <summary>An ILlmClient that replays a fixed script of completions, one per call.</summary>
     private sealed class ScriptedLlm : ILlmClient
     {
