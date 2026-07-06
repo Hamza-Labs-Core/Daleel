@@ -1080,16 +1080,30 @@ public sealed partial class AgentService
     internal static bool LooksLikePageTitle(string text)
     {
         var trimmed = text.Trim();
-        if (trimmed.Contains('|'))
+
+        // Query-echo phrasing is an SEO/listing signal regardless of shape.
+        if (trimmed.Contains("lowest price", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("best price", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("أقل الأسعار", StringComparison.Ordinal)
+            || trimmed.Contains("افضل الاسعار", StringComparison.Ordinal)
+            || trimmed.Contains("أفضل الأسعار", StringComparison.Ordinal))
         {
             return true;
         }
 
-        return trimmed.Contains("lowest price", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Contains("best price", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Contains("أقل الأسعار", StringComparison.Ordinal)
-            || trimmed.Contains("افضل الاسعار", StringComparison.Ordinal)
-            || trimmed.Contains("أفضل الأسعار", StringComparison.Ordinal);
+        // A pipe alone does NOT make a page title: real product pages append "| StoreName"
+        // ("Beko Espresso Machine 15 Bar 1628W | Leaders Center"). The pipe is a signal only when
+        // the segment before it carries NO product-identity token — no digit anywhere (model
+        // numbers, capacities, wattages all contain digits). "Espresso Machine in Jordan | Find …"
+        // has none; a genuine model does. (Branch review, matching-quality: bare-pipe dropped
+        // real products.)
+        var pipe = trimmed.IndexOf('|');
+        if (pipe > 0)
+        {
+            return !trimmed[..pipe].Any(char.IsDigit);
+        }
+
+        return false;
     }
 
     /// <summary>

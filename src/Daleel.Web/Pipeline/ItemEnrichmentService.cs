@@ -1502,8 +1502,24 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         name.Split(' ', '-', '/', '،', ',', '(', ')')
             .Select(tok => tok.Trim().TrimEnd('"'))
             .Where(tok => tok.Length > 0 && tok.All(c => char.IsDigit(c) || c == '.') && tok.Any(char.IsDigit))
-            .Select(tok => tok.TrimEnd('.', '0') is { Length: > 0 } n ? n : tok) // 2.0 ≡ 2
+            .Select(NormalizeDecimal)
             .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// "2.0" ≡ "2" and "2.50" ≡ "2.5" — but only trailing zeros of a FRACTION collapse. A naive
+    /// TrimEnd('.','0') also ate integer zeros ("100" → "1", "10" → "1"), collapsing a 100L and a
+    /// 10L heater into the same variant. Only strip zeros after a decimal point, then a bare dot.
+    /// </summary>
+    private static string NormalizeDecimal(string token)
+    {
+        if (!token.Contains('.'))
+        {
+            return token; // pure integer: every digit is significant
+        }
+
+        var trimmed = token.TrimEnd('0').TrimEnd('.');
+        return trimmed.Length > 0 ? trimmed : token;
+    }
 
     /// <summary>
     /// True when two names carry DISAGREEING variant numbers — both have numbers, none shared.

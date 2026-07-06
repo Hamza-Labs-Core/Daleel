@@ -410,7 +410,12 @@ public class EnrichmentHandlerTests
     public async Task Catalog_prefers_drained_edge_rows_over_crawling()
     {
         var (ctx, _, store, svc) = Build(ProductAnswer("A"));
-        svc.DrainedResult = (new List<ProductModel> { new() { Name = "A" } }, 1, Array.Empty<string>());
+        // A genuinely priced drain result carries the offer it claims — so the additive merge has
+        // something to compose (an identical model would correctly be a no-op patch).
+        svc.DrainedResult = (new List<ProductModel>
+        {
+            new() { Name = "A", Offers = new List<PriceOffer> { new() { Source = "Edge", Url = "https://e/a", Price = 99m } } }
+        }, 1, Array.Empty<string>());
 
         var outcome = await new CatalogAttachHandler().ExecuteAsync(
             Root(EnrichmentUnit.CatalogAttach, EnrichmentWorkQueue.Payload(new CatalogPayload("store-a.jo", "Store A"))),

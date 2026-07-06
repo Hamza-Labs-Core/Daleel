@@ -48,6 +48,163 @@ internal static class HandlerHelpers
         MaxAttempts = maxAttempts,
         NotBefore = notBefore is { } delay ? DateTimeOffset.UtcNow + delay : default
     };
+
+    /// <summary>
+    /// Composes a whole-list unit's output onto the CURRENT (row-locked) models WITHOUT clobbering
+    /// concurrent patches. The list-transforming units (vision, conditions, catalogue, brand-DB
+    /// fill) run their expensive pass on a pre-lock snapshot; assigning that whole list back would
+    /// silently revert every other unit's committed work in the window. Those units are ADD-ONLY —
+    /// they fill empty fields and append offers/models — so the safe composition is to apply only
+    /// their ADDITIONS onto the live models by name. Removals (VerifyPage's unrelated-offer prune)
+    /// never route through here; they compose per-offer inside their own mutate.
+    /// <paramref name="changed"/> reports whether anything was actually added, so a no-op patch
+    /// writes nothing.
+    /// </summary>
+    public static List<ProductModel> MergeAdditive(
+        IReadOnlyList<ProductModel> live, IReadOnlyList<ProductModel> transformed, out bool changed)
+    {
+        changed = false;
+        var byName = new Dictionary<string, ProductModel>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in transformed)
+        {
+            byName.TryAdd(t.Name, t); // first wins; the transform never yields two of one name
+        }
+
+        var result = new List<ProductModel>(live.Count + transformed.Count);
+        var liveNames = new HashSet<string>(live.Select(m => m.Name), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var current in live)
+        {
+            if (byName.TryGetValue(current.Name, out var incoming) && !ReferenceEquals(current, incoming))
+            {
+                result.Add(MergeModel(current, incoming, ref changed));
+            }
+            else
+            {
+                result.Add(current);
+            }
+        }
+
+        // Models the unit CREATED (catalogue discoveries, new SKUs) — append when the live list
+        // carries nothing of that identity yet.
+        foreach (var t in transformed)
+        {
+            if (liveNames.Contains(t.Name))
+            {
+                continue;
+            }
+
+            var identity = Identity(t);
+            if (result.Any(m => Identity(m) == identity))
+            {
+                continue;
+            }
+
+            result.Add(t);
+            changed = true;
+        }
+
+        return result;
+    }
+
+    /// <summary>Fill-only merge of one model: empty fields filled, offers appended/completed, never overwritten.</summary>
+    private static ProductModel MergeModel(ProductModel current, ProductModel incoming, ref bool changed)
+    {
+        var next = current;
+
+        if (string.IsNullOrWhiteSpace(next.ImageUrl) && !string.IsNullOrWhiteSpace(incoming.ImageUrl))
+        {
+            next = next with { ImageUrl = incoming.ImageUrl };
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(next.BrandRegionalUrl) && !string.IsNullOrWhiteSpace(incoming.BrandRegionalUrl))
+        {
+            next = next with { BrandRegionalUrl = incoming.BrandRegionalUrl };
+            changed = true;
+        }
+
+        if (string.IsNullOrWhiteSpace(next.BrandSiteUrl) && !string.IsNullOrWhiteSpace(incoming.BrandSiteUrl))
+        {
+            next = next with { BrandSiteUrl = incoming.BrandSiteUrl };
+            changed = true;
+        }
+
+        // Specs: add keys the live model lacks; never overwrite (a later scrape shouldn't stomp an
+        // earlier deep-dive's value).
+        if (incoming.Specs.Count > 0)
+        {
+            Dictionary<string, string>? merged = null;
+            foreach (var (key, value) in incoming.Specs)
+            {
+                if (!next.Specs.ContainsKey(key) && !string.IsNullOrWhiteSpace(value))
+                {
+                    merged ??= new Dictionary<string, string>(next.Specs);
+                    merged[key] = value;
+                }
+            }
+
+            if (merged is not null)
+            {
+                next = next with { Specs = merged };
+                changed = true;
+            }
+        }
+
+        // Offers: append incoming offers not already present (by Url, else Source+Price); for one
+        // that matches by Url, fill a missing price or condition. Never remove.
+        if (incoming.Offers.Count > 0)
+        {
+            var offers = next.Offers.ToList();
+            var offersChanged = false;
+            foreach (var inc in incoming.Offers)
+            {
+                var idx = offers.FindIndex(o => OffersSame(o, inc));
+                if (idx < 0)
+                {
+                    offers.Add(inc);
+                    offersChanged = true;
+                    continue;
+                }
+
+                var existing = offers[idx];
+                var patched = existing;
+                if (patched.Price is null && inc.Price is not null)
+                {
+                    patched = patched with { Price = inc.Price, Currency = inc.Currency, IsIndicative = inc.IsIndicative };
+                }
+
+                if (string.IsNullOrWhiteSpace(patched.Condition) && !string.IsNullOrWhiteSpace(inc.Condition))
+                {
+                    patched = patched with { Condition = inc.Condition };
+                }
+
+                if (!ReferenceEquals(patched, existing))
+                {
+                    offers[idx] = patched;
+                    offersChanged = true;
+                }
+            }
+
+            if (offersChanged)
+            {
+                next = next with { Offers = offers };
+                changed = true;
+            }
+        }
+
+        return next;
+    }
+
+    private static bool OffersSame(PriceOffer a, PriceOffer b) =>
+        !string.IsNullOrWhiteSpace(a.Url) && !string.IsNullOrWhiteSpace(b.Url)
+            ? string.Equals(a.Url, b.Url, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(a.Source, b.Source, StringComparison.OrdinalIgnoreCase) && a.Price == b.Price;
+
+    private static string Identity(ProductModel m) =>
+        !string.IsNullOrWhiteSpace(m.Brand) && !string.IsNullOrWhiteSpace(m.Model)
+            ? $"{m.Brand}{m.Model}".ToLowerInvariant()
+            : m.Name.ToLowerInvariant();
 }
 
 /// <summary>
@@ -71,9 +228,16 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
         // Phase 0 inline: pure DB reads, fills images/prices/specs harvested by previous searches.
         if (await svc.FillFromBrandDatabaseUnitAsync(products.Models.ToList(), products.Geo, ct) is { } filled)
         {
-            await ctx.Results.PatchAsync(item,
-                answer => answer.Products is null ? null : answer with { Products = answer.Products with { Models = filled } },
-                ct);
+            await ctx.Results.PatchAsync(item, answer =>
+            {
+                if (answer.Products is not { } p)
+                {
+                    return null;
+                }
+
+                var merged = HandlerHelpers.MergeAdditive(p.Models, filled, out var changed);
+                return changed ? answer with { Products = p with { Models = merged } } : null;
+            }, ct);
         }
 
         var children = new List<EnrichmentWorkItem>
@@ -187,9 +351,16 @@ public sealed class VisionUnitHandler : IEnrichmentUnitHandler
             return UnitOutcome.Ok;
         }
 
-        await ctx.Results.PatchAsync(item,
-            answer => answer.Products is null ? null : answer with { Products = answer.Products with { Models = identified } },
-            ct);
+        await ctx.Results.PatchAsync(item, answer =>
+        {
+            if (answer.Products is not { } p)
+            {
+                return null;
+            }
+
+            var merged = HandlerHelpers.MergeAdditive(p.Models, identified, out var changed);
+            return changed ? answer with { Products = p with { Models = merged } } : null;
+        }, ct);
         return UnitOutcome.Ok;
     }
 }
@@ -276,9 +447,16 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
 
     private static Task Patch(
         EnrichmentUnitContext ctx, EnrichmentWorkItem item, List<ProductModel> models, CancellationToken ct) =>
-        ctx.Results.PatchAsync(item,
-            answer => answer.Products is null ? null : answer with { Products = answer.Products with { Models = models } },
-            ct);
+        ctx.Results.PatchAsync(item, answer =>
+        {
+            if (answer.Products is not { } p)
+            {
+                return null;
+            }
+
+            var merged = HandlerHelpers.MergeAdditive(p.Models, models, out var changed);
+            return changed ? answer with { Products = p with { Models = merged } } : null;
+        }, ct);
 }
 
 /// <summary>
@@ -385,9 +563,16 @@ public sealed class ConditionsHandler : IEnrichmentUnitHandler
             return UnitOutcome.Ok;
         }
 
-        await ctx.Results.PatchAsync(item,
-            answer => answer.Products is null ? null : answer with { Products = answer.Products with { Models = labeled } },
-            ct);
+        await ctx.Results.PatchAsync(item, answer =>
+        {
+            if (answer.Products is not { } p)
+            {
+                return null;
+            }
+
+            var merged = HandlerHelpers.MergeAdditive(p.Models, labeled, out var changed);
+            return changed ? answer with { Products = p with { Models = merged } } : null;
+        }, ct);
         return UnitOutcome.Ok;
     }
 }
@@ -1015,9 +1200,27 @@ public sealed class CacheGapRefillHandler : IEnrichmentUnitHandler
             return UnitOutcome.Ok;
         }
 
-        await ctx.Results.PatchAsync(item,
-            _ => ResultSerialization.Deserialize<Daleel.Agent.AgentAnswer>(refilled.ResultJson),
-            ct);
+        if (ResultSerialization.Deserialize<Daleel.Agent.AgentAnswer>(refilled.ResultJson)
+                is not { Products: { } refilledProducts } refilledAnswer)
+        {
+            return UnitOutcome.Ok;
+        }
+
+        // Compose the refilled models onto the LIVE answer additively rather than replacing the
+        // whole answer: even though ServeAndEnrich normally enqueues only this unit, a wholesale
+        // overwrite would revert any concurrent patch — the same lost-update trap the other units
+        // now avoid. Non-model refilled fields (summary/research) win only when the live answer
+        // lacks them.
+        await ctx.Results.PatchAsync(item, answer =>
+        {
+            if (answer.Products is not { } p)
+            {
+                return refilledAnswer; // no live product answer to compose onto — take the refill
+            }
+
+            var merged = HandlerHelpers.MergeAdditive(p.Models, refilledProducts.Models, out var changed);
+            return changed ? answer with { Products = p with { Models = merged } } : null;
+        }, ct);
         return UnitOutcome.Ok;
     }
 }

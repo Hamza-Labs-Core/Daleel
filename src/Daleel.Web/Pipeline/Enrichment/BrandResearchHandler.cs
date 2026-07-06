@@ -410,8 +410,20 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
                 return null;
             }
 
-            var changed = filled is not null;
-            var models = filled ?? p.Models.ToList();
+            // Compose the brand-DB fill onto the LIVE models (additive) — a whole-list assign from
+            // the pre-research snapshot would revert every concurrent unit's work committed during
+            // this unit's minutes-long pass (offers, prices, images, VerifyPage prunes).
+            var changed = false;
+            List<ProductModel> models;
+            if (filled is not null)
+            {
+                models = HandlerHelpers.MergeAdditive(p.Models, filled, out changed);
+            }
+            else
+            {
+                models = p.Models.ToList();
+            }
+
             if (!string.IsNullOrWhiteSpace(siteUrl))
             {
                 for (var i = 0; i < models.Count; i++)
