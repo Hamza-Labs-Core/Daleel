@@ -595,6 +595,8 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
     Daleel.Web.Pipeline.Enrichment.ReachabilityHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.SynthesisHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ImageCheckHandler>();
 builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
 // Read-side of /admin/queues (scoped: one DbContext per dashboard refresh tick).
 builder.Services.AddScoped<Daleel.Web.Pipeline.Enrichment.IQueueDashboardService,

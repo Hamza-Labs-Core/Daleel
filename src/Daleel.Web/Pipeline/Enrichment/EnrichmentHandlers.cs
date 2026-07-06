@@ -301,6 +301,11 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
         // Last on purpose: it prunes the offers every other unit attached, so it must see them all.
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Reachability, "{}", notBefore: TimeSpan.FromSeconds(240)));
 
+        // Halal safety: vision-screen the FINAL grid images (after image lookup at 90s + catalogue/brand
+        // images land) and strip any judged haram — the gather-stage moderation never saw these enriched
+        // images. Deliberately late so it screens the settled grid, not a half-filled one.
+        children.Add(HandlerHelpers.Child(item, EnrichmentUnit.ImageCheck, "{}", notBefore: TimeSpan.FromSeconds(160)));
+
         // Deliberately LAST: an LLM makes sense of the settled result (3 batched calls — products,
         // brands, search). It settle-gates internally on OpenCount, so notBefore is only a floor;
         // the high maxAttempts (× the 30s settle backoff) holds the barrier through a long verify/

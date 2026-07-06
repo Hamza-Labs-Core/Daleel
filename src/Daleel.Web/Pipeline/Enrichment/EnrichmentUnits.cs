@@ -48,6 +48,14 @@ public static class EnrichmentUnit
     /// <summary>Job-level: prunes offers whose sites users can't actually reach (deliberately last).</summary>
     public const string Reachability = "enrich.reachability";
 
+    /// <summary>
+    /// Job-level HALAL SAFETY: vision-screens the FINAL product/brand grid images and strips any judged
+    /// haram (indecent/immodest, alcohol, pork…). Runs after image lookup/catalog/brand settle their
+    /// images — the gather-stage moderation only saw the raw search results, not these enriched images.
+    /// Always on (no flag): a missing vision model just no-ops.
+    /// </summary>
+    public const string ImageCheck = "enrich.imagecheck";
+
     /// <summary>Job-level: smart-cache gap refill (the ServeAndEnrich path) as one durable unit.</summary>
     public const string CacheGapRefill = "enrich.regaps";
 
