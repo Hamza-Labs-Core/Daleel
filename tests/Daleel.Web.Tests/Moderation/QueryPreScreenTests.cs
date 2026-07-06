@@ -35,6 +35,28 @@ public class QueryPreScreenTests
     public async Task Non_haram_queries_pass(string query) =>
         (await Screen().ScreenAsync(query)).Blocked.Should().BeFalse($"'{query}' is not a haram consumable");
 
+    [Theory]
+    [InlineData("best loans")]
+    [InlineData("credit cards jordan")]
+    [InlineData("home mortgage rates")]
+    [InlineData("قرض شخصي")]
+    public async Task Riba_product_queries_are_steered_to_islamic(string query)
+    {
+        var result = await Screen().ScreenAsync(query);
+        result.Blocked.Should().BeFalse("a financial product is steered, never blocked");
+        result.SteeredQuery.Should().NotBeNull();
+        result.SteeredQuery!.Should().Contain("islamic").And.Contain(query);
+    }
+
+    [Fact]
+    public async Task Already_islamic_finance_query_is_not_double_steered() =>
+        (await Screen().ScreenAsync("islamic personal loans")).SteeredQuery.Should().BeNull();
+
+    [Fact]
+    public async Task A_normal_product_is_not_steered() =>
+        // "laptop" is not a financial product — no steer even though stores may offer installments.
+        (await Screen().ScreenAsync("best laptop deals")).SteeredQuery.Should().BeNull();
+
     [Fact]
     public async Task Empty_query_fails_open() =>
         (await Screen().ScreenAsync("   ")).Blocked.Should().BeFalse();

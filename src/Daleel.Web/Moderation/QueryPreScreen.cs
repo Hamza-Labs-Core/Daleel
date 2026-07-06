@@ -1,9 +1,14 @@
+using System.Text.RegularExpressions;
 using Daleel.Core.Moderation;
 
 namespace Daleel.Web.Moderation;
 
-/// <summary>Outcome of a query pre-screen: blocked (with the offending haram category) or clear.</summary>
-public sealed record PreScreenResult(bool Blocked, string? Category);
+/// <summary>
+/// Outcome of a query pre-screen. <see cref="Blocked"/> = a haram consumable, reject at the door.
+/// <see cref="SteeredQuery"/> (when non-null) = the query was a riba/financial PRODUCT request and has
+/// been rewritten to steer results to sharia-compliant options (e.g. "best loans" → Islamic financing).
+/// </summary>
+public sealed record PreScreenResult(bool Blocked, string? Category, string? SteeredQuery = null);
 
 /// <summary>
 /// A ZERO-COST gate over the raw query text, run at search SUBMISSION before any provider/LLM spend.
@@ -24,6 +29,20 @@ public sealed class QueryPreScreen : IQueryPreScreen
     private static readonly HashSet<string> BlockCategories =
         new(StringComparer.OrdinalIgnoreCase) { "alcohol", "pork", "drugs" };
 
+    /// <summary>
+    /// Riba/financial-PRODUCT intent (the user is shopping FOR conventional interest-based finance) —
+    /// these are STEERED to sharia-compliant options, never blocked. This is the product-search case,
+    /// distinct from a store that merely OFFERS riba installments (never filtered — see ContentFilter).
+    /// </summary>
+    private static readonly Regex FinanceProduct = new(
+        @"\b(loans?|mortgages?|financing|installments?|credit\s*cards?|personal\s*finance|home\s*loan|car\s*loan|قرض|قروض|تمويل|رهن|بطاقة\s*ائتمان)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>Already sharia-aware — don't double-steer.</summary>
+    private static readonly Regex AlreadyIslamic = new(
+        @"\b(islamic|sharia|shariah|halal|murabaha|takaful|إسلامي|إسلامية|شريعة|حلال)\b",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly IModerationPolicyProvider _policy;
 
     public QueryPreScreen(IModerationPolicyProvider policy) => _policy = policy;
@@ -35,6 +54,9 @@ public sealed class QueryPreScreen : IQueryPreScreen
             return new PreScreenResult(false, null); // fail-open — empty handled upstream
         }
 
+        var trimmedQuery = query.Trim();
+
+        // (1) Haram-consumable BLOCK takes priority (never steer a blocked query).
         try
         {
             var snapshot = await _policy.GetAsync(ct).ConfigureAwait(false);
@@ -44,18 +66,27 @@ public sealed class QueryPreScreen : IQueryPreScreen
             var blockCats = snapshot.Categories
                 .Where(c => BlockCategories.Contains(c.Name))
                 .ToList();
-            if (blockCats.Count == 0)
+            if (blockCats.Count > 0)
             {
-                return new PreScreenResult(false, null);
+                var filter = new ContentFilter(FilterStrictness.Strict, whitelist: null, categories: blockCats);
+                if (filter.MatchDetail(trimmedQuery) is { } h)
+                {
+                    return new PreScreenResult(true, h.Category);
+                }
             }
-
-            var filter = new ContentFilter(FilterStrictness.Strict, whitelist: null, categories: blockCats);
-            var hit = filter.MatchDetail(query.Trim());
-            return hit is { } h ? new PreScreenResult(true, h.Category) : new PreScreenResult(false, null);
         }
         catch
         {
-            return new PreScreenResult(false, null); // fail-open — never block on a policy error
+            // fail-open — never block on a policy error; fall through to the (non-blocking) steer.
         }
+
+        // (2) Riba steer: a financial-PRODUCT query is rewritten to sharia-compliant terms so results
+        // surface Islamic banks / halal financing. Not a block, and not store-financing filtering.
+        if (FinanceProduct.IsMatch(trimmedQuery) && !AlreadyIslamic.IsMatch(trimmedQuery))
+        {
+            return new PreScreenResult(false, null, trimmedQuery + " islamic sharia-compliant");
+        }
+
+        return new PreScreenResult(false, null);
     }
 }

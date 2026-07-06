@@ -45,12 +45,22 @@ public sealed class ConversationService : IConversationService
             return new SubmitResult(false, null, "Query is required.", 400);
         }
 
-        // R3: zero-cost haram-consumable pre-screen BEFORE any quota debit or provider/LLM spend, so a
-        // request like "beer" is rejected at the door without creating a SearchJob or costing anything.
-        if (_preScreen is not null && (await _preScreen.ScreenAsync(query, ct)).Blocked)
+        // R3/R6: zero-cost pre-screen BEFORE any quota debit or provider/LLM spend. A haram consumable
+        // ("beer") is rejected at the door (no SearchJob, no cost); a riba/financial-PRODUCT query is
+        // steered to sharia-compliant terms so results surface Islamic options.
+        if (_preScreen is not null)
         {
-            return new SubmitResult(false, null,
-                "We can't search for that — it isn't halal-compliant.", 422);
+            var screen = await _preScreen.ScreenAsync(query, ct);
+            if (screen.Blocked)
+            {
+                return new SubmitResult(false, null,
+                    "We can't search for that — it isn't halal-compliant.", 422);
+            }
+
+            if (!string.IsNullOrWhiteSpace(screen.SteeredQuery))
+            {
+                query = screen.SteeredQuery!;
+            }
         }
 
         // Cheap pre-check: a user with no credits left can't start a search. The actual cost is
