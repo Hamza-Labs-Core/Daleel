@@ -293,6 +293,7 @@ builder.Services.AddTransient<IBrandRepository, BrandRepository>();
 builder.Services.AddTransient<IStoreRepository, StoreRepository>();
 builder.Services.AddTransient<IProductProfileRepository, ProductProfileRepository>();
 builder.Services.AddTransient<IBrandModelRepository, BrandModelRepository>();
+builder.Services.AddTransient<IBrandSiteRepository, BrandSiteRepository>();
 builder.Services.AddTransient<IScrapedPriceRepository, ScrapedPriceRepository>();
 // Entity-document persistence: Postgres index row + R2 daleel-data JSON document (the source of truth)
 // for products/services/places. Transient so each save gets its own DbContext (same circuit-safety rule
@@ -565,7 +566,7 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.CatalogAttachHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
-    Daleel.Web.Pipeline.Enrichment.BrandHarvestHandler>();
+    Daleel.Web.Pipeline.Enrichment.BrandResearchHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.ImageLookupHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
@@ -573,7 +574,7 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.CacheGapRefillHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
-    Daleel.Web.Pipeline.Enrichment.PriceFetchHandler>();
+    Daleel.Web.Pipeline.Enrichment.OfferVerificationHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IReachabilityProbe>(_ =>
     new Daleel.Web.Pipeline.Enrichment.ReachabilityProbe(Daleel.Search.Http.SharedHttpHandler.CreateClient()));
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,

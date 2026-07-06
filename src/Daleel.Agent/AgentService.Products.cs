@@ -92,7 +92,7 @@ public sealed partial class AgentService
                 // A web hit whose title is a URL/bare domain has no product identity — never surface
                 // a raw link as a product card (same rule as PickName and the extractor paths).
                 case ResultType.ProductListing when KeepLocal(r.Url, false, $"{r.Title} {r.Snippet}") && !IsNonCommerceHost(r.Url)
-                    && !LooksLikeUrl(r.Title):
+                    && !LooksLikeUrl(r.Title) && !LooksLikePageTitle(r.Title) && !IsListingPageUrl(r.Url):
                     webListings.Add(WebResultToListing(r, type));
                     break;
 
@@ -1064,6 +1064,58 @@ public sealed partial class AgentService
     }
 
     private static bool LooksLikeUrl(string text) => UrlLikeName.IsMatch(text.Trim());
+
+    /// <summary>
+    /// True when a "product name" is really a PAGE TITLE — a search/category/SEO page masquerading
+    /// as an item (observed live: "Espresso Machine in Jordan | Find the Lowest Prices",
+    /// "Coffee and Espresso Machines - Leaders Center" as grid cards). Pipe separators are the SEO
+    /// tell; "lowest/best prices" phrasing (en/ar) is the query-echo tell.
+    /// </summary>
+    internal static bool LooksLikePageTitle(string text)
+    {
+        var trimmed = text.Trim();
+        if (trimmed.Contains('|'))
+        {
+            return true;
+        }
+
+        return trimmed.Contains("lowest price", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("best price", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("أقل الأسعار", StringComparison.Ordinal)
+            || trimmed.Contains("افضل الاسعار", StringComparison.Ordinal)
+            || trimmed.Contains("أفضل الأسعار", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// True when a url is a search/category LISTING page, not a product page — fine as a crawl
+    /// entry point, never as a product card's identity. Query-parameter search urls and the common
+    /// category-path conventions are the signals.
+    /// </summary>
+    internal static bool IsListingPageUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u))
+        {
+            return false;
+        }
+
+        var query = u.Query;
+        if (query.Contains("search=", StringComparison.OrdinalIgnoreCase) ||
+            query.Contains("q=", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        var path = u.AbsolutePath;
+        // "/search/<digits>" is a PRODUCT on classified marketplaces (opensooq ad urls) — only a
+        // bare /search or /search?<query> is a results page.
+        var searchIsListing = path.Contains("/search", StringComparison.OrdinalIgnoreCase) &&
+            !System.Text.RegularExpressions.Regex.IsMatch(path, @"/search/\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return path.Contains("/product-category/", StringComparison.OrdinalIgnoreCase)
+            || searchIsListing
+            || path.EndsWith("/products", StringComparison.OrdinalIgnoreCase)
+            || (path.Contains("/collections/", StringComparison.OrdinalIgnoreCase) &&
+                !path.Contains("/products/", StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>
     /// Insight-map key matching <see cref="ListingExtractor.DedupKey"/>'s identity rules

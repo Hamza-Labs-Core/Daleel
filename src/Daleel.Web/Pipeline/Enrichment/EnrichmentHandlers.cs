@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+using Daleel.Agent;
 using Daleel.Core.Models;
 using Daleel.Web.Conversation;
 using Daleel.Web.Data;
@@ -98,16 +100,17 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
 
         foreach (var brand in svc.SelectBrandsForHarvest(products))
         {
-            children.Add(HandlerHelpers.Child(item, EnrichmentUnit.BrandHarvest,
-                EnrichmentWorkQueue.Payload(new BrandPayload(brand))));
+            children.Add(HandlerHelpers.Child(item, EnrichmentUnit.BrandResearch,
+                EnrichmentWorkQueue.Payload(new BrandPayload(brand)), maxAttempts: 4));
         }
 
         // Image lookups run late so the free sources (catalogues, brand DB) fill first — every image
         // they land is a paid SerpAPI lookup saved. Conditions run last for the same reason: they
         // read offers the other units attach.
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.ImageLookup, "{}", notBefore: TimeSpan.FromSeconds(90)));
-        // Offers arrive with URLs but often without figures — fetch the price FROM those pages
-        // (the "you have the site, get the price" rule). After catalogs attach their offers.
+        // Offers arrive with URLs but their facts are guesses — verify each offer AGAINST its own
+        // page: relatedness, price, condition, description (the "you have the site, use it" rule).
+        // After catalogs attach their offers.
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.PriceFetch, "{}", notBefore: TimeSpan.FromSeconds(120)));
         children.Add(HandlerHelpers.Child(item, EnrichmentUnit.Conditions, "{}", notBefore: TimeSpan.FromSeconds(150)));
         // Last on purpose: it prunes the offers every other unit attached, so it must see them all.
@@ -286,40 +289,6 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
             ct);
 }
 
-/// <summary>One brand's site harvest into the BrandModel DB + immediate refill of this result.</summary>
-public sealed class BrandHarvestHandler : IEnrichmentUnitHandler
-{
-    public string Kind => EnrichmentUnit.BrandHarvest;
-    public TimeSpan Budget => TimeSpan.FromSeconds(300);
-
-    public async Task<UnitOutcome> ExecuteAsync(
-        EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
-    {
-        if (EnrichmentWorkQueue.ReadPayload<BrandPayload>(item.Payload) is not { } payload)
-        {
-            return new UnitOutcome.Kill("unreadable brand payload");
-        }
-
-        if (await ctx.Results.LoadAsync(item.SearchJobId, ct) is not { Products: { Models.Count: > 0 } products })
-        {
-            return UnitOutcome.Ok;
-        }
-
-        var svc = ctx.Services.GetRequiredService<IItemEnrichmentService>();
-        if (await svc.HarvestBrandAndRefillAsync(
-                ctx.Agent(), payload.Brand, products.Models.ToList(), products.Geo,
-                item.SearchJobId.ToString(), ct) is not { } refilled)
-        {
-            return UnitOutcome.Ok;
-        }
-
-        await ctx.Results.PatchAsync(item,
-            answer => answer.Products is null ? null : answer with { Products = answer.Products with { Models = refilled } },
-            ct);
-        return UnitOutcome.Ok;
-    }
-}
-
 /// <summary>
 /// Paid image lookups for whatever is STILL imageless after the free sources ran. Each execution
 /// spends a bounded batch; when more imageless items remain it enqueues its own continuation —
@@ -436,23 +405,51 @@ public sealed class ConditionsHandler : IEnrichmentUnitHandler
 }
 
 /// <summary>
-/// Fetches prices FROM the offer pages we already hold URLs for: every "See price on store site"
-/// where the site is known is a page fetch away from a figure. Renders the page (edge-preferring),
-/// parses price lines, and stamps the offer whose URL it fetched — exact when the priced line names
-/// the model, indicative otherwise. Bounded batch per execution; enqueues its own continuation
-/// while unpriced offers remain (queue recursion, like the image pass).
+/// Verifies each offer AGAINST its own page: one fetch per offer URL yields four facts, applied in
+/// one patch. (1) Relatedness gates everything — a page that isn't about the model removes the
+/// offer entirely (a mismatched offer is worse than none). (2) Price, for offers still missing a
+/// figure — exact when the priced line names the model, indicative otherwise (the "you have the
+/// site, get the price" rule, unchanged). (3) Condition — the page's explicit used/refurbished/new
+/// marker overrides whatever the listing guessed, and a "used"/"refurbished" the page doesn't
+/// corroborate clears to null (secondhand needs positive evidence). (4) The model's "details"
+/// prose, taken from its first offer's own page when the current blob is empty or junk — the
+/// description comes from the site we actually list as the offer. Bounded batch per execution;
+/// enqueues its own continuation while verifiable work remains (queue recursion, like the image
+/// pass), and stops as soon as a batch changes nothing and no offer still awaits a figure.
 /// </summary>
-public sealed class PriceFetchHandler : IEnrichmentUnitHandler
+public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
 {
     /// <summary>Page fetches per execution — each is a render + parse, seconds apiece.</summary>
     private const int BatchSize = 6;
 
-    private readonly ILogger<PriceFetchHandler> _logger;
+    /// <summary>The markdown's title region — where a product page names its own product.</summary>
+    private const int TitleRegionChars = 600;
 
-    public PriceFetchHandler(ILogger<PriceFetchHandler> logger) => _logger = logger;
+    /// <summary>How deep into the page an explicit condition marker is trusted.</summary>
+    private const int ConditionScanChars = 1500;
+
+    /// <summary>Readable characters below which a "details" blob counts as junk.</summary>
+    private const int MinReadableChars = 120;
+
+    /// <summary>Cap for a description lifted off an offer page.</summary>
+    private const int DescriptionMaxChars = 2000;
+
+    private readonly ILogger<OfferVerificationHandler> _logger;
+
+    public OfferVerificationHandler(ILogger<OfferVerificationHandler> logger) => _logger = logger;
 
     public string Kind => EnrichmentUnit.PriceFetch;
     public TimeSpan Budget => TimeSpan.FromSeconds(240);
+
+    /// <summary>Everything one fetched page said, keyed by the model names it was judged for.</summary>
+    private sealed record PageVerdict(
+        HashSet<string> Judged,
+        HashSet<string> Related,
+        (decimal Price, string Currency, bool Exact)? Price,
+        string? Condition,
+        string? Description,
+        string Content,
+        string Url);
 
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
@@ -464,22 +461,43 @@ public sealed class PriceFetchHandler : IEnrichmentUnitHandler
 
         var providers = ctx.Services.GetRequiredService<IProviderApi>();
 
-        // One fetch per distinct unpriced offer URL; the same page may price several duplicates.
+        // One fetch per distinct offer URL needing ANY verification; the same page may settle
+        // several duplicate offers.
         var targets = models
             .SelectMany(m => m.Offers.Select(o => (Model: m, Offer: o)))
-            .Where(x => x.Offer.Price is null && !string.IsNullOrWhiteSpace(x.Offer.Url))
+            .Where(x => !string.IsNullOrWhiteSpace(x.Offer.Url) && NeedsVerification(x.Model, x.Offer))
             .GroupBy(x => x.Offer.Url!, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        if (targets.Count == 0)
+
+        // Mention pages are price sources too: a model with NO priced offer whose "Mentioned in"
+        // link carries the figure (multi-SKU brand pages especially) gets that page fetched, and a
+        // related+priced page BECOMES an offer.
+        var offerUrls = new HashSet<string>(targets.Select(g => g.Key), StringComparer.OrdinalIgnoreCase);
+        var mentionTargets = models
+            .Where(m => !m.Offers.Any(o => o.Price is not null))
+            .SelectMany(m => m.Mentions
+                .Where(link => !string.IsNullOrWhiteSpace(link.Url) && !offerUrls.Contains(link.Url))
+                .Take(2)
+                .Select(link => (Model: m, link.Url)))
+            .GroupBy(x => x.Url, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (targets.Count == 0 && mentionTargets.Count == 0)
         {
             return UnitOutcome.Ok;
         }
 
-        var found = new Dictionary<string, (decimal Price, string Currency, bool Exact)>(StringComparer.OrdinalIgnoreCase);
-        foreach (var group in targets.Take(BatchSize))
+        var verdicts = new Dictionary<string, PageVerdict>(StringComparer.OrdinalIgnoreCase);
+        var mentionModelsByUrl = mentionTargets.ToDictionary(
+            g => g.Key, g => g.Select(x => x.Model).ToList(), StringComparer.OrdinalIgnoreCase);
+        var fetchSet = targets.Take(BatchSize)
+            .Select(g => (Url: g.Key, Models: g.Select(x => x.Model).ToList()))
+            .Concat(mentionTargets.Take(Math.Max(0, BatchSize - Math.Min(BatchSize, targets.Count)))
+                .Select(g => (Url: g.Key, Models: g.Select(x => x.Model).ToList())))
+            .ToList();
+        foreach (var group in fetchSet)
         {
-            var url = group.Key;
-            var modelName = group.First().Model;
+            var url = group.Url;
             Daleel.Search.Abstractions.ScrapedPage? page;
             try
             {
@@ -490,43 +508,172 @@ public sealed class PriceFetchHandler : IEnrichmentUnitHandler
 
             if (page is null || string.IsNullOrWhiteSpace(page.Content))
             {
-                continue;
+                continue; // fetch failures verify nothing — never remove an offer we couldn't check
             }
 
-            if (PickPrice(page.Content, modelName) is { } picked)
+            var content = page.Content;
+            var judged = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var related = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var model in group.Models.DistinctBy(m => m.Name, StringComparer.OrdinalIgnoreCase))
             {
-                found[url] = picked;
+                judged.Add(model.Name);
+                if (IsRelatedPage(content, model))
+                {
+                    related.Add(model.Name);
+                }
             }
+
+            verdicts[url] = new PageVerdict(
+                judged, related,
+                PickPrice(content, group.Models[0]),
+                ExtractCondition(content),
+                ExtractDescription(content),
+                content, url);
         }
 
-        if (found.Count > 0)
+        var unrelated = targets.Take(BatchSize)
+            .Where(g => verdicts.ContainsKey(g.Key))
+            .Sum(g => g.Count(x => !verdicts[g.Key].Related.Contains(x.Model.Name)));
+        if (unrelated > 0)
         {
             _logger.LogInformation(
-                "Price fetch for job {JobId}: {Found}/{Tried} page(s) yielded a figure",
-                item.SearchJobId, found.Count, Math.Min(BatchSize, targets.Count));
-            await ctx.Results.PatchAsync(item, answer =>
+                "Offer verification for job {JobId}: removing {Count} offer(s) whose pages aren't about their model",
+                item.SearchJobId, unrelated);
+        }
+
+        var pricesFound = verdicts.Values.Count(v => v.Price is not null);
+        if (pricesFound > 0)
+        {
+            _logger.LogInformation(
+                "Offer verification for job {JobId}: {Found}/{Tried} page(s) yielded a figure",
+                item.SearchJobId, pricesFound, Math.Min(BatchSize, targets.Count));
+        }
+
+        var patched = verdicts.Count > 0 && await ctx.Results.PatchAsync(item, answer =>
+        {
+            if (answer.Products is not { } p)
             {
-                if (answer.Products is not { } p)
+                return null;
+            }
+
+            var changed = false;
+            var updated = p.Models.Select(m =>
+            {
+                var modelChanged = false;
+                var offers = new List<PriceOffer>(m.Offers.Count);
+
+                // Mention pages that proved related AND priced become OFFERS — the model had none.
+                if (!m.Offers.Any(o => o.Price is not null) &&
+                    mentionModelsByUrl.Count > 0)
                 {
-                    return null;
+                    foreach (var (mentionUrl, mentionModels) in mentionModelsByUrl)
+                    {
+                        if (mentionModels.Any(mm => mm.Name.Equals(m.Name, StringComparison.OrdinalIgnoreCase)) &&
+                            verdicts.TryGetValue(mentionUrl, out var mv) &&
+                            mv.Related.Contains(m.Name) && mv.Price is { } mp &&
+                            !m.Offers.Any(o => string.Equals(o.Url, mentionUrl, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            offers.Add(new PriceOffer
+                            {
+                                Source = AgentService.HostLabel(mentionUrl) ?? "Store",
+                                SourceType = Daleel.Core.Intelligence.ResultType.StorePage,
+                                Price = mp.Price,
+                                Currency = mp.Currency,
+                                Url = mentionUrl,
+                                IsIndicative = !mp.Exact,
+                                IsLocal = true
+                            });
+                            modelChanged = true;
+                        }
+                    }
                 }
 
-                var changed = false;
-                var updated = p.Models.Select(m =>
+                foreach (var o in m.Offers)
                 {
-                    var offers = m.Offers.Select(o =>
+                    if (o.Url is not { } u || !verdicts.TryGetValue(u, out var v) || !v.Judged.Contains(m.Name))
                     {
-                        if (o.Price is null && o.Url is { } u && found.TryGetValue(u, out var f))
-                        {
-                            changed = true;
-                            return o with { Price = f.Price, Currency = f.Currency, IsIndicative = !f.Exact };
-                        }
-                        return o;
-                    }).ToList();
-                    return m with { Offers = offers };
-                }).ToList();
-                return changed ? answer with { Products = p with { Models = updated } } : null;
-            }, ct);
+                        offers.Add(o);
+                        continue;
+                    }
+
+                    if (!v.Related.Contains(m.Name))
+                    {
+                        modelChanged = true; // unrelated page: drop the offer, don't keep the lie
+                        continue;
+                    }
+
+                    var next = o;
+                    if (next.Price is null && v.Price is { } f)
+                    {
+                        next = next with { Price = f.Price, Currency = f.Currency, IsIndicative = !f.Exact };
+                    }
+
+                    var condition = ApplyConditionEvidence(next.Condition, v.Condition);
+                    if (!string.Equals(condition, next.Condition, StringComparison.OrdinalIgnoreCase))
+                    {
+                        next = next with { Condition = condition };
+                    }
+
+                    modelChanged |= !ReferenceEquals(next, o);
+                    offers.Add(next);
+                }
+
+                var result = modelChanged ? m with { Offers = offers } : m;
+
+                // Description from the offer's own site: the (surviving) first URL-carrying offer's
+                // page fills an empty-or-junk "details" blob, but only when that page is related.
+                if (NeedsDetails(result) &&
+                    offers.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x.Url))?.Url is { } firstUrl &&
+                    verdicts.TryGetValue(firstUrl, out var fv) &&
+                    fv.Related.Contains(m.Name) && fv.Description is { } prose)
+                {
+                    var key = result.Specs.Keys.FirstOrDefault(
+                        k => k.Equals("details", StringComparison.OrdinalIgnoreCase)) ?? "details";
+                    var specs = result.Specs.ToDictionary(kv => kv.Key, kv => kv.Value);
+                    specs[key] = prose;
+                    result = result with { Specs = specs };
+                    modelChanged = true;
+                }
+
+                changed |= modelChanged;
+                return result;
+            }).ToList();
+
+            // Multi-SKU pages: the fetched page's OTHER priced lines are sibling variants (2 vs
+            // 3 ton) — they become distinct products through the same creation path as catalogue
+            // discoveries (query-gated, variant-aware dedupe).
+            foreach (var v in verdicts.Values.Where(v => v.Related.Count > 0))
+            {
+                var lines = Daleel.Core.Pricing.PriceParser.Extract(v.Content);
+                if (lines.Count < 2)
+                {
+                    continue;
+                }
+
+                var (withSiblings, createdNames) = ItemEnrichmentService.AppendCatalogDiscoveries(
+                    updated,
+                    lines.Select(l => (Name: l.Line, (decimal?)l.Price, (string?)l.Currency,
+                        (string?)v.Url, (string?)null, Indicative: true)),
+                    storeName: AgentService.HostLabel(v.Url), query: ctx.Job.Query, geo: ctx.Job.Geo);
+                if (createdNames.Count > 0)
+                {
+                    updated = withSiblings;
+                    changed = true;
+                }
+            }
+
+            return changed ? answer with { Products = p with { Models = updated } } : null;
+        }, ct);
+
+        // Anti-refetch guard: when this batch changed nothing and no offer still awaits a figure,
+        // every remaining target is a verification that already ran and confirmed the status quo —
+        // done, no continuation. (Unrelated-removed offers don't count as awaiting.)
+        var unpricedRemain = targets.Any(g => g.Any(x => x.Offer.Price is null &&
+            (!verdicts.TryGetValue(g.Key, out var v) ||
+             (v.Price is null && v.Related.Contains(x.Model.Name)))));
+        if (!patched && !unpricedRemain)
+        {
+            return UnitOutcome.Ok;
         }
 
         if (targets.Count > BatchSize)
@@ -538,6 +685,156 @@ public sealed class PriceFetchHandler : IEnrichmentUnitHandler
         }
 
         return UnitOutcome.Ok;
+    }
+
+    /// <summary>An offer's page is worth fetching when any of the four facts is still in doubt.</summary>
+    private static bool NeedsVerification(ProductModel model, PriceOffer offer) =>
+        offer.Price is null
+        || IsSecondhand(offer.Condition)
+        || (NeedsDetails(model) && IsFirstUrlOffer(model, offer));
+
+    private static bool IsFirstUrlOffer(ProductModel model, PriceOffer offer) =>
+        ReferenceEquals(model.Offers.FirstOrDefault(o => !string.IsNullOrWhiteSpace(o.Url)), offer);
+
+    private static bool IsSecondhand(string? condition) =>
+        string.Equals(condition, "used", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(condition, "refurbished", StringComparison.OrdinalIgnoreCase);
+
+    private static bool NeedsDetails(ProductModel model)
+    {
+        var details = model.Specs
+            .FirstOrDefault(kv => kv.Key.Equals("details", StringComparison.OrdinalIgnoreCase)).Value;
+        return string.IsNullOrWhiteSpace(details) || IsJunkDetails(details);
+    }
+
+    /// <summary>
+    /// The relatedness gate: the page must actually be about the model before any of its facts are
+    /// trusted. Related when the title region (first 600 chars) shares ≥2 significant tokens with
+    /// "{Brand} {Model} {Name}", or the page anywhere shares ≥3. Models with fewer than two
+    /// significant tokens can't be judged — treated as related (never remove an offer on a test
+    /// that couldn't run).
+    /// </summary>
+    internal static bool IsRelatedPage(string content, ProductModel model)
+    {
+        var want = SignificantTokens(model);
+        if (want.Count < 2)
+        {
+            return true;
+        }
+
+        var head = content.Length <= TitleRegionChars ? content : content[..TitleRegionChars];
+        if (want.Count(tok => head.Contains(tok, StringComparison.OrdinalIgnoreCase)) >= 2)
+        {
+            return true;
+        }
+
+        return want.Count(tok => content.Contains(tok, StringComparison.OrdinalIgnoreCase)) >= 3;
+    }
+
+    /// <summary>
+    /// The page's explicit condition marker within its lead: used/مستعمل, refurbished/مجدد,
+    /// new/جديد — null when the page is silent. Word-boundary matched so "unused" never reads as
+    /// used; the Arabic terms are distinctive enough to match bare (clitic article prefixes like
+    /// المستعمل still contain the word). Secondhand markers win over "new" — "new &amp; used"
+    /// pages sell used units.
+    /// </summary>
+    internal static string? ExtractCondition(string content)
+    {
+        var lead = content.Length <= ConditionScanChars ? content : content[..ConditionScanChars];
+        if (UsedRegex().IsMatch(lead) || lead.Contains("مستعمل", StringComparison.Ordinal))
+        {
+            return "used";
+        }
+
+        if (RefurbishedRegex().IsMatch(lead) || lead.Contains("مجدد", StringComparison.Ordinal))
+        {
+            return "refurbished";
+        }
+
+        if (NewRegex().IsMatch(lead) || lead.Contains("جديد", StringComparison.Ordinal))
+        {
+            return "new";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Page truth over listing guesses: an explicit page marker replaces the offer's condition
+    /// outright; a silent page clears an unevidenced "used"/"refurbished" (secondhand claims need
+    /// positive evidence) and leaves anything else as it was.
+    /// </summary>
+    internal static string? ApplyConditionEvidence(string? current, string? pageMarker) =>
+        pageMarker ?? (IsSecondhand(current) ? null : current);
+
+    /// <summary>
+    /// The page's own product description: the first contiguous run of ≥2 kept-prose lines totaling
+    /// ≥120 characters, joined and capped at 2000. Blank lines don't break a run (paragraph
+    /// spacing); dropped navigation lines do — a menu between two lines means different blocks.
+    /// </summary>
+    internal static string? ExtractDescription(string content)
+    {
+        var run = new List<string>();
+        foreach (var raw in content.Split('\n'))
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            if (CleanLine(raw) is { } prose)
+            {
+                run.Add(prose);
+                continue;
+            }
+
+            if (Qualifies(run))
+            {
+                break;
+            }
+
+            run.Clear();
+        }
+
+        if (!Qualifies(run))
+        {
+            return null;
+        }
+
+        var text = string.Join("\n", run);
+        return text.Length <= DescriptionMaxChars ? text : text[..DescriptionMaxChars].TrimEnd();
+
+        static bool Qualifies(List<string> lines) =>
+            lines.Count >= 2 && lines.Sum(l => l.Length) >= MinReadableChars;
+    }
+
+    /// <summary>Junk when fewer than 120 readable characters survive the line cleaning.</summary>
+    internal static bool IsJunkDetails(string details) =>
+        details.Split('\n').Sum(line => CleanLine(line)?.Length ?? 0) < MinReadableChars;
+
+    /// <summary>
+    /// One line of scraped markdown → readable prose, or null when the line is navigation-shaped.
+    /// Minimal shared port of the detail panel's CleanScrapedProse: links collapse to their text,
+    /// bare URLs vanish, and lines that were mostly links or read like menu words are dropped.
+    /// </summary>
+    private static string? CleanLine(string line)
+    {
+        var cleaned = ImageLinkRegex().Replace(line, " ");
+        cleaned = MarkdownLinkRegex().Replace(cleaned, "$1");
+        var beforeUrlStrip = cleaned;
+        cleaned = BareUrlRegex().Replace(cleaned, " ");
+        cleaned = cleaned.Replace("#", " ").Replace("*", " ").Trim();
+
+        if (cleaned.Length < 3)
+        {
+            return null;
+        }
+
+        var linkHeavy = beforeUrlStrip.Length > 0 && cleaned.Length < beforeUrlStrip.Length / 2;
+        var words = cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var menuish = words.Length <= 6 && !cleaned.Contains('.') && !cleaned.Contains('،') &&
+            words.All(w => w.Length <= 12);
+        return linkHeavy || menuish ? null : cleaned;
     }
 
     /// <summary>
@@ -553,12 +850,7 @@ public sealed class PriceFetchHandler : IEnrichmentUnitHandler
             return null;
         }
 
-        var want = $"{model.Brand} {model.Model} {model.Name}"
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(tok => tok.Length >= 3)
-            .Select(tok => tok.ToLowerInvariant())
-            .ToHashSet();
-
+        var want = SignificantTokens(model);
         var best = matches
             .Select(match => (Match: match, Shared: want.Count(tok =>
                 match.Line.Contains(tok, StringComparison.OrdinalIgnoreCase))))
@@ -569,6 +861,32 @@ public sealed class PriceFetchHandler : IEnrichmentUnitHandler
             ? (best.Match.Price, best.Match.Currency, Exact: true)
             : (matches[0].Price, matches[0].Currency, Exact: false);
     }
+
+    /// <summary>The model's identity tokens (≥3 chars, lowercased) — shared by every check above.</summary>
+    private static HashSet<string> SignificantTokens(ProductModel model) =>
+        $"{model.Brand} {model.Model} {model.Name}"
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(tok => tok.Length >= 3)
+            .Select(tok => tok.ToLowerInvariant())
+            .ToHashSet();
+
+    [GeneratedRegex(@"\bused\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex UsedRegex();
+
+    [GeneratedRegex(@"\brefurbished\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex RefurbishedRegex();
+
+    [GeneratedRegex(@"\bnew\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex NewRegex();
+
+    [GeneratedRegex(@"!\[[^\]]*\]\([^)]*\)")]
+    private static partial Regex ImageLinkRegex();
+
+    [GeneratedRegex(@"\[([^\]]*)\]\([^)]*\)")]
+    private static partial Regex MarkdownLinkRegex();
+
+    [GeneratedRegex(@"https?://\S+")]
+    private static partial Regex BareUrlRegex();
 }
 
 /// <summary>

@@ -82,6 +82,29 @@ public class CatalogDiscoveryTests
     }
 
     [Fact]
+    public void Multi_sku_pages_yield_distinct_variant_products()
+    {
+        // The owner's live find: one page, three AC SKUs — they must become THREE products, not
+        // one price on one model. Numeric variant tokens (2 vs 3 ton) must keep them distinct.
+        var (models, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
+            Existing("MEC AC 2 Ton Inverter"),
+            new[]
+            {
+                Entry("MEC AC 1.5 Ton Inverter Split"),
+                Entry("MEC AC 2 Ton Inverter Split"),   // matches the existing model — decorates, not duplicates
+                Entry("MEC AC 3 Ton Inverter Split")
+            },
+            storeName: "MEC Store", query: "best acs in jordan", geo: "Jordan");
+
+        created.Should().BeEquivalentTo(new[]
+        {
+            "MEC AC 1.5 Ton Inverter Split",
+            "MEC AC 3 Ton Inverter Split"
+        }, "the 2-ton line belongs to the existing model; 1.5 and 3 ton are new distinct products");
+        models.Should().HaveCount(3);
+    }
+
+    [Fact]
     public void No_query_means_no_creation()
     {
         var (models, created) = ItemEnrichmentService.AppendCatalogDiscoveries(

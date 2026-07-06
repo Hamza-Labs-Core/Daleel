@@ -338,9 +338,6 @@ public class EnrichmentHandlerTests
             List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct) =>
             Task.FromResult(DrainedResult);
 
-        public Task<List<ProductModel>?> HarvestBrandAndRefillAsync(
-            AgentService agent, string brand, List<ProductModel> models, string? geo, string? searchId, CancellationToken ct) =>
-            Task.FromResult<List<ProductModel>?>(null);
         public Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
             Task.FromResult<string?>(null);
         public Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct) =>
@@ -399,7 +396,7 @@ public class EnrichmentHandlerTests
             EnrichmentUnit.Vision,
             EnrichmentUnit.ItemDive, EnrichmentUnit.ItemDive, EnrichmentUnit.ItemDive,
             EnrichmentUnit.CatalogAttach, EnrichmentUnit.CatalogAttach,
-            EnrichmentUnit.BrandHarvest,
+            EnrichmentUnit.BrandResearch,
             EnrichmentUnit.ImageLookup, EnrichmentUnit.PriceFetch, EnrichmentUnit.Conditions,
             EnrichmentUnit.Reachability
         });

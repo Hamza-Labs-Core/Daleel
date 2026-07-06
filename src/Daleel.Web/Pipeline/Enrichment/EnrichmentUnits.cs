@@ -22,8 +22,12 @@ public static class EnrichmentUnit
     /// <summary>One store domain: match drained edge prices first, inline catalogue crawl as fallback.</summary>
     public const string CatalogAttach = "enrich.catalog";
 
-    /// <summary>One brand: harvest its site into the BrandModel DB + refill the result from it.</summary>
-    public const string BrandHarvest = "enrich.brand";
+    /// <summary>
+    /// One brand: FULL durable research — official site, Context.dev intelligence, social profiles,
+    /// site catalogue — each step saved to the Brand row the moment it lands (a retry never repeats
+    /// a completed step, and a brand researched by any search within 7 days is reused wholesale).
+    /// </summary>
+    public const string BrandResearch = "enrich.brandresearch";
 
     /// <summary>Job-level: paid image lookups for whatever is still imageless (deliberately late).</summary>
     public const string ImageLookup = "enrich.images";
@@ -31,7 +35,10 @@ public static class EnrichmentUnit
     /// <summary>Job-level: classify-worker condition backfill (deliberately last).</summary>
     public const string Conditions = "enrich.conditions";
 
-    /// <summary>Job-level: fetches the PRICE from offer pages we already hold URLs for (batched).</summary>
+    /// <summary>
+    /// Job-level: verifies offers AGAINST their own pages (batched) — relatedness (unrelated
+    /// offers are removed), missing prices, condition truth, and the model's "details" prose.
+    /// </summary>
     public const string PriceFetch = "enrich.prices";
 
     /// <summary>Job-level: prunes offers whose sites users can't actually reach (deliberately last).</summary>

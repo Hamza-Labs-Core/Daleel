@@ -52,7 +52,10 @@ public static partial class PriceParser
 
         foreach (var rawLine in text.Split('\n'))
         {
-            var line = rawLine.Trim();
+            // Scraped content is not always clean markdown: JS-rendered pages leak raw HTML (a
+            // Next.js loading skeleton became a product NAME on the live grid). Lines are stripped
+            // of markup BEFORE matching, so a price line's text is prose, never tags.
+            var line = Daleel.Core.Models.HtmlText.Strip(rawLine)?.Trim() ?? string.Empty;
             if (line.Length == 0)
             {
                 continue;

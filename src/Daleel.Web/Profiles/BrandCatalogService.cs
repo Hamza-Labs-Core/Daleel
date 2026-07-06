@@ -18,8 +18,18 @@ public interface IBrandCatalogService
     /// Resolves the saved brand by name and harvests its site into <see cref="BrandModel"/> rows. Returns the
     /// number of models upserted (0 when the brand is unknown, has no website, the scraper isn't configured,
     /// or its catalogue is already fresh). Best-effort: never throws for an individual brand.
+    /// Rows are stamped as the GLOBAL level (the brand's website — the pre-hierarchy behaviour).
     /// </summary>
     Task<int> HarvestAsync(string brandName, CancellationToken ct = default);
+
+    /// <summary>
+    /// Harvests ONE site of the brand's hierarchy (a discovered <see cref="BrandSite"/>): the given
+    /// <paramref name="siteUrl"/>'s catalogue becomes <see cref="BrandModel"/> rows stamped with
+    /// <paramref name="level"/> (a <see cref="BrandSiteLevel"/> constant) and
+    /// <paramref name="countryCode"/>. TTL-gated per (brand, level) — legacy unstamped rows count as
+    /// global — so retries and repeat searches skip levels whose catalogue is still fresh.
+    /// </summary>
+    Task<int> HarvestAsync(string brandName, string siteUrl, string level, string? countryCode, CancellationToken ct = default);
 }
 
 public sealed class BrandCatalogService : IBrandCatalogService
@@ -54,7 +64,19 @@ public sealed class BrandCatalogService : IBrandCatalogService
         _config = config;
     }
 
-    public async Task<int> HarvestAsync(string brandName, CancellationToken ct = default)
+    public Task<int> HarvestAsync(string brandName, CancellationToken ct = default) =>
+        HarvestCoreAsync(brandName, siteUrl: null, BrandSiteLevel.Global, countryCode: null, ct);
+
+    public Task<int> HarvestAsync(
+        string brandName, string siteUrl, string level, string? countryCode, CancellationToken ct = default) =>
+        HarvestCoreAsync(brandName, siteUrl, level, countryCode, ct);
+
+    /// <summary>
+    /// The shared harvest: <paramref name="siteUrl"/> null means the legacy name-based path (the
+    /// brand's saved website, stamped global) — an explicit URL harvests that one hierarchy level.
+    /// </summary>
+    private async Task<int> HarvestCoreAsync(
+        string brandName, string? siteUrl, string level, string? countryCode, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(brandName))
         {
@@ -62,7 +84,7 @@ public sealed class BrandCatalogService : IBrandCatalogService
         }
 
         var brand = await _brands.GetByNameAsync(brandName, ct).ConfigureAwait(false);
-        var domain = DomainOf(brand?.Website);
+        var domain = DomainOf(siteUrl ?? brand?.Website);
         if (brand is null || domain is null)
         {
             return 0;
@@ -75,10 +97,13 @@ public sealed class BrandCatalogService : IBrandCatalogService
 
         var now = _options.Now();
 
-        // Skip if we already have a fresh catalogue for this brand — re-harvest only after the TTL so a
-        // brand surfaced by many searches isn't re-crawled every time.
+        // Skip if we already have a fresh catalogue for this brand AT THIS LEVEL — re-harvest only
+        // after the TTL so a brand surfaced by many searches isn't re-crawled every time. The gate
+        // is per (brand, level): a fresh global catalogue must not suppress the first local pass,
+        // and vice versa. Legacy unstamped rows count as global.
         var existing = await _models.ListByBrandAsync(brand.Id, ct).ConfigureAwait(false);
-        if (existing.Count > 0 && existing.All(m => !m.IsStale(now, _options.Ttl)))
+        var levelRows = existing.Where(m => (m.SiteLevel ?? BrandSiteLevel.Global) == level).ToList();
+        if (levelRows.Count > 0 && levelRows.All(m => !m.IsStale(now, _options.Ttl)))
         {
             return 0;
         }
@@ -86,8 +111,11 @@ public sealed class BrandCatalogService : IBrandCatalogService
         // EDGE PATH (scrape-worker /scrape/brand): submit-and-forget — the crawl runs on the edge
         // with no local timeout racing it, and the drain's brand handler persists the models when
         // the result lands (even after this enrichment pass is long gone). Same gate as the store
-        // crawl: full drain path + the admin flag; anything less falls through to inline.
-        if (_providers.HasEdge && _providers.EdgeDrainReady &&
+        // crawl: full drain path + the admin flag; anything less falls through to inline. GLOBAL
+        // only: the drain persists rows unstamped (= global), so a regional/local harvest — whose
+        // whole point is the level attribution — stays inline.
+        if (level == BrandSiteLevel.Global &&
+            _providers.HasEdge && _providers.EdgeDrainReady &&
             _config is not null &&
             await _config.GetBoolAsync(
                 Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag, false, ct).ConfigureAwait(false))
@@ -156,6 +184,10 @@ public sealed class BrandCatalogService : IBrandCatalogService
                     // discontinued models rather than flagging them, so "listed" is the best signal we have.
                     IsAvailable = true,
                     SourceUrl = product.Url,
+                    // Which hierarchy level this catalogue belongs to — the local-first fill in
+                    // ItemEnrichmentService keys off this pair (legacy global harvests stamp global/null).
+                    SiteLevel = level,
+                    SiteCountry = countryCode,
                     LastRefreshed = now
                 }, ct).ConfigureAwait(false);
                 harvested++;

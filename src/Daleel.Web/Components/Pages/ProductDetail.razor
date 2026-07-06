@@ -1,66 +1,75 @@
 @page "/product/{Id}"
 @inject IProductDetailDbService Details
+@inject ISearchHistoryRepository History
+@inject ICurrentUser CurrentUser
 @inject NavigationManager Nav
 @inject ILogger<ProductDetail> Logger
 @inject ITranslationService Translator
+@inject IStringLocalizer<SharedResource> L
 
-@* Dedicated full page for a single product model, read entirely from the saved database — never
-   re-scraped live. It assembles the harvested catalogue row (specs + R2 image), the deep-dive profile
-   (description), the brand's saved reputation and the scraped-price history (where-to-buy + observed
-   range). Routing is by a stable id (numeric catalogue id or an identity hash); the human name carried
-   in the query reconstructs the normalized key the price/profile rows are stored under. The content
-   blocks themselves render via ModelDetailBody — shared with the "Details & prices" dialog so the two
-   surfaces can't drift; this page only adds its own chrome plus the saved-data extras the dialog
-   doesn't have (reputation score chip, observed price range, last-updated, deep-dive overview). *@
+@* Dedicated full page for a single product model — never re-scraped live. It merges TWO saved
+   sources: (1) the database view assembled from the harvested catalogue row (specs + R2 image), the
+   deep-dive profile (description), the brand's saved reputation and the scraped-price history; and
+   (2) the visiting user's OWN search history — the newest entry whose stored ResultJson contains this
+   product's stable id, which carries the same rich ProductModel the results dialog rendered (pros/
+   cons, reviews, mentions, rating, MSRP…). The result model wins field-by-field, the DB view fills
+   what it left empty, and everything falls back to today's DB-only behaviour when no history entry
+   has the product. Routing is by stable id (numeric catalogue id or a p_… identity hash); the human
+   name carried in the query reconstructs the normalized key the price/profile rows are stored under.
+   The content blocks render via ModelDetailBody — shared with the "Details & prices" dialog so the
+   two surfaces can't drift; this page passes its saved-data extras (reputation score chip, observed
+   price range, last-updated, deep-dive overview) INTO that structure via the body's extension
+   points rather than floating them after it. *@
 
 <PageTitle>دليل · @DisplayTitle</PageTitle>
 
 <MudButton Variant="Variant.Text" StartIcon="@Icons.Material.Filled.ArrowBack" Class="mb-2"
-           OnClick="@(() => Nav.NavigateTo("/"))">Back to search</MudButton>
+           OnClick="@(() => Nav.NavigateTo("/"))">@L["Detail.BackToSearch"]</MudButton>
 
 @if (_loading)
 {
     <div class="d-flex justify-center pa-8"><MudProgressCircular Indeterminate="true" /></div>
 }
-else if (_view is null || _model is null)
+else if (_model is null)
 {
-    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-        Details not yet available — this product will be profiled on the next search.
-    </MudAlert>
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">@L["Detail.NotAvailable"]</MudAlert>
 }
 else
 {
-    <ModelDetailBody Model="_model" />
-
-    @* Saved-data extras beyond the shared body: the brand's saved reputation score (linking through
-       to the brand page), the observed price range across the scraped history, and freshness. *@
-    @if (_view.BrandReputationScore is { } score && _view.BrandStableId is { } brandId)
-    {
-        <div class="mt-3">
-            <MudChip T="string" Size="Size.Small"
-                     Color="@(score >= 7 ? Color.Success : score >= 4 ? Color.Warning : Color.Error)"
-                     Icon="@Icons.Material.Filled.Verified"
-                     OnClick="@(() => Nav.NavigateTo($"/brand/{brandId}?name={Uri.EscapeDataString(_view.Brand ?? string.Empty)}"))">
-                @_view.Brand @score.ToString("0.#")/10
-            </MudChip>
-        </div>
-    }
-    @if (PriceRange is { } range)
-    {
-        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-1">
-            <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Small" Class="mr-1" />Observed range: @range
-        </MudText>
-    }
-    @if (_view.LastUpdated is { } updated)
-    {
-        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block">Prices updated @updated.LocalDateTime.ToString("d MMM yyyy")</MudText>
-    }
-
-    @if (!string.IsNullOrWhiteSpace(_view.Description))
-    {
-        <MudDivider Class="my-4" />
-        <ReportView Title="Overview" Text="@_view.Description" />
-    }
+    <ModelDetailBody Model="_model" TitleTypo="Typo.h4" Overview="@_view?.Description">
+        <HeaderExtra>
+            @* The brand's saved reputation score, linking through to the brand page — identity-column
+               data, so it renders beside the name rather than dangling under the body. *@
+            @{ var view = _view; }
+            @if (view is { BrandReputationScore: { } score, BrandStableId: { } brandId })
+            {
+                <div class="mt-2">
+                    <MudChip T="string" Size="Size.Small"
+                             Color="@(score >= 7 ? Color.Success : score >= 4 ? Color.Warning : Color.Error)"
+                             Icon="@Icons.Material.Filled.Verified"
+                             OnClick="@(() => Nav.NavigateTo($"/brand/{brandId}?name={Uri.EscapeDataString(view.Brand ?? string.Empty)}"))">
+                        @view.Brand @score.ToString("0.#")/10
+                    </MudChip>
+                </div>
+            }
+        </HeaderExtra>
+        <OffersFooter>
+            @* Price-history extras belong with the prices: the observed range across the scraped
+               history and how fresh the latest scrape is, at the foot of the offers card. *@
+            @if (PriceRange is { } range)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-flex align-center mt-3" Style="gap:6px;">
+                    <MudIcon Icon="@Icons.Material.Filled.History" Size="Size.Small" />@L["Detail.ObservedRange", range]
+                </MudText>
+            }
+            @if (_view?.LastUpdated is { } updated)
+            {
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="d-block mt-1">
+                    @L["Detail.PricesUpdated", updated.LocalDateTime.ToString("d MMM yyyy")]
+                </MudText>
+            }
+        </OffersFooter>
+    </ModelDetailBody>
 }
 
 @code {
@@ -72,10 +81,16 @@ else
     // products whose display name isn't "brand model", which Normalize(Name) alone would miss.
     [SupplyParameterFromQuery] public string? Key { get; set; }
 
+    /// <summary>How many of the user's newest history rows are scanned for this product's result model.</summary>
+    private const int HistoryScanLimit = 25;
+
     private ProductDetailView? _view;
 
-    // The ProductModel handed to the shared detail body — mapped from the saved view so the page and
-    // the search-results dialog render through the exact same component.
+    /// <summary>The rich result model recovered from the user's own search history, when any entry has it.</summary>
+    private ProductModel? _historyModel;
+
+    // The ProductModel handed to the shared detail body — the history model merged over the saved view,
+    // so the page and the search-results dialog render through the exact same component.
     private ProductModel? _model;
 
     private bool _loading = true;
@@ -83,7 +98,11 @@ else
 
     // Routing is by stable id; the name (carried in the query) reconstructs the DB lookup key.
     private string DecodedName => Uri.UnescapeDataString(Name ?? string.Empty);
-    private string DisplayTitle => _view?.Name is { Length: > 0 } n ? n : DecodedName;
+
+    private string DisplayTitle =>
+        _model?.Name is { Length: > 0 } n ? n
+        : _view?.Name is { Length: > 0 } vn ? vn
+        : DecodedName;
 
     private string? PriceRange
     {
@@ -107,7 +126,6 @@ else
                 // Read the assembled view from the database — no live scrape. Works cold from a shared link.
                 _view = await Details.GetAsync(
                     Id, DecodedName, string.IsNullOrWhiteSpace(Geo) ? "jordan" : Geo!, lookupKey: Key);
-                _model = _view is null ? null : BuildModel(_view);
             }
             catch (Exception ex)
             {
@@ -116,18 +134,28 @@ else
                 Logger.LogWarning(ex, "Loading product detail for {Name} failed", DecodedName);
                 _view = null;
             }
-            finally
+
+            try
             {
-                _loading = false;
-                StateHasChanged();
+                _historyModel = await FindInOwnHistoryAsync();
             }
+            catch (Exception ex)
+            {
+                // History is a bonus data source — its failure must never take down a page the DB serves.
+                Logger.LogWarning(ex, "Searching own history for product {Id} failed", Id);
+                _historyModel = null;
+            }
+
+            _model = BuildMergedModel();
+            _loading = false;
+            StateHasChanged();
             return;
         }
 
         // Once the body has rendered with the original spec labels/values, translate the whole spec sheet
         // in a SINGLE batched DeepL call (cache-first) and swap it in. Runs once; no-op when translation is
         // off or the content is already in the UI language.
-        if (_view is null || _model is null || _view.Specs.Count == 0 || _specsTranslated)
+        if (_model is null || _model.Specs.Count == 0 || _specsTranslated)
         {
             return;
         }
@@ -137,6 +165,99 @@ else
             await TranslateSpecsAsync();
         }
     }
+
+    /// <summary>
+    /// Recovers the rich <see cref="ProductModel"/> from the visiting user's OWN search history — the
+    /// results grid often knows far more about a product (pros/cons, reviews, rating, MSRP) than the
+    /// harvested DB rows do. Matching is by STABLE ID: every stored model serializes its deterministic
+    /// <see cref="ProductModel.Id"/> (a hash of brand+model identity) into the entry's ResultJson and
+    /// this page's route carries the same <c>p_…</c> hash, so a raw-string Contains prescreens candidate
+    /// rows cheaply and the deserialized models are then matched exactly on Id. Newest entry wins.
+    /// Access is inherently scoped — the repository filters every read by the caller's userId.
+    /// </summary>
+    private async Task<ProductModel?> FindInOwnHistoryAsync()
+    {
+        // Numeric catalogue routes resolve fully from the database; result models only ever carry p_ ids.
+        if (!Id.StartsWith("p_", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var userId = await CurrentUser.GetUserIdAsync();
+        if (userId is null)
+        {
+            return null;
+        }
+
+        var recent = await History.ListAsync(userId, page: 1, pageSize: HistoryScanLimit);
+        foreach (var entry in recent.Items) // newest first (Id desc)
+        {
+            // Cheap prescreen: the serialized result embeds each model's stable Id verbatim.
+            if (entry.ResultJson is not { Length: > 0 } json || !json.Contains(Id, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            try
+            {
+                var answer = ResultSerialization.Deserialize<AgentAnswer>(json);
+                var match = answer?.Products?.Models
+                    .FirstOrDefault(m => string.Equals(m.Id, Id, StringComparison.Ordinal));
+                if (match is not null)
+                {
+                    return match;
+                }
+            }
+            catch (Exception ex)
+            {
+                // Another result shape (brand/compare/stores) or a malformed row — not ours, keep scanning.
+                Logger.LogDebug(ex, "History entry {EntryId} not readable as a product result", entry.Id);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Merges the two saved sources into the model the shared body renders. The search-result model is
+    /// the richer one (pros/cons, reviews, mentions, rating, MSRP, brand reputation), so it wins
+    /// field-by-field; the DB view fills whatever it left empty — the harvested R2 image, catalogue-only
+    /// spec rows, and the offers when the result had none. Either source alone passes through unchanged.
+    /// </summary>
+    private ProductModel? BuildMergedModel()
+    {
+        var dbModel = _view is null ? null : BuildModel(_view);
+        if (_historyModel is null || dbModel is null)
+        {
+            return _historyModel ?? dbModel;
+        }
+
+        // Result specs win on key conflicts; DB-only keys are appended. Indexer assignment (not a
+        // dictionary ctor) because a deserialized result dict is case-SENSITIVE and could carry keys
+        // differing only in case — under this case-insensitive comparer that must fold, never throw.
+        var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kv in _historyModel.Specs)
+        {
+            specs[kv.Key] = kv.Value;
+        }
+        foreach (var kv in dbModel.Specs)
+        {
+            specs.TryAdd(kv.Key, kv.Value);
+        }
+
+        return _historyModel with
+        {
+            Name = Prefer(_historyModel.Name, dbModel.Name) ?? string.Empty,
+            Brand = Prefer(_historyModel.Brand, dbModel.Brand),
+            Model = Prefer(_historyModel.Model, dbModel.Model),
+            ImageUrl = Prefer(_historyModel.ImageUrl, dbModel.ImageUrl),
+            Specs = specs,
+            Offers = _historyModel.Offers.Count > 0 ? _historyModel.Offers : dbModel.Offers,
+        };
+    }
+
+    private static string? Prefer(string? primary, string? fallback) =>
+        string.IsNullOrWhiteSpace(primary) ? fallback : primary;
 
     /// <summary>Maps the saved detail view onto the ProductModel the shared body renders. Offers carry
     /// the internal store route as their StoreUrl so the store cell links through to the store page.</summary>
@@ -160,7 +281,14 @@ else
     /// <summary>Translates all spec labels and values as one batch, then swaps the spec sheet in place.</summary>
     private async Task TranslateSpecsAsync()
     {
-        var specs = _view!.Specs.ToList();
+        // Prose blobs ("details"/"description") aren't table rows — the body renders them as the About
+        // section keyed on their RAW key, so they stay out of the translation swap (and off DeepL's bill).
+        var specs = _model!.Specs.Where(s => !ModelDetailBody.IsProseKey(s.Key)).ToList();
+        if (specs.Count == 0)
+        {
+            return;
+        }
+
         var target = System.Globalization.CultureInfo.CurrentUICulture.TwoLetterISOLanguageName;
 
         // One request: every (humanized) label followed by every value (DeepL batches up to 50 texts/call).
@@ -179,11 +307,15 @@ else
         }
 
         // Rebuild the model's spec dictionary with the translated pairs (guarding against two labels
-        // translating to the same word) and let the shared body re-render it.
-        var swapped = new Dictionary<string, string>(specs.Count);
+        // translating to the same word), re-attach the raw-keyed prose blobs, and let the body re-render.
+        var swapped = new Dictionary<string, string>(_model!.Specs.Count);
         for (var i = 0; i < specs.Count; i++)
         {
             swapped.TryAdd(translated[i], translated[specs.Count + i]);
+        }
+        foreach (var prose in _model!.Specs.Where(s => ModelDetailBody.IsProseKey(s.Key)))
+        {
+            swapped.TryAdd(prose.Key, prose.Value);
         }
         _model = _model! with { Specs = swapped };
         await InvokeAsync(StateHasChanged);

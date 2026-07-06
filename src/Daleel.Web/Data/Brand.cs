@@ -37,6 +37,9 @@ public sealed class Brand
 
     public string? Website { get; set; }
 
+    /// <summary>Official social-profile URLs (facebook/instagram/…) discovered by brand research.</summary>
+    public List<string> SocialLinks { get; set; } = new();
+
     public DateTimeOffset LastRefreshed { get; set; }
 
     /// <summary>Normalizes a brand name into its lookup key (case/whitespace-insensitive).</summary>

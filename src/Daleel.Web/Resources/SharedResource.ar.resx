@@ -661,6 +661,13 @@
   <data name="Detail.About" xml:space="preserve"><value>عن هذا المنتج</value></data>
   <data name="Detail.ProsCons" xml:space="preserve"><value>الإيجابيات والسلبيات</value></data>
   <data name="Detail.StillEnriching" xml:space="preserve"><value>قد تصل تفاصيل إضافية قريبًا — تحقق لاحقًا</value></data>
+  <data name="Detail.BackToSearch" xml:space="preserve"><value>العودة إلى البحث</value></data>
+  <data name="Detail.NotAvailable" xml:space="preserve"><value>التفاصيل غير متوفرة بعد — سيتم تحليل هذا المنتج في البحث القادم.</value></data>
+  <data name="Detail.Overview" xml:space="preserve"><value>نظرة عامة</value></data>
+  <data name="Detail.ObservedRange" xml:space="preserve"><value>نطاق الأسعار الملحوظ: {0}</value></data>
+  <data name="Detail.PricesUpdated" xml:space="preserve"><value>تحدّثت الأسعار في {0}</value></data>
+  <data name="Detail.Store" xml:space="preserve"><value>المتجر</value></data>
+  <data name="Detail.Condition" xml:space="preserve"><value>الحالة</value></data>
 
   <data name="Search.EmailNotice" xml:space="preserve"><value>سنرسل إليك النتائج عبر البريد الإلكتروني عند جاهزيتها.</value></data>
   <data name="Settings.EmailResults" xml:space="preserve"><value>أرسل نتائج البحث إلى بريدي الإلكتروني</value></data>

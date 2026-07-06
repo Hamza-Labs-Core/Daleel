@@ -96,6 +96,7 @@ public sealed class BrandRepository : IBrandRepository
         existing.Pros = brand.Pros.Count > 0 ? brand.Pros : existing.Pros;
         existing.Cons = brand.Cons.Count > 0 ? brand.Cons : existing.Cons;
         existing.PopularModels = brand.PopularModels.Count > 0 ? brand.PopularModels : existing.PopularModels;
+        existing.SocialLinks = brand.SocialLinks.Count > 0 ? brand.SocialLinks : existing.SocialLinks;
         existing.PriceRange = brand.PriceRange ?? existing.PriceRange;
         existing.Website = brand.Website ?? existing.Website;
         existing.LastRefreshed = brand.LastRefreshed;

@@ -44,9 +44,6 @@ public interface IItemEnrichmentService
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
     Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
 
-    /// <summary>Phase 5 for ONE brand + immediate brand-DB refill of the list. Null = unchanged.</summary>
-    Task<List<ProductModel>?> HarvestBrandAndRefillAsync(AgentService agent, string brand, List<ProductModel> models, string? geo, string? searchId, CancellationToken ct);
-
     /// <summary>Phase 6 for ONE item: paid image lookup. Null = none found.</summary>
     Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
@@ -429,7 +426,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // geo/searchId ride on the queue contract; this unit needs neither (events are dropped here).
         // The gap gate only short-circuits when there's no query to discover NEW models for — a store
         // catalogue is a first-class product source, not just a gap-filler for existing items.
-        if (SignificantQueryTokens(query).Count == 0 &&
+        if (SignificantQueryTokens(query, geo).Count == 0 &&
             !models.Any(m => !HasPrice(m) || string.IsNullOrWhiteSpace(m.ImageUrl) || m.Specs.Count < ThinSpecThreshold))
         {
             return (null, 0, Array.Empty<string>());
@@ -468,7 +465,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false))
                 .Concat(browserPrices.Select(b =>
                     (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true))),
-            storeName, query);
+            storeName, query, geo);
 
         // Second chance on the DISCOVERED page: a general store's root crawl can return inventory
         // that has nothing to do with the query (jo-cell.com root is phones; its espresso machines
@@ -487,7 +484,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                     withNew,
                     entryPrices.Select(b =>
                         (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)),
-                    storeName, query);
+                    storeName, query, geo);
                 withNew = withEntry;
                 created = created.Concat(entryCreated).ToList();
             }
@@ -546,30 +543,6 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return priced > 0 || created.Count > 0
             ? (withNew, priced, created)
             : (null, 0, Array.Empty<string>());
-    }
-
-    public async Task<List<ProductModel>?> HarvestBrandAndRefillAsync(
-        AgentService agent, string brand, List<ProductModel> models, string? geo, string? searchId,
-        CancellationToken ct)
-    {
-        // agent/searchId ride on the queue contract; the harvest crawls through IBrandCatalogService.
-        ct.ThrowIfCancellationRequested();
-        var harvested = await HarvestOneBrandAsync(brand, ct);
-        if (harvested > 0)
-        {
-            _logger.LogInformation("Catalogued {Count} {Brand} model(s) from the brand site", harvested, brand);
-        }
-
-        // Refill even on a zero harvest: another unit (or an earlier run) may have populated the
-        // brand DB since this result last read it, and the read-through is cheap and local.
-        var (filled, images, prices, specs) = await FillFromBrandDatabaseAsync(models, geo, ct);
-        if (images + prices + specs == 0)
-        {
-            return null;
-        }
-
-        _logger.LogInformation("Filled {Count} detail(s) from brand catalogues", images + prices + specs);
-        return filled;
     }
 
     public async Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
@@ -879,11 +852,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         var specsFilled = 0;
         var now = _options.Now();
 
-        // BrandModel rows carry ONE LocalPrice/Currency (last harvest wins, no region column), so a
-        // Jordan harvest's JOD price must never surface as an offer on a USA search. Attach a
+        // A Jordan harvest's JOD price must never surface as an offer on a USA search. Attach a
         // brand-DB price only when its currency IS the search market's currency; images and specs
         // are market-agnostic and flow regardless.
-        var marketCurrency = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo).Currency;
+        var market = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo);
+        var marketCurrency = market.Currency;
 
         // One lookup per distinct brand; the brand's rows are reused across all its items.
         var rowsByBrand = new Dictionary<string, IReadOnlyList<BrandModel>>(StringComparer.OrdinalIgnoreCase);
@@ -923,12 +896,36 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 continue;
             }
 
-            if (BestBrandModelMatch(m, rows) is not { } match)
+            // LOCAL-FIRST: rows harvested from the brand's LOCAL site for THIS market get first
+            // claim — the in-market storefront price is the one a shopper here actually pays (the
+            // currency gate inside FillFromRow still applies). Any-level rows (global/regional/
+            // legacy-null = global) then fill whatever gaps remain: image and specs are
+            // market-agnostic, and FillFromRow only ever fills blanks, so the second pass can't
+            // overwrite what the local row supplied.
+            var localRows = rows.Where(r =>
+                r.SiteLevel == BrandSiteLevel.Local &&
+                string.Equals(r.SiteCountry, market.CountryCode, StringComparison.OrdinalIgnoreCase)).ToList();
+
+            var updated = m;
+            var filledImage = false;
+            var filledPrice = false;
+            var filledSpecs = false;
+
+            var localMatch = localRows.Count > 0 ? BestBrandModelMatch(m, localRows) : null;
+            if (localMatch is not null)
             {
-                continue;
+                (updated, filledImage, filledPrice, filledSpecs) = FillFromRow(updated, localMatch, marketCurrency, now);
             }
 
-            var (updated, filledImage, filledPrice, filledSpecs) = FillFromRow(m, match, marketCurrency, now);
+            if (BestBrandModelMatch(m, rows) is { } match && !ReferenceEquals(match, localMatch))
+            {
+                var (anyFilled, img, price, specs) = FillFromRow(updated, match, marketCurrency, now);
+                updated = anyFilled;
+                filledImage |= img;
+                filledPrice |= price;
+                filledSpecs |= specs;
+            }
+
             if (filledImage) images++;
             if (filledPrice) prices++;
             if (filledSpecs) specsFilled++;
@@ -1446,10 +1443,25 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         "buy", "cheap", "deal", "deals", "near", "me", "shop", "store", "stores", "online"
     };
 
-    private static List<string> SignificantQueryTokens(string? query) =>
-        string.IsNullOrWhiteSpace(query)
-            ? new List<string>()
-            : Tokens(query!).Where(tok => tok.Length >= 3 && !QueryStopwords.Contains(tok)).ToList();
+    private static List<string> SignificantQueryTokens(string? query, string? geo = null)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return new List<string>();
+        }
+
+        // Geography words never appear in product names ("best acs in JORDAN") — counting them
+        // toward the two-token requirement effectively demanded geo-in-name and killed every
+        // discovery for short queries. They are market scope, not product identity.
+        var geoTokens = string.IsNullOrWhiteSpace(geo)
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : Tokens(geo!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // ShortTokens (2+ chars): two-letter categories are real products — "AC", "TV" — and the
+        // stopword list already removes the two-letter noise words ("in", "me").
+        return ShortTokens(query!)
+            .Where(tok => tok.Length >= 2 && !QueryStopwords.Contains(tok) && !geoTokens.Contains(tok))
+            .ToList();
+    }
 
     /// <summary>
     /// Singular/plural-tolerant token match, requiring at least TWO query tokens when the query has
@@ -1459,7 +1471,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// </summary>
     private static bool NameMatchesQuery(string name, IReadOnlyList<string> queryTokens)
     {
-        var have = Tokens(name);
+        var have = ShortTokens(name); // 2-char product nouns (AC, TV) must be matchable
         if (have.Count == 0)
         {
             return false;
@@ -1481,6 +1493,30 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return stem.Equals("maker", StringComparison.OrdinalIgnoreCase) ? "machine" : stem;
     }
 
+    /// <summary>
+    /// Numeric variant tokens of a product name ("2", "1.5", "12000") — the discriminators that
+    /// separate a 2-ton AC from its 3-ton sibling. Text-token overlap between such siblings is
+    /// near-total, so ONLY these numbers can tell them apart.
+    /// </summary>
+    internal static HashSet<string> VariantNumbers(string name) =>
+        name.Split(' ', '-', '/', '،', ',', '(', ')')
+            .Select(tok => tok.Trim().TrimEnd('"'))
+            .Where(tok => tok.Length > 0 && tok.All(c => char.IsDigit(c) || c == '.') && tok.Any(char.IsDigit))
+            .Select(tok => tok.TrimEnd('.', '0') is { Length: > 0 } n ? n : tok) // 2.0 ≡ 2
+            .ToHashSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// True when two names carry DISAGREEING variant numbers — both have numbers, none shared.
+    /// Such names are different SKUs of the same line (2 vs 3 ton), never the same product: a
+    /// match between them mis-attributes prices and swallows distinct variants.
+    /// </summary>
+    internal static bool VariantsDisagree(string a, string b)
+    {
+        var va = VariantNumbers(a);
+        var vb = VariantNumbers(b);
+        return va.Count > 0 && vb.Count > 0 && !va.Overlaps(vb);
+    }
+
     /// <summary>True when the entry already decorated an existing model (the matcher's own bar).</summary>
     private static bool MatchedByAnyModel(string name, IReadOnlyList<ProductModel> models)
     {
@@ -1492,7 +1528,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         foreach (var m in models)
         {
-            var want = Tokens($"{m.Brand} {m.Model} {m.Name}");
+            var identity = $"{m.Brand} {m.Model} {m.Name}";
+            if (VariantsDisagree(name, identity))
+            {
+                continue; // a disagreeing SKU is a sibling, not this model
+            }
+
+            var want = Tokens(identity);
             if (want.Count == 0)
             {
                 continue;
@@ -1517,9 +1559,9 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     public static (List<ProductModel> Models, List<string> Created) AppendCatalogDiscoveries(
         List<ProductModel> models,
         IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)> entries,
-        string? storeName, string? query)
+        string? storeName, string? query, string? geo = null)
     {
-        var queryTokens = SignificantQueryTokens(query);
+        var queryTokens = SignificantQueryTokens(query, geo);
         var created = new List<string>();
         if (queryTokens.Count == 0)
         {
@@ -1527,8 +1569,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         }
 
         var result = models;
-        var seen = new HashSet<string>(
-            models.Select(m => string.Join(' ', Tokens(m.Name))), StringComparer.OrdinalIgnoreCase);
+        // Identity keys append the variant NUMBERS explicitly: single digits ("2" vs "3" ton) sit
+        // below every token-length floor yet are exactly what keeps sibling SKUs distinct.
+        static string IdentityKey(string name) =>
+            string.Join(' ', ShortTokens(name)) + "|" + string.Join(',', VariantNumbers(name).OrderBy(n => n, StringComparer.Ordinal));
+
+        var seen = new HashSet<string>(models.Select(m => IdentityKey(m.Name)), StringComparer.OrdinalIgnoreCase);
         foreach (var e in entries)
         {
             if (string.IsNullOrWhiteSpace(e.Name))
@@ -1536,8 +1582,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 continue;
             }
 
-            var key = string.Join(' ', Tokens(e.Name));
-            if (key.Length == 0 || !seen.Add(key) ||
+            var key = IdentityKey(e.Name);
+            if (key.StartsWith('|') || !seen.Add(key) ||
                 !NameMatchesQuery(e.Name, queryTokens) || MatchedByAnyModel(e.Name, models))
             {
                 continue;

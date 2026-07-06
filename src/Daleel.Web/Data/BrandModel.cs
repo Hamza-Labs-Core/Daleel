@@ -52,6 +52,18 @@ public sealed class BrandModel
     /// <summary>The page the model was harvested from.</summary>
     public string? SourceUrl { get; set; }
 
+    /// <summary>
+    /// Which site-hierarchy level's catalogue this row came from — a <see cref="BrandSiteLevel"/>
+    /// constant. Null = legacy/unattributed rows, treated as GLOBAL when filling specs/images.
+    /// </summary>
+    public string? SiteLevel { get; set; }
+
+    /// <summary>
+    /// Market scope of the harvest that produced this row: the ISO alpha-2 country code for
+    /// local-site rows ("jo"), a region hint for regional ones, null for global/legacy.
+    /// </summary>
+    public string? SiteCountry { get; set; }
+
     public DateTimeOffset LastRefreshed { get; set; }
 
     // ── Smart product identification (vision pipeline) ───────────────────────────

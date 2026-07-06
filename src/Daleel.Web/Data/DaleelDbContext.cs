@@ -43,6 +43,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<Store> Stores => Set<Store>();
     public DbSet<ProductProfile> ProductProfiles => Set<ProductProfile>();
     public DbSet<BrandModel> BrandModels => Set<BrandModel>();
+
+    /// <summary>A brand's discovered site hierarchy: global / regional / local. See <see cref="BrandSite"/>.</summary>
+    public DbSet<BrandSite> BrandSites => Set<BrandSite>();
     public DbSet<ScrapedPrice> ScrapedPrices => Set<ScrapedPrice>();
 
     /// <summary>The VPS token authority: minted worker bearers + admin-stored vendor keys (encrypted).</summary>
@@ -108,6 +111,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Pros).HasConversion(stringListConverter, stringListComparer);
             e.Property(x => x.Cons).HasConversion(stringListConverter, stringListComparer);
             e.Property(x => x.PopularModels).HasConversion(stringListConverter, stringListComparer);
+            e.Property(x => x.SocialLinks).HasConversion(stringListConverter, stringListComparer);
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
         });
 
@@ -163,6 +167,10 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Currency).HasMaxLength(16);
             e.Property(x => x.LocalPrice).HasColumnType("decimal(18,2)");
             e.Property(x => x.GlobalPrice).HasColumnType("decimal(18,2)");
+            // Site-hierarchy attribution: which level's catalogue (global/regional/local) a row was
+            // harvested from, and for which market. Null = legacy rows, treated as global.
+            e.Property(x => x.SiteLevel).HasMaxLength(16);
+            e.Property(x => x.SiteCountry).HasMaxLength(8);
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
 
             // Smart-identification columns: the canonical merged spec sheet (what the UI reads), the
@@ -174,6 +182,24 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.DiscoveredAt).HasConversion(toUnixMs);
 
             // A model belongs to one brand; deleting a brand removes its harvested models.
+            e.HasOne(x => x.Brand)
+                .WithMany()
+                .HasForeignKey(x => x.BrandId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<BrandSite>(e =>
+        {
+            // One row per (brand, level, market) — the discovery upsert's key. Its BrandId prefix
+            // also serves the per-brand listing. NULLS NOT DISTINCT so the single global row
+            // (CountryCode null) is enforced by the index too, not just by the read-then-write.
+            e.HasIndex(x => new { x.BrandId, x.Level, x.CountryCode }).IsUnique().AreNullsDistinct(false);
+            e.Property(x => x.Level).HasMaxLength(16);
+            e.Property(x => x.CountryCode).HasMaxLength(8);
+            e.Property(x => x.Url).HasMaxLength(500);
+            e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+
+            // A site row is meaningless without its brand — cascade it away.
             e.HasOne(x => x.Brand)
                 .WithMany()
                 .HasForeignKey(x => x.BrandId)

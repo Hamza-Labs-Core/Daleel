@@ -18,8 +18,10 @@ crawling. That shape is gone. The rule now:
 - **The search worker enqueues ONE root unit** after the base result is delivered: `enrich.plan`
   for fresh runs, `enrich.regaps` for below-threshold cache hits. That is the entire "enrich" step.
 - **`enrich.plan` fans out**: a cheap brand-DB fill inline, then one `enrich.item` per model
-  (spec dive), one `enrich.catalog` per store domain, one `enrich.brand` per surfaced brand,
-  a job-level `enrich.vision` pass, and deliberately-late `enrich.images` / `enrich.conditions`.
+  (spec dive), one `enrich.catalog` per store domain, one `enrich.brandresearch` per surfaced brand
+  (full site/intelligence/social/catalogue research, saved to the Brand row step by step and
+  freshness-gated at 7 days so no two searches repeat it), a job-level `enrich.vision` pass, and
+  deliberately-late `enrich.images` / `enrich.conditions`.
 - **Every unit saves immediately** through `EnrichedResultStore.PatchAsync`: a row lock on the job
   serializes concurrent patches, each mutation composes on the previous one, and the conversation,
   history row, result cache and live UI (`Enriched` broadcast) sync after each commit. A deploy

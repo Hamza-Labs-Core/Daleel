@@ -44,7 +44,7 @@
            Arabic product/brand names even under an English UI. Route names through TranslatedText so they
            are translated to the current UI language at display time — cache-first and best-effort, a
            transparent pass-through when no DeepL key is set or the text already matches the UI language. *@
-        <TranslatedText Text="@Model.Name" Typo="Typo.body1" Style="font-weight:500;line-height:1.3;" />
+        <TranslatedText Text="@(Daleel.Core.Models.HtmlText.Strip(Model.Name) ?? Model.Name)" Typo="Typo.body1" Style="font-weight:500;line-height:1.3;" />
 
         @if (!string.IsNullOrWhiteSpace(BrandLine))
         {

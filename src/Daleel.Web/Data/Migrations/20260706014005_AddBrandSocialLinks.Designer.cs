@@ -3,6 +3,7 @@ using System;
 using Daleel.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Daleel.Web.Data.Migrations
 {
     [DbContext(typeof(DaleelDbContext))]
-    partial class DaleelDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260706014005_AddBrandSocialLinks")]
+    partial class AddBrandSocialLinks
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -371,14 +374,6 @@ namespace Daleel.Web.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("SiteCountry")
-                        .HasMaxLength(8)
-                        .HasColumnType("character varying(8)");
-
-                    b.Property<string>("SiteLevel")
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
                     b.Property<string>("SourceUrl")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
@@ -395,44 +390,6 @@ namespace Daleel.Web.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("BrandModels");
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.BrandSite", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("BrandId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("CountryCode")
-                        .HasMaxLength(8)
-                        .HasColumnType("character varying(8)");
-
-                    b.Property<long>("LastRefreshed")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Level")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.Property<string>("Url")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("BrandId", "Level", "CountryCode")
-                        .IsUnique();
-
-                    NpgsqlIndexBuilderExtensions.AreNullsDistinct(b.HasIndex("BrandId", "Level", "CountryCode"), false);
-
-                    b.ToTable("BrandSites");
                 });
 
             modelBuilder.Entity("Daleel.Web.Data.EnrichmentWorkItem", b =>
@@ -1599,17 +1556,6 @@ namespace Daleel.Web.Data.Migrations
                 });
 
             modelBuilder.Entity("Daleel.Web.Data.BrandModel", b =>
-                {
-                    b.HasOne("Daleel.Web.Data.Brand", "Brand")
-                        .WithMany()
-                        .HasForeignKey("BrandId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Brand");
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.BrandSite", b =>
                 {
                     b.HasOne("Daleel.Web.Data.Brand", "Brand")
                         .WithMany()

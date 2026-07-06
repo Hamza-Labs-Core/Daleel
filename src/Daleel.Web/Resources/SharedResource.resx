@@ -661,6 +661,13 @@
   <data name="Detail.About" xml:space="preserve"><value>About this product</value></data>
   <data name="Detail.ProsCons" xml:space="preserve"><value>Pros &amp; cons</value></data>
   <data name="Detail.StillEnriching" xml:space="preserve"><value>More details may still be arriving — check back shortly</value></data>
+  <data name="Detail.BackToSearch" xml:space="preserve"><value>Back to search</value></data>
+  <data name="Detail.NotAvailable" xml:space="preserve"><value>Details not yet available — this product will be profiled on the next search.</value></data>
+  <data name="Detail.Overview" xml:space="preserve"><value>Overview</value></data>
+  <data name="Detail.ObservedRange" xml:space="preserve"><value>Observed price range: {0}</value></data>
+  <data name="Detail.PricesUpdated" xml:space="preserve"><value>Prices updated {0}</value></data>
+  <data name="Detail.Store" xml:space="preserve"><value>Store</value></data>
+  <data name="Detail.Condition" xml:space="preserve"><value>Condition</value></data>
   <data name="Search.EmailNotice" xml:space="preserve"><value>We'll email you the results when they're ready.</value></data>
   <data name="Settings.EmailResults" xml:space="preserve"><value>Email me search results</value></data>
   <data name="Settings.EmailResultsHelp" xml:space="preserve"><value>Get a summary email when your search finishes.</value></data>

@@ -234,5 +234,7 @@ public class ItemEnrichmentServiceTests
     private sealed class StubBrandCatalog : IBrandCatalogService
     {
         public Task<int> HarvestAsync(string brandName, CancellationToken ct = default) => Task.FromResult(0);
+        public Task<int> HarvestAsync(string brandName, string siteUrl, string level, string? countryCode, CancellationToken ct = default) =>
+            Task.FromResult(0);
     }
 }
