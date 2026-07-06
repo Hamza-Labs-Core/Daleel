@@ -495,6 +495,8 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
         }
 
         var svc = ctx.Services.GetRequiredService<IItemEnrichmentService>();
+        // GetService (nullable): absent config ⇒ actor filter off + edge check skipped (test wiring).
+        var config = ctx.Services.GetService<ISystemConfigService>();
 
         // Edge-first: match whatever the drain has persisted for this domain — the same data an
         // inline crawl would fetch, already paid for once on the edge.
@@ -502,14 +504,12 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
             products.Models.ToList(), payload.Domain, payload.StoreName, ctx.Job.Query, ct);
         if (fromDrain is not null && (priced > 0 || drainCreated.Count > 0))
         {
-            await Patch(ctx, item, fromDrain, ct);
-            await EnqueueFollowUpsAsync(ctx, item, drainCreated, ct);
+            await ApplyAsync(ctx, item, config, fromDrain, drainCreated, ct);
             return UnitOutcome.Ok;
         }
 
         var providers = ctx.Services.GetRequiredService<IProviderApi>();
-        var config = ctx.Services.GetRequiredService<ISystemConfigService>();
-        var edgeActive = providers.HasEdge &&
+        var edgeActive = providers.HasEdge && config is not null &&
             await config.GetBoolAsync(Cloudflare.CloudflareWorkerOptions.EnabledFlag, false, ct);
         if (edgeActive && item.Attempts <= DrainWaitAttempts)
         {
@@ -522,11 +522,39 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
             products.Geo, item.SearchJobId.ToString(), ctx.Job.Query, payload.EntryUrl, ct);
         if (inline is not null && inlinePriced >= 0)
         {
-            await Patch(ctx, item, inline, ct);
-            await EnqueueFollowUpsAsync(ctx, item, inlineCreated, ct);
+            await ApplyAsync(ctx, item, config, inline, inlineCreated, ct);
         }
 
         return UnitOutcome.Ok;
+    }
+
+    /// <summary>
+    /// Applies a catalogue attach: when the LLM-ACTOR relatedness filter is on (flag actor.catalog), the
+    /// newly-DISCOVERED products are judged against the query and unrelated ones (accessories, wrong
+    /// category) are dropped from the answer AND skipped for follow-up dives — replacing the token-overlap
+    /// match that admits accessories. Flag off ⇒ keep everything (the prior behaviour). Fail-open.
+    /// </summary>
+    private static async Task ApplyAsync(
+        EnrichmentUnitContext ctx, EnrichmentWorkItem item, ISystemConfigService? config,
+        List<ProductModel> models, IReadOnlyList<string> created, CancellationToken ct)
+    {
+        var keep = created;
+        if (created.Count > 0 && config is not null && await config.GetBoolAsync(Actor.ActorFlags.Catalog, false, ct))
+        {
+            var agent = await Actor.ActorFlags.AgentAsync(ctx, config, ct);
+            var related = await ctx.Services.GetRequiredService<Actor.CatalogActor>()
+                .FilterRelatedAsync(agent, ctx.Job.Query, created, ct);
+            if (related.Count < created.Count)
+            {
+                var rejected = created.Where(n => !related.Contains(n))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+                models = models.Where(m => !rejected.Contains(m.Name)).ToList();
+                keep = created.Where(n => related.Contains(n)).ToList();
+            }
+        }
+
+        await Patch(ctx, item, models, ct);
+        await EnqueueFollowUpsAsync(ctx, item, keep, ct);
     }
 
     /// <summary>

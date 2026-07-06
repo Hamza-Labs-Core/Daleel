@@ -567,6 +567,7 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.IActorLoop,
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.ItemDiveActor>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.VerifyPageActor>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.BrandSiteActor>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.CatalogActor>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.PlanEnrichmentHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,

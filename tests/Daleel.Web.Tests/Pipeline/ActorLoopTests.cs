@@ -229,6 +229,29 @@ public class ActorLoopTests
         sites.Social.Should().NotContain("not-a-url", "non-URL social entries are dropped");
     }
 
+    [Fact]
+    public async Task Catalog_actor_filters_unrelated_discoveries()
+    {
+        var llm = new ScriptedLlm(
+            "{\"action\":\"done\",\"result\":{\"related\":[\"DeLonghi Dedica EC685\",\"DeLonghi Magnifica\"]}}");
+        var actor = new CatalogActor(Loop());
+        var names = new[] { "DeLonghi Dedica EC685", "DeLonghi Magnifica", "Fondant Spray Gun", "Descaling Tablets" };
+
+        var related = await actor.FilterRelatedAsync(Agent(llm), "espresso machine", names, default);
+
+        related.Should().Contain("DeLonghi Dedica EC685").And.Contain("DeLonghi Magnifica");
+        related.Should().NotContain("Fondant Spray Gun");
+        related.Should().NotContain("Descaling Tablets");
+    }
+
+    [Fact]
+    public async Task Catalog_actor_fails_open_keeping_all_on_bad_output()
+    {
+        var related = await new CatalogActor(Loop())
+            .FilterRelatedAsync(Agent(new ScriptedLlm("garbage, not json")), "x", new[] { "A", "B" }, default);
+        related.Should().BeEquivalentTo(new[] { "A", "B" }, "a bad/empty response must not strip the catalogue");
+    }
+
     /// <summary>An ILlmClient that replays a fixed script of completions, one per call.</summary>
     private sealed class ScriptedLlm : ILlmClient
     {
