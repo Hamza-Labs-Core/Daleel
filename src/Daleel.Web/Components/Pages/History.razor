@@ -45,6 +45,11 @@ else if (_authenticated)
             <MudTh>@L["History.Col.Query"]</MudTh>
             <MudTh>@L["History.Col.Market"]</MudTh>
             <MudTh>@L["History.Col.Summary"]</MudTh>
+            <MudTh Style="text-align:right;">
+                <MudTooltip Text="Credits used (search + enrichment)">
+                    <MudIcon Icon="@Icons.Material.Filled.Toll" Size="Size.Small" />
+                </MudTooltip>
+            </MudTh>
             <MudTh Style="text-align:right;">@L["History.Col.Actions"]</MudTh>
         </HeaderContent>
         <RowTemplate>
@@ -65,6 +70,9 @@ else if (_authenticated)
                 <MudText Typo="Typo.caption" Color="Color.Secondary" dir="@Catalog.Dir(context.ResultSummary ?? "")">
                     @context.ResultSummary
                 </MudText>
+            </MudTd>
+            <MudTd DataLabel="Credits" Style="text-align:right;">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">@context.Credits</MudText>
             </MudTd>
             <MudTd Style="text-align:right;">
                 <MudTooltip Text="@L["History.Open"]">

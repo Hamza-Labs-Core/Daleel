@@ -295,6 +295,8 @@ public sealed class SearchJobService : BackgroundService
                 Geo = job.Geo, Model = job.Model, ResultSummary = null,
                 // Persist the full result so opening this entry later re-displays it without re-running.
                 ResultJson = result.ResultJson,
+                // Base-run credits; background enrichment increments this via AddCreditsAsync as it runs.
+                Credits = result.Credits,
                 CreatedAt = job.CompletedAt.Value
             }, stoppingToken);
             // Record the search for analytics / cost optimisation — providers called, api-call

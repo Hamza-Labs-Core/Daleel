@@ -310,6 +310,14 @@ public sealed class EnrichmentQueueService : BackgroundService
             {
                 await sp.GetRequiredService<IQuotaService>()
                     .ChargeCreditsAsync(item.UserId, credits, CancellationToken.None);
+
+                // Roll this unit's credits into the search's history-row total, so the user's history
+                // shows the true end-to-end cost (base run + all enrichment), growing as units land.
+                if (item.HistoryEntryId > 0)
+                {
+                    await sp.GetRequiredService<ISearchHistoryRepository>()
+                        .AddCreditsAsync(item.HistoryEntryId, credits, CancellationToken.None);
+                }
             }
         }
         catch (Exception ex)
