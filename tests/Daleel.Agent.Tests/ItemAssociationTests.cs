@@ -200,4 +200,37 @@ public class ItemAssociationTests
         // Unattached, it still surfaces in the result-level articles section — never lost.
         result.Reviews.Should().Contain(r => (r.Url ?? "").Contains("dishwashers"));
     }
+
+    [Fact]
+    public async Task Generic_category_articles_do_not_attach_to_branded_models()
+    {
+        // Live find: the MEC AC card carried mentions that never say MEC — category-token overlap
+        // (ton/inverter/air/conditioner) alone cleared the bar. The brand is the discriminator:
+        // the generic guide must attach nowhere, the SmartBuy page naming MEC must attach.
+        var bundle = new ResearchBundle
+        {
+            ShoppingResults = new[]
+            {
+                Shopping("MEC AC 2 Ton Inverter Air Conditioner", 499, "Leaders", "https://leaders.jo/p/9")
+            },
+            WebResults = new[]
+            {
+                Web("Best inverter air conditioner 2 ton buying guide",
+                    "https://acguides.example/best-2-ton",
+                    "How to choose an inverter air conditioner: ton sizing, energy saving and noise"),
+                Web("MEC air conditioners at SmartBuy Jordan",
+                    "https://smartbuy-me.com/collections/mec-acs",
+                    "Three MEC inverter air conditioner listings: 1.5 ton, 2 ton and 3 ton at the best prices")
+            }
+        };
+
+        var result = await BuildAsync(bundle);
+
+        var mec = result.Models.Single(m => m.Name.Contains("MEC"));
+        mec.Mentions.Should().NotContain(l => l.Url.Contains("acguides"),
+            "a guide that never says MEC is not about this model");
+        (mec.Mentions.Any(l => l.Url.Contains("smartbuy")) ||
+         mec.Reviews.Any(r => r.Url.Contains("smartbuy"))).Should().BeTrue(
+            "the SmartBuy page names the brand — that's the page worth fetching for its 3 listings");
+    }
 }

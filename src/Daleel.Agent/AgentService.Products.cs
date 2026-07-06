@@ -440,11 +440,17 @@ public sealed partial class AgentService
             var nameTokens = ItemTokens(m.Name);
             var normalizedBrand = NormalizeLabel(m.Brand);
 
+            var brandTokens = ItemTokens(m.Brand);
+
             // "About this model": the model number's tokens all present (the strongest signal), or
-            // enough of the item's identity shared that a lone incidental word can never attach.
+            // enough identity shared AND the DISCRIMINATING token present — for a branded model the
+            // BRAND must appear, else category words alone attach every generic roundup (live find:
+            // articles that never mention MEC attached to the MEC AC card, because ton/inverter/air
+            // overlap cleared the shared-token bar on their own).
             bool MentionsModel(HashSet<string> candidate) =>
                 (modelTokens.Count > 0 && modelTokens.All(candidate.Contains)) ||
-                SharedSignificantTokens(identityTokens, candidate) >= MinSharedIdentityTokens;
+                (SharedSignificantTokens(identityTokens, candidate) >= MinSharedIdentityTokens &&
+                 (brandTokens.Count == 0 || brandTokens.Any(candidate.Contains)));
 
             // 1) StoreUrl on offers: the seller chip links to the store's own site, distinct from
             // the offer's product-page Url (never duplicated when they're the same link).
