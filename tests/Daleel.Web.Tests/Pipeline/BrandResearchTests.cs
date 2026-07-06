@@ -41,6 +41,7 @@ public class BrandResearchTests
         public Task RetryAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) => Task.CompletedTask;
         public Task KillAsync(long id, string reason, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default) => Task.FromResult(0);
+        public Task<int> ReapExhaustedAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 
     private sealed class FixedResultStore : IEnrichedResultStore

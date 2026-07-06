@@ -255,6 +255,7 @@ public class BrandSiteHierarchyTests
         public Task RetryAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) => Task.CompletedTask;
         public Task KillAsync(long id, string reason, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default) => Task.FromResult(0);
+        public Task<int> ReapExhaustedAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 
     /// <summary>Vision identification is out of scope here — always "couldn't identify".</summary>

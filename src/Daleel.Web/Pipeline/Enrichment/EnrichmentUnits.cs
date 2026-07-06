@@ -65,6 +65,9 @@ public sealed record BrandPayload(string Brand);
 /// <summary>One page to verify + the models it was selected for (mention pages create offers).</summary>
 public sealed record VerifyPagePayload(string Url, List<string> ModelNames, bool FromMention = false);
 
+/// <summary>Names already attempted by prior image-lookup passes — so the chain advances, never loops.</summary>
+public sealed record ImageLookupPayload(List<string> Attempted);
+
 /// <summary>What a handler execution decided. Exactly one of these per attempt.</summary>
 public abstract record UnitOutcome
 {

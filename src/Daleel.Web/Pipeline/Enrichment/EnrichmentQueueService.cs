@@ -28,6 +28,9 @@ public sealed class EnrichmentQueueService : BackgroundService
     /// </summary>
     private static readonly TimeSpan Lease = TimeSpan.FromMinutes(10);
 
+    /// <summary>How often to Dead lease-expired, attempts-exhausted rows (crash victims).</summary>
+    private static readonly TimeSpan ReapInterval = TimeSpan.FromMinutes(2);
+
     private readonly IEnrichmentWorkQueue _queue;
     private readonly IEnrichedResultStore _results;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -35,6 +38,52 @@ public sealed class EnrichmentQueueService : BackgroundService
     private readonly ILogger<EnrichmentQueueService> _logger;
 
     private readonly ConcurrentDictionary<long, Task> _running = new();
+
+    // Per-job serialization gate, used ONLY when a cost cap is active for the job. Without it, N
+    // units of one job each read the same spent-sum at start and are each granted the full remaining
+    // budget — the job overshoots the admin ceiling by ~concurrency×. Holding this gate across a
+    // capped unit makes the spent-sum read authoritative (within this process; cross-container
+    // overshoot is bounded to one unit per container, and the cap is opt-in). Ref-counted so the
+    // dictionary never grows past the set of in-flight capped jobs.
+    private readonly Dictionary<int, (SemaphoreSlim Sem, int Refs)> _capGates = new();
+    private readonly object _capGatesLock = new();
+
+    private SemaphoreSlim AcquireCapGate(int jobId)
+    {
+        lock (_capGatesLock)
+        {
+            if (_capGates.TryGetValue(jobId, out var e))
+            {
+                _capGates[jobId] = (e.Sem, e.Refs + 1);
+                return e.Sem;
+            }
+
+            var sem = new SemaphoreSlim(1, 1);
+            _capGates[jobId] = (sem, 1);
+            return sem;
+        }
+    }
+
+    private void ReleaseCapGate(int jobId)
+    {
+        lock (_capGatesLock)
+        {
+            if (!_capGates.TryGetValue(jobId, out var e))
+            {
+                return;
+            }
+
+            if (e.Refs <= 1)
+            {
+                _capGates.Remove(jobId);
+                e.Sem.Dispose();
+            }
+            else
+            {
+                _capGates[jobId] = (e.Sem, e.Refs - 1);
+            }
+        }
+    }
 
     public EnrichmentQueueService(
         IEnrichmentWorkQueue queue, IEnrichedResultStore results, IServiceScopeFactory scopeFactory,
@@ -52,8 +101,27 @@ public sealed class EnrichmentQueueService : BackgroundService
         _logger.LogInformation(
             "Enrichment queue consumer started (concurrency {Concurrency})", PipelineLimits.EnrichmentConcurrency);
         using var timer = new PeriodicTimer(TickInterval);
+        var lastReap = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
+            // Reap units that crashed the container before writing an outcome (lease expired,
+            // attempts exhausted) — the claim query already refuses them, this makes them Dead and
+            // visible. Cheap UPDATE, throttled so it's not run every 2s tick.
+            if (DateTimeOffset.UtcNow - lastReap > ReapInterval)
+            {
+                lastReap = DateTimeOffset.UtcNow;
+                try
+                {
+                    var reaped = await _queue.ReapExhaustedAsync(stoppingToken);
+                    if (reaped > 0)
+                    {
+                        _logger.LogWarning("Reaped {Count} exhausted enrichment unit(s) as dead", reaped);
+                    }
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
+                catch (Exception ex) { _logger.LogWarning(ex, "Enrichment reap tick failed"); }
+            }
+
             var free = PipelineLimits.EnrichmentConcurrency - _running.Count;
             var claimedFull = false;
             if (free > 0)
@@ -136,9 +204,46 @@ public sealed class EnrichmentQueueService : BackgroundService
         var estimator = await CostConfig.BuildEstimatorAsync(config, stoppingToken);
         var caps = await CostConfig.ReadCapsAsync(config, stoppingToken);
 
+        // When a cap is active, serialize this job's units so the cumulative-spend read below is
+        // authoritative — concurrent units must not each be granted the full remaining budget.
+        SemaphoreSlim? capGate = null;
+        if (caps.MaxPerJob > 0)
+        {
+            capGate = AcquireCapGate(item.SearchJobId);
+            try
+            {
+                await capGate.WaitAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                ReleaseCapGate(item.SearchJobId);
+                return; // host shutdown — the row stays leased and re-runs
+            }
+        }
+
+        try
+        {
+            await RunUnitAsync(item, sp, db, job, config, estimator, caps, handler, stoppingToken);
+        }
+        finally
+        {
+            if (capGate is not null)
+            {
+                capGate.Release();
+                ReleaseCapGate(item.SearchJobId);
+            }
+        }
+    }
+
+    private async Task RunUnitAsync(
+        EnrichmentWorkItem item, IServiceProvider sp, DaleelDbContext db, SearchJob job,
+        ISystemConfigService config, Daleel.Core.Observability.CostEstimator estimator,
+        CostCaps caps, IEnrichmentUnitHandler handler, CancellationToken stoppingToken)
+    {
         // The per-job cost cap is CUMULATIVE across the base run and every enrichment unit: this
         // unit may only spend what the job hasn't already. A tripped/exhausted cap kills the unit
-        // visibly — a queued deep-dive must never grant the job a fresh budget.
+        // visibly — a queued deep-dive must never grant the job a fresh budget. Under the cap gate
+        // above, this read reflects every already-committed unit's spend.
         var unitCap = caps.MaxPerJob;
         if (caps.MaxPerJob > 0)
         {
@@ -266,6 +371,17 @@ public sealed class EnrichmentQueueService : BackgroundService
                 await eventStore.RecordBatchAsync(
                     calls.Select(c => PipelineEventFactory.FromApiCall(c, searchId)).ToList(),
                     CancellationToken.None);
+            }
+
+            // Charge the unit's credits to the user, exactly as the base run charges its own — the
+            // queue's recursive deep-dive spend (item dives, catalogue crawls, image lookups) is
+            // real work the user must pay for, not free enrichment. Atomic increment (QuotaService),
+            // so concurrent units don't race; UserId here is the raw id the base run also uses.
+            var credits = collector.TotalCredits;
+            if (credits > 0)
+            {
+                await sp.GetRequiredService<IQuotaService>()
+                    .ChargeCreditsAsync(item.UserId, credits, CancellationToken.None);
             }
         }
         catch (Exception ex)

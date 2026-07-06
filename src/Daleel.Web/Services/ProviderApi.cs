@@ -183,7 +183,11 @@ public sealed class ProviderApi : IProviderApi
             var edgePage = await MeterAsync(
                 "scrape-worker/context.dev", $"scrape/{format.ToString().ToLowerInvariant()}", url,
                 () => _edge.ScrapePageAsync(url, format, ct),
-                p => p?.Content?.Length ?? 0).ConfigureAwait(false);
+                p => p?.Content?.Length ?? 0,
+                // Bill the edge attempt ONLY when it delivered; a null/failed edge page must cost
+                // nothing so the inline fallback below is the single charge (no double-bill on a
+                // worker outage or bearer rotation).
+                success: p => p is { Success: true }).ConfigureAwait(false);
             if (edgePage is { Success: true })
             {
                 return edgePage;
@@ -374,8 +378,11 @@ public sealed class ProviderApi : IProviderApi
         return client;
     }
 
-    /// <summary>Cached Places provider (rebuilt only if the resolved key changes); proxy-aware.</summary>
-    private GooglePlacesProvider? Places()
+    /// <summary>
+    /// Cached Places provider (rebuilt when the resolved key OR — when proxied — the proxy bearer
+    /// changes); proxy-aware. Internal so a test can prove the proxied client rebuilds on rotation.
+    /// </summary>
+    internal GooglePlacesProvider? Places()
     {
         var key = _factory.Resolve("GOOGLE_PLACES_API_KEY");
         var proxied = key is null && HasSearchProxy;
@@ -384,12 +391,18 @@ public sealed class ProviderApi : IProviderApi
             return null;
         }
 
-        var effectiveKey = key ?? "edge-proxied";
+        // When proxied, SearchProxyClient bakes the current CF_SEARCH_WORKER_TOKEN bearer into its
+        // DefaultRequestHeaders — so the cache key MUST include that bearer, or a rotated token leaves
+        // the cached client presenting a stale value the worker rejects (401) until process restart.
+        // A constant "edge-proxied" key would never rebuild; keying by the live bearer rebuilds on
+        // rotation. The provider still receives the plain "edge-proxied" placeholder key (the real
+        // auth rides the proxy client's header, not the Places X-Goog-Api-Key).
+        var effectiveKey = key ?? $"edge-proxied:{_factory.Resolve("CF_SEARCH_WORKER_TOKEN") ?? ""}";
         lock (_gate)
         {
             if (_places is null || !string.Equals(_placesKey, effectiveKey, StringComparison.Ordinal))
             {
-                _places = new GooglePlacesProvider(effectiveKey, SearchProxyClient());
+                _places = new GooglePlacesProvider(key ?? "edge-proxied", SearchProxyClient());
                 _placesKey = effectiveKey;
             }
             return _places;
@@ -472,9 +485,10 @@ public sealed class ProviderApi : IProviderApi
     /// calls (no ambient observer) still run — they're simply not attributed.
     /// </summary>
     private static Task<T> MeterAsync<T>(
-        string provider, string endpoint, string? summary, Func<Task<T>> action, Func<T, long>? bytes = null) =>
+        string provider, string endpoint, string? summary, Func<Task<T>> action,
+        Func<T, long>? bytes = null, Func<T, bool>? success = null) =>
         ApiCallTimer.TimeAsync(
             AmbientApiObserver.Observer,
             AmbientApiObserver.Estimator ?? new CostEstimator(),
-            provider, endpoint, summary, action, bytes);
+            provider, endpoint, summary, action, bytes, success);
 }

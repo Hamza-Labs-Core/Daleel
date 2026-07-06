@@ -35,6 +35,14 @@ public interface IEnrichmentWorkQueue
 
     /// <summary>Pending+running units for a job — the UI's "deep dive still in progress" signal.</summary>
     Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Deads running rows whose lease expired AND whose attempts are exhausted — units that crashed
+    /// the container before they could write an outcome. Returns how many were reaped. The claim
+    /// query already refuses to re-run them; this makes them VISIBLE (dead, with a reason) rather
+    /// than silently stuck Running forever.
+    /// </summary>
+    Task<int> ReapExhaustedAsync(CancellationToken ct = default);
 }
 
 public sealed class EnrichmentWorkQueue : IEnrichmentWorkQueue
@@ -89,13 +97,19 @@ public sealed class EnrichmentWorkQueue : IEnrichmentWorkQueue
         var nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         // Timestamps are Unix-ms bigints (DbContext converters), so eligibility is integer math.
         // An expired lease on a running row is the crash-recovery path: the container that claimed
-        // it died (or was deployed over), and the unit simply becomes claimable again.
+        // it died (or was deployed over), and the unit becomes claimable again — but ONLY while it
+        // still has attempts left. Without the "Attempts" < "MaxAttempts" bound, a unit that crashes
+        // the container BEFORE it can write a Retry/Kill outcome (OOM, a handler ignoring the budget
+        // token) re-claims on every lease expiry forever, Attempts climbing unbounded past the cap
+        // that was meant to stop it. ReapExhaustedAsync (called by the consumer) Deads those rows so
+        // they surface instead of looping.
         var claimed = await db.EnrichmentWorkItems
             .FromSqlRaw(
                 """
                 SELECT * FROM "EnrichmentWorkItems"
                 WHERE ("Status" = {0} AND "NotBefore" <= {2})
-                   OR ("Status" = {1} AND "LeaseUntil" IS NOT NULL AND "LeaseUntil" < {2})
+                   OR ("Status" = {1} AND "LeaseUntil" IS NOT NULL AND "LeaseUntil" < {2}
+                       AND "Attempts" < "MaxAttempts")
                 ORDER BY "Id"
                 LIMIT {3}
                 FOR UPDATE SKIP LOCKED
@@ -165,6 +179,23 @@ public sealed class EnrichmentWorkQueue : IEnrichmentWorkQueue
         return await db.EnrichmentWorkItems
             .CountAsync(i => i.SearchJobId == searchJobId &&
                 (i.Status == WorkItemStatus.Pending || i.Status == WorkItemStatus.Running), ct);
+    }
+
+    public async Task<int> ReapExhaustedAsync(CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+        // LeaseUntil is a converted DateTimeOffset? (Unix-ms bigint under the hood); EF applies the
+        // converter to the comparison value, so a direct DateTimeOffset compare is a bigint compare.
+        var now = DateTimeOffset.UtcNow;
+        return await db.EnrichmentWorkItems
+            .Where(i => i.Status == WorkItemStatus.Running &&
+                        i.LeaseUntil != null && i.LeaseUntil < now &&
+                        i.Attempts >= i.MaxAttempts)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(i => i.Status, WorkItemStatus.Dead)
+                .SetProperty(i => i.LastError, "attempts exhausted before an outcome (crash/lease-expiry)")
+                .SetProperty(i => i.CompletedAt, now), ct);
     }
 
     private async Task MutateAsync(long id, Action<EnrichmentWorkItem> mutate, CancellationToken ct)

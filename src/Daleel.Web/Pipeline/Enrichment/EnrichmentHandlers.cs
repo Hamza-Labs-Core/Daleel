@@ -479,23 +479,31 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
         }
 
         var svc = ctx.Services.GetRequiredService<IItemEnrichmentService>();
+
+        // Names attempted by prior passes in this chain — skip them so we NEVER re-pay for an item
+        // whose lookup already failed. Without this the chain re-attempts the same first 12 imageless
+        // items forever (a grid of obscure items never resolves), burning paid SerpAPI lookups.
+        var attemptedBefore = EnrichmentWorkQueue.ReadPayload<ImageLookupPayload>(item.Payload)?.Attempted is { } a
+            ? new HashSet<string>(a, StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var attempts = 0;
+        var attemptedNow = new List<string>();
         var remaining = false;
         foreach (var model in models)
         {
-            if (!string.IsNullOrWhiteSpace(model.ImageUrl))
+            if (!string.IsNullOrWhiteSpace(model.ImageUrl) || attemptedBefore.Contains(model.Name))
             {
                 continue;
             }
 
-            if (attempts >= BatchSize)
+            if (attemptedNow.Count >= BatchSize)
             {
-                remaining = true;
+                remaining = true; // more UNATTEMPTED imageless items exist beyond this batch
                 break;
             }
 
-            attempts++;
+            attemptedNow.Add(model.Name);
             if (await svc.FindImageForItemAsync(ctx.Agent(), model, ct) is { } image)
             {
                 found[model.Name] = image;
@@ -529,9 +537,15 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
 
         if (remaining)
         {
+            // Carry forward everything attempted (before + this pass) so the next unit tackles the
+            // NEXT batch of unattempted items and the chain terminates once every imageless item has
+            // had exactly one lookup.
+            attemptedBefore.UnionWith(attemptedNow);
             await ctx.Queue.EnqueueAsync(new[]
             {
-                HandlerHelpers.Child(item, EnrichmentUnit.ImageLookup, "{}", notBefore: TimeSpan.FromSeconds(30))
+                HandlerHelpers.Child(item, EnrichmentUnit.ImageLookup,
+                    EnrichmentWorkQueue.Payload(new ImageLookupPayload(attemptedBefore.ToList())),
+                    notBefore: TimeSpan.FromSeconds(30))
             }, ct);
         }
 

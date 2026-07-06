@@ -314,6 +314,41 @@ public class CredentialRotationServiceTests
         secrets.Puts.Should().BeEmpty(
             "pushing the new AUTH_TOKEN without the grace token live would 401 every in-flight caller");
         vault.Pushed.Should().BeEmpty();
+        svc.RotationRepushPending.Should().BeFalse(
+            "the snapshot never advanced (grace push failed first), so there is nothing to re-push");
+    }
+
+    // ── FIX 4(a): a failed NEW-token push must not strand the app on the 6h heartbeat ───────────
+
+    [Fact]
+    public async Task Rotate_newTokenPushFails_armsFastRepush_and_recovers_on_next_ensure()
+    {
+        // RotateAsync ALWAYS advances the vault snapshot before the worker accepts the new token. If
+        // the AUTH_TOKEN push then fails, the app presents `next` but the worker holds only the old
+        // value — every app→worker call 401s. The service must arm a FAST re-push (RetryInterval),
+        // not wait for the 6h steady heartbeat; the next EnsureAndPushAllAsync must re-PUT the
+        // advanced AUTH_TOKEN and heal the gap.
+        var vault = new FakeVault();
+        // AUTH_TOKEN_PREVIOUS succeeds; only the new-token push fails (a transient Cloudflare blip).
+        var secrets = new FakeSecrets { Fails = (_, name) => name == "AUTH_TOKEN" };
+        var svc = Build(vault, secrets);
+        await vault.GetOrMintAsync(svc.BearerNameFor("daleel-scrape-worker"), ServiceCredentialKind.WorkerBearer);
+
+        (await svc.RotateWorkerAsync("daleel-scrape-worker")).Should().BeFalse();
+        svc.RotationRepushPending.Should().BeTrue(
+            "the snapshot advanced but the worker never got the new token — a fast re-push must be armed");
+
+        // The advanced token the app now presents (what EnsureAndPushAllAsync must re-deliver).
+        var advanced = await vault.GetAsync(svc.BearerNameFor("daleel-scrape-worker"));
+        secrets.Puts.Should().NotContain(p => p.Name == "AUTH_TOKEN",
+            "the failed rotation delivered no AUTH_TOKEN");
+
+        // Simulate the FAST-retry loop's corrective pass: the blip has cleared, pushes now succeed.
+        secrets.Fails = (_, _) => false;
+        await svc.EnsureAndPushAllAsync();
+
+        secrets.Puts.Should().Contain(p => p.Script == "daleel-scrape-worker" && p.Name == "AUTH_TOKEN" && p.Value == advanced,
+            "the re-push delivers the advanced AUTH_TOKEN the app is already presenting — closing the 401 window");
     }
 }
 

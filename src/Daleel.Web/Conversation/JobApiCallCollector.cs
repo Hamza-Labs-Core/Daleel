@@ -50,8 +50,13 @@ public sealed class JobApiCallCollector : IApiCallObserver
         {
             lock (_gate)
             {
-                return _calls.Sum(c =>
-                    CreditCost.ForCall(c.Provider, c.Endpoint, c.InputTokens, c.OutputTokens, c.EstimatedCost));
+                // Bill for DELIVERED work only: a failed/timed-out call (incl. a failed-edge attempt
+                // that fell back to an inline provider) delivered nothing and must not be charged —
+                // otherwise a worker outage double-bills every page it degrades.
+                return _calls
+                    .Where(c => c.Status == ApiCallStatus.Success)
+                    .Sum(c =>
+                        CreditCost.ForCall(c.Provider, c.Endpoint, c.InputTokens, c.OutputTokens, c.EstimatedCost));
             }
         }
     }

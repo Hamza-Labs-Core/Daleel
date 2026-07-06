@@ -120,6 +120,28 @@ public class EnrichmentWorkQueueTests : IDisposable
     public void Dispose() => _provider.Dispose();
 
     [Fact]
+    public async Task Lease_expired_with_attempts_exhausted_is_not_reclaimed_and_gets_reaped()
+    {
+        await _queue.EnqueueAsync(new[] { Item(maxAttempts: 1) });
+        // Claim with a zero lease and don't write an outcome — simulates a container that crashed
+        // mid-unit (Attempts is now 1 == MaxAttempts).
+        var claimed = (await _queue.ClaimAsync(1, TimeSpan.Zero))[0];
+        claimed.Attempts.Should().Be(1);
+
+        // The claim query must NOT re-run it — that infinite loop is the whole bug.
+        (await _queue.ClaimAsync(5, TimeSpan.FromMinutes(10))).Should().BeEmpty(
+            "an exhausted, lease-expired unit must never be re-claimed");
+
+        var reaped = await _queue.ReapExhaustedAsync();
+        reaped.Should().Be(1);
+
+        await using var db = NewDb();
+        var row = await db.EnrichmentWorkItems.SingleAsync(i => i.Id == claimed.Id);
+        row.Status.Should().Be(WorkItemStatus.Dead, "the crash victim surfaces as dead, not stuck running");
+        row.LastError.Should().Contain("exhausted");
+    }
+
+    [Fact]
     public async Task Complete_and_kill_are_terminal()
     {
         await _queue.EnqueueAsync(new[] { Item(), Item() });
@@ -287,6 +309,7 @@ public class EnrichmentHandlerTests
         public Task RetryAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) => Task.CompletedTask;
         public Task KillAsync(long id, string reason, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default) => Task.FromResult(0);
+        public Task<int> ReapExhaustedAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 
     private sealed class FixedResultStore : IEnrichedResultStore

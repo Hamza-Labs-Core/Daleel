@@ -1648,11 +1648,20 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             return null;
         }
 
+        var identity = $"{m.Brand} {m.Model} {m.Name}";
         BrowserPrice? best = null;
         var bestScore = 0;
         var bestHave = 0;
         foreach (var p in pool)
         {
+            // A disagreeing variant number (2 vs 3 ton) means a DIFFERENT SKU — its price must never
+            // attach to this model. Token overlap alone can't tell siblings apart (Tokens drops the
+            // single-digit discriminators), so this veto is what stops cross-attribution.
+            if (VariantsDisagree(identity, p.Line))
+            {
+                continue;
+            }
+
             var have = Tokens(p.Line);
             var score = have.Count(want.Contains);
             if (score > bestScore)
@@ -1724,11 +1733,19 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             return null;
         }
 
+        var identity = $"{m.Brand} {m.Model} {m.Name}";
         CatalogProduct? best = null;
         var bestScore = 0;
         var bestHave = 0;
         foreach (var c in pool)
         {
+            // Variant veto (see BestBrowserMatch): a 3-ton catalogue entry must not price a 2-ton
+            // model. The name + SKU carry the discriminator; category is generic, so exclude it here.
+            if (VariantsDisagree(identity, $"{c.Name} {c.Sku}"))
+            {
+                continue;
+            }
+
             var have = Tokens($"{c.Name} {c.Sku} {c.Category}");
             var score = have.Count(want.Contains);
             if (score > bestScore)

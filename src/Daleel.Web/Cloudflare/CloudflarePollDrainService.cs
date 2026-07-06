@@ -15,9 +15,13 @@ namespace Daleel.Web.Cloudflare;
 /// <see cref="ScrapedPrice"/> time series. Results are never lost to a timeout again.
 /// </summary>
 /// <remarks>
-/// Delivery is at-least-once, so every handler is idempotent: a <c>.persisted</c> marker object is
-/// written next to the result key, and a redelivered message that finds the marker just acks. The drain
-/// runs whenever the queue credentials are configured — deliberately NOT gated on the
+/// Delivery is at-least-once, so every handler is idempotent, but with TWO distinct marker keys next
+/// to the result: a <c>.persisted</c> marker on genuine SUCCESS (the success path gates on this and
+/// nothing else) and a separate <c>.failed</c> marker on terminal-failure/abandon paths (de-dupes a
+/// redelivered failure). They are deliberately distinct: jobIds are eternal SHAs (a brand submit with
+/// <c>searchJobId:null</c> never changes), so a failed delivery writing the SUCCESS key would blackhole
+/// every later successful crawl of the same key — it would ack without persisting. The drain runs
+/// whenever the queue credentials are configured — deliberately NOT gated on the
 /// <c>cloudflare.execution.enabled</c> flag, so flipping the flag off never strands in-flight results.
 /// </remarks>
 public sealed class CloudflarePollDrainService : BackgroundService
@@ -123,11 +127,12 @@ public sealed class CloudflarePollDrainService : BackgroundService
         }
 
         // Terminal worker failure: surface a real error on the timeline (faulted ≠ empty), then ack.
-        // Same marker discipline as the success path so a redelivered failure doesn't spam the
-        // timeline with duplicate warnings.
+        // A DISTINCT '.failed' marker (never '.persisted') de-dupes a redelivered failure without
+        // blocking a later SUCCESS under the same eternal jobId: a failed delivery must never make a
+        // subsequent successful crawl of the same deterministic key ack without persisting.
         if (!msg.IsDone)
         {
-            var failMarker = msg.ResultKey + ".persisted";
+            var failMarker = FailedMarkerKey(msg.ResultKey!);
             if (await _r2.ReadTextAsync(failMarker, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is null)
             {
                 await PublishEventAsync(msg, success: false,
@@ -161,7 +166,7 @@ public sealed class CloudflarePollDrainService : BackgroundService
     /// </summary>
     private async Task<Outcome> PersistCatalogAsync(PollMessage msg, string resultKey, CancellationToken ct)
     {
-        var markerKey = resultKey + ".persisted";
+        var markerKey = SuccessMarkerKey(resultKey);
         if (await _r2.ReadTextAsync(markerKey, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is not null)
         {
             return Outcome.Ack; // redelivery of an already-persisted result
@@ -174,15 +179,21 @@ public sealed class CloudflarePollDrainService : BackgroundService
             // logged by the client); retry, and let the deadline decide when to give up — but a
             // give-up must be VISIBLE, never a silent ack (faulted ≠ empty), and marker-idempotent:
             // if the ack after this fails, the redelivered message must not re-publish the event.
+            // The abandon writes the '.failed' marker, NOT '.persisted' — a later readable crawl of
+            // the same eternal jobId must still be free to persist.
             if (msg.DeadlineAt > 0 && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > msg.DeadlineAt)
             {
-                await PublishEventAsync(msg, success: false,
-                    summary: $"Edge {msg.Kind} result for {msg.Store ?? msg.Domain} could not be read before its " +
-                             "deadline (missing, oversized, or invalid JSON) — crawl discarded",
-                    ct).ConfigureAwait(false);
-                await _r2.StoreJsonAsync(
-                    JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unreadable past deadline" }),
-                    markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
+                var abandonMarker = FailedMarkerKey(resultKey);
+                if (await _r2.ReadTextAsync(abandonMarker, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is null)
+                {
+                    await PublishEventAsync(msg, success: false,
+                        summary: $"Edge {msg.Kind} result for {msg.Store ?? msg.Domain} could not be read before its " +
+                                 "deadline (missing, oversized, or invalid JSON) — crawl discarded",
+                        ct).ConfigureAwait(false);
+                    await _r2.StoreJsonAsync(
+                        JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unreadable past deadline" }),
+                        abandonMarker, R2Bucket.Data, ct).ConfigureAwait(false);
+                }
                 return Outcome.Ack;
             }
             return Outcome.Retry;
@@ -256,7 +267,7 @@ public sealed class CloudflarePollDrainService : BackgroundService
     /// </summary>
     private async Task<Outcome> PersistBrandAsync(PollMessage msg, string resultKey, CancellationToken ct)
     {
-        var markerKey = resultKey + ".persisted";
+        var markerKey = SuccessMarkerKey(resultKey);
         if (await _r2.ReadTextAsync(markerKey, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is not null)
         {
             return Outcome.Ack; // redelivery of an already-persisted result
@@ -267,13 +278,19 @@ public sealed class CloudflarePollDrainService : BackgroundService
         {
             if (msg.DeadlineAt > 0 && DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() > msg.DeadlineAt)
             {
-                await PublishEventAsync(msg, success: false,
-                    summary: $"Edge brand result for {msg.Store ?? msg.Domain} could not be read before its " +
-                             "deadline — harvest discarded",
-                    ct).ConfigureAwait(false);
-                await _r2.StoreJsonAsync(
-                    JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unreadable past deadline" }),
-                    markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
+                // '.failed' marker, NOT '.persisted': a later readable harvest of this eternal jobId
+                // must still be free to persist.
+                var abandonMarker = FailedMarkerKey(resultKey);
+                if (await _r2.ReadTextAsync(abandonMarker, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is null)
+                {
+                    await PublishEventAsync(msg, success: false,
+                        summary: $"Edge brand result for {msg.Store ?? msg.Domain} could not be read before its " +
+                                 "deadline — harvest discarded",
+                        ct).ConfigureAwait(false);
+                    await _r2.StoreJsonAsync(
+                        JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unreadable past deadline" }),
+                        abandonMarker, R2Bucket.Data, ct).ConfigureAwait(false);
+                }
                 return Outcome.Ack;
             }
             return Outcome.Retry;
@@ -290,12 +307,18 @@ public sealed class CloudflarePollDrainService : BackgroundService
                 : await SafeGetBrand(brands, brandName, ct).ConfigureAwait(false);
             if (brand is null)
             {
-                await PublishEventAsync(msg, success: false,
-                    summary: $"Edge brand harvest for '{brandName ?? msg.Domain}' had no matching brand row — models discarded",
-                    ct).ConfigureAwait(false);
-                await _r2.StoreJsonAsync(
-                    JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unknown brand" }),
-                    markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
+                // '.failed' marker, NOT '.persisted': if the brand row is created later and this
+                // eternal jobId is re-crawled, the success must still be free to persist.
+                var unknownBrandMarker = FailedMarkerKey(resultKey);
+                if (await _r2.ReadTextAsync(unknownBrandMarker, 1024, R2Bucket.Data, ct).ConfigureAwait(false) is null)
+                {
+                    await PublishEventAsync(msg, success: false,
+                        summary: $"Edge brand harvest for '{brandName ?? msg.Domain}' had no matching brand row — models discarded",
+                        ct).ConfigureAwait(false);
+                    await _r2.StoreJsonAsync(
+                        JsonSerializer.Serialize(new { abandonedAt = DateTimeOffset.UtcNow, reason = "unknown brand" }),
+                        unknownBrandMarker, R2Bucket.Data, ct).ConfigureAwait(false);
+                }
                 return Outcome.Ack;
             }
 
@@ -494,4 +517,18 @@ public sealed class CloudflarePollDrainService : BackgroundService
 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(v => !string.IsNullOrWhiteSpace(v))?.Trim();
+
+    /// <summary>
+    /// Success-idempotency marker: written ONLY when a result actually persisted. The success path
+    /// gates on this and nothing else, so a prior failure/abandon can never short-circuit a later
+    /// genuine success into an empty ack.
+    /// </summary>
+    private static string SuccessMarkerKey(string resultKey) => resultKey + ".persisted";
+
+    /// <summary>
+    /// Failure/abandon-idempotency marker: written on terminal-failure and abandon paths under a
+    /// DISTINCT key so a redelivered failure doesn't re-publish, yet — because the success path never
+    /// reads it — a failed delivery of an eternal jobId never blackholes a subsequent successful crawl.
+    /// </summary>
+    private static string FailedMarkerKey(string resultKey) => resultKey + ".failed";
 }

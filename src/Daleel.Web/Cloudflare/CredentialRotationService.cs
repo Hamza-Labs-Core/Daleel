@@ -90,6 +90,17 @@ public sealed class CredentialRotationService : BackgroundService, ICredentialRo
     private readonly IConfiguration _config;
     private readonly ILogger<CredentialRotationService> _logger;
 
+    /// <summary>
+    /// Set when a rotation's new-token push failed AFTER the vault snapshot had already advanced to
+    /// that new value. The app is then presenting a token no worker holds; the very next loop must
+    /// re-push on the FAST retry interval (via <see cref="EnsureAndPushAllAsync"/>, which PUTs the
+    /// snapshot's current AUTH_TOKEN), not sit on the 6h steady heartbeat and 401 for hours.
+    /// </summary>
+    private volatile bool _rotationRepushPending;
+
+    /// <summary>Test-visible: whether a rotation left the app presenting a token no worker holds yet.</summary>
+    internal bool RotationRepushPending => _rotationRepushPending;
+
     public CredentialRotationService(
         ICredentialVault vault, ICloudflareSecretsClient secrets, IServiceScopeFactory scopeFactory,
         IConfiguration config, ILogger<CredentialRotationService> logger)
@@ -124,7 +135,14 @@ public sealed class CredentialRotationService : BackgroundService, ICredentialRo
             var synced = 0;
             try
             {
+                // A pending rotation re-push means EnsureAndPushAllAsync (which PUTs the snapshot's
+                // current AUTH_TOKEN) is exactly the corrective step; clear the flag once it re-syncs
+                // every script, so a healed push drops back to the steady heartbeat.
                 synced = await EnsureAndPushAllAsync(stoppingToken).ConfigureAwait(false);
+                if (synced >= WorkerScripts.Count)
+                {
+                    _rotationRepushPending = false;
+                }
                 await MaybeScheduledRotationAsync(stoppingToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -136,9 +154,12 @@ public sealed class CredentialRotationService : BackgroundService, ICredentialRo
                 _logger.LogWarning(ex, "Credential sync pass failed");
             }
 
-            // Fast retries until every script has accepted its bearer (covers first-deploy races),
-            // then settle into a slow heartbeat that also re-pushes after worker re-deploys.
-            var interval = synced < WorkerScripts.Count ? RetryInterval : SteadyInterval;
+            // Fast retries until every script has accepted its bearer (covers first-deploy races AND
+            // a rotation whose new-token push failed after the snapshot advanced), then settle into a
+            // slow heartbeat that also re-pushes after worker re-deploys.
+            var interval = synced < WorkerScripts.Count || _rotationRepushPending
+                ? RetryInterval
+                : SteadyInterval;
             try
             {
                 await Task.Delay(interval, stoppingToken).ConfigureAwait(false);
@@ -191,7 +212,15 @@ public sealed class CredentialRotationService : BackgroundService, ICredentialRo
 
         if (!await _secrets.PutSecretAsync(scriptName, "AUTH_TOKEN", current, ct).ConfigureAwait(false))
         {
-            _logger.LogWarning("Rotation of {Script}: new-token push failed — worker still accepts the previous value", scriptName);
+            // RotateAsync ALREADY advanced the vault snapshot to `current`, so the app is now
+            // presenting a token the worker never received (it still holds only the previous value as
+            // AUTH_TOKEN, and the old value as AUTH_TOKEN_PREVIOUS). Arm a fast re-push so the next
+            // loop re-PUTs AUTH_TOKEN=current within RetryInterval — never leave this to the 6h
+            // heartbeat, which would 401 every app→worker call until then.
+            _rotationRepushPending = true;
+            _logger.LogWarning(
+                "Rotation of {Script}: new-token push failed — snapshot advanced but worker lacks it; " +
+                "armed a fast re-push (next loop, within {Retry})", scriptName, RetryInterval);
             return false;
         }
 

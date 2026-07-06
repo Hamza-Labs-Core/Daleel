@@ -27,7 +27,11 @@
  *
  * Idempotency: jobId = caller's Idempotency-Key or a SHA-256 of the body; the
  * result key is deterministic per jobId, and a re-submit whose result already
- * exists short-circuits to "done" without re-running (at-least-once safe).
+ * exists short-circuits to "done" without re-running (at-least-once safe) —
+ * UNLESS the submit body carries refresh=true or maxAgeSeconds=N, which forces a
+ * re-run of a stale result (brand harvests have an eternal resultKey and must be
+ * re-crawlable on a TTL). A short-lived '.inflight' R2 marker additionally stops a
+ * queued/running jobId being enqueued twice (head() only detects FINISHED jobs).
  */
 
 const CONTEXT_DEV_BASE = "https://api.context.dev";
@@ -37,6 +41,13 @@ const DEFAULT_CATALOG_TIMEOUT_MS = 120_000;
 
 /** Ceiling on the poll deadline a submit may request (ms). */
 const MAX_DEADLINE_MS = 30 * 60 * 1000;
+
+/**
+ * How long a '.inflight' marker is honoured before it's treated as stale (ms). A crashed/dead job
+ * whose marker was never cleared must not wedge a jobId forever, so the guard self-heals: past this
+ * age the marker is ignored and the submit proceeds. Comfortably longer than a normal catalogue run.
+ */
+const INFLIGHT_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Total deliveries per work message: 1 initial + max_retries (3) from wrangler.jsonc's
@@ -256,12 +267,26 @@ async function submitAsync(kind, body, request, env) {
   const jobId = await deriveJobId(request, kind, body);
   const resultKey = `${keyPrefix(env)}pipeline/${sanitize(String(body.searchJobId ?? "adhoc"))}/${kind}/${jobId}.json`;
 
-  // Idempotent re-submit: if the result is already in R2, report done without re-running.
+  // Freshness: a brand harvest has an ETERNAL resultKey (searchJobId:null → the jobId SHA never
+  // changes), so a plain "already in R2 → done" short-circuit would freeze that catalogue forever —
+  // BrandCatalogService re-submits on TTL but the worker would keep replying with the stale object.
+  // Honour an explicit refresh: pass refresh=true (or maxAgeSeconds=N) to re-run when the existing
+  // result is stale; without either flag the short-circuit is preserved exactly as before.
   const existing = await env.DATA_BUCKET.head(resultKey);
-  if (existing) {
+  if (existing && !isStale(existing, body)) {
     await putStatus(env, jobId, { status: "done", jobId, resultKey });
     return accepted(env, jobId, resultKey);
   }
+
+  // In-flight guard: head() only sees FINISHED jobs, so re-submitting a queued/running jobId would
+  // enqueue a SECOND message and run Context.dev twice. A short-lived '.inflight' marker (best-effort,
+  // TTL-bounded) lets a concurrent re-submit report the running job instead of double-enqueueing.
+  const inflightKey = resultKey + ".inflight";
+  if (await isInflight(env, inflightKey)) {
+    await putStatus(env, jobId, { status: "running", jobId, resultKey });
+    return accepted(env, jobId, resultKey);
+  }
+  await markInflight(env, inflightKey);
 
   const job = {
     kind,
@@ -277,6 +302,8 @@ async function submitAsync(kind, body, request, env) {
     // value here would fail PollMessage deserialization and silently discard the crawl.
     searchJobId: body.searchJobId == null ? null : String(body.searchJobId),
     store: typeof body.store === "string" ? body.store : null,
+    // Carried so the consumer can clear the in-flight marker once the job is finished.
+    inflightKey,
     enqueuedAt: Date.now(),
     deadlineAt: Date.now() + Math.min(intOrNull(body.deadlineMs) || MAX_DEADLINE_MS, MAX_DEADLINE_MS),
   };
@@ -335,6 +362,11 @@ async function processJob(job, env) {
 
 /** Writes the terminal status doc and enqueues the poll pointer (success or terminal error). */
 async function finishJob(job, env, { error = null, ms = null } = {}) {
+  // Job is terminal (success or terminal error): clear the in-flight marker so the next submit is
+  // gated by the freshness check on the result, not by a stale marker. Best-effort — a leftover
+  // marker just ages out via its TTL, so a failed delete can never wedge a jobId.
+  await clearInflight(env, job.inflightKey);
+
   await putStatus(env, job.jobId, {
     status: error ? "error" : "done",
     jobId: job.jobId,
@@ -479,6 +511,63 @@ async function putStatus(env, jobId, doc) {
   await env.DATA_BUCKET.put(statusKey(env, jobId), JSON.stringify({ ...doc, updatedAt: Date.now() }), {
     httpMetadata: { contentType: "application/json; charset=utf-8" },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Freshness & in-flight guard (FIX: brand catalogues froze; double-enqueue)
+// ---------------------------------------------------------------------------
+
+/**
+ * True when an EXISTING finished result should be re-run instead of short-circuited. Opt-in only:
+ * the caller must pass refresh=true or a positive maxAgeSeconds, so unflagged submits keep the old
+ * "already in R2 → done" behaviour exactly. `head()` exposes R2's own `uploaded` timestamp, so the
+ * age check needs no bytes read.
+ */
+function isStale(existing, body) {
+  if (body && body.refresh === true) return true;
+  const maxAgeSeconds = intOrNull(body && body.maxAgeSeconds);
+  if (!maxAgeSeconds) return false;
+  const uploadedMs = existing && existing.uploaded ? new Date(existing.uploaded).getTime() : NaN;
+  if (!Number.isFinite(uploadedMs)) return false; // unknown age ⇒ treat as fresh (never re-run blindly)
+  return Date.now() - uploadedMs > maxAgeSeconds * 1000;
+}
+
+/**
+ * True when a submit for this jobId is already queued/running (its '.inflight' marker exists and is
+ * still within its TTL). Best-effort: any R2 hiccup returns false so a submit is never blocked by the
+ * guard — the worst case degrades to the pre-fix behaviour (a possible double-enqueue), never a lost job.
+ */
+async function isInflight(env, inflightKey) {
+  try {
+    const marker = await env.DATA_BUCKET.get(inflightKey);
+    if (!marker) return false;
+    const at = Number((await marker.text()) || 0);
+    if (Number.isFinite(at) && Date.now() - at < INFLIGHT_TTL_MS) return true;
+    return false; // stale marker: let this submit proceed (self-heals a crashed job)
+  } catch {
+    return false;
+  }
+}
+
+/** Writes the '.inflight' marker (timestamp body). Best-effort — a failed write just loses the guard. */
+async function markInflight(env, inflightKey) {
+  try {
+    await env.DATA_BUCKET.put(inflightKey, String(Date.now()), {
+      httpMetadata: { contentType: "text/plain; charset=utf-8" },
+    });
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** Clears the '.inflight' marker when a job is finished. Best-effort — a leftover just ages out. */
+async function clearInflight(env, inflightKey) {
+  if (!inflightKey) return;
+  try {
+    await env.DATA_BUCKET.delete(inflightKey);
+  } catch {
+    /* best-effort */
+  }
 }
 
 // ---------------------------------------------------------------------------

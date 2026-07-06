@@ -376,6 +376,88 @@ public class CloudflareExecutionTests
         fixture.Queue.Retried.Should().BeEmpty();
     }
 
+    // ── FIX 1: failure/abandon must never blackhole a later success on an eternal jobId ──────────
+
+    [Fact]
+    public async Task Drain_FailureThenSuccess_StillPersists_UnderTheSameEternalResultKey()
+    {
+        // The blackhole defect: a terminal failure once wrote the SUCCESS marker ('.persisted'), so a
+        // later SUCCESSFUL crawl of the same deterministic jobId acked WITHOUT persisting — prices
+        // never landed and the vendor was charged forever. The failure must use a DISTINCT '.failed'
+        // marker and leave the success path free.
+        var fixture = new DrainFixture();
+
+        // 1) A terminal worker failure lands first (same resultKey the later success will use).
+        fixture.Queue.Enqueue(PollJson(status: "error", resultKey: "qa/r.json", store: "ABC Store",
+            error: "context.dev 500 (transient, retried on the edge, then a fresh crawl succeeds later)"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        fixture.R2.Objects.Keys.Should().Contain("qa/r.json.failed", "the failure writes the DISTINCT marker");
+        fixture.R2.Objects.Keys.Should().NotContain("qa/r.json.persisted",
+            "a failure must never write the success marker that gates persistence");
+
+        // 2) A later SUCCESSFUL crawl of the very same resultKey arrives.
+        fixture.Worker.Results["qa/r.json"] = new CatalogResultDoc
+        {
+            Kind = "catalog", Domain = "store.example", Store = "ABC Store",
+            CapturedAt = new DateTimeOffset(2026, 7, 6, 10, 0, 0, TimeSpan.Zero),
+            ProductCount = 1,
+            Products = { new() { Name = "Espresso X", Price = 139m, Currency = "JOD" } }
+        };
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        (await fixture.Prices.CountAsync()).Should().Be(1,
+            "the later success MUST persist — the prior failure marker must not blackhole it");
+        fixture.R2.Objects.Keys.Should().Contain("qa/r.json.persisted", "the success now writes its own marker");
+    }
+
+    [Fact]
+    public async Task Drain_FailureRedelivery_StillDedupes_ViaTheFailedMarker()
+    {
+        // The distinct-marker scheme must keep the failure path idempotent for its OWN redelivery.
+        var fixture = new DrainFixture();
+        fixture.Queue.Enqueue(PollJson(status: "error", resultKey: "qa/r.json", store: "ABC Store", error: "boom"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+        fixture.Queue.Enqueue(PollJson(status: "error", resultKey: "qa/r.json", store: "ABC Store", error: "boom"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        fixture.Events.Published.Should().ContainSingle("a redelivered failure de-dupes on '.failed'");
+        fixture.R2.Objects.Keys.Should().Contain("qa/r.json.failed");
+    }
+
+    [Fact]
+    public async Task Drain_AbandonPastDeadline_ThenReadableSuccess_StillPersists()
+    {
+        // The abandon path (unreadable past deadline) must also use '.failed', so a later readable
+        // crawl of the same eternal jobId persists instead of being blackholed.
+        var fixture = new DrainFixture();
+        var deadline = DateTimeOffset.UtcNow.AddMinutes(-1).ToUnixTimeMilliseconds();
+
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store",
+            deadlineAt: deadline)); // result not readable → abandoned past deadline
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        fixture.Events.Published.Should().ContainSingle(e => e.EventType == "store.prices.edge_failed");
+        fixture.R2.Objects.Keys.Should().Contain("qa/r.json.failed");
+        fixture.R2.Objects.Keys.Should().NotContain("qa/r.json.persisted",
+            "an abandon must not write the success marker");
+
+        // The result finally becomes readable and is redelivered — it must persist now.
+        fixture.Worker.Results["qa/r.json"] = new CatalogResultDoc
+        {
+            Kind = "catalog", Domain = "store.example", Store = "ABC Store",
+            CapturedAt = new DateTimeOffset(2026, 7, 6, 10, 0, 0, TimeSpan.Zero),
+            ProductCount = 1,
+            Products = { new() { Name = "Espresso X", Price = 139m, Currency = "JOD" } }
+        };
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        (await fixture.Prices.CountAsync()).Should().Be(1,
+            "a readable success after an abandon must persist, not be blocked by the '.failed' marker");
+    }
+
     private static string PollJson(
         string status, string resultKey, string store, string? error = null, long? deadlineAt = null) =>
         JsonSerializer.Serialize(new
