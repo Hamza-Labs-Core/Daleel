@@ -39,52 +39,6 @@ public sealed class EnrichmentQueueService : BackgroundService
 
     private readonly ConcurrentDictionary<long, Task> _running = new();
 
-    // Per-job serialization gate, used ONLY when a cost cap is active for the job. Without it, N
-    // units of one job each read the same spent-sum at start and are each granted the full remaining
-    // budget — the job overshoots the admin ceiling by ~concurrency×. Holding this gate across a
-    // capped unit makes the spent-sum read authoritative (within this process; cross-container
-    // overshoot is bounded to one unit per container, and the cap is opt-in). Ref-counted so the
-    // dictionary never grows past the set of in-flight capped jobs.
-    private readonly Dictionary<int, (SemaphoreSlim Sem, int Refs)> _capGates = new();
-    private readonly object _capGatesLock = new();
-
-    private SemaphoreSlim AcquireCapGate(int jobId)
-    {
-        lock (_capGatesLock)
-        {
-            if (_capGates.TryGetValue(jobId, out var e))
-            {
-                _capGates[jobId] = (e.Sem, e.Refs + 1);
-                return e.Sem;
-            }
-
-            var sem = new SemaphoreSlim(1, 1);
-            _capGates[jobId] = (sem, 1);
-            return sem;
-        }
-    }
-
-    private void ReleaseCapGate(int jobId)
-    {
-        lock (_capGatesLock)
-        {
-            if (!_capGates.TryGetValue(jobId, out var e))
-            {
-                return;
-            }
-
-            if (e.Refs <= 1)
-            {
-                _capGates.Remove(jobId);
-                e.Sem.Dispose();
-            }
-            else
-            {
-                _capGates[jobId] = (e.Sem, e.Refs - 1);
-            }
-        }
-    }
-
     public EnrichmentQueueService(
         IEnrichmentWorkQueue queue, IEnrichedResultStore results, IServiceScopeFactory scopeFactory,
         ICacheStore cache, ILogger<EnrichmentQueueService> logger)
@@ -204,35 +158,11 @@ public sealed class EnrichmentQueueService : BackgroundService
         var estimator = await CostConfig.BuildEstimatorAsync(config, stoppingToken);
         var caps = await CostConfig.ReadCapsAsync(config, stoppingToken);
 
-        // When a cap is active, serialize this job's units so the cumulative-spend read below is
-        // authoritative — concurrent units must not each be granted the full remaining budget.
-        SemaphoreSlim? capGate = null;
-        if (caps.MaxPerJob > 0)
-        {
-            capGate = AcquireCapGate(item.SearchJobId);
-            try
-            {
-                await capGate.WaitAsync(stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                ReleaseCapGate(item.SearchJobId);
-                return; // host shutdown — the row stays leased and re-runs
-            }
-        }
-
-        try
-        {
-            await RunUnitAsync(item, sp, db, job, config, estimator, caps, handler, stoppingToken);
-        }
-        finally
-        {
-            if (capGate is not null)
-            {
-                capGate.Release();
-                ReleaseCapGate(item.SearchJobId);
-            }
-        }
+        // R1 — a per-user/per-job cost limit NEVER interrupts ongoing enrichment: an in-flight deep
+        // dive (including an actor loop) always runs to completion; the limit only blocks NEW searches
+        // at submission, and actual spend is charged post-hoc (the user balance can go negative). So
+        // there is no cost gate or cap-kill here — just run the unit.
+        await RunUnitAsync(item, sp, db, job, config, estimator, caps, handler, stoppingToken);
     }
 
     private async Task RunUnitAsync(
@@ -240,35 +170,17 @@ public sealed class EnrichmentQueueService : BackgroundService
         ISystemConfigService config, Daleel.Core.Observability.CostEstimator estimator,
         CostCaps caps, IEnrichmentUnitHandler handler, CancellationToken stoppingToken)
     {
-        // The per-job cost cap is CUMULATIVE across the base run and every enrichment unit: this
-        // unit may only spend what the job hasn't already. A tripped/exhausted cap kills the unit
-        // visibly — a queued deep-dive must never grant the job a fresh budget. Under the cap gate
-        // above, this read reflects every already-committed unit's spend.
-        var unitCap = caps.MaxPerJob;
-        if (caps.MaxPerJob > 0)
-        {
-            var spent = await db.ApiCallLogs.Where(c => c.JobId == item.SearchJobId)
-                .SumAsync(c => (decimal?)c.EstimatedCost, stoppingToken) ?? 0m;
-            unitCap = caps.MaxPerJob - spent;
-            if (unitCap <= 0)
-            {
-                await _queue.KillAsync(item.Id, $"per-job cost cap reached (spent {spent:F4})");
-                return;
-            }
-        }
-
-        using var capTrip = new CancellationTokenSource();
-        using var budget = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken, capTrip.Token);
-        // The ONLY attempt bound, DERIVED, never invented: an attempt must finish before its lease
-        // can expire, or a second consumer could claim the unit while this one still runs it. The
-        // margin covers the outcome/spend writes after the handler returns.
+        // The ONLY bound is the lease: an attempt must finish before its lease can expire (or a second
+        // consumer could claim the unit while this one still runs it). It is crash-recovery/liveness,
+        // NOT a cost limit — cost never cancels ongoing work (R1).
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
         budget.CancelAfter(Lease - TimeSpan.FromMinutes(1));
 
         var collector = new JobApiCallCollector(
             line => _logger.LogInformation(
                 "Enrich unit {ItemId} ({Kind}, job {JobId}) API call · {Detail}",
                 item.Id, item.Kind, item.SearchJobId, line),
-            unitCap, capTrip);
+            maxCost: 0m, capTrip: null); // meter only — a cost cap never trips an ongoing unit
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
         var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
@@ -320,10 +232,6 @@ public sealed class EnrichmentQueueService : BackgroundService
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             return; // host shutdown — leave the row leased; expiry re-queues it untouched
-        }
-        catch (OperationCanceledException) when (capTrip.IsCancellationRequested)
-        {
-            outcome = new UnitOutcome.Kill("per-job cost cap tripped mid-unit");
         }
         catch (OperationCanceledException)
         {

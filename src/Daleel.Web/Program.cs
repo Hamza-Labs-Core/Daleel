@@ -267,6 +267,8 @@ builder.Services.AddHostedService<Daleel.Web.Moderation.FindingAutoReviewService
 // the snapshot cache.
 builder.Services.AddSingleton<Daleel.Web.Moderation.IModerationPolicyProvider,
     Daleel.Web.Moderation.ModerationPolicyProvider>();
+// Zero-cost haram-consumable query pre-screen (blocks "beer" etc. at submission before any spend).
+builder.Services.AddSingleton<Daleel.Web.Moderation.IQueryPreScreen, Daleel.Web.Moderation.QueryPreScreen>();
 
 // Vision screening of individual result images (halal moderation). OpenRouter-only, like the
 // product-identification matcher; inert when no key is configured.

@@ -18,8 +18,8 @@ public static class ActorFlags
     /// <summary>Config key for the model the actor loops run on — a capable model, NOT the user's tier default.</summary>
     public const string Model = "actor.model";
 
-    /// <summary>Fallback actor model when the config row is absent/empty (a strong, JSON-reliable model).</summary>
-    public const string DefaultModel = "openai/gpt-4o";
+    /// <summary>Fallback actor model when the config row is absent/empty — a strong model (Sonnet 5 or better).</summary>
+    public const string DefaultModel = "anthropic/claude-sonnet-5";
 
     /// <summary>
     /// Resolves the capable actor agent: reads <see cref="Model"/> from config (default

@@ -84,10 +84,11 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
         var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
 
-        using var capTrip = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // R1 — meter only, never cost-cancel a running search: a cost limit blocks NEW searches at
+        // submission, never an in-flight one; actual spend is charged post-hoc.
         var collector = new JobApiCallCollector(
             line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line),
-            caps.MaxPerJob, capTrip);
+            maxCost: 0m, capTrip: null);
 
         // Ambient metering: DI-resolved components (vision identification, brand-catalogue
         // discovery/harvest, store-catalogue crawls) make paid calls on their own HTTP clients and
@@ -148,18 +149,19 @@ public sealed class WorkflowSearchRunner : ISearchRunner
 
             var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
 
-            // Global workflow deadline: links off capTrip (so cost-cap and user cancellation still flow in)
-            // and additionally auto-cancels after WorkflowTimeout. Every activity sees this as
-            // context.CancellationToken, so a wedged step is forcibly unwound instead of hanging forever.
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(capTrip.Token);
+            // Global workflow deadline: links off `ct` (user cancel / service shutdown still flow in) and
+            // auto-cancels after WorkflowTimeout — a wall-clock liveness backstop, NOT a cost limit (R1:
+            // cost never cancels a running search). Every activity sees this as context.CancellationToken,
+            // so a wedged step is forcibly unwound instead of hanging forever.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(WorkflowTimeout);
 
-            // The deadline/cost-cap token also cancels Elsa's own workflow-state commit, so a tripped
-            // deadline makes RunAsync THROW OperationCanceledException instead of returning a faulted
-            // result — which used to bypass the salvage below entirely and turn an almost-finished run
-            // (products already extracted, only enrichment left) into a hard "no results" failure. Catch
-            // exactly that case and fall through to the same salvage a faulted run gets; a genuine job
-            // cancellation (user cancel / service shutdown, i.e. `ct`) still propagates untouched.
+            // The deadline token also cancels Elsa's own workflow-state commit, so a tripped deadline makes
+            // RunAsync THROW OperationCanceledException instead of returning a faulted result — which used
+            // to bypass the salvage below entirely and turn an almost-finished run (products already
+            // extracted, only enrichment left) into a hard "no results" failure. Catch exactly that case
+            // and fall through to the same salvage a faulted run gets; a genuine job cancellation (user
+            // cancel / service shutdown, i.e. `ct`) still propagates untouched.
             RunWorkflowResult? run = null;
             try
             {
@@ -167,16 +169,12 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                var cause = capTrip.IsCancellationRequested
-                    ? "per-job cost cap"
-                    : $"{WorkflowTimeout.TotalMinutes:0}-minute deadline";
                 _logger.LogError(
-                    "Search workflow for job {JobId} was cancelled by the {Cause}; salvaging any extracted products",
-                    job.Id, cause);
+                    "Search workflow for job {JobId} was cancelled by the {Minutes}-minute deadline; salvaging any extracted products",
+                    job.Id, WorkflowTimeout.TotalMinutes);
             }
 
-            // Distinguish a timeout (deadline fired on its own) from a cost-cap/user cancel for diagnostics.
-            if (run is not null && deadline.IsCancellationRequested && !capTrip.IsCancellationRequested)
+            if (run is not null && deadline.IsCancellationRequested)
             {
                 _logger.LogError(
                     "Search workflow for job {JobId} exceeded the {Minutes}-minute deadline and was cancelled",
@@ -277,10 +275,9 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 // Carries the smart-cache verdict (set only on a hit) up to the worker, which decides
                 // whether to launch a background partial re-enrichment for the missing pieces.
                 CacheQuality = state.CacheQuality,
-                // When the per-job cost cap cut the run short (and the result above was salvaged), the
-                // worker must NOT launch the post-result background enrichment — it would hand the very
-                // job the cap just stopped a fresh full budget, doubling the admin-configured ceiling.
-                CostCapTripped = capTrip.IsCancellationRequested && !ct.IsCancellationRequested
+                // R1: a cost cap never cuts a run short, so this is always false — enrichment always
+                // launches. (Kept for wire-compat; slated for removal with the CostCapTripped plumbing.)
+                CostCapTripped = false
             };
         }
         finally
@@ -402,14 +399,13 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var resultKey = CacheKey.ForResult(job.Query, job.Geo, language);
 
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
-        var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
-        using var capTrip = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // R1 — meter only, never cost-cancel ongoing re-enrichment.
         var collector = new JobApiCallCollector(
             line => _logger.LogInformation("Re-enrich job {JobId} API call · {Detail}", job.Id, line),
-            caps.MaxPerJob, capTrip);
+            maxCost: 0m, capTrip: null);
 
         // Ambient metering (see RunAsync): routes the vision/catalogue spend made on DI-resolved
-        // components' own HTTP clients into this re-enrichment's collector and cost cap.
+        // components' own HTTP clients into this re-enrichment's collector.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
         var agent = _agents.Build(new AgentRequest
@@ -429,7 +425,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 using var scope = _scopeFactory.CreateScope();
                 var itemEnricher = scope.ServiceProvider.GetRequiredService<IItemEnrichmentService>();
                 var itemResult = await itemEnricher
-                    .EnrichAsync(agent, products, progress, job.Id.ToString(), capTrip.Token).ConfigureAwait(false);
+                    .EnrichAsync(agent, products, progress, job.Id.ToString(), ct).ConfigureAwait(false);
                 events.AddRange(itemResult.Events);
                 if (itemResult.Products is { } updated)
                 {
@@ -442,7 +438,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             if (report.DeficientBrands.Count > 0)
             {
                 var (brands, brandEvents) = await ReResearchBrandsAsync(
-                    agent, products, job, report, progress, capTrip.Token).ConfigureAwait(false);
+                    agent, products, job, report, progress, ct).ConfigureAwait(false);
                 events.AddRange(brandEvents);
                 if (!brands.SequenceEqual(products.Brands))
                 {
@@ -455,7 +451,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             if (report.DeficientStores.Count > 0)
             {
                 var (stores, storeEvents) = await ReResearchStoresAsync(
-                    agent, products, job, report, progress, capTrip.Token).ConfigureAwait(false);
+                    agent, products, job, report, progress, ct).ConfigureAwait(false);
                 events.AddRange(storeEvents);
                 if (!stores.SequenceEqual(products.Stores))
                 {

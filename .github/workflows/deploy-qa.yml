@@ -343,6 +343,8 @@ jobs:
             # QA exercises the LLM-actor steps by default (prod leaves this unset ⇒ off). Seeds the
             # actor.* flags ON on first boot; each stays admin-toggleable at /admin/settings.
             ACTOR_STEPS_DEFAULT=true
+            # QA admin allowlist — these emails are (re)promoted to admin on login (see AuthEndpoints).
+            DALEEL_ADMIN_EMAILS=meywd@msn.com,meywd84@gmail.com
             # QA exercises the PostgreSQL event store (the bundled `postgres` compose
             # service). Password seeds that service AND the connection string below.
             POSTGRES_PASSWORD=${{ secrets.QA_POSTGRES_PASSWORD || 'daleel-qa-events' }}

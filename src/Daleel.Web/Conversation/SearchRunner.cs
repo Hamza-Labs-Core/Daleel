@@ -121,12 +121,13 @@ public sealed class AgentSearchRunner : ISearchRunner
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
         var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
 
-        using var capTrip = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // Per-call detail (provider/endpoint/cost/timing) is internal: route it to the server log,
         // not to the user's progress stream. Aggregate counts/cost still flow into analytics below.
+        // R1 — meter only, never cost-cancel: a running search is never interrupted by a cost limit;
+        // the limit blocks NEW searches at submission, and actual spend is charged post-hoc.
         var collector = new JobApiCallCollector(
             line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line),
-            caps.MaxPerJob, capTrip);
+            maxCost: 0m, capTrip: null);
 
         // Admin feedback drives moderation: the active whitelist (undo decisions) and the
         // rating-tuned thresholds ride into the agent with every run.
@@ -151,7 +152,7 @@ public sealed class AgentSearchRunner : ISearchRunner
 
         try
         {
-            var answer = await agent.AskAsync(job.Query, job.Geo, capTrip.Token).ConfigureAwait(false);
+            var answer = await agent.AskAsync(job.Query, job.Geo, ct).ConfigureAwait(false);
 
             var audit = agent.ContentFilter.AuditLog;
             var filteredCategories = string.Join(",", audit
