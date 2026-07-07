@@ -1064,85 +1064,29 @@ public sealed partial class AgentService
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
-    /// Chooses the product's display name, guarding against the LLM occasionally emitting the source URL
-    /// (or a bare domain) in the name field instead of the real product name. A URL-shaped name is rejected
-    /// in favour of the model number; if that is also missing or URL-shaped, the product is dropped rather
-    /// than surfacing a raw link to the shopper.
+    /// Chooses the product's display name via the shared <see cref="ListingExtractor.CleanExtractedName"/>,
+    /// so the LLM path rejects the same noise as the deterministic extractor: a source URL / bare domain
+    /// in the name field, a scraped markdown product card, or a search/category page title. Falls back to
+    /// the model number when the name is unusable; returns null (drop the product) when neither is usable.
     /// </summary>
-    private static string? PickName(string? name, string? model)
-    {
-        if (!string.IsNullOrWhiteSpace(name) && !LooksLikeUrl(name)) return name;
-        if (!string.IsNullOrWhiteSpace(model) && !LooksLikeUrl(model)) return model;
-        return null;
-    }
+    private static string? PickName(string? name, string? model) =>
+        ListingExtractor.CleanExtractedName(name) ?? ListingExtractor.CleanExtractedName(model);
 
     private static bool LooksLikeUrl(string text) => UrlLikeName.IsMatch(text.Trim());
 
     /// <summary>
-    /// True when a "product name" is really a PAGE TITLE — a search/category/SEO page masquerading
-    /// as an item (observed live: "Espresso Machine in Jordan | Find the Lowest Prices",
-    /// "Coffee and Espresso Machines - Leaders Center" as grid cards). Pipe separators are the SEO
-    /// tell; "lowest/best prices" phrasing (en/ar) is the query-echo tell.
+    /// True when a "product name" is really a PAGE TITLE — a search/category/SEO page masquerading as an
+    /// item. Delegates to the shared <see cref="ListingExtractor.LooksLikePageTitle"/> so the web-results,
+    /// deterministic-extract and LLM-extract paths all reject the same titles. Kept as a forwarder for the
+    /// existing call site and the <c>AgentService.LooksLikePageTitle</c> unit tests.
     /// </summary>
-    internal static bool LooksLikePageTitle(string text)
-    {
-        var trimmed = text.Trim();
-
-        // Query-echo phrasing is an SEO/listing signal regardless of shape.
-        if (trimmed.Contains("lowest price", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Contains("best price", StringComparison.OrdinalIgnoreCase)
-            || trimmed.Contains("أقل الأسعار", StringComparison.Ordinal)
-            || trimmed.Contains("افضل الاسعار", StringComparison.Ordinal)
-            || trimmed.Contains("أفضل الأسعار", StringComparison.Ordinal))
-        {
-            return true;
-        }
-
-        // A pipe alone does NOT make a page title: real product pages append "| StoreName"
-        // ("Beko Espresso Machine 15 Bar 1628W | Leaders Center"). The pipe is a signal only when
-        // the segment before it carries NO product-identity token — no digit anywhere (model
-        // numbers, capacities, wattages all contain digits). "Espresso Machine in Jordan | Find …"
-        // has none; a genuine model does. (Branch review, matching-quality: bare-pipe dropped
-        // real products.)
-        var pipe = trimmed.IndexOf('|');
-        if (pipe > 0)
-        {
-            return !trimmed[..pipe].Any(char.IsDigit);
-        }
-
-        return false;
-    }
+    internal static bool LooksLikePageTitle(string text) => ListingExtractor.LooksLikePageTitle(text);
 
     /// <summary>
-    /// True when a url is a search/category LISTING page, not a product page — fine as a crawl
-    /// entry point, never as a product card's identity. Query-parameter search urls and the common
-    /// category-path conventions are the signals.
+    /// True when a url is a search/category LISTING page, not a product page. Delegates to the shared
+    /// <see cref="ListingExtractor.IsListingPageUrl"/>; kept as a forwarder for the call site and tests.
     /// </summary>
-    internal static bool IsListingPageUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u))
-        {
-            return false;
-        }
-
-        var query = u.Query;
-        if (query.Contains("search=", StringComparison.OrdinalIgnoreCase) ||
-            query.Contains("q=", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        var path = u.AbsolutePath;
-        // "/search/<digits>" is a PRODUCT on classified marketplaces (opensooq ad urls) — only a
-        // bare /search or /search?<query> is a results page.
-        var searchIsListing = path.Contains("/search", StringComparison.OrdinalIgnoreCase) &&
-            !System.Text.RegularExpressions.Regex.IsMatch(path, @"/search/\d+", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-        return path.Contains("/product-category/", StringComparison.OrdinalIgnoreCase)
-            || searchIsListing
-            || path.EndsWith("/products", StringComparison.OrdinalIgnoreCase)
-            || (path.Contains("/collections/", StringComparison.OrdinalIgnoreCase) &&
-                !path.Contains("/products/", StringComparison.OrdinalIgnoreCase));
-    }
+    internal static bool IsListingPageUrl(string? url) => ListingExtractor.IsListingPageUrl(url);
 
     /// <summary>
     /// Insight-map key matching <see cref="ListingExtractor.DedupKey"/>'s identity rules
