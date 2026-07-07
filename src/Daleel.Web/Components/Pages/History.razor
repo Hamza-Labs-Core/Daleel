@@ -163,9 +163,10 @@ else if (_authenticated)
         }
     }
 
-    // Open loads the SAVED results for this search (no re-run) — Home renders the stored ResultJson.
+    // Open loads the SAVED results for this search (no re-run) on the dedicated, deep-linkable
+    // /search/{id} page (its title carries the search id + page; pagination updates the URL).
     private void Open(SearchHistoryEntry entry) =>
-        Nav.NavigateTo($"/?historyId={entry.Id}");
+        Nav.NavigateTo($"/search/{entry.Id}");
 
     // Re-run sends the visitor to the originating feature page with the query pre-filled (?q=).
     private void Rerun(SearchHistoryEntry entry)

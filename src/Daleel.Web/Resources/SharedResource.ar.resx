@@ -88,6 +88,9 @@
   <data name="Search.InterruptedHint" xml:space="preserve"><value>أُعيد تشغيل الخادم أثناء تنفيذ بحثك. يرجى المحاولة مرة أخرى.</value></data>
   <data name="Search.Recent" xml:space="preserve"><value>المحادثات الأخيرة</value></data>
   <data name="Search.ViewAll" xml:space="preserve"><value>عرض الكل</value></data>
+  <data name="Search.NewSearch" xml:space="preserve"><value>بحث جديد</value></data>
+  <data name="Search.NotFound.Title" xml:space="preserve"><value>نتيجة البحث هذه غير متوفرة.</value></data>
+  <data name="Search.NotFound.Back" xml:space="preserve"><value>ابدأ بحثًا جديدًا</value></data>
 
   <data name="Products.Products" xml:space="preserve"><value>المنتجات</value></data>
   <data name="Products.Brands" xml:space="preserve"><value>العلامات التجارية</value></data>

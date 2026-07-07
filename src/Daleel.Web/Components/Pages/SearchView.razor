@@ -1,0 +1,135 @@
+@page "/search/{Id:int}"
+@attribute [Authorize]
+@inject ICurrentUser CurrentUser
+@inject ISearchHistoryRepository History
+@inject NavigationManager Nav
+@inject IStringLocalizer<SharedResource> L
+
+@* Dedicated, deep-linkable view of ONE saved search result. The URL carries the search id and the
+   current page (/search/{id}?page=N), and both appear in the tab title — so a specific page of a
+   specific search is bookmarkable and shareable. History/recent links and in-grid pagination both
+   land here (Home stays the LIVE search surface, where results stream + enrich in place). *@
+
+<PageTitle>@_title</PageTitle>
+
+<div class="daleel-workspace">
+    @if (_loading)
+    {
+        <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+    }
+    else if (_notFound)
+    {
+        <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
+            <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+            <MudText Typo="Typo.subtitle1" Align="Align.Center">@L["Search.NotFound.Title"]</MudText>
+            <MudButton Href="/" Variant="Variant.Text" Color="Color.Primary" Class="mt-2"
+                       StartIcon="@Icons.Material.Filled.Search">@L["Search.NotFound.Back"]</MudButton>
+        </MudPaper>
+    }
+    else
+    {
+        <MudPaper Class="pa-4 mb-3" Outlined="true" Elevation="0">
+            <div class="d-flex align-center gap-2">
+                <MudIcon Icon="@Icons.Material.Filled.History" />
+                <MudText Typo="Typo.h6" dir="@Catalog.Dir(_query)">@_query</MudText>
+                <MudSpacer />
+                <MudButton Href="/" Variant="Variant.Text" Size="Size.Small"
+                           StartIcon="@Icons.Material.Filled.Search">@L["Search.NewSearch"]</MudButton>
+            </div>
+        </MudPaper>
+
+        @if (_answer?.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
+        {
+            @if (products.HasListings)
+            {
+                <ProductListings Result="products" InitialPage="CurrentPage" PageChanged="OnPageChanged" />
+            }
+            else
+            {
+                <AdaptiveResults Result="products" />
+            }
+        }
+        else
+        {
+            <MudPaper Class="pa-6 mb-3 d-flex flex-column align-center" Outlined="true" Elevation="0">
+                <MudIcon Icon="@Icons.Material.Filled.SearchOff" Size="Size.Large" Color="Color.Secondary" Class="mb-2" />
+                <MudText Typo="Typo.subtitle1" Align="Align.Center">@L["Home.NoResults.Title"]</MudText>
+            </MudPaper>
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    // Current page, driven by the URL so a deep-linked/bookmarked page opens on it and the title reflects it.
+    [SupplyParameterFromQuery(Name = "page")] private int? Page { get; set; }
+
+    private string? _userId;
+    private int _loadedId = -1;
+    private bool _loading = true;
+    private bool _notFound;
+    private string? _query;
+    private AgentAnswer? _answer;
+
+    private int CurrentPage => Page is { } p && p > 0 ? p : 1;
+
+    private string _title = "دليل · Daleel";
+
+    protected override void OnParametersSet() => _title = BuildTitle();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // CurrentUser resolves against the live circuit, so — like Home — load after the first render.
+        if (firstRender)
+        {
+            _userId = await CurrentUser.GetUserIdAsync();
+            await LoadAsync();
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Opening a DIFFERENT search after the first load (e.g. another history entry) reloads; a
+        // page-only change (?page=N) needs no reload — it flows into ProductListings.InitialPage.
+        if (_userId is not null && _loadedId != Id)
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadedId = Id;
+        _notFound = false;
+        _answer = null;
+        _query = null;
+
+        if (_userId is not null && await History.GetAsync(_userId, Id) is { ResultJson: { Length: > 0 } json } entry)
+        {
+            _query = entry.Query;
+            _answer = ResultSerialization.Deserialize<AgentAnswer>(json);
+        }
+        else
+        {
+            _notFound = true;
+        }
+
+        _loading = false;
+        _title = BuildTitle();
+    }
+
+    // In-grid pagination updates the URL (and thus the title) without a reload; replace:true keeps the
+    // browser history to one entry per search rather than one per page flip.
+    private void OnPageChanged(int page) =>
+        Nav.NavigateTo($"/search/{Id}?page={page}", forceLoad: false, replace: true);
+
+    private string BuildTitle()
+    {
+        var q = string.IsNullOrWhiteSpace(_query) ? $"#{Id}" : $"#{Id} · {_query}";
+        return $"دليل · {q} · Page {CurrentPage}";
+    }
+}

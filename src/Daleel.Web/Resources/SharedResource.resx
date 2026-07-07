@@ -88,6 +88,9 @@
   <data name="Search.InterruptedHint" xml:space="preserve"><value>The server restarted while your search was running. Please try again.</value></data>
   <data name="Search.Recent" xml:space="preserve"><value>Recent</value></data>
   <data name="Search.ViewAll" xml:space="preserve"><value>View all</value></data>
+  <data name="Search.NewSearch" xml:space="preserve"><value>New search</value></data>
+  <data name="Search.NotFound.Title" xml:space="preserve"><value>This search result isn't available.</value></data>
+  <data name="Search.NotFound.Back" xml:space="preserve"><value>Start a new search</value></data>
 
   <data name="Products.Products" xml:space="preserve"><value>Products</value></data>
   <data name="Products.Brands" xml:space="preserve"><value>Brands</value></data>

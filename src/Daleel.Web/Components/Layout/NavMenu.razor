@@ -20,7 +20,7 @@
             <MudDivider Class="my-2" />
 
             @* Recent searches live here, in a collapsible submenu, instead of taking up a column on the
-               home page. Clicking an entry opens its saved result via /?historyId= (Home.LoadHistoryResultAsync).
+               home page. Clicking an entry opens its saved result on /search/{id} (the deep-linkable view).
                The list is loaded on init and refreshed whenever a search completes (Notifier.Completed),
                so it stays current without a page reload. Expanded by default so it's visible at a glance. *@
             <MudNavGroup Title="@L["Search.Recent"]" Icon="@Icons.Material.Filled.History" Expanded="true">
@@ -32,7 +32,7 @@
                 {
                     @foreach (var h in _recent)
                     {
-                        <MudNavLink Href="@($"/?historyId={h.Id}")" Icon="@Icons.Material.Filled.ChatBubbleOutline">
+                        <MudNavLink Href="@($"/search/{h.Id}")" Icon="@Icons.Material.Filled.ChatBubbleOutline">
                             <span dir="@Catalog.Dir(h.Query)" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">@h.Query</span>
                         </MudNavLink>
                     }
