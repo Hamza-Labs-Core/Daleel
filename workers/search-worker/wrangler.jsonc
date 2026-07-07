@@ -27,18 +27,33 @@
 
   "observability": { "enabled": true },
 
-  // CACHE_TTL_SECONDS is the SerpAPI cache TTL (default 3600 if unset/unparsable; the worker
-  // clamps to KV's minimum of 60). Places responses use a fixed 900 s.
-  "vars": { "CACHE_TTL_SECONDS": "3600" },
+  // Account-wide SerpAPI hourly cap: a single Durable Object (idFromName "serpapi-global") funnels
+  // every cache-missed SerpAPI call for a strongly-consistent rolling-hour counter (KV can't — it is
+  // eventually consistent). SQLite-backed DO storage is the current default class type. DO state is
+  // per-SCRIPT, so declaring the binding + migration under env.qa gives QA its own isolated counter.
+  "durable_objects": {
+    "bindings": [{ "name": "SERP_LIMITER", "class_name": "SerpApiRateLimiter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SerpApiRateLimiter"] }],
 
-  // QA: separate KV namespace — QA cache entries must never serve prod traffic (or vice versa).
+  // CACHE_TTL_SECONDS is the SerpAPI cache TTL (default 3600 if unset/unparsable; the worker
+  // clamps to KV's minimum of 60). Places responses use a fixed 900 s. SERPAPI_HOURLY_LIMIT tunes
+  // the cap without a code change (default 1000 if unset).
+  "vars": { "CACHE_TTL_SECONDS": "3600", "SERPAPI_HOURLY_LIMIT": "1000" },
+
+  // QA: separate KV namespace — QA cache entries must never serve prod traffic (or vice versa). The
+  // DO binding + migration are mirrored here so the -qa script gets its own (isolated) DO namespace.
   "env": {
     "qa": {
       "name": "daleel-search-worker-qa",
-      "vars": { "CACHE_TTL_SECONDS": "3600" },
+      "vars": { "CACHE_TTL_SECONDS": "3600", "SERPAPI_HOURLY_LIMIT": "1000" },
       "kv_namespaces": [
         { "binding": "SEARCH_CACHE", "id": "PLACEHOLDER_SEARCH_CACHE_KV_ID_QA" }
-      ]
+      ],
+      "durable_objects": {
+        "bindings": [{ "name": "SERP_LIMITER", "class_name": "SerpApiRateLimiter" }]
+      },
+      "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SerpApiRateLimiter"] }]
     }
   }
 }

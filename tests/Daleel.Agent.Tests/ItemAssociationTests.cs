@@ -15,8 +15,13 @@ namespace Daleel.Agent.Tests;
 public class ItemAssociationTests
 {
     /// <summary>
-    /// Builds the product result straight from a hand-made bundle — no LLM extraction, no
-    /// reputation pass — so only the deterministic pipeline plus the association pass runs.
+    /// Builds the result straight from a hand-made bundle — no LLM extraction, no reputation pass —
+    /// so only the deterministic pipeline plus the association pass runs. The fixtures seed models from
+    /// <see cref="ResearchBundle.ShoppingResults"/> (the one deterministic source that can carry a
+    /// PRICED, URL-less offer, which some of these store-matching tests need); PRODUCT intent now
+    /// suppresses the shopping product-card seed, so these build under a non-product intent to keep the
+    /// intent-INDEPENDENT association pass (<see cref="AgentService.BuildProductSearchResultAsync"/>'s
+    /// AttachItemResearch) under test. Product-intent shopping-card removal is covered by AgentServiceTests.
     /// </summary>
     private static Task<ProductSearchResult> BuildAsync(
         ResearchBundle bundle, string query = "espresso machines in Jordan")
@@ -24,7 +29,7 @@ public class ItemAssociationTests
         var agent = new AgentService(new FakeLlmClient(_ => "unused"));
         return agent.BuildProductSearchResultAsync(
             query, GeoProfiles.Jordan, bundle, "summary", CancellationToken.None,
-            assessReputation: false, useLlmExtraction: false);
+            assessReputation: false, useLlmExtraction: false, intent: SearchIntentType.Service);
     }
 
     private static SearchResult Shopping(string title, decimal price, string seller, string? url = null) => new()

@@ -53,7 +53,7 @@ public interface IItemEnrichmentService
     /// <summary>Store domains Phase 4 would crawl for this result (pure selection, no I/O).</summary>
     IReadOnlyList<(string Domain, string? StoreName, string? EntryUrl)> SelectCatalogDomains(ProductSearchResult products);
 
-    /// <summary>Brands Phase 5 would harvest for this result (pure selection incl. the MaxBrandCatalogs cap, no I/O).</summary>
+    /// <summary>Brands Phase 5 would harvest from Context.dev for this result (pure selection, no I/O; every surfaced brand, cost/TTL-bounded).</summary>
     IReadOnlyList<string> SelectBrandsForHarvest(ProductSearchResult products);
 }
 
@@ -107,9 +107,6 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IBrandCatalogService _brandCatalog;
     private readonly ILogger<ItemEnrichmentService> _logger;
     private readonly Services.IProviderApi _providers;
-
-    /// <summary>How many of the result's brands get their site catalogue harvested per run (slow crawls).</summary>
-    private const int MaxBrandCatalogs = 2;
 
     /// <summary>
     /// Cap on per-run image-search lookups for models the pipeline left imageless (~one grid page).
@@ -595,7 +592,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             .Select(b => b.Name)
             .Where(n => !string.IsNullOrWhiteSpace(n))
             .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Take(MaxBrandCatalogs)
+            // Every surfaced brand gets its Context.dev catalogue harvested — the brand APIs are the
+            // canonical brand-product source (no lucky top-2). Uncapped by default like the store-catalogue
+            // and item fan-outs; the grid's brand set is naturally small and the per-(brand,level) TTL gate
+            // stops repeat searches re-billing. Restrainable via PIPELINE_MAX_BRAND_CATALOGS since each
+            // harvest is a paid crawl (see PipelineLimits.MaxBrandCatalogs).
+            .Take(PipelineLimits.MaxBrandCatalogs)
             .ToList();
 
     /// <summary>Detail blobs are capped to the entity column budget wherever a page is scraped.</summary>

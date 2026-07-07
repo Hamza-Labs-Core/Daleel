@@ -122,8 +122,15 @@ public sealed partial class AgentService
                 $"shopping {bundle.ShoppingResults.Count}, places-stores {bundle.Stores.Count}");
         }
 
-        // Shopping hits come from a geo-targeted search (gl=cc) → treated as local.
-        var shoppingListings = ListingExtractor.FromShopping(bundle.ShoppingResults);
+        // Shopping hits come from a geo-targeted search (gl=cc) → treated as local. But for PRODUCT
+        // searches, Google Shopping is no longer a product-card SOURCE: those hits are aggregator
+        // "lowest price" SEO rows, and the grid's product data now comes from brand sites (Context.dev)
+        // + store pages (CF-Browser) + LLM extraction. Shopping still flows into bundle.Prices and the
+        // analyst/extraction context (unchanged), and non-product intents (Deals/service/place) keep the
+        // seed — so the /deals surface, which reads ShoppingResults directly, is untouched.
+        var shoppingListings = intent == SearchIntentType.Product
+            ? Array.Empty<ProductListing>()
+            : ListingExtractor.FromShopping(bundle.ShoppingResults);
 
         // Deep-extract individual listings from the top LOCAL marketplace/store pages.
         var extracted = await ExtractListingsAsync(classified, geo, includeIntl, cancellationToken).ConfigureAwait(false);

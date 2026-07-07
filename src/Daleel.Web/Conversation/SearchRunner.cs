@@ -26,13 +26,6 @@ public sealed record SearchRunResult(
     /// complete and needs no follow-up.
     /// </summary>
     public Daleel.Web.Pipeline.CacheQualityReport? CacheQuality { get; init; }
-
-    /// <summary>
-    /// True when the run was cut short by the per-job cost cap (the result, if any, was salvaged).
-    /// The worker must not launch the post-result background enrichment for such a job — a fresh
-    /// enrichment budget would double the admin-configured spending ceiling exactly when it fired.
-    /// </summary>
-    public bool CostCapTripped { get; init; }
 }
 
 /// <summary>
@@ -117,17 +110,15 @@ public sealed class AgentSearchRunner : ISearchRunner
         }
         await RecordResultCacheAsync(job, "miss", ct).ConfigureAwait(false);
 
-        // Per-job cost instrumentation: estimate + cap from admin config, stream each call live.
+        // Per-job cost instrumentation: estimate spend from admin pricing, stream each call live.
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
-        var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
 
         // Per-call detail (provider/endpoint/cost/timing) is internal: route it to the server log,
         // not to the user's progress stream. Aggregate counts/cost still flow into analytics below.
         // R1 — meter only, never cost-cancel: a running search is never interrupted by a cost limit;
         // the limit blocks NEW searches at submission, and actual spend is charged post-hoc.
         var collector = new JobApiCallCollector(
-            line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line),
-            maxCost: 0m, capTrip: null);
+            line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line));
 
         // Admin feedback drives moderation: the active whitelist (undo decisions) and the
         // rating-tuned thresholds ride into the agent with every run.

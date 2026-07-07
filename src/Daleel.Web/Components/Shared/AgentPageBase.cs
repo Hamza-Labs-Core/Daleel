@@ -163,7 +163,7 @@ public abstract class AgentPageBase : ComponentBase
         StateHasChanged();
 
         // Meter the provider calls this search makes so we can charge its real credit cost afterwards.
-        var meter = new Daleel.Web.Conversation.JobApiCallCollector(_ => { }, 0m, null);
+        var meter = new Daleel.Web.Conversation.JobApiCallCollector(_ => { });
         try
         {
             var agent = Agents.Build(new AgentRequest

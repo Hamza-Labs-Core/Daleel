@@ -156,19 +156,18 @@ public sealed class EnrichmentQueueService : BackgroundService
 
         var config = sp.GetRequiredService<ISystemConfigService>();
         var estimator = await CostConfig.BuildEstimatorAsync(config, stoppingToken);
-        var caps = await CostConfig.ReadCapsAsync(config, stoppingToken);
 
         // R1 — a per-user/per-job cost limit NEVER interrupts ongoing enrichment: an in-flight deep
         // dive (including an actor loop) always runs to completion; the limit only blocks NEW searches
         // at submission, and actual spend is charged post-hoc (the user balance can go negative). So
         // there is no cost gate or cap-kill here — just run the unit.
-        await RunUnitAsync(item, sp, db, job, config, estimator, caps, handler, stoppingToken);
+        await RunUnitAsync(item, sp, db, job, config, estimator, handler, stoppingToken);
     }
 
     private async Task RunUnitAsync(
         EnrichmentWorkItem item, IServiceProvider sp, DaleelDbContext db, SearchJob job,
         ISystemConfigService config, Daleel.Core.Observability.CostEstimator estimator,
-        CostCaps caps, IEnrichmentUnitHandler handler, CancellationToken stoppingToken)
+        IEnrichmentUnitHandler handler, CancellationToken stoppingToken)
     {
         // The ONLY bound is the lease: an attempt must finish before its lease can expire (or a second
         // consumer could claim the unit while this one still runs it). It is crash-recovery/liveness,
@@ -179,8 +178,7 @@ public sealed class EnrichmentQueueService : BackgroundService
         var collector = new JobApiCallCollector(
             line => _logger.LogInformation(
                 "Enrich unit {ItemId} ({Kind}, job {JobId}) API call · {Detail}",
-                item.Id, item.Kind, item.SearchJobId, line),
-            maxCost: 0m, capTrip: null); // meter only — a cost cap never trips an ongoing unit
+                item.Id, item.Kind, item.SearchJobId, line)); // meter only — cost never trips an ongoing unit
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
         var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;

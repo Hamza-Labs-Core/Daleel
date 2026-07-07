@@ -89,10 +89,18 @@ public sealed partial class AgentService
         }
 
         var selected = queries.Take(_options.MaxQueriesPerKind).ToList();
-        // Web and shopping go deep (paginated up to 10 pages); other kinds keep the shallow depth.
-        var maxResults = kind is SearchKind.Web or SearchKind.Shopping
-            ? _options.DeepResultsPerQuery
-            : _options.ResultsPerQuery;
+        // Depth is per-engine now that SerpAPI is discovery-only for WEB:
+        //   • Shopping goes deep (up to 10 pages) — it feeds the price/Deals surface.
+        //   • Web is DISCOVERY-only (≈1–2 pages) — just enough to surface brand/store/marketplace
+        //     URLs that CF-Browser (stores) and Context.dev (brands) then read; the single biggest
+        //     lever on the SerpAPI hourly cap.
+        //   • Other kinds keep the shallow default depth.
+        var maxResults = kind switch
+        {
+            SearchKind.Shopping => _options.DeepResultsPerQuery,
+            SearchKind.Web => _options.WebDiscoveryResultsPerQuery,
+            _ => _options.ResultsPerQuery
+        };
         var tasks = selected.Select(q => SafeSearchAsync(new SearchQuery
         {
             Query = q,

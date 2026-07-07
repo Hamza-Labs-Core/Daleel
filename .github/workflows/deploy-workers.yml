@@ -8,7 +8,10 @@
 # into wrangler.jsonc's placeholder).
 #
 # Required GitHub secrets:
-#   CLOUDFLARE_API_TOKEN              — Workers Scripts: Edit + R2 + Queues + KV + Workers AI.
+#   CLOUDFLARE_API_TOKEN              — Workers Scripts: Edit + R2 + Queues + KV + Workers AI
+#                                       + Durable Objects (the search-worker's SerpAPI hourly cap is a
+#                                       DO; `wrangler deploy` applies its migration, so a token without
+#                                       Durable Objects: Edit will 403 the search-worker deploy).
 #   CLOUDFLARE_ACCOUNT_ID             — account id.
 #   (worker BEARERS are NOT CI secrets any more: the VPS token authority mints and pushes
 #   AUTH_TOKEN/AUTH_TOKEN_PREVIOUS via the Cloudflare API — see /admin/credentials)

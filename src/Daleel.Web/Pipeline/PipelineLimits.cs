@@ -4,9 +4,10 @@ namespace Daleel.Web.Pipeline;
 /// The pipeline's fan-out limits. Entity fan-outs are UNCAPPED by default: every discovered brand,
 /// store and model is dispatched — dropping work on the floor was a VPS-era self-protection that the
 /// Cloudflare execution layer (docs/architecture/cloudflare-workers-pipeline.md) makes obsolete. The
-/// real backstops are the ones designed for the job: the per-job cost cap (<c>cost.max_per_job</c>),
-/// the workflow deadline + salvage, and the queue retry budgets — all of which keep partial results
-/// instead of silently truncating them.
+/// real backstops are the ones designed for the job: the workflow deadline + salvage, the per-unit
+/// lease + queue retry budgets, and the per-(entity) freshness gates — all of which keep partial
+/// results instead of silently truncating them. (Cost is metered + charged to credits, never used to
+/// cap or cancel a running job — see R1 in <c>EnrichmentQueueService</c>.)
 /// </summary>
 /// <remarks>
 /// Environment knobs (rendered into .env by the deploy workflows) exist as optional RESTRAINTS for an
@@ -27,6 +28,17 @@ public static class PipelineLimits
 
     /// <summary>Brands researched per search — every discovered brand, unless an env restraint is set.</summary>
     public static int MaxBrands { get; } = FromEnv("PIPELINE_MAX_BRANDS", fallback: int.MaxValue);
+
+    /// <summary>
+    /// Brand catalogues harvested from Context.dev per search — every surfaced brand (the canonical
+    /// brand-product source), unless an env restraint is set. UNCAPPED by default like the other
+    /// fan-outs; the brand set a grid surfaces is naturally small and the per-(brand,level) TTL gate
+    /// stops repeat searches re-billing. It gets its OWN restraint (<c>PIPELINE_MAX_BRAND_CATALOGS</c>)
+    /// only because each harvest is a paid <c>/v1/brand/ai/products</c> crawl — so an operator can
+    /// throttle the priciest fan-out independently, without also restraining brand research. (Note the
+    /// per-job cost cap is not currently armed for ANY fan-out, so it is not a real backstop here.)
+    /// </summary>
+    public static int MaxBrandCatalogs { get; } = FromEnv("PIPELINE_MAX_BRAND_CATALOGS", fallback: int.MaxValue);
 
     /// <summary>Stores researched per search — every discovered store, unless an env restraint is set.</summary>
     public static int MaxStores { get; } = FromEnv("PIPELINE_MAX_STORES", fallback: int.MaxValue);

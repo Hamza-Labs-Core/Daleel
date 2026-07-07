@@ -91,13 +91,10 @@ public class AgentServiceTests
     [Fact]
     public async Task AskAsync_ProductQuery_ProjectsStructuredListings()
     {
-        // FakeSearchProvider returns the same set for every kind; we lean on classification to bucket them.
+        // The priced Samsung model is sourced via LLM extraction (Google Shopping is no longer a
+        // product-card source); the Samsung brand page and the buying-guide article are classified
+        // straight from the web results.
         var search = new FakeSearchProvider(
-            new SearchResult
-            {
-                Title = "Samsung Split AC AR24", Price = new Money(450, "JOD"), Seller = "OpenSooq",
-                Url = "https://jo.opensooq.com/en/listing/12345678", Kind = SearchKind.Shopping
-            },
             new SearchResult
             {
                 Title = "Air Conditioners | Samsung Jordan",
@@ -109,7 +106,19 @@ public class AgentServiceTests
                 Url = "https://blog.example.com/best-acs", Kind = SearchKind.Web
             });
 
-        var agent = new AgentService(PlannerAndAnalyst("Top picks summarized."),
+        const string productsJson = """
+            { "products": [
+              { "name": "Samsung Split AC AR24", "brand": "Samsung", "model": "AR24",
+                "offers": [ { "source": "OpenSooq", "price": 450, "currency": "JOD", "url": "https://shop.jo/ar24" } ] }
+            ] }
+            """;
+
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.PlannerSystem ? StrategyJson
+            : system == PromptTemplates.ProductExtractionSystem ? productsJson
+            : "Top picks summarized.");
+
+        var agent = new AgentService(llm,
             new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);
 
         var answer = await agent.AskAsync("ACs in Jordan", "jordan");
@@ -351,12 +360,13 @@ public class AgentServiceTests
     {
         // When every extraction reply is unparseable, the pass retries once (two attempts total)
         // and then falls back to the deterministic listings instead of throwing. Here the only
-        // deterministic source is a shopping hit, which must still surface.
+        // deterministic source is a WEB product listing (Google Shopping is no longer a product-card
+        // source), which must still surface.
         var search = new FakeSearchProvider(
             new SearchResult
             {
                 Title = "Samsung Split AC AR24", Price = new Money(450, "JOD"), Seller = "OpenSooq",
-                Url = "https://jo.opensooq.com/en/listing/1", Kind = SearchKind.Shopping
+                Url = "https://shop.jo/listing/1", Kind = SearchKind.Web
             });
 
         var llm = new FakeLlmClient(system =>
@@ -371,7 +381,7 @@ public class AgentServiceTests
 
         // Retried exactly once (2 attempts) before falling back.
         llm.SystemPromptsSeen.Count(s => s == PromptTemplates.ProductExtractionSystem).Should().Be(2);
-        // The deterministic shopping listing is unaffected by the failed LLM pass.
+        // The deterministic web listing is unaffected by the failed LLM pass.
         answer.Products!.Models.Should().Contain(m => m.Offers.Any(o => o.Price == 450 && o.Currency == "JOD"));
     }
 
@@ -389,16 +399,26 @@ public class AgentServiceTests
             } ] }
             """;
 
+        // The branded model is sourced via LLM extraction (which carries the brand) rather than a
+        // Google Shopping hit — shopping is no longer a product-card source for product searches.
+        const string productsJson = """
+            { "products": [
+              { "name": "Samsung Split AC AR24", "brand": "Samsung", "model": "AR24",
+                "offers": [ { "source": "OpenSooq", "price": 450, "currency": "JOD", "url": "https://shop.jo/ar24" } ] }
+            ] }
+            """;
+
         var llm = new FakeLlmClient(system =>
             system == PromptTemplates.PlannerSystem ? StrategyJson
+            : system == PromptTemplates.ProductExtractionSystem ? productsJson
             : system == PromptTemplates.BrandReputationSystem ? repJson
             : "summary");
 
         var search = new FakeSearchProvider(
             new SearchResult
             {
-                Title = "Samsung Split AC AR24", Price = new Money(450, "JOD"), Seller = "OpenSooq",
-                Url = "https://jo.opensooq.com/en/listing/123", Kind = SearchKind.Shopping
+                Title = "Samsung AC options in Jordan", Snippet = "compare models and sellers",
+                Url = "https://blog.x/acs", Kind = SearchKind.Web
             });
 
         var agent = new AgentService(llm, new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow }, search: search);

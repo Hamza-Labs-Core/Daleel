@@ -248,7 +248,7 @@ public class SynthesisTests
         // The design's biggest risk: an UNMETERED LLM call. Prove SynthesizeAsync flows through the
         // service's _llm, so the enrichment consumer's LoggingLlmClient wrapper meters and bills it
         // exactly like every other pipeline call (the consumer wires the ambient collector into _llm).
-        var collector = new JobApiCallCollector(_ => { }, maxCost: 0, capTrip: null);
+        var collector = new JobApiCallCollector(_ => { });
         var metered = new LoggingLlmClient(new CountingLlm(), collector, new CostEstimator());
         var agent = new AgentService(metered);
 

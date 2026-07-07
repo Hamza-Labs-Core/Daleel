@@ -58,7 +58,7 @@ public class MeteringBillingTests
     [Fact]
     public void Credits_bill_delivered_calls_only()
     {
-        var collector = new JobApiCallCollector(_ => { }, maxCost: 0, capTrip: null);
+        var collector = new JobApiCallCollector(_ => { });
         // A failed edge attempt (Error) then a successful inline scrape (Success) — one delivered page.
         collector.Record(new ApiCall
         {

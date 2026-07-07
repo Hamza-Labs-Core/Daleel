@@ -88,9 +88,8 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "model.default_free", Value = "openai/gpt-4o-mini", Type = "string" },
         new SystemConfig { Key = "model.default_pro", Value = "anthropic/claude-sonnet-4", Type = "string" },
 
-        // Cost controls + per-provider pricing (USD). max_per_job = 0 ⇒ no cap.
-        new SystemConfig { Key = "cost.max_per_job", Value = "0", Type = "decimal" },
-        new SystemConfig { Key = "cost.monthly_alert", Value = "50", Type = "decimal" },
+        // Per-provider pricing (USD) — drives the CostEstimator; spend is metered + charged to credits,
+        // never used to cap/cancel a running job (R1).
         new SystemConfig { Key = "pricing.search", Value = "0.005", Type = "decimal" },
         new SystemConfig { Key = "pricing.scrape", Value = "0.001", Type = "decimal" },
         new SystemConfig { Key = "pricing.extract", Value = "0.002", Type = "decimal" },

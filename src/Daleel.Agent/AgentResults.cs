@@ -13,11 +13,26 @@ public sealed class AgentOptions
     public int ResultsPerQuery { get; init; } = 10;
 
     /// <summary>
-    /// Depth for web/shopping queries: the provider pages through Google until it reaches this many
-    /// results (SerpAPI caps at 10 pages). Defaults to a deep 100-result scan; total cost is still
+    /// Depth for SHOPPING queries: the provider pages through Google Shopping until it reaches this
+    /// many results (SerpAPI caps at 10 pages). Defaults to a deep 100-result scan — this feeds the
+    /// price/Deals surface, where exhaustive priced coverage is the whole point. Total cost is still
     /// bounded by <see cref="MaxQueriesPerKind"/> and the per-job API-call cap.
     /// </summary>
+    /// <remarks>
+    /// WEB no longer uses this depth: SerpAPI is now a DISCOVERY layer (find brand/store/marketplace
+    /// URLs, which brand/store enrichment then reads), so web pages shallow via
+    /// <see cref="WebDiscoveryResultsPerQuery"/>. Keeping shopping deep leaves the Deals feature intact.
+    /// </remarks>
     public int DeepResultsPerQuery { get; init; } = 100;
+
+    /// <summary>
+    /// Depth for WEB queries — deliberately shallow (≈1–2 SerpAPI pages). Web search is DISCOVERY-only:
+    /// it surfaces the brand/store/marketplace URLs the pipeline then reads via CF-Browser (stores) and
+    /// Context.dev (brands), so we don't page 10 deep. This is the single biggest lever on the SerpAPI
+    /// hourly cap — 14 queries × ~2 pages instead of × 10. Bump to 30 (≈3 pages) if local-store discovery
+    /// in thin markets regresses.
+    /// </summary>
+    public int WebDiscoveryResultsPerQuery { get; init; } = 20;
 
     /// <summary>Max web/shopping queries to actually execute from a plan (cost guard).</summary>
     /// <remarks>

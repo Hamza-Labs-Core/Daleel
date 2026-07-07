@@ -17,7 +17,7 @@ public class JobApiCallCollectorTests
     public void Records_AccumulatesCallsAndCost_AndStreamsProgress()
     {
         var lines = new List<string>();
-        var collector = new JobApiCallCollector(lines.Add, maxCost: 0, capTrip: null);
+        var collector = new JobApiCallCollector(lines.Add);
 
         collector.Record(Call(0.005m));
         collector.Record(Call(0.030m));
@@ -29,26 +29,15 @@ public class JobApiCallCollectorTests
     }
 
     [Fact]
-    public void Cap_TripsCancellation_WhenExceeded()
+    public void Record_MetersButNeverCancels_EvenAtHighSpend()
     {
-        using var cts = new CancellationTokenSource();
-        var lines = new List<string>();
-        var collector = new JobApiCallCollector(lines.Add, maxCost: 0.01m, capTrip: cts);
+        // Cost is meter-only (R1): the collector has no cancellation vector at all — a job runs to
+        // completion regardless of spend, and the total simply accrues for post-hoc credit charging.
+        var collector = new JobApiCallCollector(_ => { });
 
-        collector.Record(Call(0.008m));
-        cts.IsCancellationRequested.Should().BeFalse();
-
-        collector.Record(Call(0.008m)); // total 0.016 > 0.01
-        cts.IsCancellationRequested.Should().BeTrue();
-        lines.Should().Contain(l => l.Contains("Cost cap"));
-    }
-
-    [Fact]
-    public void NoCap_NeverTrips()
-    {
-        using var cts = new CancellationTokenSource();
-        var collector = new JobApiCallCollector(_ => { }, maxCost: 0, capTrip: cts);
         for (var i = 0; i < 50; i++) collector.Record(Call(1m));
-        cts.IsCancellationRequested.Should().BeFalse();
+
+        collector.TotalCost.Should().Be(50m);
+        collector.Calls.Should().HaveCount(50);
     }
 }

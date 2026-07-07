@@ -15,7 +15,7 @@ namespace Daleel.Search.Providers;
 /// Auth requires both <c>CLOUDFLARE_ACCOUNT_ID</c> (in the URL path) and a bearer
 /// <c>CLOUDFLARE_API_TOKEN</c>.
 /// </remarks>
-public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvider
+public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvider, IExtractProvider
 {
     public const string DefaultBaseUrl = "https://api.cloudflare.com";
 
@@ -75,6 +75,27 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
         {
             return new ScrapedPage { Url = url, Provider = Name, Success = false, Error = ex.Message };
         }
+    }
+
+    /// <summary>
+    /// Renders the page with a real headless browser and runs Cloudflare's Workers-AI structured
+    /// extraction (<c>/browser-rendering/json</c>) against <paramref name="jsonSchema"/> — the
+    /// browser-native equivalent of Context.dev's AI Extract. Because it renders JS-heavy, anti-bot
+    /// store/marketplace pages, it is the primary structured extractor for STORE listings (Context.dev
+    /// stays the brand-catalogue path). Returns an empty object on a soft failure; a hard HTTP failure
+    /// throws <see cref="ProviderException"/>, which callers (ListingExtractor / ScrapeRouter) isolate.
+    /// </summary>
+    public async Task<JsonElement> ExtractAsync(
+        string url, object jsonSchema, CancellationToken cancellationToken = default)
+    {
+        var body = new
+        {
+            url,
+            response_format = new { type = "json_schema", json_schema = jsonSchema }
+        };
+
+        var raw = await PostAsync(Endpoint("json"), body, cancellationToken).ConfigureAwait(false);
+        return ParseExtraction(raw);
     }
 
     /// <summary>Renders the page and returns the full HTML.</summary>
@@ -143,5 +164,63 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
         }
 
         return raw;
+    }
+
+    /// <summary>
+    /// Parses a <c>/browser-rendering/json</c> response into the extracted object. Cloudflare wraps
+    /// results as <c>{ "success": true, "result": ... }</c>; <c>result</c> is normally the object
+    /// matching the schema (the <c>{ "products": [...] }</c> shape) but is occasionally a JSON string
+    /// that itself needs parsing. Returns an empty object on anything unparseable — the caller's
+    /// <c>FromExtractedJson</c> treats that as "no listings", never throwing.
+    /// </summary>
+    private static JsonElement ParseExtraction(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return EmptyObject();
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("result", out var result))
+            {
+                if (result.ValueKind == JsonValueKind.String)
+                {
+                    var inner = result.GetString();
+                    if (string.IsNullOrWhiteSpace(inner))
+                    {
+                        return EmptyObject();
+                    }
+
+                    try
+                    {
+                        using var innerDoc = JsonDocument.Parse(inner);
+                        return innerDoc.RootElement.Clone();
+                    }
+                    catch (JsonException)
+                    {
+                        return EmptyObject();
+                    }
+                }
+
+                return result.Clone();
+            }
+
+            // No wrapper — the body may itself be the extracted object.
+            return root.Clone();
+        }
+        catch (JsonException)
+        {
+            return EmptyObject();
+        }
+    }
+
+    private static JsonElement EmptyObject()
+    {
+        using var doc = JsonDocument.Parse("{}");
+        return doc.RootElement.Clone();
     }
 }

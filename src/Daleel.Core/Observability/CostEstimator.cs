@@ -101,6 +101,12 @@ public sealed class CostEstimator
                 : e.Contains("extract") ? _pricing.PerExtract
                 : _pricing.PerScrape;
         }
+        // Structured extraction metered at the ScrapeRouter boundary carries the router's synthetic
+        // provider name ("scrape-router"), not the underlying provider — but it is browser-first, so
+        // price the "extract" endpoint at the (higher) render rate rather than letting it fall through
+        // to PerSearch, which would ~2x under-report browser store extraction and mis-attribute it to
+        // SerpAPI spend. (Direct cloudflare-browser / context.dev extracts are already priced above.)
+        else if (e.Contains("extract")) vendor = _pricing.PerRender;
         else
         {
             // SerpAPI / Bing and other search engines bill per search.

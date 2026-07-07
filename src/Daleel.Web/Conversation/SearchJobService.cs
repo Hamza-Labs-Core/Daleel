@@ -340,15 +340,6 @@ public sealed class SearchJobService : BackgroundService
                         job, historyEntry.Id, result, Pipeline.Enrichment.EnrichmentUnit.CacheGapRefill, quality);
                 }
             }
-            else if (result.CostCapTripped)
-            {
-                // The per-job cost cap cut the base run short (the result above was salvaged). The
-                // queue consumer enforces the same cumulative cap per unit, but not enqueueing at all
-                // is cheaper and clearer: the user keeps the salvaged base result.
-                _logger.LogWarning(
-                    "Skipping background enrichment for job {JobId}: the per-job cost cap tripped during the base run",
-                    job.Id);
-            }
             else
             {
                 // Fresh run: the plan unit fans out progressive enrichment — the UI fills images,

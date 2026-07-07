@@ -80,15 +80,13 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
         var resultKey = CacheKey.ForResult(job.Query, job.Geo, language);
 
-        // Per-job cost instrumentation: estimate + cap from admin config, stream each call live.
+        // Per-job cost instrumentation: estimate spend from admin pricing, stream each call live.
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
-        var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
 
         // R1 — meter only, never cost-cancel a running search: a cost limit blocks NEW searches at
         // submission, never an in-flight one; actual spend is charged post-hoc.
         var collector = new JobApiCallCollector(
-            line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line),
-            maxCost: 0m, capTrip: null);
+            line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line));
 
         // Ambient metering: DI-resolved components (vision identification, brand-catalogue
         // discovery/harvest, store-catalogue crawls) make paid calls on their own HTTP clients and
@@ -274,10 +272,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             {
                 // Carries the smart-cache verdict (set only on a hit) up to the worker, which decides
                 // whether to launch a background partial re-enrichment for the missing pieces.
-                CacheQuality = state.CacheQuality,
-                // R1: a cost cap never cuts a run short, so this is always false — enrichment always
-                // launches. (Kept for wire-compat; slated for removal with the CostCapTripped plumbing.)
-                CostCapTripped = false
+                CacheQuality = state.CacheQuality
             };
         }
         finally
@@ -401,8 +396,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
         // R1 — meter only, never cost-cancel ongoing re-enrichment.
         var collector = new JobApiCallCollector(
-            line => _logger.LogInformation("Re-enrich job {JobId} API call · {Detail}", job.Id, line),
-            maxCost: 0m, capTrip: null);
+            line => _logger.LogInformation("Re-enrich job {JobId} API call · {Detail}", job.Id, line));
 
         // Ambient metering (see RunAsync): routes the vision/catalogue spend made on DI-resolved
         // components' own HTTP clients into this re-enrichment's collector.

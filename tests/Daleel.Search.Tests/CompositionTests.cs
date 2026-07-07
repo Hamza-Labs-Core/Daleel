@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Daleel.Core.Models;
 using Daleel.Search;
 using Daleel.Search.Abstractions;
@@ -113,5 +114,100 @@ public class ScrapeRouterTests
 
         var page = await router.ScrapeAsync("https://x");
         page.Success.Should().BeFalse();
+    }
+
+    // A chain member that can both scrape and extract (Context.dev / Cloudflare-browser shape).
+    private sealed class StubExtractScraper : IScrapeProvider, IExtractProvider
+    {
+        private readonly string _json;
+        private readonly bool _throws;
+        public string Name { get; }
+        public int ExtractCalls { get; private set; }
+        public StubExtractScraper(string name, string json, bool throws = false)
+            => (Name, _json, _throws) = (name, json, throws);
+
+        public Task<ScrapedPage> ScrapeAsync(string url, ScrapeFormat format = ScrapeFormat.Markdown, CancellationToken ct = default)
+            => Task.FromResult(new ScrapedPage { Content = "md", Success = true, Provider = Name });
+
+        public Task<JsonElement> ExtractAsync(string url, object jsonSchema, CancellationToken ct = default)
+        {
+            ExtractCalls++;
+            if (_throws) throw new InvalidOperationException("boom");
+            using var doc = JsonDocument.Parse(_json);
+            return Task.FromResult(doc.RootElement.Clone());
+        }
+    }
+
+    private static string? FirstProductName(JsonElement root) =>
+        root.ValueKind == JsonValueKind.Object &&
+        root.TryGetProperty("products", out var arr) &&
+        arr.ValueKind == JsonValueKind.Array && arr.GetArrayLength() > 0
+            ? arr[0].GetProperty("name").GetString()
+            : null;
+
+    [Fact]
+    public async Task ExtractAsync_PrefersTheBrowser_ReverseOfScrapeOrder()
+    {
+        // The chain is cheap-first for scraping (context → browser); structured extraction of a
+        // store page prefers the most capable renderer — the browser — i.e. the reverse.
+        var router = new ScrapeRouter(
+            new StubExtractScraper("context", """{ "products": [ { "name": "from-context" } ] }"""),
+            new StubExtractScraper("browser", """{ "products": [ { "name": "from-browser" } ] }"""));
+
+        var result = await router.ExtractAsync("https://store/x", new { });
+        FirstProductName(result).Should().Be("from-browser");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_FallsBackToLighterExtractor_WhenBrowserEmpty()
+    {
+        var router = new ScrapeRouter(
+            new StubExtractScraper("context", """{ "products": [ { "name": "from-context" } ] }"""),
+            new StubExtractScraper("browser", """{ "products": [] }"""));
+
+        var result = await router.ExtractAsync("https://store/x", new { });
+        FirstProductName(result).Should().Be("from-context");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_SkipsNonExtractMembers_AndStillSurfacesProducts()
+    {
+        // The bug this fixes: a plain (scrape-only) provider in the chain must NOT hide the
+        // extract-capable member — before the router forwarded IExtractProvider, it did exactly that.
+        var router = new ScrapeRouter(
+            new StubScraper("plain", new ScrapedPage { Content = "md", Success = true }),
+            new StubExtractScraper("browser", """{ "products": [ { "name": "from-browser" } ] }"""));
+
+        var result = await router.ExtractAsync("https://store/x", new { });
+        FirstProductName(result).Should().Be("from-browser");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_FallsBackOnThrow()
+    {
+        var router = new ScrapeRouter(
+            new StubExtractScraper("context", """{ "products": [ { "name": "from-context" } ] }"""),
+            new StubExtractScraper("browser", "{}", throws: true));
+
+        var result = await router.ExtractAsync("https://store/x", new { });
+        FirstProductName(result).Should().Be("from-context");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_AcceptsAlternateArrayKeys_WithoutBillingTheFallback()
+    {
+        // A result wrapped under "items" (a key ListingExtractor.ResolveProductsArray accepts) must
+        // count as non-empty, so the router short-circuits on the browser and never bills the fallback
+        // extractor — HasProducts must stay in lockstep with the consumer's accepted keys.
+        var context = new StubExtractScraper("context", """{ "products": [ { "name": "from-context" } ] }""");
+        var browser = new StubExtractScraper("browser", """{ "items": [ { "name": "from-browser" } ] }""");
+        var router = new ScrapeRouter(context, browser); // extract reverses → browser first
+
+        var result = await router.ExtractAsync("https://store/x", new { });
+
+        result.TryGetProperty("items", out var items).Should().BeTrue("the browser's items-wrapped result is returned as-is");
+        items.GetArrayLength().Should().Be(1);
+        browser.ExtractCalls.Should().Be(1);
+        context.ExtractCalls.Should().Be(0, "the browser result was non-empty, so the fallback is never called or billed");
     }
 }
