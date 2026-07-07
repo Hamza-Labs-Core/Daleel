@@ -45,13 +45,19 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
         "image INDIVIDUALLY. Flag an image when it depicts haram content: alcoholic drinks or bars " +
         "(category \"alcohol\"), pork products (\"pork\"), gambling (\"gambling\"), nudity or " +
         "sexualized content (\"adult\"), recreational drugs (\"drugs\"), smoking/tobacco products " +
-        "(\"tobacco\"), or ANY VISIBLE WOMAN WHO IS NOT IN FULL HIJAB — her hair, neck, arms, or legs " +
-        "are not fully covered, OR she wears tight, sheer, or otherwise form-fitting/revealing " +
-        "clothing (category \"immodest\").\n\n" +
-        "Do NOT flag ordinary product photos, electronics, food that isn't pork/alcohol, logos, or " +
-        "images of men, children, or women in full hijab (hair fully covered, loose modest clothing).\n\n" +
-        "IMPORTANT: if a woman is visible and you cannot clearly tell she is in full hijab, FLAG her as " +
-        "\"immodest\". For non-person content only, when unsure do not flag.\n\n" +
+        "(\"tobacco\"), or a REAL WOMAN who is visible in the photo and is NOT in full hijab — her hair, " +
+        "neck, arms, or legs are not fully covered, OR she wears tight, sheer, or otherwise form-fitting/" +
+        "revealing clothing (category \"immodest\").\n\n" +
+        "The \"immodest\" category applies ONLY when an actual PERSON is visible. A photo with NO person " +
+        "is NEVER immodest: product-only shots, clothing laid flat or on a hanger, a garment on a " +
+        "MANNEQUIN or a headless/faceless dress form, folded items, accessories, shoes, bags, " +
+        "electronics, food, and logos are all fine — do NOT flag any of them for immodesty (only for the " +
+        "other haram categories above, and only if those actually apply).\n\n" +
+        "Do NOT flag images of men, children, or women in full hijab (hair fully covered, loose modest " +
+        "clothing).\n\n" +
+        "IMPORTANT: ONLY when a real, living woman is visible AND you cannot clearly tell she is in full " +
+        "hijab, FLAG her as \"immodest\". For everything else — especially any photo with no person — " +
+        "when unsure do NOT flag.\n\n" +
         "The images are numbered in the order given. Respond with ONLY a JSON array containing " +
         "one object PER FLAGGED image (omit clean images): {\"index\": number starting at 0, " +
         "\"category\": string, \"confidence\": number 0-1, \"reason\": short string}.";
