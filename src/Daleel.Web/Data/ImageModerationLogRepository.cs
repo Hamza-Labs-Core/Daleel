@@ -34,6 +34,13 @@ public interface IImageModerationLogRepository
     Task ApplyReEvalVerdictAsync(
         long id, string decision, string? category, double? score, string? reason, string? source,
         DateTimeOffset screenedAt, CancellationToken ct = default);
+
+    /// <summary>
+    /// Moves a still-queued image to the BACK of the re-evaluation queue (stamps ReEvalRequestedAt = now).
+    /// Used when a re-eval could not screen it (infra outage): it stays queued and retries, but no longer
+    /// holds the oldest marker — so a wall of un-screenable images can't starve newer flagged rows.
+    /// </summary>
+    Task RequeueReEvalAsync(long id, CancellationToken ct = default);
 }
 
 /// <summary>Registry tallies for the admin summary line (Pending = queued for re-evaluation).</summary>
@@ -59,6 +66,31 @@ public sealed class ImageModerationLogRepository : IImageModerationLogRepository
             byUrl[row.ImageUrl] = row;
         }
 
+        try
+        {
+            await UpsertOnceAsync(byUrl, ct).ConfigureAwait(false);
+        }
+        catch (DbUpdateException)
+        {
+            // A concurrent screen of the SAME image URL inserted its registry row between our read and
+            // save, violating UNIQUE(ImageUrl). Reset the tracker and retry once: the re-read now sees
+            // that row, so our insert becomes an update. (Both verdicts come from the same rules, so
+            // whichever wins is equivalent.) A second failure is swallowed — the audit is best-effort.
+            _db.ChangeTracker.Clear();
+            try
+            {
+                await UpsertOnceAsync(byUrl, ct).ConfigureAwait(false);
+            }
+            catch (DbUpdateException)
+            {
+                _db.ChangeTracker.Clear();
+            }
+        }
+    }
+
+    private async Task UpsertOnceAsync(
+        IReadOnlyDictionary<string, ImageModerationLog> byUrl, CancellationToken ct)
+    {
         var urls = byUrl.Keys.ToList();
         var existing = await _db.ImageModerationLogs
             .Where(x => urls.Contains(x.ImageUrl))
@@ -85,7 +117,21 @@ public sealed class ImageModerationLogRepository : IImageModerationLogRepository
             }
             else
             {
-                _db.ImageModerationLogs.Add(row);
+                _db.ImageModerationLogs.Add(new ImageModerationLog
+                {
+                    ImageUrl = row.ImageUrl,
+                    Decision = row.Decision,
+                    Category = row.Category,
+                    Score = row.Score,
+                    Reason = row.Reason,
+                    DecisionSource = row.DecisionSource,
+                    ItemName = row.ItemName,
+                    ItemKind = row.ItemKind,
+                    Query = row.Query,
+                    Geo = row.Geo,
+                    SearchJobId = row.SearchJobId,
+                    CreatedAt = row.CreatedAt,
+                });
             }
         }
 
@@ -163,6 +209,15 @@ public sealed class ImageModerationLogRepository : IImageModerationLogRepository
                 .SetProperty(x => x.CreatedAt, screenedAt)
                 .SetProperty(x => x.ReEvalRequestedAt, (DateTimeOffset?)null), ct)
             .ConfigureAwait(false);
+
+    public async Task RequeueReEvalAsync(long id, CancellationToken ct = default)
+    {
+        var now = DateTimeOffset.UtcNow;
+        await _db.ImageModerationLogs
+            .Where(x => x.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.ReEvalRequestedAt, (DateTimeOffset?)now), ct)
+            .ConfigureAwait(false);
+    }
 
     private IQueryable<ImageModerationLog> FilteredQuery(string? decision, string? queryLike)
     {

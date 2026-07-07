@@ -134,7 +134,9 @@ public sealed class ImageReEvalService : BackgroundService
             }
             else if (unscreened.Contains(row.ImageUrl))
             {
-                // Could not screen this one (infra) — leave it queued to retry; don't clear the marker.
+                // Could not screen this one (infra) — keep it queued to retry, but move it to the BACK of
+                // the queue so a wall of un-screenable images can't starve newer flagged rows.
+                await repo.RequeueReEvalAsync(row.Id, ct).ConfigureAwait(false);
                 continue;
             }
             else
