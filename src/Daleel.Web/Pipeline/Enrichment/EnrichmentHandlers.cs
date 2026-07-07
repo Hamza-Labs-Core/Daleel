@@ -672,6 +672,20 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
             }, ct);
         }
 
+        if (found.Count > 0)
+        {
+            // This pass ADDED images — screen them. The Plan-enqueued screen fires ~160s in, BEFORE
+            // image-lookup resolves imageless items, so late-added images would otherwise never be
+            // screened (→ fail-closed HIDDEN forever, and absent from the /admin/images registry). Queue a
+            // fresh ImageCheck now that the images have landed. Idempotent + cache-backed, so re-screens
+            // across a multi-batch chain only pay a vision call for each newly-added image.
+            await ctx.Queue.EnqueueAsync(new[]
+            {
+                HandlerHelpers.Child(item, EnrichmentUnit.ImageCheck, string.Empty,
+                    notBefore: TimeSpan.FromSeconds(20))
+            }, ct);
+        }
+
         if (remaining)
         {
             // Carry forward everything attempted (before + this pass) so the next unit tackles the
