@@ -49,7 +49,7 @@ public sealed record SearchResultEmailModel
             TopProducts = products is null
                 ? Array.Empty<EmailProduct>()
                 : products.Models.Take(3)
-                    .Select(m => new EmailProduct(m.Name, PriceRangeOf(m), m.ImageUrl))
+                    .Select(m => new EmailProduct(m.Name, PriceRangeOf(m), m.DisplayImageUrl))
                     .ToList(),
             TopStores = products is null
                 ? Array.Empty<EmailStore>()

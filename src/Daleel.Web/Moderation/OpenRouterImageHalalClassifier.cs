@@ -42,13 +42,16 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
 
     private const string SystemPrompt =
         "You are a halal-content image moderator for a Muslim shopping assistant. You judge each " +
-        "image INDIVIDUALLY. Flag an image ONLY when the image itself clearly depicts haram " +
-        "content: alcoholic drinks or bars (category \"alcohol\"), pork products (\"pork\"), " +
-        "gambling (\"gambling\"), nudity or sexualized content (\"adult\"), women not dressed " +
-        "modestly per Islamic dress norms (\"immodest\"), recreational drugs (\"drugs\"), or " +
-        "smoking/tobacco products (\"tobacco\").\n\n" +
-        "Do NOT flag ordinary product photos, electronics, food that isn't pork/alcohol, logos, " +
-        "or images of men, children, or modestly-dressed women. When unsure, do not flag.\n\n" +
+        "image INDIVIDUALLY. Flag an image when it depicts haram content: alcoholic drinks or bars " +
+        "(category \"alcohol\"), pork products (\"pork\"), gambling (\"gambling\"), nudity or " +
+        "sexualized content (\"adult\"), recreational drugs (\"drugs\"), smoking/tobacco products " +
+        "(\"tobacco\"), or ANY VISIBLE WOMAN WHO IS NOT IN FULL HIJAB — her hair, neck, arms, or legs " +
+        "are not fully covered, OR she wears tight, sheer, or otherwise form-fitting/revealing " +
+        "clothing (category \"immodest\").\n\n" +
+        "Do NOT flag ordinary product photos, electronics, food that isn't pork/alcohol, logos, or " +
+        "images of men, children, or women in full hijab (hair fully covered, loose modest clothing).\n\n" +
+        "IMPORTANT: if a woman is visible and you cannot clearly tell she is in full hijab, FLAG her as " +
+        "\"immodest\". For non-person content only, when unsure do not flag.\n\n" +
         "The images are numbered in the order given. Respond with ONLY a JSON array containing " +
         "one object PER FLAGGED image (omit clean images): {\"index\": number starting at 0, " +
         "\"category\": string, \"confidence\": number 0-1, \"reason\": short string}.";
@@ -78,19 +81,21 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
         }
     }
 
-    public async Task<IReadOnlyList<ImageVerdict>> ClassifyAsync(
+    public async Task<ImageClassifierResult> ClassifyAsync(
         IReadOnlyList<string> imageUrls, CancellationToken ct = default)
     {
-        var verdicts = new List<ImageVerdict>();
+        var flaggedVerdicts = new List<ImageVerdict>();
+        var unscreened = new List<string>();
         var toClassify = new List<string>();
 
         foreach (var url in imageUrls.Where(IsHttpUrl).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             if (await ReadCachedAsync(url, ct).ConfigureAwait(false) is { } cached)
             {
+                // A cached verdict is a completed screen: haram → flagged; clean → nothing to record.
                 if (cached.IsHaram)
                 {
-                    verdicts.Add(cached);
+                    flaggedVerdicts.Add(cached);
                 }
             }
             else
@@ -105,7 +110,11 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             var flagged = await ClassifyBatchAsync(batch, ct).ConfigureAwait(false);
             if (flagged is null)
             {
-                continue; // batch failed — leave those images unscreened (and uncached)
+                // The screen could NOT run for this batch (HTTP 402 out-of-credits / 429 / 5xx /
+                // timeout / unparseable). Report the URLs as UNSCREENED so the caller fails CLOSED
+                // (hide + hold) — never mistaken for "clean". Do NOT cache: a retry must re-attempt.
+                unscreened.AddRange(batch);
+                continue;
             }
 
             foreach (var url in batch)
@@ -115,12 +124,12 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
                 await WriteCachedAsync(verdict, ct).ConfigureAwait(false);
                 if (verdict.IsHaram)
                 {
-                    verdicts.Add(verdict);
+                    flaggedVerdicts.Add(verdict);
                 }
             }
         }
 
-        return verdicts;
+        return new ImageClassifierResult(flaggedVerdicts, unscreened);
     }
 
     /// <summary>Runs one vision call over a batch. Returns null when the call failed entirely.</summary>

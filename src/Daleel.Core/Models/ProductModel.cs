@@ -88,6 +88,21 @@ public record ProductModel
     public string? ImageUrl { get; init; }
 
     /// <summary>
+    /// The raw <see cref="ImageUrl"/> as it stood the moment the halal vision screen VERIFIED it clean.
+    /// The UI never reads <see cref="ImageUrl"/> directly — it reads <see cref="DisplayImageUrl"/>, which
+    /// yields the picture ONLY while this mirror still equals <see cref="ImageUrl"/>. So an image is
+    /// hidden by default (fail-closed) and shown only after the screen promotes it; any later reassignment
+    /// of <see cref="ImageUrl"/> silently re-hides it until re-verified. Preserving the raw URL (rather
+    /// than nulling a flagged one) lets an admin whitelist or a retry un-hide it later.
+    /// </summary>
+    public string? VerifiedImageUrl { get; init; }
+
+    /// <summary>The image URL to actually render — non-null only when the vision screen has cleared it.</summary>
+    public string? DisplayImageUrl =>
+        VerifiedImageUrl is { Length: > 0 } v && string.Equals(v, ImageUrl, StringComparison.Ordinal)
+            ? ImageUrl : null;
+
+    /// <summary>
     /// Stable, URL-safe identifier used to route to the model's detail page. Products aren't persisted
     /// with a database key, so this is a deterministic hash of the model's (brand + model) identity —
     /// see <see cref="StableId.ForProduct"/>. The human <see cref="Name"/> is kept as a display/scan

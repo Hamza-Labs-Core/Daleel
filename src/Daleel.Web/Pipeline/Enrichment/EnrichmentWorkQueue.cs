@@ -42,6 +42,13 @@ public interface IEnrichmentWorkQueue
     /// </summary>
     Task RetryAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// Parks a claimed unit for a later attempt WITHOUT consuming its attempt budget. For a billing/infra
+    /// outage (402/429/5xx/timeout) the work must SURVIVE — the unit stays queued and retries until the
+    /// outage clears, and it NEVER Deads. Distinct from <see cref="RetryAsync"/>, which counts attempts.
+    /// </summary>
+    Task RequeueAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default);
+
     /// <summary>Kills a claimed unit immediately (non-retryable give-up, e.g. the job's cost cap).</summary>
     Task KillAsync(long id, string reason, CancellationToken ct = default);
 
@@ -213,6 +220,18 @@ public sealed class EnrichmentWorkQueue : IEnrichmentWorkQueue
             // provider to recover without parking the unit for ages.
             item.NotBefore = DateTimeOffset.UtcNow +
                 (delay ?? TimeSpan.FromSeconds(Math.Min(300, 30 * item.Attempts)));
+        }, ct);
+
+    public Task RequeueAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) =>
+        MutateAsync(id, item =>
+        {
+            item.LastError = Truncate(reason);
+            item.LeaseUntil = null;
+            item.Status = WorkItemStatus.Pending;
+            // Undo the claim-time Attempts++ so an arbitrarily long outage never exhausts the terminal
+            // budget — "retry until infra recovers", never a give-up. NEVER sets Dead.
+            item.Attempts = Math.Max(0, item.Attempts - 1);
+            item.NotBefore = DateTimeOffset.UtcNow + (delay ?? TimeSpan.FromSeconds(120));
         }, ct);
 
     public Task KillAsync(long id, string reason, CancellationToken ct = default) =>

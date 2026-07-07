@@ -95,17 +95,17 @@ public sealed class ShadowHalalImageClassifier : IHalalImageClassifier
 
     public bool IsConfigured => _inner.IsConfigured;
 
-    public async Task<IReadOnlyList<ImageVerdict>> ClassifyAsync(
+    public async Task<ImageClassifierResult> ClassifyAsync(
         IReadOnlyList<string> imageUrls, CancellationToken ct = default)
     {
-        var verdicts = await _inner.ClassifyAsync(imageUrls, ct).ConfigureAwait(false);
+        var result = await _inner.ClassifyAsync(imageUrls, ct).ConfigureAwait(false);
 
         if (_api.HasEdgeFilter && imageUrls.Count > 0)
         {
-            _ = Task.Run(() => ShadowCompareAsync(imageUrls, verdicts));
+            _ = Task.Run(() => ShadowCompareAsync(imageUrls, result.Flagged));
         }
 
-        return verdicts;
+        return result;
     }
 
     private async Task ShadowCompareAsync(IReadOnlyList<string> urls, IReadOnlyList<ImageVerdict> authoritative)

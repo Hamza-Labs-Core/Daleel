@@ -237,7 +237,12 @@ public sealed class EnrichmentQueueService : BackgroundService
         }
         catch (Exception ex)
         {
-            outcome = new UnitOutcome.Retry(ex.Message);
+            // A billing/infra failure (OpenRouter 402 out-of-credits, provider 429/5xx, network error) is
+            // NOT the unit's fault — park it (Requeue, no attempt consumed) so the work survives the outage
+            // instead of burning attempts toward Dead. Genuinely-terminal faults still Retry→Dead.
+            outcome = EnrichmentErrorClassifier.IsRetriableInfra(ex)
+                ? new UnitOutcome.Requeue($"infra unavailable: {ex.Message}")
+                : new UnitOutcome.Retry(ex.Message);
         }
         finally
         {
@@ -256,6 +261,12 @@ public sealed class EnrichmentQueueService : BackgroundService
                     "Enrich unit {ItemId} ({Kind}, job {JobId}) attempt {Attempt}/{Max} will retry: {Reason}",
                     item.Id, item.Kind, item.SearchJobId, item.Attempts, item.MaxAttempts, retry.Reason);
                 await _queue.RetryAsync(item.Id, retry.Reason, retry.Delay);
+                break;
+            case UnitOutcome.Requeue requeue:
+                _logger.LogWarning(
+                    "Enrich unit {ItemId} ({Kind}, job {JobId}) parked — infra unavailable, staying queued (no attempt consumed): {Reason}",
+                    item.Id, item.Kind, item.SearchJobId, requeue.Reason);
+                await _queue.RequeueAsync(item.Id, requeue.Reason, requeue.Delay);
                 break;
             case UnitOutcome.Kill kill:
                 _logger.LogWarning(

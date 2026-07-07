@@ -117,6 +117,35 @@ public class EnrichmentWorkQueueTests : IDisposable
         dead.CompletedAt.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task Requeue_parks_without_consuming_attempts_and_never_dies()
+    {
+        // A billing/infra outage must NEVER drop pending work: RequeueAsync keeps the unit Pending and
+        // undoes the claim-time attempt increment, so even an arbitrarily long outage never exhausts
+        // MaxAttempts and Deads — "stay queued until billing/infra is resolved".
+        await _queue.EnqueueAsync(new[] { Item(maxAttempts: 2) });
+        long id = 0;
+
+        for (var cycle = 0; cycle < 20; cycle++)
+        {
+            var claimed = await _queue.ClaimAsync(1, TimeSpan.FromMinutes(10));
+            claimed.Should().ContainSingle("a parked infra unit is always re-claimable once due");
+            id = claimed[0].Id;
+            await _queue.RequeueAsync(id, "infra unavailable: openrouter HTTP 402 PaymentRequired");
+
+            await using var db = NewDb();
+            var row = await db.EnrichmentWorkItems.SingleAsync(i => i.Id == id);
+            row.Status.Should().Be(WorkItemStatus.Pending, "an infra park never dies, no matter how long the outage");
+            row.NotBefore = DateTimeOffset.UtcNow.AddSeconds(-1); // make it due for the next cycle
+            await db.SaveChangesAsync();
+        }
+
+        await using var check = NewDb();
+        var final = await check.EnrichmentWorkItems.SingleAsync(i => i.Id == id);
+        final.Status.Should().Be(WorkItemStatus.Pending, "20 infra cycles must not exhaust a 2-attempt budget");
+        final.Attempts.Should().BeLessThanOrEqualTo(1, "each claim(+1)+requeue(-1) nets zero attempts consumed");
+    }
+
     public void Dispose() => _provider.Dispose();
 
     [Fact]
@@ -348,6 +377,7 @@ public class EnrichmentHandlerTests
             Task.FromResult<IReadOnlyList<EnrichmentWorkItem>>(Array.Empty<EnrichmentWorkItem>());
         public Task CompleteAsync(long id, CancellationToken ct = default) => Task.CompletedTask;
         public Task RetryAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task RequeueAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) => Task.CompletedTask;
         public Task KillAsync(long id, string reason, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default) => Task.FromResult(0);
         public Task<int> ReapExhaustedAsync(CancellationToken ct = default) => Task.FromResult(0);

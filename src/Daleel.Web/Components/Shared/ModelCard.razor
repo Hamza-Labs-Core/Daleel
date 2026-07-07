@@ -4,9 +4,9 @@
 
 <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;display:flex;flex-direction:column;">
     <div style="height:150px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);">
-        @if (!string.IsNullOrWhiteSpace(Model.ImageUrl))
+        @if (!string.IsNullOrWhiteSpace(Model.DisplayImageUrl))
         {
-            <SafeImage Src="@Model.ImageUrl" Alt="@Model.Name" Style="max-height:150px;max-width:100%;object-fit:contain;" />
+            <SafeImage Src="@Model.DisplayImageUrl" Alt="@Model.Name" Style="max-height:150px;max-width:100%;object-fit:contain;" />
         }
         else
         {

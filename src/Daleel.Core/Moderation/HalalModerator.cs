@@ -367,7 +367,9 @@ public sealed class HalalModerator
         IReadOnlyList<ImageVerdict> verdicts;
         try
         {
-            verdicts = await _imageClassifier!.ClassifyAsync(urls, ct).ConfigureAwait(false);
+            // Gather stage stays best-effort/fail-open (an unscreened raw image is re-screened later by
+            // the fail-CLOSED ImageCheck unit before the user sees it) — so we only consume Flagged here.
+            verdicts = (await _imageClassifier!.ClassifyAsync(urls, ct).ConfigureAwait(false)).Flagged;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

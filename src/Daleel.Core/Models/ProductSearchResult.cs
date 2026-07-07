@@ -160,6 +160,15 @@ public record BrandInfo
     public string? Url { get; init; }
     public string? LogoUrl { get; init; }
 
+    /// <summary>Mirror of <see cref="LogoUrl"/> at the moment the vision screen cleared it; see
+    /// <see cref="ProductModel.VerifiedImageUrl"/>. The UI renders <see cref="DisplayLogoUrl"/>, never the raw logo.</summary>
+    public string? VerifiedLogoUrl { get; init; }
+
+    /// <summary>The logo URL to actually render — non-null only when the vision screen has cleared it.</summary>
+    public string? DisplayLogoUrl =>
+        VerifiedLogoUrl is { Length: > 0 } v && string.Equals(v, LogoUrl, StringComparison.Ordinal)
+            ? LogoUrl : null;
+
     /// <summary>Database id when this brand has a saved profile; null for live, unsaved brands.</summary>
     public int? DbId { get; init; }
 

@@ -7,6 +7,12 @@ namespace Daleel.Search.Http;
 /// <summary>Thrown when an external search/scrape provider returns an error.</summary>
 public class ProviderException : Exception
 {
+    /// <summary>The HTTP status the provider returned, when the failure was an HTTP response (else null).</summary>
+    public int? StatusCode { get; init; }
+
+    /// <summary>True when this is a transient/infra failure (retries exhausted, timeout) rather than a hard error.</summary>
+    public bool IsTransient { get; init; }
+
     public ProviderException(string message) : base(message) { }
     public ProviderException(string message, Exception inner) : base(message, inner) { }
 }
@@ -108,7 +114,10 @@ public abstract class HttpProviderBase
                     var body = await SafeBodyAsync(response).ConfigureAwait(false);
                     var status = response.StatusCode;
                     response.Dispose();
-                    throw new ProviderException($"{ProviderName}: HTTP {(int)status} {status}. {body}");
+                    throw new ProviderException($"{ProviderName}: HTTP {(int)status} {status}. {body}")
+                    {
+                        StatusCode = (int)status,
+                    };
                 }
 
                 last = new ProviderException($"{ProviderName}: transient HTTP {(int)response.StatusCode}.");
@@ -131,7 +140,11 @@ public abstract class HttpProviderBase
             }
         }
 
-        throw new ProviderException($"{ProviderName}: request failed after retries.", last!);
+        throw new ProviderException($"{ProviderName}: request failed after retries.", last!)
+        {
+            IsTransient = true,
+            StatusCode = (last as ProviderException)?.StatusCode,
+        };
     }
 
     private static bool IsTransient(HttpStatusCode status) =>

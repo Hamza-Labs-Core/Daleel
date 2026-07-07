@@ -95,6 +95,14 @@ public abstract record UnitOutcome
     /// <summary>Non-retryable give-up (cost cap, poison payload). Stored visibly on the dead row.</summary>
     public sealed record Kill(string Reason) : UnitOutcome;
 
+    /// <summary>
+    /// Park and retry WITHOUT consuming the attempt budget — the work is fine, the INFRA is down
+    /// (billing 402, provider 5xx/429, timeout). The unit stays queued and re-runs until the outage
+    /// clears; it NEVER dies. Distinct from <see cref="Retry"/> (which counts toward MaxAttempts and
+    /// eventually Deads) so a long outage can't silently drop pending work.
+    /// </summary>
+    public sealed record Requeue(string Reason, TimeSpan? Delay = null) : UnitOutcome;
+
     public static readonly Done Ok = new();
 }
 
