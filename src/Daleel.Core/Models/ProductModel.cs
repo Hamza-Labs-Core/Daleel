@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using Daleel.Core.Intelligence;
 
@@ -106,9 +107,20 @@ public record ProductModel
     /// <summary>Every distinct candidate photo, primary first — what the screen must clear before any renders.</summary>
     public IReadOnlyList<string> CandidateImages =>
         (string.IsNullOrWhiteSpace(ImageUrl) ? Images : Images.Prepend(ImageUrl!))
-            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Where(IsUsableImageUrl)
             .Distinct(StringComparer.Ordinal)
             .ToList();
+
+    /// <summary>
+    /// A usable product image is an absolute http(s) URL. Extractors occasionally emit junk in the image
+    /// field — the literal string "null"/"undefined", a bare word, or a relative path — which passed the
+    /// old "not whitespace" check and then, because the vision screen skips non-http urls, got promoted as
+    /// a "verified" image (rendering &lt;img src="null"&gt; → 404) and logged as a shown image. Requiring a
+    /// real http(s) url at the candidate gate keeps that junk out of screening, display, and the audit.
+    /// </summary>
+    private static bool IsUsableImageUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
 
     /// <summary>The photos to actually render — verified AND still a candidate, in order. A fail-closed gallery.</summary>
     public IReadOnlyList<string> DisplayImages
