@@ -1,22 +1,23 @@
 namespace Daleel.Web.Data;
 
 /// <summary>
-/// An admin-only audit record of the halal VISION screen's verdict on ONE product/brand image — the
-/// full picture of "every image and whether it was shown, hidden, or could not be screened, and why".
-/// Unlike <see cref="FilteredContentLog"/> (which records only FLAGGED findings, for threshold tuning),
-/// this logs EVERY candidate image the <c>ImageCheckHandler</c> screened, including the clean ones that
-/// were shown — so an admin can see exactly what the filter did to each photo.
+/// The system-wide REGISTRY of every product/brand image the halal vision screen has looked at — one row
+/// per distinct image URL, carrying its LATEST verdict ("every image and whether it was shown, hidden, or
+/// could not be screened, and why"). Unlike <see cref="FilteredContentLog"/> (which records only FLAGGED
+/// findings, for threshold tuning), this tracks EVERY candidate image, clean ones included, so an admin
+/// can review the whole image corpus on /admin/images and flag any/all for re-evaluation.
 /// </summary>
 /// <remarks>
-/// Anonymous by construction (no userId): image review is about the content and the model's decision,
-/// not who searched. Keyed by (SearchJobId, ImageUrl) so a re-screen (e.g. after an infra outage
-/// clears) UPDATES the row rather than duplicating it — the log reflects the latest verdict.
+/// Anonymous by construction (no userId): image review is about the content and the model's decision, not
+/// who searched. Keyed by <see cref="ImageUrl"/> (unique) so re-seeing / re-screening an image UPDATES its
+/// single registry row rather than duplicating it; <see cref="SearchJobId"/>/<see cref="Query"/> record
+/// where it was LAST seen. <see cref="ReEvalRequestedAt"/> is the re-evaluation queue marker.
 /// </remarks>
 public sealed class ImageModerationLog
 {
     public long Id { get; set; }
 
-    /// <summary>The search whose results carried this image.</summary>
+    /// <summary>The search whose results LAST carried this image.</summary>
     public int? SearchJobId { get; set; }
 
     /// <summary>The query that surfaced the image, e.g. "women pants".</summary>
@@ -52,7 +53,15 @@ public sealed class ImageModerationLog
     /// <summary>How the decision was reached: "vision" (screened), or "not-configured" (no vision model).</summary>
     public string? DecisionSource { get; set; }
 
+    /// <summary>When this image was last screened (the verdict's timestamp).</summary>
     public DateTimeOffset CreatedAt { get; set; }
+
+    /// <summary>
+    /// The re-evaluation QUEUE marker: non-null means an admin flagged this image to be re-screened with
+    /// the current rules. The <c>ImageReEvalService</c> drains flagged rows (oldest first), re-runs the
+    /// vision screen (bypassing the verdict cache), writes the fresh verdict and clears this back to null.
+    /// </summary>
+    public DateTimeOffset? ReEvalRequestedAt { get; set; }
 }
 
 /// <summary>The three outcomes an image screen can record. Kept as constants so the handler, the

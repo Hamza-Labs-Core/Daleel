@@ -58,7 +58,7 @@ public class HalalModeratorTests
             _respond = respond;
 
         public Task<ImageClassifierResult> ClassifyAsync(
-            IReadOnlyList<string> imageUrls, CancellationToken ct = default)
+            IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false)
         {
             Calls.Add(imageUrls);
             return Task.FromResult(new ImageClassifierResult(_respond(imageUrls), Array.Empty<string>()));

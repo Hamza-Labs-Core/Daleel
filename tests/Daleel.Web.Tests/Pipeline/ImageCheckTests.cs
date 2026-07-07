@@ -140,7 +140,8 @@ public class ImageCheckTests
         public FakeClassifier(string? haramUrl = null, IReadOnlyCollection<string>? unscreened = null)
             => (_haramUrl, _unscreened) = (haramUrl, unscreened);
         public bool IsConfigured => true;
-        public Task<ImageClassifierResult> ClassifyAsync(IReadOnlyList<string> imageUrls, CancellationToken ct = default)
+        public Task<ImageClassifierResult> ClassifyAsync(
+            IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false)
         {
             var flagged = _haramUrl is not null && imageUrls.Contains(_haramUrl)
                 ? new[] { new ImageVerdict(_haramUrl, true, "immodest", 0.95, "revealing") }

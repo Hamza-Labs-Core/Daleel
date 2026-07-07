@@ -74,7 +74,7 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
     }
 
     public async Task<ImageClassifierResult> ClassifyAsync(
-        IReadOnlyList<string> imageUrls, CancellationToken ct = default)
+        IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false)
     {
         var flaggedVerdicts = new List<ImageVerdict>();
         var unscreened = new List<string>();
@@ -82,7 +82,9 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
 
         foreach (var url in imageUrls.Where(IsHttpUrl).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (await ReadCachedAsync(url, ct).ConfigureAwait(false) is { } cached)
+            // Re-evaluation passes bypassCache: ignore the stored verdict so a rule change actually
+            // re-judges the image (the fresh verdict is written back, refreshing the cache).
+            if (!bypassCache && await ReadCachedAsync(url, ct).ConfigureAwait(false) is { } cached)
             {
                 // A cached verdict is a completed screen: haram → flagged; clean → nothing to record.
                 if (cached.IsHaram)

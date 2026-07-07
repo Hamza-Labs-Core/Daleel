@@ -263,6 +263,7 @@ builder.Services.AddTransient<IImageModerationRuleRepository, ImageModerationRul
 // auto-ratings (admin ratings always override), and self-activates keyword suppressions on
 // repeated wrong-flag consensus. Inert when no LLM key is configured.
 builder.Services.AddHostedService<Daleel.Web.Moderation.FindingAutoReviewService>();
+builder.Services.AddHostedService<Daleel.Web.Moderation.ImageReEvalService>();
 
 // The moderation feedback loop's read side: whitelist keys + rating-tuned thresholds, briefly
 // cached and handed to every search run. Singleton (scope-factory based) so background jobs share

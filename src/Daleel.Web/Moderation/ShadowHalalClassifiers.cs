@@ -96,9 +96,9 @@ public sealed class ShadowHalalImageClassifier : IHalalImageClassifier
     public bool IsConfigured => _inner.IsConfigured;
 
     public async Task<ImageClassifierResult> ClassifyAsync(
-        IReadOnlyList<string> imageUrls, CancellationToken ct = default)
+        IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false)
     {
-        var result = await _inner.ClassifyAsync(imageUrls, ct).ConfigureAwait(false);
+        var result = await _inner.ClassifyAsync(imageUrls, ct, bypassCache).ConfigureAwait(false);
 
         if (_api.HasEdgeFilter && imageUrls.Count > 0)
         {

@@ -442,11 +442,13 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
 
         builder.Entity<ImageModerationLog>(e =>
         {
-            // Browsed newest-first and filtered by decision in the admin "Images" audit page.
+            // Browsed newest-first and filtered by decision in the admin "Images" registry page.
             e.HasIndex(x => x.CreatedAt);
             e.HasIndex(x => new { x.Decision, x.CreatedAt });
-            // Upserted by (job, image): one indexed lookup finds a prior verdict to overwrite.
-            e.HasIndex(x => new { x.SearchJobId, x.ImageUrl });
+            // ONE registry row per distinct image URL — upsert/lookup by URL.
+            e.HasIndex(x => x.ImageUrl).IsUnique();
+            // The re-evaluation queue: the processor scans for flagged rows oldest-first.
+            e.HasIndex(x => x.ReEvalRequestedAt);
             e.Property(x => x.Query).HasMaxLength(2000);
             e.Property(x => x.Geo).HasMaxLength(64);
             e.Property(x => x.ImageUrl).HasMaxLength(2048);
@@ -457,6 +459,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Reason).HasMaxLength(300);
             e.Property(x => x.DecisionSource).HasMaxLength(16);
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            e.Property(x => x.ReEvalRequestedAt).HasConversion(toNullableUnixMs);
         });
 
         builder.Entity<ImageModerationRule>(e =>

@@ -112,9 +112,12 @@ public interface IHalalImageClassifier
     /// <summary>
     /// Screens each image URL and returns the haram <see cref="ImageClassifierResult.Flagged"/> ones plus
     /// the <see cref="ImageClassifierResult.Unscreened"/> URLs the screen could not run on (billing/infra
-    /// failure). A URL in neither set was screened clean.
+    /// failure). A URL in neither set was screened clean. When <paramref name="bypassCache"/> is true the
+    /// cached verdict is ignored and a fresh screen runs (and refreshes the cache) — used by admin
+    /// re-evaluation so a rule change actually re-judges the image instead of returning the old verdict.
     /// </summary>
-    Task<ImageClassifierResult> ClassifyAsync(IReadOnlyList<string> imageUrls, CancellationToken ct = default);
+    Task<ImageClassifierResult> ClassifyAsync(
+        IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false);
 }
 
 /// <summary>Inert image classifier used when no vision-capable key is configured.</summary>
@@ -126,7 +129,7 @@ public sealed class NullHalalImageClassifier : IHalalImageClassifier
     // nothing flagged AND nothing unscreened, so callers (which also guard on IsConfigured) show images
     // as-is. Fail-CLOSED is scoped to a configured screen that can't RUN, never to "no screen at all".
     public Task<ImageClassifierResult> ClassifyAsync(
-        IReadOnlyList<string> imageUrls, CancellationToken ct = default) =>
+        IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false) =>
         Task.FromResult(ImageClassifierResult.Empty);
 }
 

@@ -1,6 +1,7 @@
 @page "/admin/images"
 @attribute [Authorize(Roles = "Admin")]
 @inject IImageModerationLogRepository ImageLog
+@inject ISnackbar Snackbar
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Admin · Images</PageTitle>
@@ -8,17 +9,18 @@
 <AdminNav />
 <MudText Typo="Typo.h4" Class="mb-1">Image moderation</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Every product/brand image the halal vision screen looked at, and what it did to each one:
-    <b>shown</b> (verified clean), <b>hidden</b> (flagged haram — with the category, the model's
-    confidence score, and its reason), or <b>unscreened</b> (the screen couldn't run — held hidden,
-    fail-closed, until it recovers). The grid renders the <em>shown</em> images only; this page is the
-    audit of that decision for every photo. Anonymous by design — no user is recorded.
+    Every product/brand image the halal vision screen has looked at — one row per image — and what it
+    did to each: <b>shown</b> (verified clean), <b>hidden</b> (flagged haram, with category, confidence
+    score and reason), or <b>unscreened</b> (the screen couldn't run — held hidden, fail-closed). Select
+    images (or use <b>Re-evaluate all matching</b>) to <b>re-queue them for re-screening against the
+    current rules</b>; a background worker re-judges them and updates the verdict here. Anonymous by
+    design — no user is recorded.
 </MudText>
 
 @if (_error is not null)
 {
     <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
-        Couldn't load the image log: @_error
+        Couldn't load the image registry: @_error
         <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="LoadAsync">Retry</MudButton>
     </MudAlert>
 }
@@ -44,10 +46,30 @@ else
                       OnAdornmentClick="LoadAsync" OnKeyDown="@OnSearchKey" Style="max-width:320px;" />
     </div>
 
+    <div class="d-flex flex-wrap gap-2 align-center mb-2">
+        @if (_selected.Count > 0)
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="@_busy"
+                       StartIcon="@Icons.Material.Filled.Refresh" OnClick="FlagSelectedAsync">
+                Re-evaluate @_selected.Count selected
+            </MudButton>
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_busy"
+                   StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="FlagAllAsync">
+            Re-evaluate all matching
+        </MudButton>
+        @if (_counts is { Pending: > 0 } cp)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">
+                @cp.Pending queued for re-evaluation
+            </MudChip>
+        }
+    </div>
+
     @if (_counts is { } c)
     {
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
-            Last 30 days: <b>@c.Total</b> screened · @c.Shown shown · @c.Hidden hidden · @c.Unscreened unscreened
+            Registry: <b>@c.Total</b> images · @c.Shown shown · @c.Hidden hidden · @c.Unscreened unscreened
             &nbsp;·&nbsp; showing the latest @_rows.Count
         </MudText>
     }
@@ -58,7 +80,8 @@ else
     }
     else
     {
-        <MudTable Items="_rows" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" Outlined="true">
+        <MudTable Items="_rows" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" Outlined="true"
+                  MultiSelection="true" @bind-SelectedItems="_selected" T="ImageModerationLog">
             <HeaderContent>
                 <MudTh>Image</MudTh>
                 <MudTh>Decision</MudTh>
@@ -82,6 +105,10 @@ else
                         <MudText Typo="Typo.caption" Class="d-block mt-1">
                             @context.Category · @(Math.Round(s * 100))% conf.
                         </MudText>
+                    }
+                    @if (context.ReEvalRequestedAt is not null)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text" Class="mt-1">queued</MudChip>
                     }
                 </MudTd>
                 <MudTd DataLabel="Item">
@@ -108,10 +135,12 @@ else
 
 @code {
     private bool _loading = true;
+    private bool _busy;
     private string? _error;
     private string _decision = "all";
     private string _search = string.Empty;
     private IReadOnlyList<ImageModerationLog> _rows = Array.Empty<ImageModerationLog>();
+    private HashSet<ImageModerationLog> _selected = new();
     private ImageModerationCounts? _counts;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -125,7 +154,8 @@ else
             var decision = _decision == "all" ? null : _decision;
             var search = string.IsNullOrWhiteSpace(_search) ? null : _search;
             _rows = await ImageLog.ListRecentAsync(500, decision, search);
-            _counts = await ImageLog.CountsSinceAsync(DateTimeOffset.UtcNow.AddDays(-30));
+            _selected = new HashSet<ImageModerationLog>();
+            _counts = await ImageLog.RegistryCountsAsync();
         }
         catch (Exception ex)
         {
@@ -134,6 +164,56 @@ else
         finally
         {
             _loading = false;
+        }
+    }
+
+    private async Task FlagSelectedAsync()
+    {
+        if (_selected.Count == 0 || _busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var n = await ImageLog.FlagForReEvalAsync(_selected.Select(r => r.Id).ToList());
+            Snackbar.Add($"Queued {n} image(s) for re-evaluation.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't queue: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task FlagAllAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var decision = _decision == "all" ? null : _decision;
+            var search = string.IsNullOrWhiteSpace(_search) ? null : _search;
+            var n = await ImageLog.FlagAllForReEvalAsync(decision, search);
+            Snackbar.Add($"Queued {n} image(s) matching the filter for re-evaluation.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't queue: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
         }
     }
 
