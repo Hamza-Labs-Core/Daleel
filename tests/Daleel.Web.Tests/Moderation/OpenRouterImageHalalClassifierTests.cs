@@ -88,4 +88,71 @@ public class OpenRouterImageHalalClassifierTests
         OpenRouterImageHalalClassifier.Parse("""{"choices": []}""", Batch).Should().BeNull();
         OpenRouterImageHalalClassifier.Parse(Wrap("no json here"), Batch).Should().BeNull();
     }
+
+    [Fact]
+    public void VisionPolicy_ComposesPromptFromRuleList()
+    {
+        var rules = new[]
+        {
+            new VisionPolicy.Rule("alcohol", "Bottles of wine."),
+            new VisionPolicy.Rule("weapons", "Guns or knives marketed as weapons."),
+        };
+
+        var prompt = VisionPolicy.Compose(rules);
+
+        prompt.Should().Contain("following rules apply", "the prompt is composed from the rule list");
+        prompt.Should().Contain("[alcohol] Bottles of wine.");
+        prompt.Should().Contain("[weapons] Guns or knives marketed as weapons.");
+        prompt.Should().Contain("JSON array", "the fixed output contract the parser needs is preserved");
+    }
+
+    [Fact]
+    public void VisionPolicy_Compose_EmptyRules_FallsBackToDefaults()
+    {
+        VisionPolicy.Compose(Array.Empty<VisionPolicy.Rule>())
+            .Should().Be(VisionPolicy.Compose(VisionPolicy.DefaultRules));
+    }
+
+    [Fact]
+    public void VisionPolicy_AllowedCategories_IncludesRuleCategories_ExcludesNeverFiltered()
+    {
+        var rules = new[]
+        {
+            new VisionPolicy.Rule("weapons", "guns"),
+            new VisionPolicy.Rule("banking", "riba — must never be a match"),
+        };
+
+        var allowed = VisionPolicy.AllowedCategories(rules);
+
+        allowed.Should().Contain("weapons", "an admin rule's category is honoured by the parser");
+        allowed.Should().Contain("immodest", "the built-in categories remain available");
+        allowed.Should().NotContain("banking", "never-filtered categories are excluded even if a rule names one");
+    }
+
+    [Fact]
+    public void Parse_HonorsCustomRuleCategory()
+    {
+        // A category defined only by an admin rule must flag through — not be dropped as "unknown".
+        var allowed = VisionPolicy.AllowedCategories(new[] { new VisionPolicy.Rule("weapons", "guns") });
+        var body = Wrap("""[{"index": 0, "category": "weapons", "confidence": 0.9, "reason": "rifle"}]""");
+
+        var verdict = OpenRouterImageHalalClassifier.Parse(body, Batch, allowed)!.Single().Value;
+
+        verdict.Category.Should().Be("weapons");
+        verdict.IsHaram.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Parse_DropsCategoryOutsideActiveRules()
+    {
+        // With a restricted rule set, a category NOT in it is dropped (the model can't invent categories).
+        var allowed = VisionPolicy.AllowedCategories(new[] { new VisionPolicy.Rule("alcohol", "bottles") });
+        var body = Wrap("""[{"index": 0, "category": "immodest", "confidence": 0.9, "reason": "x"}]""");
+
+        // "immodest" is a built-in category, so it's still allowed (union with the halal set)...
+        OpenRouterImageHalalClassifier.Parse(body, Batch, allowed).Should().ContainSingle();
+        // ...but a truly unknown one is dropped.
+        var junk = Wrap("""[{"index": 0, "category": "totally-made-up", "confidence": 0.9, "reason": "x"}]""");
+        OpenRouterImageHalalClassifier.Parse(junk, Batch, allowed).Should().BeEmpty();
+    }
 }

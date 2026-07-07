@@ -42,33 +42,9 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
 
     private const string CacheKeyPrefix = "halal-image:";
 
-    /// <summary>SystemConfig key holding an admin-editable override of the vision policy prompt. When
-    /// unset/blank, <see cref="DefaultSystemPrompt"/> is used — so admins can retune the image rules
-    /// (e.g. the full-hijab policy) from /admin/moderation without a redeploy, nothing hardcoded.</summary>
-    public const string PromptConfigKey = "moderation.vision_prompt";
-
-    /// <summary>The built-in vision policy — the fallback when no admin override is configured.</summary>
-    public const string DefaultSystemPrompt =
-        "You are a halal-content image moderator for a Muslim shopping assistant. You judge each " +
-        "image INDIVIDUALLY. Flag an image when it depicts haram content: alcoholic drinks or bars " +
-        "(category \"alcohol\"), pork products (\"pork\"), gambling (\"gambling\"), nudity or " +
-        "sexualized content (\"adult\"), recreational drugs (\"drugs\"), smoking/tobacco products " +
-        "(\"tobacco\"), or a REAL WOMAN who is visible in the photo and is NOT in full hijab — her hair, " +
-        "neck, arms, or legs are not fully covered, OR she wears tight, sheer, or otherwise form-fitting/" +
-        "revealing clothing (category \"immodest\").\n\n" +
-        "The \"immodest\" category applies ONLY when an actual PERSON is visible. A photo with NO person " +
-        "is NEVER immodest: product-only shots, clothing laid flat or on a hanger, a garment on a " +
-        "MANNEQUIN or a headless/faceless dress form, folded items, accessories, shoes, bags, " +
-        "electronics, food, and logos are all fine — do NOT flag any of them for immodesty (only for the " +
-        "other haram categories above, and only if those actually apply).\n\n" +
-        "Do NOT flag images of men, children, or women in full hijab (hair fully covered, loose modest " +
-        "clothing).\n\n" +
-        "IMPORTANT: ONLY when a real, living woman is visible AND you cannot clearly tell she is in full " +
-        "hijab, FLAG her as \"immodest\". For everything else — especially any photo with no person — " +
-        "when unsure do NOT flag.\n\n" +
-        "The images are numbered in the order given. Respond with ONLY a JSON array containing " +
-        "one object PER FLAGGED image (omit clean images): {\"index\": number starting at 0, " +
-        "\"category\": string, \"confidence\": number 0-1, \"reason\": short string}.";
+    /// <summary>The built-in vision policy prompt — composed from <see cref="VisionPolicy.DefaultRules"/>,
+    /// the fallback used when no admin rule list is configured (or a rule read fails).</summary>
+    public static readonly string DefaultSystemPrompt = VisionPolicy.Compose(VisionPolicy.DefaultRules);
 
     private readonly string _apiKey;
     private readonly string _model;
@@ -120,14 +96,15 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             }
         }
 
-        // Resolve the effective policy prompt once per screen: an admin override from SystemConfig, else
-        // the built-in default. Read once (not per batch) so all batches judge by the same policy.
-        var prompt = await ResolvePromptAsync(ct).ConfigureAwait(false);
+        // Resolve the effective policy once per screen from the admin rule LIST: the prompt composed from
+        // the active rules, plus the categories those rules may flag with. Read once (not per batch) so
+        // all batches judge by the same policy.
+        var (prompt, allowed) = await ResolvePolicyAsync(ct).ConfigureAwait(false);
 
         for (var offset = 0; offset < toClassify.Count; offset += BatchSize)
         {
             var batch = toClassify.Skip(offset).Take(BatchSize).ToList();
-            var flagged = await ClassifyBatchAsync(batch, prompt, ct).ConfigureAwait(false);
+            var flagged = await ClassifyBatchAsync(batch, prompt, allowed, ct).ConfigureAwait(false);
             if (flagged is null)
             {
                 // The screen could NOT run for this batch (HTTP 402 out-of-credits / 429 / 5xx /
@@ -153,35 +130,41 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
     }
 
     /// <summary>
-    /// The effective vision policy prompt: an admin override from SystemConfig
-    /// (<see cref="PromptConfigKey"/>) when set, else <see cref="DefaultSystemPrompt"/>. Best-effort —
-    /// any config-read failure (or no scope factory, e.g. in tests) falls back to the default so image
-    /// moderation is never blocked by a config lookup.
+    /// The effective vision policy for this screen: the prompt composed from the admin rule LIST and the
+    /// category set those rules may flag with. Best-effort — no scope factory (e.g. tests), no active
+    /// rules, or any read failure falls back to the built-in default policy so image moderation is never
+    /// blocked by a config lookup.
     /// </summary>
-    private async Task<string> ResolvePromptAsync(CancellationToken ct)
+    private async Task<(string Prompt, IReadOnlySet<string> Allowed)> ResolvePolicyAsync(CancellationToken ct)
     {
+        var fallback = (DefaultSystemPrompt, VisionPolicy.AllowedCategories(VisionPolicy.DefaultRules));
         if (_scopeFactory is null)
         {
-            return DefaultSystemPrompt;
+            return fallback;
         }
 
         try
         {
             using var scope = _scopeFactory.CreateScope();
-            var config = scope.ServiceProvider.GetRequiredService<ISystemConfigService>();
-            var custom = await config.GetAsync(PromptConfigKey, ct).ConfigureAwait(false);
-            return string.IsNullOrWhiteSpace(custom) ? DefaultSystemPrompt : custom!;
+            var rules = await scope.ServiceProvider.GetRequiredService<IImageModerationRuleRepository>()
+                .ActiveRulesAsync(ct).ConfigureAwait(false);
+            if (rules.Count == 0)
+            {
+                return fallback;
+            }
+
+            return (VisionPolicy.Compose(rules), VisionPolicy.AllowedCategories(rules));
         }
         catch (Exception ex)
         {
-            _logger.LogDebug(ex, "Vision prompt config read failed; using the built-in default");
-            return DefaultSystemPrompt;
+            _logger.LogDebug(ex, "Image moderation rule read failed; using the built-in default policy");
+            return fallback;
         }
     }
 
     /// <summary>Runs one vision call over a batch. Returns null when the call failed entirely.</summary>
     private async Task<Dictionary<string, ImageVerdict>?> ClassifyBatchAsync(
-        IReadOnlyList<string> batch, string systemPrompt, CancellationToken ct)
+        IReadOnlyList<string> batch, string systemPrompt, IReadOnlySet<string> allowedCategories, CancellationToken ct)
     {
         var content = new List<object>
         {
@@ -219,7 +202,7 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             }
 
             var body = await resp.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
-            return Parse(body, batch);
+            return Parse(body, batch, allowedCategories);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -232,9 +215,14 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
         }
     }
 
-    /// <summary>Extracts flagged-image verdicts from an OpenAI-shaped chat-completions response.</summary>
-    internal static Dictionary<string, ImageVerdict>? Parse(string responseBody, IReadOnlyList<string> batch)
+    /// <summary>Extracts flagged-image verdicts from an OpenAI-shaped chat-completions response. The
+    /// <paramref name="allowedCategories"/> are the categories the active rules may flag with (defaults to
+    /// the built-in halal set); a verdict tagged outside that set — or with a never-filtered category — is
+    /// dropped so the model can't invent junk categories.</summary>
+    internal static Dictionary<string, ImageVerdict>? Parse(
+        string responseBody, IReadOnlyList<string> batch, IReadOnlySet<string>? allowedCategories = null)
     {
+        var allowed = allowedCategories ?? HalalPolicy.AllowedCategories;
         string? content;
         try
         {
@@ -264,7 +252,7 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             var category = dto.Category?.Trim().ToLowerInvariant();
             if (dto.Index < 0 || dto.Index >= batch.Count
                 || category is null
-                || !HalalPolicy.AllowedCategories.Contains(category)
+                || !allowed.Contains(category)
                 || HalalPolicy.NeverFiltered.Contains(category))
             {
                 continue;

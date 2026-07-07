@@ -257,6 +257,7 @@ builder.Services.AddTransient<IFilteredContentLogRepository, FilteredContentLogR
 builder.Services.AddTransient<IModerationWhitelistRepository, FilteredContentLogRepository>();
 builder.Services.AddTransient<IModerationRuleRepository, ModerationRuleRepository>();
 builder.Services.AddTransient<IImageModerationLogRepository, ImageModerationLogRepository>();
+builder.Services.AddTransient<IImageModerationRuleRepository, ImageModerationRuleRepository>();
 
 // The dynamic feedback loop: an LLM auditor reviews persisted findings on an interval, stores
 // auto-ratings (admin ratings always override), and self-activates keyword suppressions on
@@ -725,6 +726,8 @@ static void EnsureDatabase(WebApplication app)
 
     // Seed admin-editable system settings (idempotent).
     scope.ServiceProvider.GetRequiredService<ISystemConfigService>().SeedDefaultsAsync().GetAwaiter().GetResult();
+    // Seed the halal image-moderation rule list from the built-in defaults on first run (idempotent).
+    scope.ServiceProvider.GetRequiredService<IImageModerationRuleRepository>().SeedDefaultsIfEmptyAsync().GetAwaiter().GetResult();
 
     // Bring the event store's `daleel_events` database up to schema. The app DB Migrate() above already
     // proved the Postgres server is reachable, but the event store is a separate database, so keep this

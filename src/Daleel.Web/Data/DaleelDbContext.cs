@@ -37,6 +37,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
     public DbSet<FilteredContentLog> FilteredContentLogs => Set<FilteredContentLog>();
     public DbSet<ImageModerationLog> ImageModerationLogs => Set<ImageModerationLog>();
+    public DbSet<ImageModerationRule> ImageModerationRules => Set<ImageModerationRule>();
     public DbSet<ModerationWhitelistEntry> ModerationWhitelist => Set<ModerationWhitelistEntry>();
     public DbSet<ModerationRuleOverride> ModerationRules => Set<ModerationRuleOverride>();
     public DbSet<SearchCache> SearchCache => Set<SearchCache>();
@@ -455,6 +456,15 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Category).HasMaxLength(32);
             e.Property(x => x.Reason).HasMaxLength(300);
             e.Property(x => x.DecisionSource).HasMaxLength(16);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+        });
+
+        builder.Entity<ImageModerationRule>(e =>
+        {
+            // Listed in prompt/admin order; the composed prompt reads active rows by SortOrder.
+            e.HasIndex(x => x.SortOrder);
+            e.Property(x => x.Category).HasMaxLength(48);
+            e.Property(x => x.Instruction).HasMaxLength(2000);
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 
