@@ -285,7 +285,8 @@ builder.Services.AddSingleton<Daleel.Core.Moderation.IHalalImageClassifier>(sp =
         key.Trim(),
         Environment.GetEnvironmentVariable("DALEEL_MODERATION_VISION_MODEL"),
         sp.GetRequiredService<ILogger<Daleel.Web.Moderation.OpenRouterImageHalalClassifier>>(),
-        sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>());
+        sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>(),
+        scopeFactory: sp.GetRequiredService<IServiceScopeFactory>());
 });
 builder.Services.AddHttpContextAccessor();
 

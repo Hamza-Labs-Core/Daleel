@@ -5,7 +5,9 @@
 @inject IModerationRuleRepository Rules
 @inject IModerationWhitelistRepository Whitelist
 @inject Microsoft.Extensions.Caching.Memory.IMemoryCache Cache
+@inject ISystemConfigService Config
 @inject ISnackbar Snackbar
+@using Daleel.Web.Moderation
 
 <PageTitle>دليل · Admin · Moderation</PageTitle>
 
@@ -130,6 +132,35 @@ else
     </MudPaper>
 
     <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
+        <MudText Typo="Typo.h6" Class="mb-1">Image moderation policy (vision prompt)</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
+            The exact instructions the vision model screens every product/brand image against — what to
+            hide and what to allow (e.g. the full-hijab rule, product-only photos being fine). Edit it
+            here to retune image moderation without a redeploy; changes take effect on the next screen.
+            <b>Save empty / Reset</b> restores the built-in default.
+        </MudText>
+        <MudTextField @bind-Value="_visionPrompt" Lines="12" Variant="Variant.Outlined"
+                      AutoGrow="true" MaxLines="30" Immediate="true"
+                      Style="font-family:monospace; font-size:0.85rem;" />
+        <div class="d-flex gap-2 mt-2">
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       Disabled="@_visionSaving" StartIcon="@Icons.Material.Filled.Save"
+                       OnClick="SaveVisionPromptAsync">Save policy</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       Disabled="@_visionSaving" StartIcon="@Icons.Material.Filled.RestartAlt"
+                       OnClick="ResetVisionPromptAsync">Reset to default</MudButton>
+            @if (_visionIsDefault)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Default">using default</MudChip>
+            }
+            else
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Info">custom override active</MudChip>
+            }
+        </div>
+    </MudPaper>
+
+    <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
         <MudText Typo="Typo.h6" Class="mb-1">Whitelist (never filtered)</MudText>
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
             Content the moderation pipeline must always keep — created from a finding's
@@ -202,6 +233,44 @@ else
     private string _newKind = "url";
     private string? _newValue;
     private string? _newNote;
+
+    // The admin-editable vision policy prompt (SystemConfig override, or the built-in default).
+    private string _visionPrompt = OpenRouterImageHalalClassifier.DefaultSystemPrompt;
+    private bool _visionSaving;
+    private bool _visionIsDefault = true;
+
+    private async Task SaveVisionPromptAsync()
+    {
+        _visionSaving = true;
+        try
+        {
+            // Saving the default (or blank) clears the override so the built-in policy takes over.
+            var trimmed = _visionPrompt?.Trim() ?? string.Empty;
+            var store = string.Equals(trimmed, OpenRouterImageHalalClassifier.DefaultSystemPrompt.Trim(), StringComparison.Ordinal)
+                ? string.Empty : trimmed;
+            await Config.SetAsync(OpenRouterImageHalalClassifier.PromptConfigKey, store, "text");
+            _visionIsDefault = store.Length == 0;
+            if (_visionIsDefault)
+            {
+                _visionPrompt = OpenRouterImageHalalClassifier.DefaultSystemPrompt;
+            }
+            Snackbar.Add(_visionIsDefault ? "Reverted to the default image policy." : "Image moderation policy saved.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't save the policy: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _visionSaving = false;
+        }
+    }
+
+    private async Task ResetVisionPromptAsync()
+    {
+        _visionPrompt = OpenRouterImageHalalClassifier.DefaultSystemPrompt;
+        await SaveVisionPromptAsync();
+    }
 
     private async Task AddWhitelistAsync()
     {
@@ -328,6 +397,9 @@ else
             _ratingStats = await FilteredLog.RatingStatsAsync(DateTimeOffset.UtcNow.AddDays(-90));
             _rules = await Rules.ListOpenAsync();
             _whitelist = await Whitelist.ListEntriesAsync();
+            var savedPrompt = await Config.GetAsync(OpenRouterImageHalalClassifier.PromptConfigKey);
+            _visionIsDefault = string.IsNullOrWhiteSpace(savedPrompt);
+            _visionPrompt = _visionIsDefault ? OpenRouterImageHalalClassifier.DefaultSystemPrompt : savedPrompt!;
             _loading = false;
         }
         catch (Exception ex)

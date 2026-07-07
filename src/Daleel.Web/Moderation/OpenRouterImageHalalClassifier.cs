@@ -6,6 +6,8 @@ using Daleel.Core.Caching;
 using Daleel.Core.Llm;
 using Daleel.Core.Moderation;
 using Daleel.Search.Http;
+using Daleel.Web.Data;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Daleel.Web.Moderation;
 
@@ -40,7 +42,13 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
 
     private const string CacheKeyPrefix = "halal-image:";
 
-    private const string SystemPrompt =
+    /// <summary>SystemConfig key holding an admin-editable override of the vision policy prompt. When
+    /// unset/blank, <see cref="DefaultSystemPrompt"/> is used — so admins can retune the image rules
+    /// (e.g. the full-hijab policy) from /admin/moderation without a redeploy, nothing hardcoded.</summary>
+    public const string PromptConfigKey = "moderation.vision_prompt";
+
+    /// <summary>The built-in vision policy — the fallback when no admin override is configured.</summary>
+    public const string DefaultSystemPrompt =
         "You are a halal-content image moderator for a Muslim shopping assistant. You judge each " +
         "image INDIVIDUALLY. Flag an image when it depicts haram content: alcoholic drinks or bars " +
         "(category \"alcohol\"), pork products (\"pork\"), gambling (\"gambling\"), nudity or " +
@@ -67,18 +75,20 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
     private readonly ICacheStore? _cache;
+    private readonly IServiceScopeFactory? _scopeFactory;
     private readonly ILogger<OpenRouterImageHalalClassifier> _logger;
 
     public bool IsConfigured => true;
 
     public OpenRouterImageHalalClassifier(
         string apiKey, string? model, ILogger<OpenRouterImageHalalClassifier> logger,
-        ICacheStore? cache = null, HttpClient? http = null)
+        ICacheStore? cache = null, HttpClient? http = null, IServiceScopeFactory? scopeFactory = null)
     {
         _apiKey = apiKey;
         _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model;
         _logger = logger;
         _cache = cache;
+        _scopeFactory = scopeFactory;
         _ownsHttp = http is null;
         _http = http ?? SharedHttpHandler.CreateClient();
         if (_http.Timeout == default || _http.Timeout == TimeSpan.FromSeconds(100))
@@ -110,10 +120,14 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             }
         }
 
+        // Resolve the effective policy prompt once per screen: an admin override from SystemConfig, else
+        // the built-in default. Read once (not per batch) so all batches judge by the same policy.
+        var prompt = await ResolvePromptAsync(ct).ConfigureAwait(false);
+
         for (var offset = 0; offset < toClassify.Count; offset += BatchSize)
         {
             var batch = toClassify.Skip(offset).Take(BatchSize).ToList();
-            var flagged = await ClassifyBatchAsync(batch, ct).ConfigureAwait(false);
+            var flagged = await ClassifyBatchAsync(batch, prompt, ct).ConfigureAwait(false);
             if (flagged is null)
             {
                 // The screen could NOT run for this batch (HTTP 402 out-of-credits / 429 / 5xx /
@@ -138,9 +152,36 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
         return new ImageClassifierResult(flaggedVerdicts, unscreened);
     }
 
+    /// <summary>
+    /// The effective vision policy prompt: an admin override from SystemConfig
+    /// (<see cref="PromptConfigKey"/>) when set, else <see cref="DefaultSystemPrompt"/>. Best-effort —
+    /// any config-read failure (or no scope factory, e.g. in tests) falls back to the default so image
+    /// moderation is never blocked by a config lookup.
+    /// </summary>
+    private async Task<string> ResolvePromptAsync(CancellationToken ct)
+    {
+        if (_scopeFactory is null)
+        {
+            return DefaultSystemPrompt;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var config = scope.ServiceProvider.GetRequiredService<ISystemConfigService>();
+            var custom = await config.GetAsync(PromptConfigKey, ct).ConfigureAwait(false);
+            return string.IsNullOrWhiteSpace(custom) ? DefaultSystemPrompt : custom!;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Vision prompt config read failed; using the built-in default");
+            return DefaultSystemPrompt;
+        }
+    }
+
     /// <summary>Runs one vision call over a batch. Returns null when the call failed entirely.</summary>
     private async Task<Dictionary<string, ImageVerdict>?> ClassifyBatchAsync(
-        IReadOnlyList<string> batch, CancellationToken ct)
+        IReadOnlyList<string> batch, string systemPrompt, CancellationToken ct)
     {
         var content = new List<object>
         {
@@ -153,7 +194,7 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             model = _model,
             messages = new object[]
             {
-                new { role = "system", content = SystemPrompt },
+                new { role = "system", content = systemPrompt },
                 new { role = "user", content }
             }
         };
