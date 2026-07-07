@@ -332,13 +332,22 @@ public sealed class SearchJobService : BackgroundService
             if (result.CacheQuality is { } quality)
             {
                 // Served from cache. A below-threshold hit was shown immediately; the gap refill unit
-                // re-scrapes ONLY the pieces the quality validator flagged as missing. A complete
-                // (ServeAsIs) hit needs nothing further.
+                // re-scrapes ONLY the pieces the quality validator flagged as missing.
                 if (quality.Decision == CacheDecision.ServeAndEnrich)
                 {
                     await EnqueueEnrichmentAsync(
                         job, historyEntry.Id, result, Pipeline.Enrichment.EnrichmentUnit.CacheGapRefill, quality);
                 }
+
+                // Halal image safety on a CACHE serve: a cache hit does no gather, so this run's
+                // gather-stage vision moderation never saw the served images — and an older cached
+                // result may predate the image-check unit entirely (exactly how immodest images survived
+                // on a replayed "women dress" result). So screen the final grid images here too, delayed
+                // so any gap refill above that reassigns images settles first. Fresh runs get this via the
+                // Plan fan-out; ImageCheck is idempotent, so a re-screen of an already-clean result no-ops.
+                await EnqueueEnrichmentAsync(
+                    job, historyEntry.Id, result, Pipeline.Enrichment.EnrichmentUnit.ImageCheck, quality: null,
+                    notBefore: TimeSpan.FromSeconds(160));
             }
             else
             {
@@ -406,7 +415,8 @@ public sealed class SearchJobService : BackgroundService
     /// the base result is already delivered, but the deep-dive would silently never happen.
     /// </summary>
     private async Task EnqueueEnrichmentAsync(
-        SearchJob job, int historyId, SearchRunResult result, string kind, CacheQualityReport? quality)
+        SearchJob job, int historyId, SearchRunResult result, string kind, CacheQualityReport? quality,
+        TimeSpan? notBefore = null)
     {
         try
         {
@@ -425,7 +435,8 @@ public sealed class SearchJobService : BackgroundService
                     Payload = payload,
                     // The gap refill wraps a whole multi-phase pass, so a second full attempt is the
                     // most a transient failure deserves; fan-out units carry the default budget.
-                    MaxAttempts = kind == Pipeline.Enrichment.EnrichmentUnit.CacheGapRefill ? 2 : 4
+                    MaxAttempts = kind == Pipeline.Enrichment.EnrichmentUnit.CacheGapRefill ? 2 : 4,
+                    NotBefore = notBefore is { } delay ? DateTimeOffset.UtcNow + delay : default
                 }
             });
         }

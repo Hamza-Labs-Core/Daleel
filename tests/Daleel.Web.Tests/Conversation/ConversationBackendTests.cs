@@ -38,6 +38,7 @@ public class ConversationBackendTests : IDisposable
 
         using var scope = _provider.CreateScope();
         scope.ServiceProvider.GetRequiredService<DaleelDbContext>().Database.EnsureCreated();
+        FakeRunner.CacheQuality = null; // static — reset so a prior test's cache-serve doesn't leak in
     }
 
     private DaleelDbContext NewDb() => _provider.CreateScope().ServiceProvider.GetRequiredService<DaleelDbContext>();
@@ -77,6 +78,25 @@ public class ConversationBackendTests : IDisposable
         (await db.AnalyticsEvents.CountAsync(e => e.EventType == "search")).Should().Be(1);
         _broadcaster.Completed.Should().ContainSingle(c => c.UserId == "u1" && c.Status == "completed");
         _broadcaster.Progress.Should().Contain(p => p.UserId == "u1");
+    }
+
+    [Fact]
+    public async Task Worker_CacheServe_EnqueuesImageCheck_ToScreenServedImages()
+    {
+        // A cache HIT does no gather, so this run's gather-stage vision moderation never sees the served
+        // images — and a replayed result can predate the image-check unit entirely (how immodest images
+        // survived on a cached "women dress" result). So a cache serve must STILL enqueue an image-check
+        // to screen the final grid images. Regression guard for that gap.
+        FakeRunner.CacheQuality = Daleel.Web.Pipeline.CacheQualityReport.Complete; // ServeAsIs
+        var jobId = await SeedJobAsync();
+
+        await Worker().ProcessAsync(jobId, CancellationToken.None);
+
+        await using var db = NewDb();
+        var kinds = await db.EnrichmentWorkItems
+            .Where(e => e.SearchJobId == jobId).Select(e => e.Kind).ToListAsync();
+        kinds.Should().Contain(Daleel.Web.Pipeline.Enrichment.EnrichmentUnit.ImageCheck,
+            "a served-from-cache result must still have its final images vision-screened");
     }
 
     [Fact]
@@ -310,6 +330,8 @@ public class ConversationBackendTests : IDisposable
         public static bool BlockUntilCancelled;
         public static TaskCompletionSource? Started;
         public static TaskCompletionSource? Release;
+        /// <summary>When set, the run reports a cache HIT with this verdict (else a fresh run).</summary>
+        public static Daleel.Web.Pipeline.CacheQualityReport? CacheQuality;
 
         public async Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct)
         {
@@ -325,7 +347,10 @@ public class ConversationBackendTests : IDisposable
                 }
             }
 
-            return new SearchRunResult("{\"Summary\":\"FAKE-RESULT\"}", "ask", 0, string.Empty);
+            return new SearchRunResult("{\"Summary\":\"FAKE-RESULT\"}", "ask", 0, string.Empty)
+            {
+                CacheQuality = CacheQuality
+            };
         }
     }
 
