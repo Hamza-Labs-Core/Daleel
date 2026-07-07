@@ -84,6 +84,41 @@ public class ImageCheckTests
     }
 
     [Fact]
+    public async Task Screens_the_whole_gallery_and_shows_only_the_verified_photos()
+    {
+        // Each item now carries ALL photos from its listings; the screen verifies each and the item shows
+        // only the clean ones — a flagged photo in the gallery is hidden while the clean ones still render.
+        const string cleanA = "https://x/a-clean.jpg";
+        const string haramB = "https://x/b-haram.jpg";
+        const string cleanC = "https://x/c-clean.jpg";
+        var answer = new AgentAnswer
+        {
+            Question = "women dress", Geo = "jordan",
+            Products = new ProductSearchResult
+            {
+                Models = new[] { new ProductModel { Name = "Dress", Images = new[] { cleanA, haramB, cleanC } } },
+                Brands = Array.Empty<BrandInfo>()
+            }
+        };
+        var store = new RecordingStore(answer);
+        var services = new ServiceCollection();
+        services.AddSingleton<IHalalImageClassifier>(new FakeClassifier(haramB));
+        var ctx = new EnrichmentUnitContext
+        {
+            Services = services.BuildServiceProvider(),
+            Job = new SearchJob { Id = 1, Query = "women dress", Geo = "jordan" },
+            Agent = () => null!, Results = store, Queue = null!
+        };
+        var item = new EnrichmentWorkItem { Id = 1, SearchJobId = 1, Kind = EnrichmentUnit.ImageCheck };
+
+        await new ImageCheckHandler(NullLogger<ImageCheckHandler>.Instance).ExecuteAsync(item, ctx, default);
+
+        var model = store.Current.Products!.Models.Single();
+        model.DisplayImages.Should().Equal(new[] { cleanA, cleanC }, "the two clean photos show; the flagged one is hidden");
+        model.Images.Should().Contain(haramB, "the raw gallery is preserved so a whitelist/retry can un-hide it");
+    }
+
+    [Fact]
     public async Task Unscreened_image_stays_hidden_and_the_unit_requeues()
     {
         // The vision screen could not run (e.g. OpenRouter HTTP 402 out-of-credits): the image must NOT be

@@ -7,7 +7,7 @@ namespace Daleel.Web.Pipeline.Enrichment;
 /// <summary>
 /// HALAL SAFETY pass over the FINAL grid images — the fail-CLOSED gate the UI depends on. Product/brand
 /// images are HIDDEN by default (the UI renders <c>DisplayImageUrl</c>, which is null until this unit
-/// PROMOTES <c>VerifiedImageUrl</c>); it vision-screens every image the user would see and promotes ONLY
+/// PROMOTES its <c>VerifiedImages</c>); it vision-screens every candidate photo of every item and promotes ONLY
 /// the ones judged clean, leaving flagged (immodest/alcohol/pork…) AND could-not-screen images hidden.
 /// Nothing is destructively stripped — the raw URL is kept, so a later admin whitelist or a retry can
 /// un-hide it. On a screen that could NOT run (OpenRouter 402 out-of-credits / provider outage) the unit
@@ -38,10 +38,10 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
             return UnitOutcome.Ok;
         }
 
-        var urls = products.Models.Select(m => m.ImageUrl)
-            .Concat(products.Brands.Select(b => b.LogoUrl))
+        // Screen EVERY candidate photo of every item (the whole gallery), plus brand logos.
+        var urls = products.Models.SelectMany(m => m.CandidateImages)
+            .Concat(products.Brands.Select(b => b.LogoUrl).Where(u => !string.IsNullOrWhiteSpace(u)).Select(u => u!))
             .Where(u => !string.IsNullOrWhiteSpace(u))
-            .Select(u => u!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(MaxImages)
             .ToList();
@@ -88,8 +88,8 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
         bool Verified(string? url) =>
             url is { Length: > 0 } u && attempted.Contains(u) && !flagged.Contains(u) && !unscreened.Contains(u);
 
-        // Promote clean images, un-promote everything else. Never nulls the raw URL — hiding is entirely
-        // via VerifiedImageUrl, so a whitelist/retry can un-hide. Idempotent: a re-run sets the same target.
+        // Promote the clean photos of each item's gallery, un-promote the rest. Never nulls the raw
+        // candidates — hiding is entirely via VerifiedImages, so a whitelist/retry can un-hide. Idempotent.
         await ctx.Results.PatchAsync(item, answer =>
         {
             if (answer.Products is not { } p)
@@ -100,11 +100,11 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
             var changed = false;
             var models = p.Models.Select(m =>
             {
-                var target = Verified(m.ImageUrl) ? m.ImageUrl : null;
-                if (!string.Equals(target, m.VerifiedImageUrl, StringComparison.Ordinal))
+                var verified = m.CandidateImages.Where(Verified).ToList();
+                if (!verified.SequenceEqual(m.VerifiedImages, StringComparer.Ordinal))
                 {
                     changed = true;
-                    return m with { VerifiedImageUrl = target };
+                    return m with { VerifiedImages = verified };
                 }
                 return m;
             }).ToList();

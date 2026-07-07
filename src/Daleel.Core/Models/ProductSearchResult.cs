@@ -161,7 +161,7 @@ public record BrandInfo
     public string? LogoUrl { get; init; }
 
     /// <summary>Mirror of <see cref="LogoUrl"/> at the moment the vision screen cleared it; see
-    /// <see cref="ProductModel.VerifiedImageUrl"/>. The UI renders <see cref="DisplayLogoUrl"/>, never the raw logo.</summary>
+    /// <see cref="ProductModel.VerifiedImages"/>. The UI renders <see cref="DisplayLogoUrl"/>, never the raw logo.</summary>
     public string? VerifiedLogoUrl { get; init; }
 
     /// <summary>The logo URL to actually render — non-null only when the vision screen has cleared it.</summary>

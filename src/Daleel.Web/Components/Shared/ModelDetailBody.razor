@@ -12,17 +12,27 @@
 
 <MudPaper Outlined="true" Elevation="0" Class="pa-4">
     <MudGrid Spacing="4">
-        @if (!string.IsNullOrWhiteSpace(Model.DisplayImageUrl))
+        @if (Model.DisplayImages.Count > 0)
         {
             <MudItem xs="12" md="5">
-                <MudPaper Outlined="true" Elevation="0" Class="pa-4 d-flex align-center justify-center rounded-lg"
+                <MudPaper Outlined="true" Elevation="0" Class="pa-4 d-flex flex-column align-center justify-center rounded-lg"
                           Style="min-height:220px;height:100%;">
-                    <SafeImage Src="@Model.DisplayImageUrl" Alt="@Model.Name" Style="max-height:280px;max-width:100%;object-fit:contain;" />
+                    @* All the photos found for this item across its listings — the vision-verified ones only. *@
+                    <SafeImage Src="@Model.DisplayImages[0]" Alt="@Model.Name" Style="max-height:280px;max-width:100%;object-fit:contain;" />
+                    @if (Model.DisplayImages.Count > 1)
+                    {
+                        <div class="d-flex flex-wrap mt-3" style="gap:8px;justify-content:center;">
+                            @foreach (var img in Model.DisplayImages.Skip(1).Take(9))
+                            {
+                                <SafeImage Src="@img" Alt="@Model.Name" Style="max-height:52px;max-width:72px;object-fit:contain;border-radius:6px;" />
+                            }
+                        </div>
+                    }
                 </MudPaper>
             </MudItem>
         }
 
-        <MudItem xs="12" md="@(string.IsNullOrWhiteSpace(Model.DisplayImageUrl) ? 12 : 7)">
+        <MudItem xs="12" md="@(Model.DisplayImages.Count > 0 ? 7 : 12)">
             @* Names are cached language-agnostically (an Arabic market yields Arabic names under an EN UI),
                so route them through TranslatedText — cache-first, best-effort, dir-aware. *@
             <TranslatedText Text="@(Daleel.Core.Models.HtmlText.Strip(Model.Name) ?? Model.Name)" Typo="@TitleTypo" />

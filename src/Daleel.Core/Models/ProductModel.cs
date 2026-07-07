@@ -1,3 +1,4 @@
+using System.Linq;
 using Daleel.Core.Intelligence;
 
 namespace Daleel.Core.Models;
@@ -85,22 +86,42 @@ public record ProductModel
     public string? Brand { get; init; }
     public string? Model { get; init; }
     public string? ProductLine { get; init; }
+    /// <summary>The primary/first photo (kept for callers that want a single image; enrichment fills it).</summary>
     public string? ImageUrl { get; init; }
 
     /// <summary>
-    /// The raw <see cref="ImageUrl"/> as it stood the moment the halal vision screen VERIFIED it clean.
-    /// The UI never reads <see cref="ImageUrl"/> directly — it reads <see cref="DisplayImageUrl"/>, which
-    /// yields the picture ONLY while this mirror still equals <see cref="ImageUrl"/>. So an image is
-    /// hidden by default (fail-closed) and shown only after the screen promotes it; any later reassignment
-    /// of <see cref="ImageUrl"/> silently re-hides it until re-verified. Preserving the raw URL (rather
-    /// than nulling a flagged one) lets an admin whitelist or a retry un-hide it later.
+    /// EVERY photo found for this item — aggregated across ALL the listings/offers that matched it. Raw,
+    /// unscreened, distinct. The full candidate gallery is <see cref="CandidateImages"/> (these plus
+    /// <see cref="ImageUrl"/>); the user sees the VERIFIED subset (<see cref="DisplayImages"/>).
     /// </summary>
-    public string? VerifiedImageUrl { get; init; }
+    public IReadOnlyList<string> Images { get; init; } = Array.Empty<string>();
 
-    /// <summary>The image URL to actually render — non-null only when the vision screen has cleared it.</summary>
-    public string? DisplayImageUrl =>
-        VerifiedImageUrl is { Length: > 0 } v && string.Equals(v, ImageUrl, StringComparison.Ordinal)
-            ? ImageUrl : null;
+    /// <summary>
+    /// The subset of <see cref="CandidateImages"/> the halal vision screen VERIFIED clean. The UI renders
+    /// ONLY these (fail-closed): a photo is hidden until promoted here, and re-hides if it leaves the
+    /// candidate set. Preserving the raw candidates lets an admin whitelist / a retry un-hide one later.
+    /// </summary>
+    public IReadOnlyList<string> VerifiedImages { get; init; } = Array.Empty<string>();
+
+    /// <summary>Every distinct candidate photo, primary first — what the screen must clear before any renders.</summary>
+    public IReadOnlyList<string> CandidateImages =>
+        (string.IsNullOrWhiteSpace(ImageUrl) ? Images : Images.Prepend(ImageUrl!))
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>The photos to actually render — verified AND still a candidate, in order. A fail-closed gallery.</summary>
+    public IReadOnlyList<string> DisplayImages
+    {
+        get
+        {
+            var verified = new HashSet<string>(VerifiedImages, StringComparer.Ordinal);
+            return CandidateImages.Where(verified.Contains).ToList();
+        }
+    }
+
+    /// <summary>The primary photo to render (first verified) — for single-image surfaces like the grid card.</summary>
+    public string? DisplayImageUrl => DisplayImages.Count > 0 ? DisplayImages[0] : null;
 
     /// <summary>
     /// Stable, URL-safe identifier used to route to the model's detail page. Products aren't persisted
