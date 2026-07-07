@@ -256,6 +256,7 @@ builder.Services.AddTransient<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddTransient<IFilteredContentLogRepository, FilteredContentLogRepository>();
 builder.Services.AddTransient<IModerationWhitelistRepository, FilteredContentLogRepository>();
 builder.Services.AddTransient<IModerationRuleRepository, ModerationRuleRepository>();
+builder.Services.AddTransient<IImageModerationLogRepository, ImageModerationLogRepository>();
 
 // The dynamic feedback loop: an LLM auditor reviews persisted findings on an interval, stores
 // auto-ratings (admin ratings always override), and self-activates keyword suppressions on

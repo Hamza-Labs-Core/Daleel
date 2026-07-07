@@ -1,3 +1,4 @@
+using Daleel.Core.Models;
 using Daleel.Core.Moderation;
 using Daleel.Web.Data;
 using Microsoft.Extensions.DependencyInjection;
@@ -51,10 +52,12 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
         }
 
         var attempted = new HashSet<string>(urls, StringComparer.OrdinalIgnoreCase);
+        var flaggedVerdicts = new Dictionary<string, ImageVerdict>(StringComparer.OrdinalIgnoreCase);
         HashSet<string> flagged;
         HashSet<string> unscreened;
+        var configured = classifier is { IsConfigured: true };
 
-        if (classifier is null || !classifier.IsConfigured)
+        if (!configured)
         {
             // No vision model = moderation intentionally OFF (a deployment choice, not a failure): VERIFY
             // (show) every image. Fail-closed hiding is scoped to a configured screen that can't RUN, never
@@ -67,7 +70,7 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
             ImageClassifierResult screen;
             try
             {
-                screen = await classifier.ClassifyAsync(urls, ct);
+                screen = await classifier!.ClassifyAsync(urls, ct);
             }
             catch (OperationCanceledException) { throw; }
             catch (Exception ex)
@@ -75,10 +78,12 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
                 return new UnitOutcome.Retry($"image screen failed: {ex.Message}");
             }
 
-            flagged = screen.Flagged
-                .Where(v => !string.IsNullOrWhiteSpace(v.ImageUrl))
-                .Select(v => v.ImageUrl)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // Keep the FULL flagged verdicts (category/score/reason) for the audit log, not just the URLs.
+            foreach (var v in screen.Flagged.Where(v => !string.IsNullOrWhiteSpace(v.ImageUrl)))
+            {
+                flaggedVerdicts[v.ImageUrl] = v;
+            }
+            flagged = flaggedVerdicts.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
             unscreened = new HashSet<string>(screen.Unscreened, StringComparer.OrdinalIgnoreCase);
         }
 
@@ -122,6 +127,10 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
             return changed ? answer with { Products = p with { Models = models, Brands = brands } } : null;
         }, ct);
 
+        // AUDIT: record every candidate image's verdict for the admin /admin/images page — the decision
+        // (shown/hidden/unscreened) and, when hidden, the category/score/reason. Best-effort.
+        await RecordAuditAsync(ctx, item, products, attempted, flaggedVerdicts, unscreened, configured, ct);
+
         // FAIL-CLOSED / STAY-QUEUED: if the screen could not run for some images (billing/infra), they
         // stay hidden and the unit REQUEUES (no attempt consumed) so it re-screens once the outage clears.
         if (unscreened.Count > 0)
@@ -137,5 +146,97 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
             "Image check job {JobId}: {Clean} image(s) verified, {Flagged} hidden as haram.",
             item.SearchJobId, urls.Count - flagged.Count, flagged.Count);
         return UnitOutcome.Ok;
+    }
+
+    /// <summary>
+    /// Writes one <see cref="ImageModerationLog"/> row per screened image (deduped by URL, first item
+    /// wins) so the admin audit page shows every photo, its decision, and — when hidden — the vision
+    /// model's category/score/reason. Best-effort: an audit-write failure never faults the screen.
+    /// </summary>
+    private async Task RecordAuditAsync(
+        EnrichmentUnitContext ctx, EnrichmentWorkItem item, ProductSearchResult products,
+        HashSet<string> attempted, IReadOnlyDictionary<string, ImageVerdict> flaggedVerdicts,
+        HashSet<string> unscreened, bool configured, CancellationToken ct)
+    {
+        var repo = ctx.Services.GetService<IImageModerationLogRepository>();
+        if (repo is null)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var source = configured ? "vision" : "not-configured";
+        var rows = new List<ImageModerationLog>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void Add(string? url, string? itemName, string kind)
+        {
+            if (string.IsNullOrWhiteSpace(url) || !attempted.Contains(url!) || !seen.Add(url!))
+            {
+                return;
+            }
+
+            string decision;
+            string? category = null;
+            double? score = null;
+            string? reason = null;
+            if (flaggedVerdicts.TryGetValue(url!, out var v))
+            {
+                decision = ImageModerationDecision.Hidden;
+                category = v.Category;
+                score = v.Confidence;
+                reason = v.Reason;
+            }
+            else if (unscreened.Contains(url!))
+            {
+                decision = ImageModerationDecision.Unscreened;
+            }
+            else
+            {
+                decision = ImageModerationDecision.Shown;
+            }
+
+            rows.Add(new ImageModerationLog
+            {
+                SearchJobId = item.SearchJobId,
+                Query = ctx.Job.Query,
+                Geo = ctx.Job.Geo,
+                ImageUrl = url!,
+                ItemName = itemName,
+                ItemKind = kind,
+                Decision = decision,
+                Category = category,
+                Score = score,
+                Reason = reason,
+                DecisionSource = source,
+                CreatedAt = now,
+            });
+        }
+
+        foreach (var m in products.Models)
+        {
+            foreach (var img in m.CandidateImages)
+            {
+                Add(img, m.Name, "product");
+            }
+        }
+        foreach (var b in products.Brands)
+        {
+            Add(b.LogoUrl, b.Name, "brand-logo");
+        }
+
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await repo.RecordAsync(rows, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Image audit log write failed for job {JobId}", item.SearchJobId);
+        }
     }
 }

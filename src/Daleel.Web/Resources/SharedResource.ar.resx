@@ -649,6 +649,7 @@
   <data name="Admin.Nav.Data" xml:space="preserve"><value>البيانات</value></data>
   <data name="Admin.Nav.Moderation" xml:space="preserve"><value>الإشراف</value></data>
   <data name="Admin.Nav.Filtered" xml:space="preserve"><value>المحتوى المحجوب</value></data>
+  <data name="Admin.Nav.Images" xml:space="preserve"><value>الصور</value></data>
   <data name="Admin.Nav.Brands" xml:space="preserve"><value>العلامات التجارية</value></data>
   <data name="Admin.Nav.Stores" xml:space="preserve"><value>المتاجر</value></data>
   <data name="Admin.Nav.Queues" xml:space="preserve"><value>قوائم الانتظار</value></data>

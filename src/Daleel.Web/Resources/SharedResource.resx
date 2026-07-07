@@ -649,6 +649,7 @@
   <data name="Admin.Nav.Data" xml:space="preserve"><value>Data</value></data>
   <data name="Admin.Nav.Moderation" xml:space="preserve"><value>Moderation</value></data>
   <data name="Admin.Nav.Filtered" xml:space="preserve"><value>Filtered</value></data>
+  <data name="Admin.Nav.Images" xml:space="preserve"><value>Images</value></data>
   <data name="Admin.Nav.Brands" xml:space="preserve"><value>Brands</value></data>
   <data name="Admin.Nav.Stores" xml:space="preserve"><value>Stores</value></data>
   <data name="Admin.Nav.Queues" xml:space="preserve"><value>Queues</value></data>

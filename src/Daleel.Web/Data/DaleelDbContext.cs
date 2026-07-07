@@ -36,6 +36,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<UserConversation> UserConversations => Set<UserConversation>();
     public DbSet<ApiCallLog> ApiCallLogs => Set<ApiCallLog>();
     public DbSet<FilteredContentLog> FilteredContentLogs => Set<FilteredContentLog>();
+    public DbSet<ImageModerationLog> ImageModerationLogs => Set<ImageModerationLog>();
     public DbSet<ModerationWhitelistEntry> ModerationWhitelist => Set<ModerationWhitelistEntry>();
     public DbSet<ModerationRuleOverride> ModerationRules => Set<ModerationRuleOverride>();
     public DbSet<SearchCache> SearchCache => Set<SearchCache>();
@@ -436,6 +437,25 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.AutoReviewNote).HasMaxLength(300);
             // The auto-reviewer polls for unreviewed rows newest-batch-first.
             e.HasIndex(x => x.AutoReviewedAt);
+        });
+
+        builder.Entity<ImageModerationLog>(e =>
+        {
+            // Browsed newest-first and filtered by decision in the admin "Images" audit page.
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.Decision, x.CreatedAt });
+            // Upserted by (job, image): one indexed lookup finds a prior verdict to overwrite.
+            e.HasIndex(x => new { x.SearchJobId, x.ImageUrl });
+            e.Property(x => x.Query).HasMaxLength(2000);
+            e.Property(x => x.Geo).HasMaxLength(64);
+            e.Property(x => x.ImageUrl).HasMaxLength(2048);
+            e.Property(x => x.ItemName).HasMaxLength(512);
+            e.Property(x => x.ItemKind).HasMaxLength(32);
+            e.Property(x => x.Decision).HasMaxLength(16);
+            e.Property(x => x.Category).HasMaxLength(32);
+            e.Property(x => x.Reason).HasMaxLength(300);
+            e.Property(x => x.DecisionSource).HasMaxLength(16);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
         });
 
         builder.Entity<ModerationRuleOverride>(e =>
