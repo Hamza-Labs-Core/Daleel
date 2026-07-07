@@ -29,13 +29,16 @@ else if (_loading)
 else
 {
     <div class="d-flex flex-wrap gap-3 align-center mb-3">
-        <MudChipSet T="string" SelectedValue="@_decision" SelectedValueChanged="OnDecisionChanged"
-                    Mandatory="true" Variant="Variant.Outlined">
-            <MudChip T="string" Value="@("all")">All</MudChip>
-            <MudChip T="string" Value="@ImageModerationDecision.Shown" Color="Color.Success">Shown</MudChip>
-            <MudChip T="string" Value="@ImageModerationDecision.Hidden" Color="Color.Error">Hidden</MudChip>
-            <MudChip T="string" Value="@ImageModerationDecision.Unscreened" Color="Color.Warning">Unscreened</MudChip>
-        </MudChipSet>
+        <div class="d-flex flex-wrap gap-1">
+            <MudButton Size="Size.Small" Variant="@FilterVariant("all")"
+                       OnClick='() => OnDecisionChanged("all")'>All</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Success" Variant="@FilterVariant(ImageModerationDecision.Shown)"
+                       OnClick="() => OnDecisionChanged(ImageModerationDecision.Shown)">Shown</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Error" Variant="@FilterVariant(ImageModerationDecision.Hidden)"
+                       OnClick="() => OnDecisionChanged(ImageModerationDecision.Hidden)">Hidden</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Warning" Variant="@FilterVariant(ImageModerationDecision.Unscreened)"
+                       OnClick="() => OnDecisionChanged(ImageModerationDecision.Unscreened)">Unscreened</MudButton>
+        </div>
         <MudTextField @bind-Value="_search" Placeholder="Filter by query or item…" Variant="Variant.Outlined"
                       Margin="Margin.Dense" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
                       OnAdornmentClick="LoadAsync" OnKeyDown="@OnSearchKey" Style="max-width:320px;" />
@@ -147,6 +150,8 @@ else
             await LoadAsync();
         }
     }
+
+    private Variant FilterVariant(string decision) => _decision == decision ? Variant.Filled : Variant.Outlined;
 
     private static Color DecisionColor(string decision) => decision switch
     {
