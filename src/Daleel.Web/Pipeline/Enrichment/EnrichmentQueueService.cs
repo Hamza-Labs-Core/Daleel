@@ -181,6 +181,12 @@ public sealed class EnrichmentQueueService : BackgroundService
                 item.Id, item.Kind, item.SearchJobId, line)); // meter only — cost never trips an ongoing unit
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
+        // Live event sink for this enrichment unit — so scrape.fallback / item.reviews / catalog.page
+        // events from the enrichment path reach the per-search timeline the same way base-run events do.
+        var eventSink = sp.GetRequiredService<ISearchEventSinkFactory>()
+            .For(item.SearchJobId.ToString(), Anonymizer.HashUserId(job.UserId));
+        using var events = AmbientSearchEvents.Begin(eventSink);
+
         var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
 
         // One agent per distinct model, all wired to THIS unit's cost collector so every LLM call is

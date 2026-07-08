@@ -422,7 +422,25 @@ public sealed class AgentFactory : IAgentFactory
         {
             0 => null,
             1 => chain[0],
-            _ => new ScrapeRouter(chain.ToArray())
+            _ => new ScrapeRouter(chain.ToArray(), ScrapeFallbackReporter())
         };
     }
+
+    /// <summary>Emits a <c>scrape.fallback</c> timeline event when the scrape router degrades from one
+    /// provider to the next (e.g. Cloudflare browser → Context.dev), via the ambient sink active for the
+    /// whole run — so the store-extraction fallback the owner wants surfaced is no longer silent.</summary>
+    private static Action<ScrapeFallback> ScrapeFallbackReporter() => hop =>
+        AmbientSearchEvents.Sink?.Emit(new SearchEvent(
+            SearchEventCategories.Extract,
+            "scrape.fallback",
+            $"Scrape fallback: {hop.From} → {hop.To} ({hop.Reason})",
+            SearchEventLevel.Warning,
+            "scrape",
+            new Dictionary<string, object?>
+            {
+                ["from"] = hop.From,
+                ["to"] = hop.To,
+                ["url"] = hop.Url,
+                ["reason"] = hop.Reason,
+            }));
 }

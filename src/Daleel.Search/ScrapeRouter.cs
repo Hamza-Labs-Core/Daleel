@@ -19,14 +19,24 @@ namespace Daleel.Search;
 /// extraction of JS-heavy store/marketplace pages tries the most capable renderer — the headless
 /// browser — first (reverse order), falling back to a lighter extractor when it yields nothing.
 /// </remarks>
+/// <summary>One scrape/extract fallback hop inside a <see cref="ScrapeRouter"/> — the provider that came up
+/// short and the one being tried next. Surfaced so the pipeline can REPORT it (e.g. "browser extract empty
+/// → Context.dev") instead of the fallback happening silently.</summary>
+public readonly record struct ScrapeFallback(string From, string To, string Url, string Reason);
+
 public sealed class ScrapeRouter : IScrapeProvider, IExtractProvider
 {
     private readonly IReadOnlyList<IScrapeProvider> _chain;
     private readonly IReadOnlyList<IExtractProvider> _extractChain;
+    private readonly Action<ScrapeFallback>? _onFallback;
 
     public string Name => "scrape-router";
 
-    public ScrapeRouter(params IScrapeProvider[] chain)
+    public ScrapeRouter(params IScrapeProvider[] chain) : this(chain, onFallback: null)
+    {
+    }
+
+    public ScrapeRouter(IScrapeProvider[] chain, Action<ScrapeFallback>? onFallback)
     {
         if (chain is null || chain.Length == 0)
         {
@@ -36,6 +46,7 @@ public sealed class ScrapeRouter : IScrapeProvider, IExtractProvider
         _chain = chain;
         // Cheap-first for scraping → browser-first for extraction: reverse the extract-capable members.
         _extractChain = chain.OfType<IExtractProvider>().Reverse().ToList();
+        _onFallback = onFallback;
     }
 
     public async Task<ScrapedPage> ScrapeAsync(
@@ -45,25 +56,32 @@ public sealed class ScrapeRouter : IScrapeProvider, IExtractProvider
     {
         ScrapedPage? lastFailure = null;
 
-        foreach (var provider in _chain)
+        for (var i = 0; i < _chain.Count; i++)
         {
-            ScrapedPage page;
+            var provider = _chain[i];
+            string reason;
             try
             {
-                page = await provider.ScrapeAsync(url, format, cancellationToken).ConfigureAwait(false);
+                var page = await provider.ScrapeAsync(url, format, cancellationToken).ConfigureAwait(false);
+                if (page.Success && !string.IsNullOrWhiteSpace(page.Content))
+                {
+                    return page;
+                }
+
+                reason = string.IsNullOrWhiteSpace(page.Error) ? "empty content" : page.Error!;
+                lastFailure = page;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                reason = ex.Message;
                 lastFailure = new ScrapedPage { Url = url, Provider = provider.Name, Success = false, Error = ex.Message };
-                continue;
             }
 
-            if (page.Success && !string.IsNullOrWhiteSpace(page.Content))
+            // Report the degrade to the next provider (e.g. Context.dev → Cloudflare browser).
+            if (i + 1 < _chain.Count)
             {
-                return page;
+                _onFallback?.Invoke(new ScrapeFallback(provider.Name, _chain[i + 1].Name, url, reason));
             }
-
-            lastFailure = page;
         }
 
         return lastFailure ?? new ScrapedPage
@@ -85,24 +103,31 @@ public sealed class ScrapeRouter : IScrapeProvider, IExtractProvider
     {
         JsonElement? last = null;
 
-        foreach (var extractor in _extractChain)
+        for (var i = 0; i < _extractChain.Count; i++)
         {
-            JsonElement result;
+            var extractor = _extractChain[i];
+            string reason;
             try
             {
-                result = await extractor.ExtractAsync(url, jsonSchema, cancellationToken).ConfigureAwait(false);
+                var result = await extractor.ExtractAsync(url, jsonSchema, cancellationToken).ConfigureAwait(false);
+                if (HasProducts(result))
+                {
+                    return result;
+                }
+
+                reason = "no products";
+                last = result;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                continue;
+                reason = ex.Message;
             }
 
-            if (HasProducts(result))
+            // Report the browser→Context.dev degrade (the store-extraction fallback the owner wants surfaced).
+            if (i + 1 < _extractChain.Count)
             {
-                return result;
+                _onFallback?.Invoke(new ScrapeFallback(extractor.Name, _extractChain[i + 1].Name, url, reason));
             }
-
-            last = result;
         }
 
         return last ?? EmptyObject();
