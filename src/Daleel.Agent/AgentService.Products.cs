@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -5,6 +6,7 @@ using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Llm;
 using Daleel.Core.Models;
+using Daleel.Core.Observability;
 using Daleel.Pipeline.Extraction;
 using Daleel.Search.Abstractions;
 
@@ -950,25 +952,26 @@ public sealed partial class AgentService
             (IReadOnlyList<ProductListing>)Array.Empty<ProductListing>(),
             (IReadOnlyDictionary<string, ModelInsight>)new Dictionary<string, ModelInsight>(StringComparer.Ordinal));
 
-        // Classifying context: real product/store listings are separated from editorial articles, so the
-        // extractor mines articles for which products exist without ever listing an article as an item.
-        var context = BuildExtractionContext(bundle);
-        if (context.Length == 0)
+        // Split the bundle into bounded parts (one "signals" digest + one per scraped page) and extract
+        // each in its OWN LLM call, in PARALLEL under a concurrency gate — so the uncapped "extract every
+        // model" prompt sees a bounded input per call and completes, instead of one monolithic call over
+        // everything (which hung past the deadline). The downstream ListingAggregator dedups by identity,
+        // so unioning the parts' products needs no extra dedup here.
+        var parts = BuildExtractionParts(bundle, _options.ExtractionMaxPageChars);
+        if (_options.ExtractionMaxParts > 0 && parts.Count > _options.ExtractionMaxParts)
+        {
+            parts = parts.Take(_options.ExtractionMaxParts).ToList();
+        }
+        if (parts.Count == 0)
         {
             return empty;
         }
 
-        // Ask the LLM for structured products; if its JSON can't be parsed, retry once before
-        // falling back gracefully to no LLM listings (the deterministic sources still stand).
-        var dto = await ExtractProductsDtoAsync(query, geo, context, cancellationToken, schema, intent).ConfigureAwait(false);
-        if (dto?.Products is null)
-        {
-            return empty;
-        }
+        var dtos = await ExtractPartsAsync(query, geo, parts, cancellationToken, schema, intent).ConfigureAwait(false);
 
         var listings = new List<ProductListing>();
         var insights = new Dictionary<string, ModelInsight>(StringComparer.Ordinal);
-        foreach (var p in dto.Products)
+        foreach (var p in dtos.Where(d => d?.Products is not null).SelectMany(d => d!.Products!))
         {
             var name = PickName(p.Name, p.Model);
             if (string.IsNullOrWhiteSpace(name))
@@ -987,8 +990,9 @@ public sealed partial class AgentService
             var verdict = string.IsNullOrWhiteSpace(p.Summary) ? null : p.Summary!.Trim();
             if (pros.Count > 0 || cons.Count > 0 || verdict is not null)
             {
-                insights[ModelInsightKey(brand, model, name!.Trim())] =
-                    new ModelInsight(pros, cons, verdict);
+                // TryAdd: first non-empty insight per model wins across parts (a later page can't clobber it).
+                insights.TryAdd(ModelInsightKey(brand, model, name!.Trim()),
+                    new ModelInsight(pros, cons, verdict));
             }
             var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (p.Specs is { Count: > 0 })
@@ -1063,6 +1067,65 @@ public sealed partial class AgentService
     /// <summary>An LLM-distilled verdict for a model: short pros/cons and a one-line summary.</summary>
     private sealed record ModelInsight(
         IReadOnlyList<string> Pros, IReadOnlyList<string> Cons, string? Summary);
+
+    /// <summary>
+    /// Runs one LLM extraction call PER part in parallel, bounded by <see cref="AgentOptions.ExtractionConcurrency"/>
+    /// (each part is a full "extract every model" call, so an ungated fan-out would storm the LLM rate limit).
+    /// A part that fails (non-cancellation) is salvaged as null; on cancellation (the workflow deadline) the
+    /// parts that already completed are kept rather than discarding the whole extraction.
+    /// </summary>
+    private async Task<IReadOnlyList<ExtractedProductsDto?>> ExtractPartsAsync(
+        string query, GeoProfile geo, IReadOnlyList<ExtractionPart> parts, CancellationToken cancellationToken,
+        ProductSchema? schema, SearchIntentType intent)
+    {
+        using var gate = new SemaphoreSlim(Math.Max(1, _options.ExtractionConcurrency));
+        var tasks = parts.Select(async part =>
+        {
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                var dto = await ExtractProductsDtoAsync(query, geo, part.Content, cancellationToken, schema, intent)
+                    .ConfigureAwait(false);
+                EmitExtractionPart(part.Label, dto?.Products?.Count ?? 0, dto is not null, sw.ElapsedMilliseconds);
+                return dto;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log($"extraction part '{part.Label}' failed: {ex.Message}");
+                EmitExtractionPart(part.Label, 0, false, sw.ElapsedMilliseconds);
+                return null;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToList();
+
+        try
+        {
+            return await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Deadline hit mid-fan-out: keep whatever finished rather than losing the whole extraction.
+            return tasks.Where(t => t.IsCompletedSuccessfully).Select(t => t.Result).ToList();
+        }
+    }
+
+    /// <summary>Logs + emits a per-part extraction event so /admin/timeline shows extraction progress
+    /// (which page/signals part yielded how many products, and how long it took).</summary>
+    private void EmitExtractionPart(string label, int productCount, bool success, long elapsedMs)
+    {
+        Log($"extracted {productCount} products from {label} ({elapsedMs} ms)");
+        (_options.Events ?? AmbientSearchEvents.Sink)?.Emit(new SearchEvent(
+            SearchEventCategories.Extract,
+            "extract.part",
+            $"Extracted {productCount} products from {label}",
+            success ? SearchEventLevel.Info : SearchEventLevel.Warning,
+            "extraction",
+            new Dictionary<string, object?> { ["part"] = label, ["products"] = productCount, ["ms"] = elapsedMs }));
+    }
 
     // A URL / bare domain the LLM sometimes drops into the name field instead of the product name:
     // "https://x.com/p", "www.foo.io", "amazon.com/dp/B0…". The final label must be all letters (a TLD)

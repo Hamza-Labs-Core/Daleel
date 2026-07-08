@@ -313,25 +313,27 @@ public sealed partial class AgentService
         return sb.ToString();
     }
 
-    /// <summary>
-    /// Flattens a bundle for the LLM extraction pass, CLASSIFYING every web result first (via
-    /// <see cref="ResultClassifier"/>) so the extractor can tell a real buyable listing from an article
-    /// about products. Real product/store/brand/marketplace hits are grouped under one heading; editorial
-    /// sources (reviews, blogs, buying-guides) are grouped under a clearly-marked "reference only" heading
-    /// — they feed product/brand discovery but must never be emitted as purchasable items. The shopping
-    /// hits, store data, social posts and scraped pages are appended exactly as in <see cref="BuildContext"/>.
-    /// </summary>
-    private static string BuildExtractionContext(ResearchBundle bundle)
-    {
-        var sb = new StringBuilder();
+    /// <summary>One bounded unit of extraction input — a labelled context chunk that gets its own LLM call.</summary>
+    internal readonly record struct ExtractionPart(string Label, string Content);
 
+    /// <summary>
+    /// Splits a bundle into bounded extraction PARTS for parallel per-part LLM extraction: one "signals"
+    /// part (web-result classification into buyable listings vs reference-only editorial + the
+    /// shopping/stores/social digest — all short) plus one part PER scraped page carrying its FULL content
+    /// (capped at <paramref name="maxPageChars"/> so a single huge page can't reintroduce the monolithic
+    /// hang). Each part becomes its own extraction call, so the uncapped "extract EVERY model" instruction
+    /// sees a bounded input per call and completes — instead of one monolithic call over everything, which
+    /// hung past the deadline (measured: 80 mixed inputs → stuck &gt;10 min).
+    /// </summary>
+    private static IReadOnlyList<ExtractionPart> BuildExtractionParts(ResearchBundle bundle, int maxPageChars)
+    {
+        var parts = new List<ExtractionPart>();
+
+        // (1) The "signals" part: web-result classification + the non-web digest (shopping/stores/social),
+        // WITHOUT the scraped pages — those become their own parts below.
+        var signals = new StringBuilder();
         if (bundle.WebResults.Count > 0)
         {
-            // Extraction is UNCAPPED (owner: "scale to hundreds") but it's still ONE monolithic LLM call,
-            // and feeding it a huge context made that single call hang past the deadline (measured: 80
-            // inputs → stuck >10 min). Until extraction is CHUNKED into parallel per-source calls, keep the
-            // input modest so the uncapped call still completes. 30 > the old 24; the real scale win needs
-            // the chunked-parallel-extraction + brand-catalogue-as-source rework.
             var classified = bundle.WebResults
                 .Take(30)
                 .Select(r => (r, type: ResultClassifier.Classify(r.Url, r.Title, r.Snippet)))
@@ -342,26 +344,44 @@ public sealed partial class AgentService
 
             if (listings.Count > 0)
             {
-                sb.AppendLine("# Product & store listings (real items/sellers — extract products from these)");
+                signals.AppendLine("# Product & store listings (real items/sellers — extract products from these)");
                 foreach (var r in listings)
                 {
-                    AppendWebResult(sb, r);
+                    AppendWebResult(signals, r);
                 }
             }
 
             if (articles.Count > 0)
             {
-                sb.AppendLine("# Reference articles (background SOURCES only — mine for which products/brands exist; " +
+                signals.AppendLine("# Reference articles (background SOURCES only — mine for which products/brands exist; " +
                     "NEVER list an article, review or round-up itself as a product)");
                 foreach (var r in articles)
                 {
-                    AppendWebResult(sb, r);
+                    AppendWebResult(signals, r);
                 }
             }
         }
 
-        AppendNonWebContext(sb, bundle);
-        return sb.ToString();
+        AppendNonWebContext(signals, bundle, includePages: false);
+        if (signals.Length > 0)
+        {
+            parts.Add(new ExtractionPart("signals", signals.ToString()));
+        }
+
+        // (2) One part per scraped page — FULL content (capped), NO 3-page limit. Store listing pages carry
+        // the product density, so each is its own bounded extraction call.
+        foreach (var page in bundle.Pages)
+        {
+            if (string.IsNullOrWhiteSpace(page.Content))
+            {
+                continue;
+            }
+
+            var content = page.Content.Length > maxPageChars ? page.Content[..maxPageChars] + "…" : page.Content;
+            parts.Add(new ExtractionPart($"page:{page.Url}", $"# Page: {page.Url}\n{content}"));
+        }
+
+        return parts;
     }
 
     /// <summary>Appends one web result as a context bullet (title — snippet (url) [image]).</summary>
@@ -376,8 +396,10 @@ public sealed partial class AgentService
         sb.AppendLine();
     }
 
-    /// <summary>Appends the non-web sections (shopping, stores, social, pages) shared by both context builders.</summary>
-    private static void AppendNonWebContext(StringBuilder sb, ResearchBundle bundle)
+    /// <summary>Appends the non-web sections (shopping, stores, social, and — when <paramref name="includePages"/>
+    /// — scraped pages) shared by both context builders. Extraction passes includePages:false because each
+    /// scraped page becomes its own extraction part.</summary>
+    private static void AppendNonWebContext(StringBuilder sb, ResearchBundle bundle, bool includePages = true)
     {
         if (bundle.ShoppingResults.Count > 0)
         {
@@ -415,10 +437,13 @@ public sealed partial class AgentService
             }
         }
 
-        foreach (var page in bundle.Pages.Take(3))
+        if (includePages)
         {
-            sb.AppendLine($"# Page: {page.Url}");
-            sb.AppendLine(Truncate(page.Content, 2000));
+            foreach (var page in bundle.Pages.Take(3))
+            {
+                sb.AppendLine($"# Page: {page.Url}");
+                sb.AppendLine(Truncate(page.Content, 2000));
+            }
         }
     }
 

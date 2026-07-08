@@ -3,6 +3,7 @@ using Daleel.Agent.Llm;
 using Daleel.Apify;
 using Daleel.Core.Llm;
 using Daleel.Core.Moderation;
+using Daleel.Core.Observability;
 using Daleel.Core.Pipeline;
 using Daleel.Pipeline;
 using Daleel.Search;
@@ -244,6 +245,9 @@ public sealed class AgentFactory : IAgentFactory
             MaxUrlsToRead = EnvInt("SEARCH_MAX_URLS_TO_READ", 20),                  // was 6
             MaxListingUrls = EnvInt("SEARCH_MAX_LISTING_URLS", 40),                 // was 12
             WebDiscoveryResultsPerQuery = EnvInt("SEARCH_WEB_DISCOVERY_PER_QUERY", 30), // was 20
+            ExtractionConcurrency = EnvInt("SEARCH_EXTRACTION_CONCURRENCY", 4),
+            ExtractionMaxParts = EnvInt("SEARCH_EXTRACTION_MAX_PARTS", 12),
+            ExtractionMaxPageChars = EnvInt("SEARCH_EXTRACTION_MAX_PAGE_CHARS", 40000),
         };
         var filter = new ContentFilter(request.Strictness, request.ModerationWhitelist, request.ModerationCategories);
 
@@ -371,11 +375,27 @@ public sealed class AgentFactory : IAgentFactory
         };
     }
 
-    /// <summary>Streams each discovery failover hop to the request's progress log — the same seam the
-    /// event spine taps to persist it — or null when there is no log sink to write to.</summary>
-    private static Action<SearchFailover>? Failover(Action<string>? log) => log is null
-        ? null
-        : hop => log($"Discovery: {hop.FromProvider} unavailable ({hop.Reason}) — falling back to {hop.ToProvider}.");
+    /// <summary>Reports each discovery failover hop: a progress-log line AND a persisted
+    /// <c>discovery.failover</c> timeline event via the ambient search-event sink (active for the whole
+    /// run), so an operator sees that e.g. SerpAPI fell over to the browser-SERP fallback rather than the
+    /// pipeline degrading silently.</summary>
+    private static Action<SearchFailover> Failover(Action<string>? log) => hop =>
+    {
+        log?.Invoke($"Discovery: {hop.FromProvider} unavailable ({hop.Reason}) — falling back to {hop.ToProvider}.");
+        AmbientSearchEvents.Sink?.Emit(new SearchEvent(
+            SearchEventCategories.Search,
+            "discovery.failover",
+            $"Discovery failover: {hop.FromProvider} → {hop.ToProvider} ({hop.Reason})",
+            SearchEventLevel.Warning,
+            "search",
+            new Dictionary<string, object?>
+            {
+                ["from"] = hop.FromProvider,
+                ["to"] = hop.ToProvider,
+                ["kind"] = hop.Kind.ToString(),
+                ["reason"] = hop.Reason,
+            }));
+    };
 
     /// <summary>The Cloudflare edge browser when its creds are set, else null. Shared conceptually by
     /// the scrape chain and the browser-SERP discovery fallback so both are gated on the same creds.</summary>

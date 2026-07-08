@@ -80,6 +80,18 @@ public sealed class AgentOptions
     /// carrier covers DI-resolved collaborators too.
     /// </summary>
     public ISearchEventSink? Events { get; init; }
+
+    /// <summary>Max in-flight per-page extraction LLM calls (fan-out concurrency). Bounds LLM rate-limit
+    /// pressure without dropping any part.</summary>
+    public int ExtractionConcurrency { get; init; } = 4;
+
+    /// <summary>Max extraction parts (signals + N pages) per run — a worst-case wall-clock guard against the
+    /// workflow deadline. 0 = uncapped.</summary>
+    public int ExtractionMaxParts { get; init; } = 12;
+
+    /// <summary>Max chars of a single scraped page fed to one extraction call — a generous cap so no single
+    /// part can reintroduce the monolithic hang.</summary>
+    public int ExtractionMaxPageChars { get; init; } = 40_000;
 }
 
 /// <summary>
