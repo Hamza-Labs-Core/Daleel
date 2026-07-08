@@ -92,6 +92,10 @@ public sealed class AgentOptions
     /// <summary>Max chars of a single scraped page fed to one extraction call — a generous cap so no single
     /// part can reintroduce the monolithic hang.</summary>
     public int ExtractionMaxPageChars { get; init; } = 40_000;
+
+    /// <summary>How many listing PAGES to crawl per store (pagination): page 1 + up to depth-1 derived next
+    /// pages, stop-on-empty. 1 = page 1 only (no pagination).</summary>
+    public int StorePageDepth { get; init; } = 3;
 }
 
 /// <summary>

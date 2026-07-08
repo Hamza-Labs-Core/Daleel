@@ -248,6 +248,7 @@ public sealed class AgentFactory : IAgentFactory
             ExtractionConcurrency = EnvInt("SEARCH_EXTRACTION_CONCURRENCY", 4),
             ExtractionMaxParts = EnvInt("SEARCH_EXTRACTION_MAX_PARTS", 12),
             ExtractionMaxPageChars = EnvInt("SEARCH_EXTRACTION_MAX_PAGE_CHARS", 40000),
+            StorePageDepth = EnvInt("SEARCH_STORE_PAGE_DEPTH", 3),
         };
         var filter = new ContentFilter(request.Strictness, request.ModerationWhitelist, request.ModerationCategories);
 

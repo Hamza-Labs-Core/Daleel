@@ -930,10 +930,64 @@ public sealed partial class AgentService
             return Array.Empty<ProductListing>();
         }
 
+        // Each store URL is crawled across MULTIPLE listing pages (pagination), not just the one Google
+        // returned — bounded by StorePageDepth, stop-on-empty. Stores run in parallel; pages within a store
+        // run sequentially (stop-on-empty needs the previous page's result).
         var tasks = targets.Select(t =>
-            ListingExtractor.ExtractAsync(extractor, t.Item1, t.Source, t.type, geo.Currency, cancellationToken));
+            ExtractStorePagesAsync(extractor, t.Item1, t.Source, t.type, geo.Currency, cancellationToken));
         var batches = await Task.WhenAll(tasks).ConfigureAwait(false);
         return batches.SelectMany(b => b).ToList();
+    }
+
+    /// <summary>
+    /// Extracts a store's product listings across paginated pages: page 1 (the URL Google returned) plus up
+    /// to <see cref="AgentOptions.StorePageDepth"/>-1 derived next pages, stopping as soon as a page yields
+    /// no listings (past the last page). Only paginates a first page that actually produced products.
+    /// </summary>
+    private async Task<IReadOnlyList<ProductListing>> ExtractStorePagesAsync(
+        IExtractProvider extractor, string url, string source, ResultType type, string? currency,
+        CancellationToken cancellationToken)
+    {
+        var all = new List<ProductListing>();
+
+        var first = await ListingExtractor.ExtractAsync(extractor, url, source, type, currency, cancellationToken)
+            .ConfigureAwait(false);
+        all.AddRange(first);
+
+        // A first page that yielded nothing isn't a browsable listing page — don't paginate it.
+        if (first.Count == 0 || _options.StorePageDepth <= 1)
+        {
+            return all;
+        }
+
+        foreach (var pageUrl in StorePagination.NextPages(url, _options.StorePageDepth))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var page = await ListingExtractor.ExtractAsync(extractor, pageUrl, source, type, currency, cancellationToken)
+                .ConfigureAwait(false);
+            if (page.Count == 0)
+            {
+                break; // stop-on-empty: past the last page
+            }
+
+            all.AddRange(page);
+            EmitStorePage(source, pageUrl, page.Count);
+        }
+
+        return all;
+    }
+
+    /// <summary>Emits a store.scraped event when a paginated store page yields products.</summary>
+    private void EmitStorePage(string source, string url, int count)
+    {
+        Log($"store page {url} → {count} listings");
+        (_options.Events ?? AmbientSearchEvents.Sink)?.Emit(new SearchEvent(
+            SearchEventCategories.Store,
+            "store.scraped",
+            $"{source}: {count} products from a paginated page",
+            SearchEventLevel.Info,
+            "scrape",
+            new Dictionary<string, object?> { ["source"] = source, ["url"] = url, ["products"] = count }));
     }
 
     /// <summary>
