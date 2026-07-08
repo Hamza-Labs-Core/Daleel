@@ -187,7 +187,20 @@ public sealed class AgentFactory : IAgentFactory
         }
 
         var opinions = new OpinionExtractor(llm);
-        var options = new AgentOptions { DefaultGeo = request.Geo, Log = request.Log, Language = request.Language };
+        // SCALE-TO-HUNDREDS breadth. The pipeline fan-outs are already uncapped (PipelineLimits); the real
+        // limiter on the model count is how many pages get READ and how many DIVERSE queries run, both of
+        // which live here in AgentOptions. Raised from the VPS-era defaults and made env-tunable so an
+        // operator can trade coverage against cost/latency + the SerpAPI hourly cap without a redeploy.
+        var options = new AgentOptions
+        {
+            DefaultGeo = request.Geo,
+            Log = request.Log,
+            Language = request.Language,
+            MaxQueriesPerKind = EnvInt("SEARCH_MAX_QUERIES_PER_KIND", 24),          // was 14
+            MaxUrlsToRead = EnvInt("SEARCH_MAX_URLS_TO_READ", 20),                  // was 6
+            MaxListingUrls = EnvInt("SEARCH_MAX_LISTING_URLS", 40),                 // was 12
+            WebDiscoveryResultsPerQuery = EnvInt("SEARCH_WEB_DISCOVERY_PER_QUERY", 30), // was 20
+        };
         var filter = new ContentFilter(request.Strictness, request.ModerationWhitelist, request.ModerationCategories);
 
         // The moderation pipeline: deterministic keyword baseline + LLM adjudication over the SAME
@@ -219,6 +232,11 @@ public sealed class AgentFactory : IAgentFactory
         return new AgentService(llm, options, search, places, scraper, social, matcher: null, opinions, filter,
             moderator);
     }
+
+    /// <summary>Reads a positive int from the environment, else the fallback. Used for the env-tunable
+    /// search-breadth knobs; a non-positive or unparseable value falls back rather than zeroing coverage.</summary>
+    private static int EnvInt(string name, int fallback) =>
+        int.TryParse(Environment.GetEnvironmentVariable(name), out var v) && v > 0 ? v : fallback;
 
     /// <summary>Selects an LLM client, preferring OpenRouter (one key, every model), then OpenAI, then Anthropic.</summary>
     private ILlmClient BuildLlm(string? model) =>
