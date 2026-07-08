@@ -110,7 +110,8 @@ public sealed class EnrichedResultStore : IEnrichedResultStore
             _logger.LogWarning(ex, "Enrichment patch for job {JobId}: reader-surface sync failed", item.SearchJobId);
         }
 
-        await RefreshCacheAsync(sp, item.SearchJobId, patchedJson, ct);
+        // The whole-query result VAULT is no longer refreshed (owner decision — the vault was removed; see
+        // CheckCacheActivity). The durable per-job record was already patched via the reader surfaces above.
         await _broadcaster.EnrichedAsync(item.UserId, item.SearchJobId, patchedJson, item.ResultType);
         return true;
     }

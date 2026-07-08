@@ -87,67 +87,13 @@ public sealed class CheckCacheActivity : CancellableActivity
             return;
         }
 
-        services.Report(SearchStep.CheckingVault, "Progress.Msg.Vault");
-        try
-        {
-            var payload = await services.Cache.GetAsync(state.ResultKey, context.CancellationToken);
-            if (payload is null)
-            {
-                state.RecordEvent(EventCategory.Cache, "cache.miss", "cache");
-                return;
-            }
-
-            var cached = JsonSerializer.Deserialize<CachedSearchResult>(payload);
-            if (cached is null)
-            {
-                state.RecordEvent(EventCategory.Cache, "cache.miss", "cache");
-                return;
-            }
-
-            // Smart cache validation: a hit isn't automatically good enough. Score the stored report for
-            // completeness and let the verdict decide — replay it, replay-then-refill-in-background, or
-            // (when it's too thin) discard it and fall through to a full live search.
-            var validator = context.GetRequiredService<ICacheQualityValidator>();
-            var quality = ScoreQuality(validator, cached.ResultJson);
-
-            if (quality.Decision == CacheDecision.Miss)
-            {
-                // Too incomplete to count as a hit — fall through to a full live search, exactly like a
-                // miss. FromCache stays false, so every downstream activity runs.
-                state.RecordEvent(EventCategory.Cache, "cache.stale", "cache", success: false,
-                    metadata: QualityMetadata(quality));
-                return;
-            }
-
-            state.FromCache = true;
-            state.ResultJson = cached.ResultJson;
-            state.ResultType = cached.ResultType;
-            state.FilteredCount = cached.FilteredCount;
-            state.FilteredCategories = cached.FilteredCategories ?? string.Empty;
-            state.CacheQuality = quality;
-
-            if (quality.Decision == CacheDecision.ServeAndEnrich)
-            {
-                // Show the cached report immediately; the runner reads CacheQuality back and kicks off a
-                // background pass that re-scrapes ONLY the missing pieces, then streams the refreshed result.
-                state.RecordEvent(EventCategory.Cache, "cache.partial", "cache",
-                    metadata: QualityMetadata(quality));
-            }
-            else
-            {
-                state.RecordEvent(EventCategory.Cache, "cache.hit", "cache",
-                    metadata: QualityMetadata(quality));
-            }
-            services.Report(SearchStep.CheckingVault, "Progress.Msg.CacheHit");
-        }
-        catch (OperationCanceledException)
-        {
-            throw; // a cap-trip / user cancel must stop the job, not be swallowed as a cache miss
-        }
-        catch
-        {
-            // Cache hiccup or corrupt payload ⇒ treat as a miss and run the search live.
-        }
+        // The whole-query result VAULT was removed (owner decision): a cached whole-result would serve
+        // stale products/prices and skip the relevance/learning pass, so every search now runs fresh. The
+        // PROVIDER cache (raw discovery-API responses) and the ENTITY caches (ProductProfile item-meta,
+        // ScrapedPrice price series, Brand/Store meta) are untouched — only the query→whole-grid vault is
+        // gone. FromCache stays false, so every downstream activity runs live.
+        _ = services;
+        state.RecordEvent(EventCategory.Cache, "cache.bypass", "cache");
     }
 
     /// <summary>
@@ -693,48 +639,31 @@ public sealed class ModerateContentActivity : CancellableActivity
 [Activity("Daleel", "Search", "Cache: serialize + persist the completed report")]
 public sealed class CacheResultsActivity : CancellableActivity
 {
-    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
+    protected override ValueTask DoExecuteAsync(ActivityExecutionContext context)
     {
         var state = context.GetRequiredService<SearchPipelineState>();
         var services = context.GetRequiredService<SearchPipelineServices>();
         if (state.FromCache || state.Answer is null)
         {
-            return;
+            return ValueTask.CompletedTask;
         }
 
-        // Never cache an empty product search. A zero-result payload is too often a transient/upstream
-        // failure (provider outage, geo-filter bug) rather than a true "nothing exists" — persisting it
-        // would serve the stale empty for the whole TTL and hide the recovery. A non-product "ask" answer
-        // (Products is null) is a legitimate result and is still cached.
+        // Skip an empty product search — a zero-result payload is too often a transient/upstream failure
+        // rather than a true "nothing exists". A non-product "ask" answer (Products is null) is legitimate
+        // and is still serialized.
         if (IsEmptyProductResult(state.Answer))
         {
             state.RecordEvent(EventCategory.Cache, "cache.skip-empty", "cache");
-            return;
+            return ValueTask.CompletedTask;
         }
 
         services.Report(SearchStep.ComparingPrices, "Progress.Msg.Saving");
+        // Serialize the report so the runner persists it to SearchJob.ResultJson (history, sharing, the
+        // detail pages). The whole-query result VAULT is no longer written (owner decision — see
+        // CheckCacheActivity); that durable per-job record is NOT the vault.
         state.ResultJson = ResultSerialization.Serialize(state.Answer);
         state.ResultType = "ask";
-        state.RecordEvent(EventCategory.Cache, "cache.write", "cache");
-
-        if (services.Cache is not null)
-        {
-            try
-            {
-                var cached = new CachedSearchResult(
-                    state.ResultJson, state.ResultType, state.FilteredCount, state.FilteredCategories);
-                await services.Cache.SetAsync(
-                    state.ResultKey, JsonSerializer.Serialize(cached), state.CacheTtl, context.CancellationToken);
-            }
-            catch (OperationCanceledException)
-            {
-                throw; // cancellation must propagate; only swallow genuine cache-write failures
-            }
-            catch
-            {
-                // Best-effort: a cache write must never fail the search.
-            }
-        }
+        return ValueTask.CompletedTask;
     }
 
     /// <summary>
