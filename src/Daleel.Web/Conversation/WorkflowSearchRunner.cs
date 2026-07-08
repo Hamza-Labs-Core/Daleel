@@ -48,6 +48,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private readonly ISearchEmailNotifier _emailNotifier;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IModerationPolicyProvider _moderationPolicy;
+    private readonly IRelevancePolicyProvider _relevancePolicy;
     private readonly IHalalImageClassifier _imageClassifier;
     private readonly ILogger<WorkflowSearchRunner> _logger;
     private readonly IConversationBroadcaster? _broadcaster;
@@ -57,7 +58,8 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         IFilteredContentLogRepository filteredLog, ICacheStore cache, IEventStore eventStore,
         ISystemEventLog systemLog, ISearchEventSinkFactory sinkFactory,
         ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
-        IModerationPolicyProvider moderationPolicy, IHalalImageClassifier imageClassifier,
+        IModerationPolicyProvider moderationPolicy, IRelevancePolicyProvider relevancePolicy,
+        IHalalImageClassifier imageClassifier,
         ILogger<WorkflowSearchRunner> logger,
         IConversationBroadcaster? broadcaster = null)
     {
@@ -67,6 +69,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         _filteredLog = filteredLog;
         _cache = cache;
         _moderationPolicy = moderationPolicy;
+        _relevancePolicy = relevancePolicy;
         _imageClassifier = imageClassifier;
         _eventStore = eventStore;
         _systemLog = systemLog;
@@ -106,6 +109,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // Admin feedback drives moderation: the active whitelist (undo decisions) and the
         // rating-tuned thresholds ride into the agent with every run. Best-effort by contract.
         var moderation = await _moderationPolicy.GetAsync(ct).ConfigureAwait(false);
+        var relevance = await _relevancePolicy.GetAsync(job.Query, job.Geo, ct).ConfigureAwait(false);
 
         // Per-call-site pipeline models: each LLM step (planner, extraction, …) runs the model configured
         // for it (model.<site>), so steps can be cost-tuned independently at /admin/settings.
@@ -127,6 +131,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             ModerationWhitelist = moderation.WhitelistKeys,
             ModerationCategories = moderation.Categories,
             HalalPolicy = moderation.Policy,
+            RelevanceNegatives = relevance,
             ImageClassifier = _imageClassifier
         });
 

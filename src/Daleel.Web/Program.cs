@@ -262,6 +262,7 @@ builder.Services.AddTransient<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddTransient<IFilteredContentLogRepository, FilteredContentLogRepository>();
 builder.Services.AddTransient<IRelevanceFlagRepository, RelevanceFlagRepository>();
 builder.Services.AddTransient<IRelevanceFeedbackService, RelevanceFeedbackService>();
+builder.Services.AddSingleton<IRelevancePolicyProvider, RelevancePolicyProvider>();
 builder.Services.AddTransient<IModerationWhitelistRepository, FilteredContentLogRepository>();
 builder.Services.AddTransient<IModerationRuleRepository, ModerationRuleRepository>();
 builder.Services.AddTransient<IImageModerationLogRepository, ImageModerationLogRepository>();
