@@ -47,7 +47,21 @@ public static class ListingExtractor
                         specs = new { type = "object" },
                         availability = new { type = "string" },
                         seller = new { type = "string" },
-                        condition = new { type = "string" }
+                        condition = new { type = "string" },
+                        reviews = new
+                        {
+                            type = "array",
+                            items = new
+                            {
+                                type = "object",
+                                properties = new
+                                {
+                                    text = new { type = "string" },
+                                    rating = new { type = "number" },
+                                    author = new { type = "string" }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -142,11 +156,42 @@ public static class ListingExtractor
                 Availability = Str(item, "availability"),
                 Condition = NormalizeCondition(Str(item, "condition")),
                 OriginalPrice = Num(item, "original_price", "originalPrice", "was_price"),
-                Seller = Str(item, "seller")
+                Seller = Str(item, "seller"),
+                RatedReviews = ParseReviews(item)
             });
         }
 
         return listings;
+    }
+
+    /// <summary>Parses a listing's optional "reviews" array — buyer reviews scraped from the product page.
+    /// Capped at 20 (review-spam guard); a review with no text is skipped.</summary>
+    private static IReadOnlyList<ProductReview> ParseReviews(JsonElement item)
+    {
+        if (!item.TryGetProperty("reviews", out var arr) || arr.ValueKind != JsonValueKind.Array)
+        {
+            return Array.Empty<ProductReview>();
+        }
+
+        var reviews = new List<ProductReview>();
+        foreach (var r in arr.EnumerateArray())
+        {
+            if (r.ValueKind != JsonValueKind.Object)
+            {
+                continue;
+            }
+
+            var text = Str(r, "text", "review", "body", "content");
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            var rating = Num(r, "rating", "stars", "score");
+            reviews.Add(new ProductReview(text!, rating is { } n ? (double)n : null, Str(r, "author", "name")));
+        }
+
+        return reviews.Take(20).ToList();
     }
 
     /// <summary>

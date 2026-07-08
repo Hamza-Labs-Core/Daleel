@@ -52,7 +52,8 @@ public static class ListingAggregator
                 Rating = rating,
                 RatingCount = ratingCount,
                 Specs = MergeSpecs(items),
-                Offers = offers
+                Offers = offers,
+                RatedReviews = items.SelectMany(i => i.RatedReviews).DistinctBy(r => r.Text).Take(20).ToList()
             });
         }
 

@@ -145,6 +145,9 @@ public record ProductListing
 
     public string? Seller { get; init; }
 
+    /// <summary>Buyer reviews scraped from this listing's product page (rating/text), when present.</summary>
+    public IReadOnlyList<ProductReview> RatedReviews { get; init; } = Array.Empty<ProductReview>();
+
     /// <summary>Price as a <see cref="Money"/>, when both amount and currency are present.</summary>
     public Money? AsMoney =>
         Price is { } p && !string.IsNullOrWhiteSpace(Currency) ? new Money(p, Currency!) : null;

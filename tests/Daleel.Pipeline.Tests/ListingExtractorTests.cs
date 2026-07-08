@@ -51,6 +51,35 @@ public class ListingExtractorTests
     }
 
     [Fact]
+    public void FromExtractedJson_ParsesReviews()
+    {
+        var json = Json("""
+        {
+          "products": [
+            {
+              "name": "Samsung AR24",
+              "url": "https://store.com/p/ar24",
+              "reviews": [
+                { "text": "Cools fast, quiet.", "rating": 5, "author": "Ahmad" },
+                { "text": "Good value", "rating": 4 },
+                { "rating": 3 }
+              ]
+            }
+          ]
+        }
+        """);
+
+        var listings = ListingExtractor.FromExtractedJson(json, "Store", ResultType.Marketplace);
+
+        var reviews = listings.Should().ContainSingle().Subject.RatedReviews;
+        reviews.Should().HaveCount(2); // the review with no text is skipped
+        reviews[0].Text.Should().Be("Cools fast, quiet.");
+        reviews[0].Rating.Should().Be(5);
+        reviews[0].Author.Should().Be("Ahmad");
+        reviews[1].Rating.Should().Be(4);
+    }
+
+    [Fact]
     public void FromExtractedJson_ParsesStringPriceAndBareArray()
     {
         var json = Json("""

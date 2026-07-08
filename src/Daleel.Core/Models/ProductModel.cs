@@ -73,6 +73,12 @@ public record PriceOffer
 /// <summary>A review/discussion source that names a specific model (attached to its card).</summary>
 public sealed record ItemReview(string? Title, string Url, string? Snippet = null, string? Source = null);
 
+/// <summary>A buyer review scraped from a product/store page — distinct from the editorial
+/// <see cref="ItemReview"/> (articles ABOUT the model) and StoreReview (venue reviews). <c>Rating</c> is
+/// 1–5 when the source gave one.</summary>
+public sealed record ProductReview(
+    string Text, double? Rating = null, string? Author = null, DateTimeOffset? Date = null, string? Source = null);
+
 /// <summary>Any other link that mentions a specific model — article, comparison, source page.</summary>
 public sealed record ItemLink(string Title, string Url, string? Source = null);
 
@@ -169,6 +175,10 @@ public record ProductModel
 
     /// <summary>Reviews/discussions that name THIS model — card-attached, never an orphan section.</summary>
     public IReadOnlyList<ItemReview> Reviews { get; init; } = Array.Empty<ItemReview>();
+
+    /// <summary>Buyer reviews scraped from this model's store/product pages (rating + text), distinct from the
+    /// editorial <see cref="Reviews"/>. Populated by the store/item extraction when the page carries reviews.</summary>
+    public IReadOnlyList<ProductReview> RatedReviews { get; init; } = Array.Empty<ProductReview>();
 
     /// <summary>Other links mentioning THIS model (articles, comparisons, sources).</summary>
     public IReadOnlyList<ItemLink> Mentions { get; init; } = Array.Empty<ItemLink>();
