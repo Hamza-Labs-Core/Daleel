@@ -1,6 +1,9 @@
 @* A single aggregated product model: image, name, lowest price across all its sources,
    how many sellers carry it, deal flag, a Details button and an optional compare checkbox. *@
 @inject IStringLocalizer<SharedResource> L
+@inject Daleel.Web.Services.IRelevanceFeedbackService Feedback
+@inject Daleel.Web.Services.ICurrentUser CurrentUser
+@inject ISnackbar Snackbar
 
 <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;display:flex;flex-direction:column;">
     <div style="height:150px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);">
@@ -113,6 +116,15 @@
             <MudButton Href="@url" Target="_blank" Size="Size.Small" Variant="Variant.Text"
                        StartIcon="@Icons.Material.Filled.OpenInNew">@L["Products.View"]</MudButton>
         }
+        @if (!string.IsNullOrWhiteSpace(Query))
+        {
+            <MudSpacer />
+            <MudTooltip Text="@(_flagged ? "Flagged as not relevant" : "Not relevant to your search?")">
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Flag"
+                               Color="@(_flagged ? Color.Warning : Color.Default)"
+                               Disabled="_flagged" OnClick="OnFlagNotRelevant" />
+            </MudTooltip>
+        }
     </MudCardActions>
 </MudCard>
 
@@ -130,4 +142,30 @@
 
     private Task OnToggleCompare(bool value) => SelectedChanged.InvokeAsync(value);
     private Task OnDetailsClicked() => OnDetails.InvokeAsync();
+
+    // Relevancy feedback ("not relevant"): only shown when the card knows its originating query.
+    [Parameter] public string? Query { get; set; }
+    [Parameter] public string? Geo { get; set; }
+    [Parameter] public string? Target { get; set; }
+
+    private bool _flagged;
+
+    private async Task OnFlagNotRelevant()
+    {
+        if (_flagged || string.IsNullOrWhiteSpace(Query))
+        {
+            return;
+        }
+
+        var userId = await CurrentUser.GetUserIdAsync();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            Snackbar.Add("Sign in to flag results.", Severity.Info);
+            return;
+        }
+
+        await Feedback.RecordAsync(Model, Query!, Target, Geo, reason: null, userId);
+        _flagged = true;
+        Snackbar.Add("Thanks — we'll use that to improve future searches.", Severity.Success);
+    }
 }

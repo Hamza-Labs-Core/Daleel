@@ -83,6 +83,9 @@ else
         {
             <MudItem xs="12" sm="6" md="4" @key="model">
                 <ModelCard Model="model"
+                           Query="@Result.Query"
+                           Geo="@Result.Geo"
+                           Target="@FlagTarget"
                            Selected="@_selected.Contains(idx)"
                            CanSelectMore="@(_selected.Count < MaxCompare)"
                            SelectedChanged="@(v => ToggleCompare(idx, v))"
@@ -150,6 +153,10 @@ else
 
 @code {
     [Parameter, EditorRequired] public ProductSearchResult Result { get; set; } = default!;
+
+    /// <summary>The relevance target a "not relevant" flag records against — the classified product type,
+    /// else the raw query (matches the relevance gate's own target).</summary>
+    private string FlagTarget => Result.Schema.IsEmpty ? Result.Query : Result.Schema.ProductType;
 
     /// <summary>Optional brand to pre-filter by (set when drilling in from the Brands tab).</summary>
     [Parameter] public string? InitialBrand { get; set; }
