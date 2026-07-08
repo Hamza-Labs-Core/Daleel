@@ -75,8 +75,12 @@ public sealed partial class AgentService
     public async Task<SearchStrategy> PlanAsync(
         string planningPrompt, CancellationToken cancellationToken = default, string? userQuery = null)
     {
-        var text = await _llm.CompleteTextAsync(PromptTemplates.PlannerSystem, planningPrompt, cancellationToken)
-            .ConfigureAwait(false);
+        string text;
+        using (LlmCallSiteScope.Enter(LlmCallSites.Planner))
+        {
+            text = await _llm.CompleteTextAsync(PromptTemplates.PlannerSystem, planningPrompt, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         var dto = LlmJson.Deserialize<StrategyDto>(text);
         var strategy = dto?.ToStrategy() ?? new SearchStrategy { Reasoning = "Planner returned no usable JSON." };
@@ -245,8 +249,11 @@ public sealed partial class AgentService
         }
 
         var prompt = PromptTemplates.Analyze(task, geo, context, _options.Language);
-        return await _llm.CompleteTextAsync(systemPrompt ?? PromptTemplates.AnalystSystem, prompt, cancellationToken)
-            .ConfigureAwait(false);
+        using (LlmCallSiteScope.Enter(LlmCallSites.Analyst))
+        {
+            return await _llm.CompleteTextAsync(systemPrompt ?? PromptTemplates.AnalystSystem, prompt, cancellationToken)
+                .ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -257,9 +264,14 @@ public sealed partial class AgentService
     /// so this call is billed exactly like every other pipeline LLM call. Unlike
     /// <see cref="AnalyzeAsync"/> it prepends no analyst context and returns the model's text verbatim.
     /// </summary>
-    public Task<string> SynthesizeAsync(
-        string systemPrompt, string userPrompt, CancellationToken cancellationToken = default) =>
-        _llm.CompleteTextAsync(systemPrompt, userPrompt, cancellationToken);
+    public async Task<string> SynthesizeAsync(
+        string systemPrompt, string userPrompt, CancellationToken cancellationToken = default)
+    {
+        using (LlmCallSiteScope.Enter(LlmCallSites.Synthesis))
+        {
+            return await _llm.CompleteTextAsync(systemPrompt, userPrompt, cancellationToken).ConfigureAwait(false);
+        }
+    }
 
     private async Task<IReadOnlyList<CustomerOpinion>> ExtractOpinionsAsync(
         string subject, ResearchBundle bundle, CancellationToken cancellationToken)

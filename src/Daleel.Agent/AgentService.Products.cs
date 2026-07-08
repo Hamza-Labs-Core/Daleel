@@ -748,10 +748,14 @@ public sealed partial class AgentService
         var context = BuildContext(bundle);
         try
         {
-            var text = await _llm.CompleteTextAsync(
-                PromptTemplates.BrandReputationSystem,
-                PromptTemplates.BrandReputations(brands, geo, context),
-                cancellationToken).ConfigureAwait(false);
+            string text;
+            using (LlmCallSiteScope.Enter(LlmCallSites.BrandReputation))
+            {
+                text = await _llm.CompleteTextAsync(
+                    PromptTemplates.BrandReputationSystem,
+                    PromptTemplates.BrandReputations(brands, geo, context),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var dto = LlmJson.Deserialize<BrandReputationsDto>(text);
             if (dto?.Brands is null)
@@ -852,10 +856,14 @@ public sealed partial class AgentService
 
         try
         {
-            var text = await _llm.CompleteTextAsync(
-                PromptTemplates.ModelDetailSystem,
-                PromptTemplates.ModelProsCons(model.Name, context),
-                cancellationToken).ConfigureAwait(false);
+            string text;
+            using (LlmCallSiteScope.Enter(LlmCallSites.EnrichModel))
+            {
+                text = await _llm.CompleteTextAsync(
+                    PromptTemplates.ModelDetailSystem,
+                    PromptTemplates.ModelProsCons(model.Name, context),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var dto = LlmJson.Deserialize<ProsConsDto>(text);
             if (dto is not null)
@@ -1127,8 +1135,12 @@ public sealed partial class AgentService
         {
             try
             {
-                var text = await _llm.CompleteTextAsync(
-                    system, prompt, cancellationToken).ConfigureAwait(false);
+                string text;
+                using (LlmCallSiteScope.Enter(LlmCallSites.Extraction))
+                {
+                    text = await _llm.CompleteTextAsync(
+                        system, prompt, cancellationToken).ConfigureAwait(false);
+                }
 
                 var dto = LlmJson.Deserialize<ExtractedProductsDto>(text);
                 if (dto?.Products is not null)
@@ -1164,10 +1176,14 @@ public sealed partial class AgentService
                     .Where(s => !string.IsNullOrWhiteSpace(s))))
                 .ToList();
 
-            var text = await _llm.CompleteTextAsync(
-                PromptTemplates.RelevanceGateSystem,
-                PromptTemplates.RelevanceGate(target, labels),
-                cancellationToken).ConfigureAwait(false);
+            string text;
+            using (LlmCallSiteScope.Enter(LlmCallSites.Relevance))
+            {
+                text = await _llm.CompleteTextAsync(
+                    PromptTemplates.RelevanceGateSystem,
+                    PromptTemplates.RelevanceGate(target, labels),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var dto = LlmJson.Deserialize<RelevanceVerdictsDto>(text);
             if (dto?.Drop is not { Count: > 0 } drop)

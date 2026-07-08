@@ -30,10 +30,14 @@ public sealed partial class AgentService
 
         try
         {
-            var text = await _llm.CompleteTextAsync(
-                PromptTemplates.CategoryIntelligenceSystem,
-                PromptTemplates.CategoryIntelligence(category, geo),
-                cancellationToken).ConfigureAwait(false);
+            string text;
+            using (LlmCallSiteScope.Enter(LlmCallSites.Category))
+            {
+                text = await _llm.CompleteTextAsync(
+                    PromptTemplates.CategoryIntelligenceSystem,
+                    PromptTemplates.CategoryIntelligence(category, geo),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var dto = LlmJson.Deserialize<CategoryIntelligenceDto>(text);
             return dto is null ? SearchIntelligence.Neutral(category) : MapIntelligence(category, dto);

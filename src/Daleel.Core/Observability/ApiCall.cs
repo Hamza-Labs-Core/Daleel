@@ -35,6 +35,14 @@ public record ApiCall
     public string? Model { get; init; }
     public int? InputTokens { get; init; }
     public int? OutputTokens { get; init; }
+
+    /// <summary>
+    /// For LLM calls, the pipeline call-site that made this call (e.g. "extraction", "planner") — the
+    /// key from <c>Daleel.Core.Llm.LlmCallSites</c>. Null for non-LLM calls. Lets analytics group spend
+    /// and call counts by pipeline step, not just by provider. Also encoded into <see cref="Endpoint"/>
+    /// (as <c>chat:&lt;callSite&gt;</c>) so it persists without a schema change.
+    /// </summary>
+    public string? CallSite { get; init; }
 }
 
 /// <summary>

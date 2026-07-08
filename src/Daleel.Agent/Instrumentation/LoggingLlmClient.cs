@@ -36,11 +36,16 @@ public sealed class LoggingLlmClient : ILlmClient
         finally
         {
             sw.Stop();
+            // The pipeline step that made this call (ambient, set by the caller). Encoded into Endpoint
+            // as "chat:<callSite>" so it groups in the persisted ApiCallLog without a schema change, and
+            // also carried structured on ApiCall.CallSite.
+            var callSite = LlmCallSiteScope.Current;
             _observer.Record(new ApiCall
             {
                 Timestamp = DateTimeOffset.UtcNow,
                 Provider = "OpenRouter/" + _inner.Provider,
-                Endpoint = "chat",
+                Endpoint = callSite is null ? "chat" : "chat:" + callSite,
+                CallSite = callSite,
                 RequestSummary = response?.Model,
                 Model = response?.Model,
                 InputTokens = response?.InputTokens,

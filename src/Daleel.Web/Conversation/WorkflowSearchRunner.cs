@@ -99,9 +99,14 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // rating-tuned thresholds ride into the agent with every run. Best-effort by contract.
         var moderation = await _moderationPolicy.GetAsync(ct).ConfigureAwait(false);
 
+        // Per-call-site pipeline models: each LLM step (planner, extraction, …) runs the model configured
+        // for it (model.<site>), so steps can be cost-tuned independently at /admin/settings.
+        var callSiteModels = await ResolveCallSiteModelsAsync(ct).ConfigureAwait(false);
+
         // Background jobs resolve keys from server env only (browser BYO keys aren't available here).
         var agent = _agents.Build(new AgentRequest
         {
+            CallSiteModels = callSiteModels,
             Geo = job.Geo,
             Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model,
             Language = language,
@@ -402,8 +407,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // components' own HTTP clients into this re-enrichment's collector.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
+        var callSiteModels = await ResolveCallSiteModelsAsync(ct).ConfigureAwait(false);
         var agent = _agents.Build(new AgentRequest
         {
+            CallSiteModels = callSiteModels,
             Geo = job.Geo, Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model, Language = language,
             Log = progress, ApiObserver = collector, CostEstimator = estimator, Cache = _cache, CacheTtl = CacheTtl
         });
@@ -613,6 +620,23 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     /// false and the worker's post-run backstop remains the hard guarantee that a cancelled job is
     /// finalized as cancelled.
     /// </summary>
+    /// <summary>Snapshots each pipeline call-site's configured model (model.&lt;site&gt;) for this run; a
+    /// missing/blank row leaves that call-site on its registry default (resolved in AgentFactory).</summary>
+    private async Task<IReadOnlyDictionary<string, string>> ResolveCallSiteModelsAsync(CancellationToken ct)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var site in Daleel.Core.Llm.LlmCallSites.All)
+        {
+            var model = await _config.GetAsync(site.ConfigKey, ct).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(model))
+            {
+                map[site.Key] = model!;
+            }
+        }
+
+        return map;
+    }
+
     private async Task<bool> IsCancelRequestedAsync(int jobId)
     {
         try

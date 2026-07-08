@@ -56,6 +56,13 @@ public sealed record AgentRequest
 
     /// <summary>How long cached provider responses stay valid (defaults to 30 days).</summary>
     public TimeSpan CacheTtl { get; init; } = TimeSpan.FromDays(30);
+
+    /// <summary>
+    /// Per-call-site model overrides (call-site key → OpenRouter model id), resolved from config by the
+    /// caller. A missing/blank entry falls back to that call-site's registry default. This is what lets
+    /// each pipeline step (planner, extraction, analyst, …) run a different model for cost tuning.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? CallSiteModels { get; init; }
 }
 
 /// <summary>A snapshot of which capabilities the server environment enables.</summary>
@@ -146,7 +153,42 @@ public sealed class AgentFactory : IAgentFactory
 
     public AgentService Build(AgentRequest request)
     {
-        var llm = BuildLlm(request.Model);
+        // Fail fast when no LLM key is configured: the routing client below builds its backing clients
+        // lazily (on the first completion), so validate the hard requirement up-front rather than deep
+        // inside a search run.
+        if (!HasLlm())
+        {
+            throw new InvalidOperationException(
+                "No LLM key available. Set OPENROUTER_API_KEY (recommended), OPENAI_API_KEY or ANTHROPIC_API_KEY " +
+                "as a server environment variable, or enter one on the Settings page.");
+        }
+
+        // Per-call-site model routing: each pipeline step (planner, extraction, analyst, …) resolves its
+        // own model from config (CallSiteModels) → registry default, so steps can be cost-tuned
+        // independently. One backing client is built per distinct model, logging-wrapped when an observer
+        // is present so each call is still metered — with its call-site stamped on (LoggingLlmClient reads
+        // the ambient LlmCallSiteScope the pipeline opens around each call).
+        var estimator = request.CostEstimator ?? new Daleel.Core.Observability.CostEstimator();
+        var observer = request.ApiObserver;
+
+        ILlmClient BuildModelClient(string model)
+        {
+            ILlmClient client = BuildLlm(model);
+            return observer is null
+                ? client
+                : new Daleel.Agent.Instrumentation.LoggingLlmClient(client, observer, estimator);
+        }
+
+        string ModelForCallSite(string callSite) =>
+            request.CallSiteModels is { } configured &&
+            configured.TryGetValue(callSite, out var cfg) && !string.IsNullOrWhiteSpace(cfg)
+                ? cfg
+                : LlmCallSites.DefaultFor(callSite);
+
+        ILlmClient llm = new RoutingLlmClient(
+            ModelForCallSite,
+            BuildModelClient,
+            defaultModel: string.IsNullOrWhiteSpace(request.Model) ? LlmCallSites.DefaultModel : request.Model!);
 
         // Edge search proxy (search-worker, doc §3.5): when configured, the SerpAPI/Places calls run
         // through the worker — which injects the vendor key (held as a worker secret) and serves hot
@@ -166,12 +208,11 @@ public sealed class AgentFactory : IAgentFactory
         IPostFetcher? social =
             Resolve("APIFY_TOKEN") is { } apify ? new ApifyPostFetcher(new ApifyClient(apify)) : null;
 
-        // Wrap every provider in a logging decorator when an observer is supplied, so every
-        // external call is timed, cost-estimated, and streamed.
-        if (request.ApiObserver is { } observer)
+        // Wrap the non-LLM providers in a logging decorator when an observer is supplied, so every
+        // external call is timed, cost-estimated, and streamed. The LLM is already per-model
+        // logging-wrapped inside the router's factory above.
+        if (observer is not null)
         {
-            var estimator = request.CostEstimator ?? new Daleel.Core.Observability.CostEstimator();
-            llm = new Daleel.Agent.Instrumentation.LoggingLlmClient(llm, observer, estimator);
             if (search is not null) search = Daleel.Search.Instrumentation.LoggingProviders.Wrap(search, observer, estimator);
             if (places is not null) places = Daleel.Search.Instrumentation.LoggingProviders.Wrap(places, observer, estimator);
             if (scraper is not null) scraper = Daleel.Search.Instrumentation.LoggingProviders.WrapScrape(scraper, observer, estimator);

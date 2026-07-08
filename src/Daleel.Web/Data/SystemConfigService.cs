@@ -1,3 +1,4 @@
+using Daleel.Core.Llm;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -87,6 +88,19 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "limit.saved_results_free", Value = "10", Type = "int" },
         new SystemConfig { Key = "model.default_free", Value = "openai/gpt-4o-mini", Type = "string" },
         new SystemConfig { Key = "model.default_pro", Value = "anthropic/claude-sonnet-4", Type = "string" },
+
+        // Per-call-site pipeline model overrides (model.<site>). Each pipeline LLM step resolves its own
+        // model from these (see Daleel.Core.Llm.LlmCallSites) so an operator can cost-tune every step
+        // independently at /admin/settings; seeded from the registry defaults (a capable model). The
+        // enrichment actors read actor.model separately. Generated from the registry so the two never drift.
+        new SystemConfig { Key = LlmCallSites.Planner.ConfigKey, Value = LlmCallSites.Planner.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.Category.ConfigKey, Value = LlmCallSites.Category.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.Extraction.ConfigKey, Value = LlmCallSites.Extraction.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.Relevance.ConfigKey, Value = LlmCallSites.Relevance.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.Analyst.ConfigKey, Value = LlmCallSites.Analyst.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.Synthesis.ConfigKey, Value = LlmCallSites.Synthesis.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.BrandReputation.ConfigKey, Value = LlmCallSites.BrandReputation.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.EnrichModel.ConfigKey, Value = LlmCallSites.EnrichModel.DefaultModel, Type = "string" },
 
         // Per-provider pricing (USD) — drives the CostEstimator; spend is metered + charged to credits,
         // never used to cap/cancel a running job (R1).
