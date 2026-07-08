@@ -632,6 +632,8 @@ builder.Services.AddSingleton<MonitorService>();
 // /status page: HTTP probes against each provider's host + last-search lookup.
 builder.Services.AddHttpClient();
 builder.Services.AddTransient<IStatusService, StatusService>();
+// Live OpenRouter model catalogue for the admin per-call-site model picker (fetched, briefly cached).
+builder.Services.AddSingleton<IOpenRouterCatalog, OpenRouterCatalog>();
 // QA-only raw provider diagnostics (gated by DIAGNOSTICS_ENABLED — off in production).
 builder.Services.AddScoped<IProviderDiagnostics, ProviderDiagnostics>();
 
