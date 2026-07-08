@@ -281,6 +281,29 @@
     </MudPaper>
 }
 
+@if (Model.RatedReviews.Count > 0)
+{
+    <MudPaper Outlined="true" Elevation="0" Class="pa-4 mt-4">
+        @SectionHeader(Icons.Material.Filled.Star, $"Buyer reviews ({Model.RatedReviews.Count})")
+        @foreach (var review in Model.RatedReviews)
+        {
+            <div class="mb-3">
+                @if (review.Rating is { } r)
+                {
+                    <MudText Typo="Typo.body2" Class="d-flex align-center" Style="gap:4px;">
+                        <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small" Color="Color.Warning" />@r.ToString("0.0")
+                    </MudText>
+                }
+                <MudText Typo="Typo.body2" Class="d-block mt-1" dir="@Catalog.Dir(review.Text)">@review.Text</MudText>
+                @if (!string.IsNullOrWhiteSpace(review.Author))
+                {
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">— @review.Author</MudText>
+                }
+            </div>
+        }
+    </MudPaper>
+}
+
 @if (Model.Mentions.Count > 0)
 {
     <MudPaper Outlined="true" Elevation="0" Class="pa-4 mt-4">
