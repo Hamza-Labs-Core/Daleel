@@ -301,14 +301,12 @@
   <data name="Progress.Researching" xml:space="preserve"><value>Daleel is researching…</value></data>
   <data name="Progress.Complete" xml:space="preserve"><value>Research complete</value></data>
   <!-- Search progress stepper labels (SearchProgress.razor) -->
-  <data name="Progress.Step.Analyzing" xml:space="preserve"><value>Analyzing query</value></data>
-  <data name="Progress.Step.Vault" xml:space="preserve"><value>Checking vault</value></data>
-  <data name="Progress.Step.Web" xml:space="preserve"><value>Searching web</value></data>
-  <data name="Progress.Step.Extract" xml:space="preserve"><value>Extracting products</value></data>
-  <data name="Progress.Step.Profiles" xml:space="preserve"><value>Building profiles</value></data>
-  <data name="Progress.Step.Stores" xml:space="preserve"><value>Finding stores</value></data>
-  <data name="Progress.Step.Compare" xml:space="preserve"><value>Comparing prices</value></data>
-  <data name="Progress.Step.Done" xml:space="preserve"><value>Done</value></data>
+  <data name="Progress.Step.Analyzing" xml:space="preserve"><value>Understanding your search</value></data>
+  <data name="Progress.Step.Web" xml:space="preserve"><value>Scanning the market</value></data>
+  <data name="Progress.Step.Extract" xml:space="preserve"><value>Gathering your options</value></data>
+  <data name="Progress.Step.Profiles" xml:space="preserve"><value>Digging into the details</value></data>
+  <data name="Progress.Step.Compare" xml:space="preserve"><value>Weighing your options</value></data>
+  <data name="Progress.Step.Done" xml:space="preserve"><value>Ready</value></data>
   <!-- Compact mobile stepper: position + completed-count summaries -->
   <data name="Progress.StepCount" xml:space="preserve"><value>Step {0} of {1}</value></data>
   <data name="Progress.StepsComplete" xml:space="preserve"><value>{0} of {1} steps complete</value></data>
@@ -321,54 +319,54 @@
   <data name="Progress.Noun.Comparison" xml:space="preserve"><value>a comparison</value></data>
   <data name="Progress.Noun.Answers" xml:space="preserve"><value>answers</value></data>
   <!-- Live activity-feed messages -->
-  <data name="Progress.Msg.Strategy" xml:space="preserve"><value>Generating search strategy…</value></data>
-  <data name="Progress.Msg.Analyzing" xml:space="preserve"><value>Analyzing your request…</value></data>
-  <data name="Progress.Msg.Market" xml:space="preserve"><value>Focusing on the {0} market…</value></data>
-  <data name="Progress.Msg.LookingFor" xml:space="preserve"><value>Looking for {0}: {1}</value></data>
-  <data name="Progress.Msg.Vault" xml:space="preserve"><value>Checking our answers vault…</value></data>
-  <data name="Progress.Msg.CacheHit" xml:space="preserve"><value>⚡ Loaded from cache — an identical search ran recently.</value></data>
-  <data name="Progress.Msg.Expanding" xml:space="preserve"><value>Expanding the search across providers…</value></data>
-  <data name="Progress.Msg.Gathered" xml:space="preserve"><value>Gathered {0} web, {1} shopping and {2} store sources.</value></data>
-  <data name="Progress.Msg.Reading" xml:space="preserve"><value>Found {0} sources — reading and extracting…</value></data>
-  <data name="Progress.Msg.Identifying" xml:space="preserve"><value>Identifying brands and models…</value></data>
-  <data name="Progress.Msg.Extracted" xml:space="preserve"><value>Extracted {0} product(s) from {1} brand(s).</value></data>
-  <data name="Progress.Msg.BuildingProfiles" xml:space="preserve"><value>Building profiles for {0} brand(s) and {1} store(s)…</value></data>
-  <data name="Progress.Msg.BuildingBrand" xml:space="preserve"><value>Building profile for {0}…</value></data>
-  <data name="Progress.Msg.VerifyingStore" xml:space="preserve"><value>Verifying {0} on Google Maps…</value></data>
-  <data name="Progress.Msg.Enriched" xml:space="preserve"><value>Enriched {0} brand(s); verified {1} store(s) on Google Maps.</value></data>
-  <data name="Progress.Msg.Ranking" xml:space="preserve"><value>Ranking {0} product(s) from {1} brand(s)…</value></data>
-  <data name="Progress.Msg.Reviewing" xml:space="preserve"><value>Reviewing content quality…</value></data>
-  <data name="Progress.Msg.Saving" xml:space="preserve"><value>Saving results…</value></data>
-  <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>Loaded a saved answer.</value></data>
-  <data name="Progress.Msg.DoneCount" xml:space="preserve"><value>Done! Found {0} product(s) from {1} brand(s).</value></data>
-  <data name="Progress.Msg.Done" xml:space="preserve"><value>Done!</value></data>
+  <data name="Progress.Msg.Strategy" xml:space="preserve"><value>Mapping out where to look…</value></data>
+  <data name="Progress.Msg.Analyzing" xml:space="preserve"><value>Making sense of your search…</value></data>
+  <data name="Progress.Msg.Market" xml:space="preserve"><value>Focusing on {0}…</value></data>
+  <data name="Progress.Msg.LookingFor" xml:space="preserve"><value>On the hunt for {0}: {1}</value></data>
+  <data name="Progress.Msg.Vault" xml:space="preserve"><value>Getting started…</value></data>
+  <data name="Progress.Msg.CacheHit" xml:space="preserve"><value>Picking up where we left off…</value></data>
+  <data name="Progress.Msg.Expanding" xml:space="preserve"><value>Casting a wide net…</value></data>
+  <data name="Progress.Msg.Gathered" xml:space="preserve"><value>Pulling in what's out there…</value></data>
+  <data name="Progress.Msg.Reading" xml:space="preserve"><value>Following up on {0} leads…</value></data>
+  <data name="Progress.Msg.Identifying" xml:space="preserve"><value>Spotting the brands and models…</value></data>
+  <data name="Progress.Msg.Extracted" xml:space="preserve"><value>Rounded up {0} option(s) across {1} brand(s).</value></data>
+  <data name="Progress.Msg.BuildingProfiles" xml:space="preserve"><value>Getting the story behind {0} brand(s) and {1} store(s)…</value></data>
+  <data name="Progress.Msg.BuildingBrand" xml:space="preserve"><value>Getting to know {0}…</value></data>
+  <data name="Progress.Msg.VerifyingStore" xml:space="preserve"><value>Checking out {0}…</value></data>
+  <data name="Progress.Msg.Enriched" xml:space="preserve"><value>Got the background on {0} brand(s) and {1} store(s).</value></data>
+  <data name="Progress.Msg.Ranking" xml:space="preserve"><value>Weighing {0} option(s) across {1} brand(s)…</value></data>
+  <data name="Progress.Msg.Reviewing" xml:space="preserve"><value>Double-checking everything…</value></data>
+  <data name="Progress.Msg.Saving" xml:space="preserve"><value>Putting it all together…</value></data>
+  <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>Bringing your results together…</value></data>
+  <data name="Progress.Msg.DoneCount" xml:space="preserve"><value>All set — {0} option(s) across {1} brand(s).</value></data>
+  <data name="Progress.Msg.Done" xml:space="preserve"><value>All set!</value></data>
 
   <!-- Per-activity feed lines (previously hardcoded English Log() calls; now localized signals). -->
-  <data name="Progress.Msg.AnalyzingCategory" xml:space="preserve"><value>Analyzing {0} market requirements…</value></data>
-  <data name="Progress.Msg.LookingForStores" xml:space="preserve"><value>Looking for {0}…</value></data>
-  <data name="Progress.Msg.ExtractingSpecs" xml:space="preserve"><value>Extracting {0}…</value></data>
-  <data name="Progress.Msg.EnrichedBrandsCount" xml:space="preserve"><value>Enriched {0} brand(s).</value></data>
-  <data name="Progress.Msg.VerifiedStoresCount" xml:space="preserve"><value>Verified {0} store(s) on Google Maps.</value></data>
-  <data name="Progress.Msg.DeepDiving" xml:space="preserve"><value>Deep-diving {0} product(s) in parallel…</value></data>
-  <data name="Progress.Msg.FindingBrandSite" xml:space="preserve"><value>Finding {0}'s local site…</value></data>
-  <data name="Progress.Msg.ScrapingBrandCatalog" xml:space="preserve"><value>Scraping {0}'s catalogue via Context.dev…</value></data>
-  <data name="Progress.Msg.BuiltReputation" xml:space="preserve"><value>Built reputation profile for {0}.</value></data>
-  <data name="Progress.Msg.SavedBrandProfile" xml:space="preserve"><value>Saved {0}'s profile.</value></data>
-  <data name="Progress.Msg.LocatedLogoNoStorage" xml:space="preserve"><value>Located the {0} logo (object storage not configured).</value></data>
-  <data name="Progress.Msg.StoredLogo" xml:space="preserve"><value>Stored the {0} logo to R2.</value></data>
-  <data name="Progress.Msg.LocatedLogoNoHost" xml:space="preserve"><value>Located the {0} logo (R2 images host not set — kept the source URL).</value></data>
+  <data name="Progress.Msg.AnalyzingCategory" xml:space="preserve"><value>Getting a feel for {0}…</value></data>
+  <data name="Progress.Msg.LookingForStores" xml:space="preserve"><value>Tracking down {0}…</value></data>
+  <data name="Progress.Msg.ExtractingSpecs" xml:space="preserve"><value>Digging into {0}…</value></data>
+  <data name="Progress.Msg.EnrichedBrandsCount" xml:space="preserve"><value>Got the background on {0} brand(s).</value></data>
+  <data name="Progress.Msg.VerifiedStoresCount" xml:space="preserve"><value>Checked out {0} store(s).</value></data>
+  <data name="Progress.Msg.DeepDiving" xml:space="preserve"><value>Taking a closer look at {0} option(s)…</value></data>
+  <data name="Progress.Msg.FindingBrandSite" xml:space="preserve"><value>Looking up {0}…</value></data>
+  <data name="Progress.Msg.ScrapingBrandCatalog" xml:space="preserve"><value>Browsing {0}'s lineup…</value></data>
+  <data name="Progress.Msg.BuiltReputation" xml:space="preserve"><value>Got a read on {0}.</value></data>
+  <data name="Progress.Msg.SavedBrandProfile" xml:space="preserve"><value>All caught up on {0}.</value></data>
+  <data name="Progress.Msg.LocatedLogoNoStorage" xml:space="preserve"><value>Found {0}'s logo.</value></data>
+  <data name="Progress.Msg.StoredLogo" xml:space="preserve"><value>Found {0}'s logo.</value></data>
+  <data name="Progress.Msg.LocatedLogoNoHost" xml:space="preserve"><value>Found {0}'s logo.</value></data>
   <data name="Progress.Msg.LookingUpStore" xml:space="preserve"><value>Looking up {0}…</value></data>
-  <data name="Progress.Msg.ScrapingStoreSite" xml:space="preserve"><value>Scraping {0}'s site via Context.dev…</value></data>
-  <data name="Progress.Msg.VerifyingStoreMaps" xml:space="preserve"><value>Verifying {0} on Google Maps…</value></data>
-  <data name="Progress.Msg.SavedStoreProfile" xml:space="preserve"><value>Saved {0}'s profile.</value></data>
-  <data name="Progress.Msg.ReadingStoreCatalog" xml:space="preserve"><value>Reading {0}'s catalogue for prices…</value></data>
-  <data name="Progress.Msg.FoundPricedProducts" xml:space="preserve"><value>Found {0} priced product(s) at {1}.</value></data>
-  <data name="Progress.Msg.FetchingSpecs" xml:space="preserve"><value>Fetching official specs for {0}…</value></data>
-  <data name="Progress.Msg.ComparingItemPrices" xml:space="preserve"><value>Comparing {0} store price(s) for {1}…</value></data>
-  <data name="Progress.Msg.SavedDeepDive" xml:space="preserve"><value>Saved deep-dive for {0}.</value></data>
-  <data name="Progress.Msg.IdentifiedItem" xml:space="preserve"><value>Identified {0} as “{1}” ({2}, {3}).</value></data>
-  <data name="Progress.Msg.MergedSpecs" xml:space="preserve"><value>Merged {0} source(s) into {1} canonical spec(s) for {2}.</value></data>
-  <data name="Progress.Msg.SavedFinalSpecs" xml:space="preserve"><value>Saved canonical spec sheet for {0} ({1} spec(s)).</value></data>
+  <data name="Progress.Msg.ScrapingStoreSite" xml:space="preserve"><value>Browsing {0}…</value></data>
+  <data name="Progress.Msg.VerifyingStoreMaps" xml:space="preserve"><value>Checking out {0}…</value></data>
+  <data name="Progress.Msg.SavedStoreProfile" xml:space="preserve"><value>All caught up on {0}.</value></data>
+  <data name="Progress.Msg.ReadingStoreCatalog" xml:space="preserve"><value>Checking prices at {0}…</value></data>
+  <data name="Progress.Msg.FoundPricedProducts" xml:space="preserve"><value>Found {0} priced option(s) at {1}.</value></data>
+  <data name="Progress.Msg.FetchingSpecs" xml:space="preserve"><value>Looking up the details on {0}…</value></data>
+  <data name="Progress.Msg.ComparingItemPrices" xml:space="preserve"><value>Comparing prices across {0} shop(s) for {1}…</value></data>
+  <data name="Progress.Msg.SavedDeepDive" xml:space="preserve"><value>All caught up on {0}.</value></data>
+  <data name="Progress.Msg.IdentifiedItem" xml:space="preserve"><value>Got the details on {0}.</value></data>
+  <data name="Progress.Msg.MergedSpecs" xml:space="preserve"><value>Pulling the details together…</value></data>
+  <data name="Progress.Msg.SavedFinalSpecs" xml:space="preserve"><value>All done with {0}'s details.</value></data>
 
   <data name="Sources.Label" xml:space="preserve"><value>Sources</value></data>
 
