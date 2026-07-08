@@ -315,11 +315,13 @@ public sealed partial class AgentService
 
         if (bundle.WebResults.Count > 0)
         {
-            // Feed the extractor a WIDE slice of the discovered web results (owner: "scale to hundreds"):
-            // the more real listings/articles it sees, the more distinct models it can pull out. Raised
-            // from 24; the extraction itself is now uncapped (see PromptTemplates.ExtractProducts).
+            // Extraction is UNCAPPED (owner: "scale to hundreds") but it's still ONE monolithic LLM call,
+            // and feeding it a huge context made that single call hang past the deadline (measured: 80
+            // inputs → stuck >10 min). Until extraction is CHUNKED into parallel per-source calls, keep the
+            // input modest so the uncapped call still completes. 30 > the old 24; the real scale win needs
+            // the chunked-parallel-extraction + brand-catalogue-as-source rework.
             var classified = bundle.WebResults
-                .Take(80)
+                .Take(30)
                 .Select(r => (r, type: ResultClassifier.Classify(r.Url, r.Title, r.Snippet)))
                 .ToList();
 
