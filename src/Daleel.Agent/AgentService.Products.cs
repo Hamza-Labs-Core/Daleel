@@ -1298,7 +1298,7 @@ public sealed partial class AgentService
             {
                 text = await _llm.CompleteTextAsync(
                     PromptTemplates.RelevanceGateSystem,
-                    PromptTemplates.RelevanceGate(target, labels),
+                    PromptTemplates.RelevanceGate(target, labels, _options.RelevancePolicy.Negatives),
                     cancellationToken).ConfigureAwait(false);
             }
 

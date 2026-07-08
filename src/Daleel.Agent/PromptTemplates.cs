@@ -333,10 +333,31 @@ public static class PromptTemplates
     /// lists only the indices to DROP, so an item the model overlooks fails open (kept), and the output
     /// stays tiny regardless of how many items are kept.
     /// </summary>
-    public static string RelevanceGate(string target, IReadOnlyList<string> items)
+    public static string RelevanceGate(string target, IReadOnlyList<string> items) =>
+        RelevanceGate(target, items, Array.Empty<RelevanceNegative>());
+
+    /// <summary>
+    /// Relevance gate with LEARNED negatives: examples shoppers previously flagged as not-relevant to this
+    /// search, injected as ADVISORY calibration (the gate still judges each item on its own — a resemblance
+    /// alone is not a drop, which guards against a runaway feedback loop).
+    /// </summary>
+    public static string RelevanceGate(
+        string target, IReadOnlyList<string> items, IReadOnlyList<RelevanceNegative> negatives)
     {
         var sb = new StringBuilder();
         sb.Append("The shopper is looking for: ").AppendLine(target);
+        if (negatives.Count > 0)
+        {
+            sb.AppendLine("Shoppers previously flagged these as NOT what they wanted for this search — use them to " +
+                "CALIBRATE, but judge each item on its OWN merits (do NOT drop an item merely because it resembles one):");
+            foreach (var n in negatives.Take(20))
+            {
+                sb.Append("- ").Append(n.Label);
+                if (!string.IsNullOrWhiteSpace(n.Reason)) sb.Append(" (").Append(n.Reason).Append(')');
+                sb.AppendLine();
+            }
+        }
+
         sb.AppendLine("For each numbered item, decide: is the item ITSELF one of these? Accessories, consumables, " +
             "parts, and different product types are NOT. Also drop any item that is haram/immodest content.");
         sb.AppendLine("Items:");

@@ -42,6 +42,10 @@ public sealed record AgentRequest
     /// <summary>Moderation thresholds, typically feedback-tuned via <c>IModerationPolicyProvider</c>.</summary>
     public HalalPolicy? HalalPolicy { get; init; }
 
+    /// <summary>Learned relevance negatives (items previously flagged not-relevant to this query), resolved
+    /// from the RelevanceFlag store by the search runner and fed into the relevance gate.</summary>
+    public RelevancePolicySnapshot? RelevanceNegatives { get; init; }
+
     /// <summary>Vision screening of individual result images (flagged images are stripped, items kept).</summary>
     public IHalalImageClassifier? ImageClassifier { get; init; }
 
@@ -240,6 +244,7 @@ public sealed class AgentFactory : IAgentFactory
             DefaultGeo = request.Geo,
             Log = request.Log,
             Events = request.Events,
+            RelevancePolicy = request.RelevanceNegatives ?? RelevancePolicySnapshot.Empty,
             Language = request.Language,
             MaxQueriesPerKind = EnvInt("SEARCH_MAX_QUERIES_PER_KIND", 24),          // was 14
             MaxUrlsToRead = EnvInt("SEARCH_MAX_URLS_TO_READ", 20),                  // was 6

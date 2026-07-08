@@ -96,6 +96,10 @@ public sealed class AgentOptions
     /// <summary>How many listing PAGES to crawl per store (pagination): page 1 + up to depth-1 derived next
     /// pages, stop-on-empty. 1 = page 1 only (no pagination).</summary>
     public int StorePageDepth { get; init; } = 3;
+
+    /// <summary>Learned relevance negatives (items previously flagged not-relevant to this query) fed into the
+    /// relevance gate as advisory calibration. Empty by default; the search runner attaches the snapshot.</summary>
+    public RelevancePolicySnapshot RelevancePolicy { get; init; } = RelevancePolicySnapshot.Empty;
 }
 
 /// <summary>

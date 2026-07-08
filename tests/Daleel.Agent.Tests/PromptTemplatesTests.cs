@@ -162,4 +162,26 @@ public class PromptTemplatesTests
         prompt.Should().Contain("availability");
         prompt.Should().Contain("description");
     }
+
+    [Fact]
+    public void RelevanceGate_WithNegatives_InjectsAdvisoryCalibrationBlock()
+    {
+        var prompt = PromptTemplates.RelevanceGate("pants", new[] { "Nike Socks", "Levi 501" },
+            new[] { new RelevanceNegative("socks", "not pants") });
+
+        prompt.Should().Contain("previously flagged");
+        prompt.Should().Contain("socks (not pants)");
+        // Runaway-loop guard: judge each item on its own merits, not on resemblance.
+        prompt.Should().Contain("OWN merits");
+        prompt.Should().Contain("\"drop\"");
+    }
+
+    [Fact]
+    public void RelevanceGate_NoNegatives_OmitsCalibrationBlock()
+    {
+        var prompt = PromptTemplates.RelevanceGate("pants", new[] { "Levi 501" });
+
+        prompt.Should().NotContain("previously flagged");
+        prompt.Should().Contain("\"drop\"");
+    }
 }
