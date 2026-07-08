@@ -311,8 +311,11 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         }
 
         var searchId = job.Id.ToString();
-        var events = new List<PipelineEvent>(collector.Calls.Count + buffered.Count);
-        events.AddRange(collector.Calls.Select(c => PipelineEventFactory.FromApiCall(c, searchId)));
+        // Provider-call firehose events (LLM/search/scrape/places) — NOT tee'd live (open decision:
+        // provider-call cost stays end-of-run), so these still bridge to the timeline below.
+        var providerEvents = collector.Calls.Select(c => PipelineEventFactory.FromApiCall(c, searchId)).ToList();
+        var events = new List<PipelineEvent>(providerEvents.Count + buffered.Count);
+        events.AddRange(providerEvents);
         events.AddRange(buffered);
 
         if (events.Count == 0)
@@ -328,10 +331,16 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         if (_systemLog.IsEnabled)
         {
             var userHash = Anonymizer.HashUserId(job.UserId);
-            var timeline = events
+            // ONLY the provider-call events — the buffered semantic events (cache/profile/item/…) are now
+            // emitted LIVE via the AmbientSearchEvents tee in {Sub}SearchPipelineState.RecordEvent, so
+            // re-projecting `buffered` here would DOUBLE-write them (SystemEvent has no idempotency key).
+            var timeline = providerEvents
                 .Select(e => SystemEventProjection.FromPipelineEvent(e, userHash))
                 .ToList();
-            await _systemLog.PublishManyAsync(timeline, CancellationToken.None).ConfigureAwait(false);
+            if (timeline.Count > 0)
+            {
+                await _systemLog.PublishManyAsync(timeline, CancellationToken.None).ConfigureAwait(false);
+            }
         }
     }
 

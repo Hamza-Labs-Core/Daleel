@@ -1,3 +1,4 @@
+using Daleel.Core.Observability;
 using Daleel.Web.Events;
 
 namespace Daleel.Web.Pipeline.SubWorkflows;
@@ -28,7 +29,19 @@ public abstract class SubWorkflowState : ISearchScopedState
     public void RecordEvent(
         string category, string eventType, string provider,
         bool success = true, decimal cost = 0m, long durationMs = 0,
-        IReadOnlyDictionary<string, object?>? metadata = null) =>
+        IReadOnlyDictionary<string, object?>? metadata = null)
+    {
         Events.Add(PipelineEventFactory.Custom(
             category, eventType, provider, SearchId, success, cost, durationMs, metadata));
+
+        // Tee LIVE to the per-search timeline (see SearchPipelineState.RecordEvent) so sub-workflow
+        // (brand/store/item) events also appear mid-flight; the end-of-run bridge skips these.
+        AmbientSearchEvents.Sink?.Emit(new SearchEvent(
+            SystemEventProjection.CategoryOf(category, eventType),
+            eventType,
+            string.IsNullOrWhiteSpace(provider) ? eventType : $"{eventType} · {provider}",
+            success ? SearchEventLevel.Info : SearchEventLevel.Error,
+            string.IsNullOrWhiteSpace(provider) ? "pipeline" : $"pipeline/{provider}",
+            metadata));
+    }
 }
