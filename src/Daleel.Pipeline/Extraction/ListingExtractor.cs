@@ -48,6 +48,8 @@ public static class ListingExtractor
                         availability = new { type = "string" },
                         seller = new { type = "string" },
                         condition = new { type = "string" },
+                        gtin = new { type = "string" },
+                        mpn = new { type = "string" },
                         reviews = new
                         {
                             type = "array",
@@ -157,7 +159,8 @@ public static class ListingExtractor
                 Condition = NormalizeCondition(Str(item, "condition")),
                 OriginalPrice = Num(item, "original_price", "originalPrice", "was_price"),
                 Seller = Str(item, "seller"),
-                RatedReviews = ParseReviews(item)
+                RatedReviews = ParseReviews(item),
+                Sku = Str(item, "gtin", "mpn", "upc", "ean")
             });
         }
 
@@ -265,6 +268,14 @@ public static class ListingExtractor
     /// </summary>
     public static string DedupKey(ProductListing listing)
     {
+        // A strong global SKU (GTIN/UPC/EAN/MPN) identifies the product across stores — group by it first,
+        // so the same item from different sellers collapses into one model even when its name/model text
+        // differs. Store-internal codes are not treated as SKUs (see ProductIdentity.HasStrongSku).
+        if (ProductIdentity.HasStrongSku(listing.Sku))
+        {
+            return $"k:{ProductIdentity.NormalizeSku(listing.Sku)}";
+        }
+
         if (!string.IsNullOrWhiteSpace(listing.Model))
         {
             // Normalize Arabic orthography then case-fold (the normalizer leaves Latin case as-is),

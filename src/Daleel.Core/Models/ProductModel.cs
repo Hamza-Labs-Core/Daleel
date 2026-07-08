@@ -92,6 +92,11 @@ public record ProductModel
     public string Name { get; init; } = string.Empty;
     public string? Brand { get; init; }
     public string? Model { get; init; }
+
+    /// <summary>Global product id (GTIN/UPC/EAN/MPN) when known — merges the same product across stores.
+    /// A stored attribute; routing/persistence keys stay brand+model to avoid identity drift.</summary>
+    public string? Sku { get; init; }
+
     public string? ProductLine { get; init; }
     /// <summary>The primary/first photo (kept for callers that want a single image; enrichment fills it).</summary>
     public string? ImageUrl { get; init; }

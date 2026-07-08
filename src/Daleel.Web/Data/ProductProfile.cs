@@ -24,6 +24,10 @@ public sealed class ProductProfile
     public string? Brand { get; set; }
     public string? Model { get; set; }
 
+    /// <summary>Global product id (GTIN/UPC/EAN/MPN) when known — a stored attribute; the upsert key stays
+    /// <see cref="NameKey"/> (brand+model) to avoid identity drift.</summary>
+    public string? Sku { get; set; }
+
     /// <summary>The scraped detail (markdown specs/description) distilled from the offer page.</summary>
     public string? Details { get; set; }
 

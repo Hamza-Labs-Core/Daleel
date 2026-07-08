@@ -255,7 +255,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 new Dictionary<string, object?> { ["item"] = r.m.Name, ["url"] = r.url });
             await SafeUpsert(new ProductProfile
             {
-                Name = r.m.Name, Brand = r.m.Brand, Model = r.m.Model, NameKey = r.key,
+                Name = r.m.Name, Brand = r.m.Brand, Model = r.m.Model, Sku = r.m.Sku, NameKey = r.key,
                 Details = r.content, SourceUrl = r.url, LastRefreshed = now
             }, ct);
         }
@@ -410,7 +410,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         await SafeUpsert(new ProductProfile
         {
-            Name = item.Name, Brand = item.Brand, Model = item.Model, NameKey = key,
+            Name = item.Name, Brand = item.Brand, Model = item.Model, Sku = item.Sku, NameKey = key,
             Details = content, SourceUrl = url, LastRefreshed = now
         }, ct);
         return WithDetail(item, content!);

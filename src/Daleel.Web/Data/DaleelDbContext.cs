@@ -124,6 +124,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.HasIndex(x => new { x.UserHash, x.QueryKey, x.DedupKey }).IsUnique();
         });
 
+        // First-class SKU: a stored global-id attribute on the item profile (the upsert key stays NameKey).
+        builder.Entity<ProductProfile>().Property(p => p.Sku).HasMaxLength(100);
+
         builder.Entity<Brand>(e =>
         {
             // Upsert/lookup is an exact match on the normalized name, so it's unique + indexed.

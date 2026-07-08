@@ -148,6 +148,10 @@ public record ProductListing
     /// <summary>Buyer reviews scraped from this listing's product page (rating/text), when present.</summary>
     public IReadOnlyList<ProductReview> RatedReviews { get; init; } = Array.Empty<ProductReview>();
 
+    /// <summary>Global product id (GTIN/UPC/EAN/MPN) when the listing carried one — used to merge the same
+    /// product across stores. Store-internal codes are deliberately not captured here.</summary>
+    public string? Sku { get; init; }
+
     /// <summary>Price as a <see cref="Money"/>, when both amount and currency are present.</summary>
     public Money? AsMoney =>
         Price is { } p && !string.IsNullOrWhiteSpace(Currency) ? new Money(p, Currency!) : null;

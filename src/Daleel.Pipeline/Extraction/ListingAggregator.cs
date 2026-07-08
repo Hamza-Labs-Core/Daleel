@@ -53,7 +53,8 @@ public static class ListingAggregator
                 RatingCount = ratingCount,
                 Specs = MergeSpecs(items),
                 Offers = offers,
-                RatedReviews = items.SelectMany(i => i.RatedReviews).DistinctBy(r => r.Text).Take(20).ToList()
+                RatedReviews = items.SelectMany(i => i.RatedReviews).DistinctBy(r => r.Text).Take(20).ToList(),
+                Sku = items.Select(i => i.Sku).FirstOrDefault(ProductIdentity.HasStrongSku)
             });
         }
 
