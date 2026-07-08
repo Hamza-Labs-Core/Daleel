@@ -149,8 +149,9 @@ public class PromptTemplatesTests
         // Bilingual store-finder phrasing (Arabic "متجر" / "للبيع") must be requested.
         prompt.Should().Contain("متجر");
         prompt.Should().Contain("للبيع");
-        // And a concrete push for 8–10 diverse queries so a single generic query can't starve coverage.
-        prompt.Should().Contain("8–10");
+        // And a concrete push for a broad diverse query set (16–20) so a single generic query can't starve
+        // coverage — the "scale to hundreds" breadth lever (discover more distinct brand/store sources).
+        prompt.Should().Contain("16–20");
     }
 
     [Fact]
