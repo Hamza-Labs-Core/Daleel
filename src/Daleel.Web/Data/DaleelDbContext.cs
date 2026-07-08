@@ -63,6 +63,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<EntityRecord> EntityRecords => Set<EntityRecord>();
     public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
     public DbSet<TranslationCacheEntry> TranslationCache => Set<TranslationCacheEntry>();
+    public DbSet<RelevanceFlag> RelevanceFlags => Set<RelevanceFlag>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -100,6 +101,28 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
         builder.Entity<ApplicationUser>()
             .Property(u => u.EmailSearchResults)
             .HasDefaultValue(true);
+
+        // Relevancy feedback ("not relevant" flags) — the raw signal the learning loop reads. CreatedAt is
+        // Unix-ms bigint like the other timestamps; unique on (UserHash, QueryKey, DedupKey) so a re-flag is
+        // idempotent; indexed on (QueryKey, DedupKey) for the per-query negative lookup.
+        builder.Entity<RelevanceFlag>(e =>
+        {
+            e.Property(x => x.Query).HasMaxLength(400);
+            e.Property(x => x.QueryKey).HasMaxLength(400);
+            e.Property(x => x.Target).HasMaxLength(200);
+            e.Property(x => x.Geo).HasMaxLength(64);
+            e.Property(x => x.DedupKey).HasMaxLength(300);
+            e.Property(x => x.StableId).HasMaxLength(64);
+            e.Property(x => x.Brand).HasMaxLength(200);
+            e.Property(x => x.Model).HasMaxLength(200);
+            e.Property(x => x.Name).HasMaxLength(400);
+            e.Property(x => x.Reason).HasMaxLength(300);
+            e.Property(x => x.UserHash).HasMaxLength(64);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            e.HasIndex(x => new { x.QueryKey, x.DedupKey });
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => new { x.UserHash, x.QueryKey, x.DedupKey }).IsUnique();
+        });
 
         builder.Entity<Brand>(e =>
         {
