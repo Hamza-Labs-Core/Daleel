@@ -1,4 +1,5 @@
 using Daleel.Core.Models;
+using Daleel.Core.Observability;
 using Daleel.Search.Abstractions;
 
 namespace Daleel.Agent;
@@ -71,6 +72,14 @@ public sealed class AgentOptions
 
     /// <summary>Optional progress logger.</summary>
     public Action<string>? Log { get; init; }
+
+    /// <summary>
+    /// Optional live per-search event sink. When set, pipeline steps emit semantic <see cref="SearchEvent"/>s
+    /// (discovery counts, scrape fallbacks, per-page extraction, …) that the Web layer persists to the
+    /// timeline. Resolved by each emitter as <c>Events ?? AmbientSearchEvents.Sink</c>, so the ambient
+    /// carrier covers DI-resolved collaborators too.
+    /// </summary>
+    public ISearchEventSink? Events { get; init; }
 }
 
 /// <summary>

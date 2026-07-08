@@ -44,6 +44,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private readonly ICacheStore _cache;
     private readonly IEventStore _eventStore;
     private readonly ISystemEventLog _systemLog;
+    private readonly ISearchEventSinkFactory _sinkFactory;
     private readonly ISearchEmailNotifier _emailNotifier;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IModerationPolicyProvider _moderationPolicy;
@@ -54,7 +55,8 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     public WorkflowSearchRunner(
         IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
         IFilteredContentLogRepository filteredLog, ICacheStore cache, IEventStore eventStore,
-        ISystemEventLog systemLog, ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
+        ISystemEventLog systemLog, ISearchEventSinkFactory sinkFactory,
+        ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
         IModerationPolicyProvider moderationPolicy, IHalalImageClassifier imageClassifier,
         ILogger<WorkflowSearchRunner> logger,
         IConversationBroadcaster? broadcaster = null)
@@ -68,6 +70,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         _imageClassifier = imageClassifier;
         _eventStore = eventStore;
         _systemLog = systemLog;
+        _sinkFactory = sinkFactory;
         _emailNotifier = emailNotifier;
         _scopeFactory = scopeFactory;
         _logger = logger;
@@ -95,6 +98,11 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // through awaits and sub-workflow scopes; restored on dispose.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
+        // Live per-search event sink: pipeline steps emit semantic timeline events through the ambient
+        // carrier (same AsyncLocal reach as the metering observer) so this search's events appear live.
+        var eventSink = _sinkFactory.For(job.Id.ToString(), Anonymizer.HashUserId(job.UserId));
+        using var events = AmbientSearchEvents.Begin(eventSink);
+
         // Admin feedback drives moderation: the active whitelist (undo decisions) and the
         // rating-tuned thresholds ride into the agent with every run. Best-effort by contract.
         var moderation = await _moderationPolicy.GetAsync(ct).ConfigureAwait(false);
@@ -107,6 +115,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var agent = _agents.Build(new AgentRequest
         {
             CallSiteModels = callSiteModels,
+            Events = eventSink,
             Geo = job.Geo,
             Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model,
             Language = language,
@@ -407,10 +416,14 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // components' own HTTP clients into this re-enrichment's collector.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
+        var reEnrichSink = _sinkFactory.For(job.Id.ToString(), Anonymizer.HashUserId(job.UserId));
+        using var eventScope = AmbientSearchEvents.Begin(reEnrichSink);
+
         var callSiteModels = await ResolveCallSiteModelsAsync(ct).ConfigureAwait(false);
         var agent = _agents.Build(new AgentRequest
         {
             CallSiteModels = callSiteModels,
+            Events = reEnrichSink,
             Geo = job.Geo, Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model, Language = language,
             Log = progress, ApiObserver = collector, CostEstimator = estimator, Cache = _cache, CacheTtl = CacheTtl
         });

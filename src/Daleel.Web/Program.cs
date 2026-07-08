@@ -127,6 +127,12 @@ builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.P
 // cross-system feed (search lifecycle, pipeline actions bridged from the firehose, logins, background
 // sweeps, errors) the /admin/timeline page reads. Best-effort like the cost event store above.
 builder.Services.AddSingleton<Daleel.Web.Events.ISystemEventLog, Daleel.Web.Events.PostgresSystemEventLog>();
+// Live per-search event sink: batches SearchEvents (emitted anywhere in the pipeline via the ambient
+// AmbientSearchEvents carrier) and flushes them to the timeline off the hot path, so each search's events
+// appear live instead of only at end-of-run.
+builder.Services.AddSingleton<Daleel.Web.Events.SystemEventWriter>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Daleel.Web.Events.SystemEventWriter>());
+builder.Services.AddSingleton<Daleel.Web.Events.ISearchEventSinkFactory, Daleel.Web.Events.SystemEventSinkFactory>();
 
 // ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
 // ASP.NET encrypts the Identity auth cookie with Data Protection keys. By default those keys live in

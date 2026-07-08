@@ -47,6 +47,9 @@ public sealed record AgentRequest
     /// <summary>Optional observer that records every external API call (timing + cost).</summary>
     public Daleel.Core.Observability.IApiCallObserver? ApiObserver { get; init; }
 
+    /// <summary>Optional live per-search event sink; the pipeline emits semantic timeline events to it.</summary>
+    public Daleel.Core.Observability.ISearchEventSink? Events { get; init; }
+
     /// <summary>Pricing used to estimate per-call cost (defaults to built-in rates).</summary>
     public Daleel.Core.Observability.CostEstimator? CostEstimator { get; init; }
 
@@ -235,6 +238,7 @@ public sealed class AgentFactory : IAgentFactory
         {
             DefaultGeo = request.Geo,
             Log = request.Log,
+            Events = request.Events,
             Language = request.Language,
             MaxQueriesPerKind = EnvInt("SEARCH_MAX_QUERIES_PER_KIND", 24),          // was 14
             MaxUrlsToRead = EnvInt("SEARCH_MAX_URLS_TO_READ", 20),                  // was 6
