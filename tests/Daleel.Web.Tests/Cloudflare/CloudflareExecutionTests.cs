@@ -642,6 +642,8 @@ public class CloudflareExecutionTests
             throw new NotSupportedException();
         public Task<IReadOnlyList<QueryCost>> RecentJobUsageAsync(string userId, int take, CancellationToken ct = default) =>
             throw new NotSupportedException();
+        public Task<IReadOnlyList<CallSiteUsage>> CallSiteUsageAsync(DateTimeOffset since, CancellationToken ct = default) =>
+            throw new NotSupportedException();
         public Task<IReadOnlyList<ProviderUsage>> ProviderUsageAsync(DateTimeOffset since, CancellationToken ct = default) =>
             throw new NotSupportedException();
         public Task<IReadOnlyList<(DateTime Day, decimal Cost)>> CostPerDayAsync(int days, CancellationToken ct = default) =>
