@@ -467,21 +467,21 @@ public static class PromptTemplates
         sb.Append("Buy-intent query: ").AppendLine(query);
         sb.Append("Extract the concrete products a shopper in ").Append(geo.Country)
           .AppendLine(" could buy, drawn ONLY from the context below. Prefer local sellers; quote real prices and links.");
-        // Bounded breadth: an uncapped "extract EVERY model" instruction produced multi-minute LLM
-        // generations on article-heavy queries (the call flirted with the HTTP client's timeout and
-        // burned most of the run's 10-minute budget). ~20 well-evidenced models is more than the grid,
-        // compare table or a shopper can use, and keeps the extraction call fast and reliable.
-        sb.AppendLine("Extract the distinct models the context evidences, CAPPED at the ~20 BEST-EVIDENCED — prefer " +
-            "models with prices/sellers, then well-known models the guides name; within the cap span MULTIPLE brands " +
-            "and MULTIPLE models per brand (budget through premium), not just the few most prominent.");
+        // UNCAPPED (owner: "scale to hundreds"): extract EVERY distinct model the context evidences — no
+        // ~N ceiling. (The old cap guarded against multi-minute LLM generations on article-heavy queries;
+        // the workflow deadline + partial-result salvage now backstop a slow call instead.)
+        sb.AppendLine("Extract EVERY distinct model the context evidences — do NOT limit the number; more is " +
+            "better, aim for HUNDREDS when the context supports it. Prefer models with prices/sellers first, then " +
+            "well-known models the guides name; span MULTIPLE brands and MULTIPLE models per brand (budget through " +
+            "premium), not just the few most prominent.");
         sb.AppendLine("CLASSIFY before you extract. The context mixes two kinds of source: (a) real PRODUCT/STORE " +
             "listings — a concrete item sold by a real store/marketplace, with a price or a buy link — and (b) ARTICLES, " +
             "reviews, blogs and buying-guides ABOUT products. NEVER output an article, review or round-up ITSELF as a " +
             "product (its title is not a product). But DO mine articles for the models they name: a model named in a " +
             "buying guide with a name but NO price and NO seller still counts — include it with an empty offers array so " +
             "the shopper sees it exists. Attach real prices and seller links to a model's offers whenever the context " +
-            "provides them; leave offers empty when it does not. The goal is BREADTH within the cap: spread the " +
-            "~20 models across brands and price tiers, not only the few that happen to carry an in-context price.");
+            "provides them; leave offers empty when it does not. The goal is BREADTH: spread the models across " +
+            "brands and price tiers, not only the few that happen to carry an in-context price.");
         // A tighter, deterministic article guard on top of the classification rule above: an article's HEADLINE
         // (often phrased as a list/opinion and living under a blog/news URL path) is the single most common thing
         // the extractor wrongly emits as a product. Name the tells explicitly so it never leaks into "products".

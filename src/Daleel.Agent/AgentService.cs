@@ -315,8 +315,11 @@ public sealed partial class AgentService
 
         if (bundle.WebResults.Count > 0)
         {
+            // Feed the extractor a WIDE slice of the discovered web results (owner: "scale to hundreds"):
+            // the more real listings/articles it sees, the more distinct models it can pull out. Raised
+            // from 24; the extraction itself is now uncapped (see PromptTemplates.ExtractProducts).
             var classified = bundle.WebResults
-                .Take(24)
+                .Take(80)
                 .Select(r => (r, type: ResultClassifier.Classify(r.Url, r.Title, r.Snippet)))
                 .ToList();
 
