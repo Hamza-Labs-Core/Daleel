@@ -133,11 +133,16 @@ public sealed class AgentFactory : IAgentFactory
 
     public ProviderStatus Describe() => new(
         Llm: HasLlm(),
-        WebSearch: Resolve("SERPAPI_KEY") is not null || Resolve("BING_SEARCH_KEY") is not null,
+        // The browser-SERP fallback also counts as web discovery: with Cloudflare creds, discovery
+        // survives even when no search-vendor key is present.
+        WebSearch: Resolve("SERPAPI_KEY") is not null || Resolve("BING_SEARCH_KEY") is not null ||
+                   HasCloudflareBrowser(),
         Places: Resolve("GOOGLE_PLACES_API_KEY") is not null,
-        Scraper: Resolve("CONTEXT_DEV_API_KEY") is not null ||
-                 (Resolve("CLOUDFLARE_ACCOUNT_ID") is not null && Resolve("CLOUDFLARE_API_TOKEN") is not null),
+        Scraper: Resolve("CONTEXT_DEV_API_KEY") is not null || HasCloudflareBrowser(),
         Social: Resolve("APIFY_TOKEN") is not null);
+
+    private bool HasCloudflareBrowser() =>
+        Resolve("CLOUDFLARE_ACCOUNT_ID") is not null && Resolve("CLOUDFLARE_API_TOKEN") is not null;
 
     public AgentService Build(AgentRequest request)
     {
@@ -149,13 +154,7 @@ public sealed class AgentFactory : IAgentFactory
         // relocated execution, identical behavior). Unconfigured ⇒ providers hit the vendors directly.
         var searchProxy = EdgeSearchClient();
 
-        ISearchProvider? search =
-            Resolve("SERPAPI_KEY") is { } serp ? new SerpApiProvider(serp, searchProxy)
-            // The key can live ONLY on the worker: the placeholder satisfies the provider's ctor and
-            // the worker replaces whatever api_key the query carries with its own secret.
-            : searchProxy is not null ? new SerpApiProvider("edge-proxied", EdgeSearchClient())
-            : Resolve("BING_SEARCH_KEY") is { } bing ? new BingProvider(bing)
-            : null;
+        ISearchProvider? search = BuildSearch(searchProxy, request.Log);
 
         IPlacesProvider? places =
             Resolve("GOOGLE_PLACES_API_KEY") is { } gp ? new GooglePlacesProvider(gp, EdgeSearchClient())
@@ -285,6 +284,61 @@ public sealed class AgentFactory : IAgentFactory
         return client;
     }
 
+    /// <summary>
+    /// Builds the discovery search chain: SerpAPI (direct key or edge-proxied) → Bing → the
+    /// no-vendor-quota browser-SERP fallback, wrapped in a <see cref="SearchRouter"/> so a primary
+    /// outage — most pressingly SerpAPI monthly-quota exhaustion, which returns non-2xx and would
+    /// otherwise leave web discovery a silent empty — fails over to the next source. A single
+    /// configured provider is returned bare; none configured returns null.
+    /// </summary>
+    private ISearchProvider? BuildSearch(HttpClient? searchProxy, Action<string>? log)
+    {
+        var chain = new List<ISearchProvider>();
+
+        if (Resolve("SERPAPI_KEY") is { } serp)
+        {
+            chain.Add(new SerpApiProvider(serp, searchProxy));
+        }
+        // The key can live ONLY on the worker: the placeholder satisfies the provider's ctor and the
+        // worker replaces whatever api_key the query carries with its own secret.
+        else if (searchProxy is not null)
+        {
+            chain.Add(new SerpApiProvider("edge-proxied", EdgeSearchClient()));
+        }
+
+        if (Resolve("BING_SEARCH_KEY") is { } bing)
+        {
+            chain.Add(new BingProvider(bing));
+        }
+
+        // Last resort: render a SERP with the edge browser. Needs only the Cloudflare creds the
+        // scraper already uses — no search-vendor quota — so discovery survives SerpAPI exhaustion.
+        if (BuildCloudflareBrowser() is { } browser)
+        {
+            chain.Add(new BrowserSearchProvider(browser));
+        }
+
+        return chain.Count switch
+        {
+            0 => null,
+            1 => chain[0],
+            _ => new SearchRouter(chain.ToArray(), Failover(log))
+        };
+    }
+
+    /// <summary>Streams each discovery failover hop to the request's progress log — the same seam the
+    /// event spine taps to persist it — or null when there is no log sink to write to.</summary>
+    private static Action<SearchFailover>? Failover(Action<string>? log) => log is null
+        ? null
+        : hop => log($"Discovery: {hop.FromProvider} unavailable ({hop.Reason}) — falling back to {hop.ToProvider}.");
+
+    /// <summary>The Cloudflare edge browser when its creds are set, else null. Shared conceptually by
+    /// the scrape chain and the browser-SERP discovery fallback so both are gated on the same creds.</summary>
+    private CloudflareBrowserProvider? BuildCloudflareBrowser() =>
+        Resolve("CLOUDFLARE_ACCOUNT_ID") is { } cfId && Resolve("CLOUDFLARE_API_TOKEN") is { } cfToken
+            ? new CloudflareBrowserProvider(cfId, cfToken)
+            : null;
+
     /// <summary>Builds the scrape router (Context.dev → Cloudflare) from whatever is configured.</summary>
     private IScrapeProvider? BuildScraper()
     {
@@ -294,10 +348,9 @@ public sealed class AgentFactory : IAgentFactory
             chain.Add(new ContextDevProvider(ctx));
         }
 
-        if (Resolve("CLOUDFLARE_ACCOUNT_ID") is { } cfId &&
-            Resolve("CLOUDFLARE_API_TOKEN") is { } cfToken)
+        if (BuildCloudflareBrowser() is { } browser)
         {
-            chain.Add(new CloudflareBrowserProvider(cfId, cfToken));
+            chain.Add(browser);
         }
 
         return chain.Count switch
