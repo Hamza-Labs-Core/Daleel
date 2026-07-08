@@ -159,11 +159,13 @@ public static class PromptTemplates
         sb.AppendLine("Aim for BREADTH: cover as MANY brands as compete in this market and MULTIPLE models per brand " +
             "— generate enough queries (include brand-named and 'best <category> brands' queries) that the results " +
             "span the budget, mid-range and premium ends, not just the top one or two names.");
-        sb.AppendLine("Generate 16–20 DIVERSE webQueries (and 10–14 shoppingQueries) so the search casts a WIDE net for " +
-            "HUNDREDS of distinct products, not dozens. Make them genuinely different — vary by BRAND (one query per " +
-            "major brand), by TYPE / sub-category, by price tier, and by synonym — NOT rephrasings of the same query, " +
-            "which just return the same products. A single generic query only surfaces the big global sites; the " +
-            "diverse ones are what reach the local sellers and the long tail.");
+        sb.AppendLine("Generate 16–20 DIVERSE webQueries so the search DISCOVERS as many distinct BRANDS, STORES and " +
+            "MARKETPLACES as possible — these are where the product ITEMS come from: their catalogues (brand sites) and " +
+            "product pages (stores) are crawled to build the grid, so the more distinct brand/store SOURCES you surface, " +
+            "the more items the crawl yields (aim for HUNDREDS). Vary them: one query per major BRAND (catalogue/official " +
+            "site), store-FINDER queries, marketplace/classifieds category queries, and buying-guide / 'best <category> " +
+            "brands' queries — NOT rephrasings of the same generic query, which just surface the same few big sites. " +
+            "Keep shoppingQueries MODEST (4–6): Google Shopping feeds the Deals/price surface, NOT the product grid.");
         // Local-store discovery is the single biggest gap in local markets: a small, well-stocked local
         // e-commerce store (a Shopify/WooCommerce shop, a local electronics chain's site) rarely ranks for a
         // bare "<category>" query but DOES rank for store-finding phrasings — and once its domain is in the
