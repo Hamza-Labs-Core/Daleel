@@ -144,7 +144,7 @@ public sealed class AnalyzeMarketActivity : CancellableActivity
         }
 
         var category = state.Strategy.Subject is { Length: > 0 } s ? s : state.Query;
-        // "Analyzing AC market requirements…" — surface the up-front reasoning to the user.
+        // Surface the up-front reasoning to the user (renders as e.g. "Getting a feel for air conditioners…").
         services.Report(SearchStep.Analyzing, "Progress.Msg.Analyzing");
         services.Report(SearchStep.Analyzing, "Progress.Msg.AnalyzingCategory", category);
 
