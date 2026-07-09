@@ -156,9 +156,12 @@ public sealed class ProviderApi : IProviderApi
         }
 
         // No bytes selector: a product COUNT must not masquerade as ResponseBytes in the usage log.
+        // The describe selector IS that count — "0 products" is the single most important thing this
+        // call can tell us, and it costs the same as "40 products".
         return await MeterAsync(
             "Context.dev", "catalog/extract", domain,
-            () => ctx.ExtractProductsAsync(domain, maxProducts, timeoutMs, ct)).ConfigureAwait(false);
+            () => ctx.ExtractProductsAsync(domain, maxProducts, timeoutMs, ct),
+            describe: r => $"{r.Count} product(s)").ConfigureAwait(false);
     }
 
     public async Task<BrandProfile?> GetBrandAsync(string domain, CancellationToken ct = default)
@@ -170,7 +173,8 @@ public sealed class ProviderApi : IProviderApi
 
         return await MeterAsync(
             "Context.dev", "brand/retrieve", domain,
-            () => ctx.GetBrandAsync(domain, ct)).ConfigureAwait(false);
+            () => ctx.GetBrandAsync(domain, ct),
+            describe: b => b is null ? "no profile" : "profile").ConfigureAwait(false);
     }
 
     public async Task<ScrapedPage?> ScrapePageAsync(
@@ -187,7 +191,8 @@ public sealed class ProviderApi : IProviderApi
                 // Bill the edge attempt ONLY when it delivered; a null/failed edge page must cost
                 // nothing so the inline fallback below is the single charge (no double-bill on a
                 // worker outage or bearer rotation).
-                success: p => p is { Success: true }).ConfigureAwait(false);
+                success: p => p is { Success: true },
+                describe: p => Rendered(p?.Content)).ConfigureAwait(false);
             if (edgePage is { Success: true })
             {
                 return edgePage;
@@ -202,7 +207,8 @@ public sealed class ProviderApi : IProviderApi
         var page = await MeterAsync(
             "Context.dev", $"scrape/{format.ToString().ToLowerInvariant()}", url,
             () => ctx.ScrapeAsync(url, format, ct),
-            p => p.Content?.Length ?? 0).ConfigureAwait(false);
+            p => p.Content?.Length ?? 0,
+            describe: p => Rendered(p?.Content)).ConfigureAwait(false);
         return page.Success ? page : null;
     }
 
@@ -486,9 +492,13 @@ public sealed class ProviderApi : IProviderApi
     /// </summary>
     private static Task<T> MeterAsync<T>(
         string provider, string endpoint, string? summary, Func<Task<T>> action,
-        Func<T, long>? bytes = null, Func<T, bool>? success = null) =>
+        Func<T, long>? bytes = null, Func<T, bool>? success = null, Func<T, string?>? describe = null) =>
         ApiCallTimer.TimeAsync(
             AmbientApiObserver.Observer,
             AmbientApiObserver.Estimator ?? new CostEstimator(),
-            provider, endpoint, summary, action, bytes, success);
+            provider, endpoint, summary, action, bytes, success, describe);
+
+    /// <summary>How much content a scrape actually returned — an empty 200 is a paid non-result.</summary>
+    private static string Rendered(string? content) =>
+        string.IsNullOrWhiteSpace(content) ? "empty" : $"{content.Length:N0} chars";
 }

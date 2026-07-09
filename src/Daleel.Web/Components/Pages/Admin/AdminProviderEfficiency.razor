@@ -1,0 +1,182 @@
+@page "/admin/providers"
+@using Daleel.Web.Data
+@using System.Globalization
+@attribute [Authorize(Roles = "Admin")]
+@inject IApiCallLogRepository ApiLog
+
+<PageTitle>دليل · Admin · Provider efficiency</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">Provider efficiency</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Every individual provider call — what we asked for, what came back, and what it cost. The aggregates on
+    Analytics can't show a call that billed us to return nothing; this can.
+</MudText>
+
+<div class="d-flex flex-wrap align-center gap-3 mb-4">
+    <MudButtonGroup Variant="Variant.Outlined" Size="Size.Small">
+        <MudButton Color="@(_hours == 24 ? Color.Primary : Color.Default)" OnClick="@(() => SetWindow(24))">24h</MudButton>
+        <MudButton Color="@(_hours == 168 ? Color.Primary : Color.Default)" OnClick="@(() => SetWindow(168))">7 days</MudButton>
+        <MudButton Color="@(_hours == 720 ? Color.Primary : Color.Default)" OnClick="@(() => SetWindow(720))">30 days</MudButton>
+    </MudButtonGroup>
+
+    <MudSelect T="string" Value="_provider" ValueChanged="OnProviderChanged" Label="Provider" Dense="true"
+               Clearable="true" Variant="Variant.Outlined" Margin="Margin.Dense" Style="min-width:220px;">
+        <MudSelectItem T="string" Value="@(null)">All providers</MudSelectItem>
+        @foreach (var p in _providers)
+        {
+            <MudSelectItem T="string" Value="@p">@p</MudSelectItem>
+        }
+    </MudSelect>
+
+    <MudSwitch T="bool" Value="_barrenOnly" ValueChanged="OnBarrenChanged" Color="Color.Warning"
+               Label="Paid for nothing only" />
+
+    <MudSpacer />
+    <MudButton StartIcon="@Icons.Material.Filled.Refresh" Size="Size.Small" OnClick="LoadAsync">Refresh</MudButton>
+</div>
+
+@if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" Class="mb-4" />
+}
+else
+{
+    <MudGrid Class="mb-4">
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-3" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Calls</MudText>
+                <MudText Typo="Typo.h5">@_rows.Count.ToString("N0", CultureInfo.InvariantCulture)</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-3" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Total cost</MudText>
+                <MudText Typo="Typo.h5">@Usd(_rows.Sum(r => r.EstimatedCost))</MudText>
+            </MudPaper>
+        </MudItem>
+        <MudItem xs="12" sm="4">
+            <MudPaper Class="pa-3" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.caption" Color="Color.Secondary">Paid for nothing</MudText>
+                <MudText Typo="Typo.h5" Color="@(_barrenCost > 0 ? Color.Warning : Color.Default)">
+                    @Usd(_barrenCost)
+                </MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary">
+                    @_barrenCount.ToString("N0", CultureInfo.InvariantCulture) call(s) billed, empty result
+                </MudText>
+            </MudPaper>
+        </MudItem>
+    </MudGrid>
+
+    @if (_rows.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">No provider calls in this window.</MudAlert>
+    }
+    else
+    {
+        <MudSimpleTable Dense="true" Hover="true" Striped="true" Style="overflow-x:auto;">
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>Provider</th>
+                    <th>Endpoint</th>
+                    <th>Request</th>
+                    <th>Response</th>
+                    <th style="text-align:right;">ms</th>
+                    <th style="text-align:right;">Cost</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in Shown)
+                {
+                    <tr style="@(IsBarren(r) ? "background:var(--mud-palette-warning-hover);" : null)">
+                        <td><MudText Typo="Typo.caption">@r.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss", CultureInfo.InvariantCulture)</MudText></td>
+                        <td><MudText Typo="Typo.caption">@r.Provider</MudText></td>
+                        <td><MudText Typo="Typo.caption">@r.Endpoint</MudText></td>
+                        <td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            <MudTooltip Text="@r.RequestSummary"><MudText Typo="Typo.caption">@r.RequestSummary</MudText></MudTooltip>
+                        </td>
+                        <td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            <MudTooltip Text="@r.ResponseSummary">
+                                <MudText Typo="Typo.caption" Color="@(IsBarren(r) ? Color.Warning : Color.Default)">
+                                    @(string.IsNullOrWhiteSpace(r.ResponseSummary) ? "—" : r.ResponseSummary)
+                                </MudText>
+                            </MudTooltip>
+                        </td>
+                        <td style="text-align:right;"><MudText Typo="Typo.caption">@r.ResponseTimeMs.ToString("N0", CultureInfo.InvariantCulture)</MudText></td>
+                        <td style="text-align:right;"><MudText Typo="Typo.caption">@Usd(r.EstimatedCost)</MudText></td>
+                        <td>
+                            <MudText Typo="Typo.caption" Color="@(r.Status == "success" ? Color.Success : Color.Error)">@r.Status</MudText>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private int _hours = 24;
+    private string? _provider;
+    private bool _barrenOnly;
+
+    private IReadOnlyList<ApiCallLog> _rows = Array.Empty<ApiCallLog>();
+    private IReadOnlyList<string> _providers = Array.Empty<string>();
+    private int _barrenCount;
+    private decimal _barrenCost;
+
+    private IEnumerable<ApiCallLog> Shown => _barrenOnly ? _rows.Where(IsBarren) : _rows;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        var since = DateTimeOffset.UtcNow.AddHours(-_hours);
+        _rows = await ApiLog.RecentCallsAsync(since, limit: 500, provider: _provider);
+        // The provider list is derived from the unfiltered window so narrowing never hides the way back.
+        if (_provider is null)
+        {
+            _providers = _rows.Select(r => r.Provider).Distinct().OrderBy(p => p).ToList();
+        }
+        var barren = _rows.Where(IsBarren).ToList();
+        _barrenCount = barren.Count;
+        _barrenCost = barren.Sum(r => r.EstimatedCost);
+        _loading = false;
+    }
+
+    private async Task SetWindow(int hours)
+    {
+        _hours = hours;
+        await LoadAsync();
+    }
+
+    private async Task OnProviderChanged(string? provider)
+    {
+        _provider = string.IsNullOrWhiteSpace(provider) ? null : provider;
+        await LoadAsync();
+    }
+
+    private Task OnBarrenChanged(bool value)
+    {
+        _barrenOnly = value;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// A call we PAID for that came back with nothing usable — the waste this page exists to surface
+    /// (e.g. Context.dev billing 10 credits to answer "0 product(s)"). Errors are excluded: they already
+    /// cost nothing, and the failure is visible in Status.
+    /// </summary>
+    private static bool IsBarren(ApiCallLog r) =>
+        r.EstimatedCost > 0m &&
+        r.ResponseSummary is { Length: > 0 } s &&
+        (s.StartsWith("0 ", StringComparison.Ordinal) ||
+         s.Equals("empty", StringComparison.OrdinalIgnoreCase) ||
+         s.Equals("(empty)", StringComparison.OrdinalIgnoreCase) ||
+         s.Equals("no profile", StringComparison.OrdinalIgnoreCase));
+
+    private static string Usd(decimal value) => "$" + value.ToString("0.0000", CultureInfo.InvariantCulture);
+}

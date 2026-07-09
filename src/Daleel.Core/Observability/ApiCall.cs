@@ -25,6 +25,14 @@ public record ApiCall
     /// <summary>Short, non-sensitive summary (query text, scraped URL, model).</summary>
     public string? RequestSummary { get; init; }
 
+    /// <summary>
+    /// Short, non-sensitive description of what the call RETURNED — "0 products", "8 products",
+    /// "3.7 KB markdown", "empty". This is what makes efficiency legible: a Context.dev catalogue call
+    /// that burns credits to hand back an empty products array is indistinguishable from a productive
+    /// one by cost and duration alone. Never the raw body; capped like <see cref="RequestSummary"/>.
+    /// </summary>
+    public string? ResponseSummary { get; init; }
+
     public long ResponseTimeMs { get; init; }
     public long ResponseBytes { get; init; }
     public ApiCallStatus Status { get; init; } = ApiCallStatus.Success;

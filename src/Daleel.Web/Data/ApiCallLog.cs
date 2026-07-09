@@ -25,6 +25,13 @@ public sealed class ApiCallLog
     /// <summary>Short, non-sensitive request summary (query/url/model).</summary>
     public string? RequestSummary { get; set; }
 
+    /// <summary>
+    /// Short, non-sensitive description of what the call RETURNED ("0 products", "8 products",
+    /// "3.7 KB markdown"). Makes a paid-but-useless call visible on the provider-efficiency view —
+    /// cost and duration alone cannot tell a productive catalogue crawl from an empty one.
+    /// </summary>
+    public string? ResponseSummary { get; set; }
+
     public long ResponseTimeMs { get; set; }
     public long ResponseBytes { get; set; }
 

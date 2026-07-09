@@ -718,4 +718,5 @@
   <data name="ProviderStatus.Degraded" xml:space="preserve"><value>Some search features are temporarily unavailable.</value></data>
   <data name="Monitor.RunUnavailable" xml:space="preserve"><value>Monitoring is temporarily unavailable.</value></data>
   <data name="Stores.NoStores" xml:space="preserve"><value>No stores found for this search.</value></data>
+  <data name="Admin.Nav.Providers" xml:space="preserve"><value>Providers</value></data>
 </root>

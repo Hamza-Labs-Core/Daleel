@@ -230,6 +230,7 @@ public sealed class AgentSearchRunner : ISearchRunner
             Provider = c.Provider,
             Endpoint = c.Endpoint,
             RequestSummary = c.RequestSummary,
+            ResponseSummary = c.ResponseSummary,
             ResponseTimeMs = c.ResponseTimeMs,
             ResponseBytes = c.ResponseBytes,
             Status = c.Status.ToString().ToLowerInvariant(),

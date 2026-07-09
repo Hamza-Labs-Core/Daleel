@@ -636,6 +636,10 @@ public class CloudflareExecutionTests
             return Task.CompletedTask;
         }
 
+        public Task<IReadOnlyList<ApiCallLog>> RecentCallsAsync(
+            DateTimeOffset since, int limit = 200, string? provider = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ApiCallLog>>(Rows);
+
         public Task<IReadOnlyList<ApiCallLog>> ListByJobAsync(int jobId, string userId, CancellationToken ct = default) =>
             throw new NotSupportedException();
         public Task<(int Calls, decimal Cost)> UserUsageSinceAsync(string userId, DateTimeOffset since, CancellationToken ct = default) =>

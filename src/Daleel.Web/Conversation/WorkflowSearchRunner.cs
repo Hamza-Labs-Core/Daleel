@@ -694,7 +694,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var rows = calls.Select(c => new ApiCallLog
         {
             UserId = hashedUser, JobId = job.Id, Provider = c.Provider, Endpoint = c.Endpoint,
-            RequestSummary = c.RequestSummary, ResponseTimeMs = c.ResponseTimeMs, ResponseBytes = c.ResponseBytes,
+            RequestSummary = c.RequestSummary, ResponseSummary = c.ResponseSummary, ResponseTimeMs = c.ResponseTimeMs, ResponseBytes = c.ResponseBytes,
             Status = c.Status.ToString().ToLowerInvariant(), EstimatedCost = c.EstimatedCost,
             Model = c.Model, InputTokens = c.InputTokens, OutputTokens = c.OutputTokens, CreatedAt = c.Timestamp
         });

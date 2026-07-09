@@ -398,6 +398,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Provider).HasMaxLength(64);
             e.Property(x => x.Endpoint).HasMaxLength(64);
             e.Property(x => x.RequestSummary).HasMaxLength(500);
+            e.Property(x => x.ResponseSummary).HasMaxLength(500);
             e.Property(x => x.Status).HasMaxLength(16);
             e.Property(x => x.Model).HasMaxLength(128);
             e.Property(x => x.EstimatedCost).HasColumnType("decimal(12,6)");

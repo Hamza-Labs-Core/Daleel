@@ -16,6 +16,11 @@ public static class ApiCallTimer
     /// a call that returned but did not deliver is recorded as <see cref="ApiCallStatus.Error"/> at
     /// ZERO cost, so a failed-edge-then-inline-fallback bills once, not twice.
     /// </summary>
+    /// <remarks>
+    /// <paramref name="describe"/> optionally summarizes what the call RETURNED (e.g. "0 products").
+    /// Only invoked for a delivered result, and truncated like the request summary, so the efficiency
+    /// view can show what each paid call actually produced without ever storing a raw body.
+    /// </remarks>
     public static async Task<T> TimeAsync<T>(
         IApiCallObserver? observer,
         CostEstimator estimator,
@@ -24,7 +29,8 @@ public static class ApiCallTimer
         string? summary,
         Func<Task<T>> action,
         Func<T, long>? bytes = null,
-        Func<T, bool>? success = null)
+        Func<T, bool>? success = null,
+        Func<T, string?>? describe = null)
     {
         if (observer is null)
         {
@@ -58,12 +64,19 @@ public static class ApiCallTimer
                 && (success is null || (result is not null && success(result)));
             var recordedStatus = status == ApiCallStatus.Success && !delivered ? ApiCallStatus.Error : status;
             var size = delivered && bytes is not null && result is not null ? bytes(result) : 0;
+            // Describe only a delivered result: an errored/undelivered call is already identified by
+            // Status, and its exception text is not safe to persist. A DELIVERED-but-empty response —
+            // the expensive-and-useless case — is exactly what this captures.
+            var described = delivered && describe is not null && result is not null
+                ? RequestSummaries.Truncate(describe(result))
+                : null;
             observer.Record(new ApiCall
             {
                 Timestamp = DateTimeOffset.UtcNow,
                 Provider = provider,
                 Endpoint = endpoint,
                 RequestSummary = summary,
+                ResponseSummary = described,
                 ResponseTimeMs = sw.ElapsedMilliseconds,
                 ResponseBytes = size,
                 Status = recordedStatus,

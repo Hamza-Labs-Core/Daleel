@@ -719,4 +719,5 @@
   <data name="ProviderStatus.Degraded" xml:space="preserve"><value>بعض ميزات البحث غير متاحة مؤقتًا.</value></data>
   <data name="Monitor.RunUnavailable" xml:space="preserve"><value>المراقبة غير متاحة مؤقتًا.</value></data>
   <data name="Stores.NoStores" xml:space="preserve"><value>لم يتم العثور على متاجر لهذا البحث.</value></data>
+  <data name="Admin.Nav.Providers" xml:space="preserve"><value>المزوّدون</value></data>
 </root>
