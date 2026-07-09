@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Daleel.Web.Pipeline;
 
 namespace Daleel.Web.Conversation;
 
@@ -100,7 +101,17 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
     {
         _latestProgress[(userId, jobId)] = message;
         Progress?.Invoke(userId, jobId, message);
-        return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Progress", jobId, message);
+        // External SignalR subscribers (off-device/mobile clients) get a wire-safe copy: the internal
+        // localization key is stripped so pipeline internals (e.g. "Progress.Msg.ScrapingBrandCatalog")
+        // never travel off-device — only the step + user-facing args remain. Plain, non-encoded agent
+        // diagnostic lines aren't broadcast at all, matching the in-app UI (which ignores them). The
+        // in-process arm above still carries the full signal, so server-side localization is unaffected.
+        if (!SearchProgressSignal.TryDecode(message, out var signal))
+        {
+            return Task.CompletedTask;
+        }
+        return _hub.Clients.Group(ConversationHub.Group(userId))
+            .SendAsync("Progress", jobId, SearchProgressSignal.EncodeWireSafe(signal));
     }
 
     public Task CompletedAsync(string userId, int jobId, string status, string? resultJson, string? resultType, string? error)

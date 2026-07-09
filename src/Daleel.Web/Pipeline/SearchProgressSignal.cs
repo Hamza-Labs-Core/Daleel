@@ -55,6 +55,16 @@ public readonly record struct SearchProgressSignal(SearchStep Step, string Key, 
     }
 
     /// <summary>
+    /// Re-encodes a signal for the EXTERNAL SignalR wire with its internal localization key stripped.
+    /// Off-device subscribers get the step + user-facing args (store/brand names) but never the pipeline's
+    /// internal key names (e.g. "Progress.Msg.ScrapingBrandCatalog"), which would otherwise disclose how the
+    /// search works. The in-app Blazor UI is fed the full in-process signal (with the key) separately, so
+    /// its client-side localization is unaffected.
+    /// </summary>
+    public static string EncodeWireSafe(SearchProgressSignal signal) =>
+        Encode(signal.Step, string.Empty, signal.Args.ToArray());
+
+    /// <summary>
     /// Decodes a transport string back into a signal. Returns <c>false</c> for any string that is not
     /// an encoded signal (a plain feed line), so callers can fall through to step-less rendering.
     /// </summary>
