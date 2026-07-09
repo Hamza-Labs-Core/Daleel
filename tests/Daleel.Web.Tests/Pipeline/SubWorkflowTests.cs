@@ -630,7 +630,8 @@ public class SubWorkflowTests
         public bool IsAvailable { get; init; } = true;
         public int BrandCalls => _brandCalls;
 
-        public Task<Brand?> ResearchBrandAsync(string brandName, string? geo, CancellationToken ct = default)
+        public Task<Brand?> ResearchBrandAsync(
+            string brandName, string? geo, CancellationToken ct = default, string? siteUrlHint = null)
         {
             Interlocked.Increment(ref _brandCalls);
             return Task.FromResult(Brand(brandName));

@@ -164,6 +164,47 @@ public class ProfileServiceTests
         researcher.BrandCalls.Should().Be(2);
     }
 
+    // ── siteUrlHint plumbing ─────────────────────────────────────────────────────
+    // The hint IS the "never re-discover a site we already know" optimization: if a service stops
+    // passing the saved Website, every stale refresh silently re-pays site discovery.
+
+    [Fact]
+    public async Task GetOrCreate_SeedsResearchWithTheSavedWebsite_WhenStale()
+    {
+        using var ctx = new PostgresTestContext();
+        var repo = new BrandRepository(ctx.Db);
+        await repo.UpsertAsync(new Brand
+        {
+            Name = "Sony", Website = "https://sony.example", LastRefreshed = Now.AddDays(-40)
+        });
+        var researcher = new SpyResearcher(brand: new Brand { Name = "Sony", Description = "updated" });
+        var svc = new BrandProfileService(repo, researcher, Options());
+
+        await svc.GetOrCreateAsync("Sony");
+
+        researcher.LastBrandHint.Should().Be("https://sony.example",
+            "the stale row's site is a real URL a previous pass established — research must not re-discover it");
+    }
+
+    [Fact]
+    public async Task Refresh_PassesNoHint_SoASuspectSiteGetsReestablished()
+    {
+        using var ctx = new PostgresTestContext();
+        var repo = new BrandRepository(ctx.Db);
+        await repo.UpsertAsync(new Brand
+        {
+            Name = "Sony", Website = "https://wrong.example", LastRefreshed = Now.AddDays(-1)
+        });
+        var researcher = new SpyResearcher(brand: new Brand { Name = "Sony", Description = "re-done" });
+        var svc = new BrandProfileService(repo, researcher, Options());
+
+        await svc.RefreshAsync("Sony");
+
+        researcher.BrandCalls.Should().Be(1);
+        researcher.LastBrandHint.Should().BeNull(
+            "a FORCED refresh exists to correct a wrong profile — seeding it with the saved site would re-confirm the mistake");
+    }
+
     /// <summary>Configurable researcher double that counts calls and returns canned entities (or null).</summary>
     private sealed class SpyResearcher : IProfileResearcher
     {
@@ -172,6 +213,8 @@ public class ProfileServiceTests
         private readonly bool _echoName;
         public int BrandCalls { get; private set; }
         public int StoreCalls { get; private set; }
+        public string? LastBrandHint { get; private set; }
+        public string? LastStoreHint { get; private set; }
         public bool IsAvailable => true;
 
         public SpyResearcher(Brand? brand = null, Store? store = null, bool echoName = false)
@@ -181,9 +224,11 @@ public class ProfileServiceTests
             _echoName = echoName;
         }
 
-        public Task<Brand?> ResearchBrandAsync(string brandName, string? geo, CancellationToken ct = default)
+        public Task<Brand?> ResearchBrandAsync(
+            string brandName, string? geo, CancellationToken ct = default, string? siteUrlHint = null)
         {
             BrandCalls++;
+            LastBrandHint = siteUrlHint;
             if (_brand is null) return Task.FromResult<Brand?>(null);
             return Task.FromResult<Brand?>(new Brand
             {
@@ -195,6 +240,7 @@ public class ProfileServiceTests
         public Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default, string? siteUrlHint = null)
         {
             StoreCalls++;
+            LastStoreHint = siteUrlHint;
             return Task.FromResult(_store);
         }
     }

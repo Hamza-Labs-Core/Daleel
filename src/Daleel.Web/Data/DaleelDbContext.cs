@@ -144,6 +144,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.PopularModels).HasConversion(stringListConverter, stringListComparer);
             e.Property(x => x.SocialLinks).HasConversion(stringListConverter, stringListComparer);
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+            e.Property(x => x.SiteCheckedAt).HasConversion(toNullableUnixMs);
         });
 
         builder.Entity<Store>(e =>

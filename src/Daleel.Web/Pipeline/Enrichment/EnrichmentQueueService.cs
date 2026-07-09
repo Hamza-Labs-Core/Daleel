@@ -198,13 +198,21 @@ public sealed class EnrichmentQueueService : BackgroundService
             var model = string.IsNullOrWhiteSpace(modelOverride)
                 ? (string.IsNullOrWhiteSpace(job.Model) ? null : job.Model)
                 : modelOverride;
-            var key = model ?? string.Empty;
+            // Pinned (override) and unpinned builds differ by CallSiteModels even when the model
+            // string collides (job model == actor model), so the pin is part of the cache key.
+            var key = (modelOverride is null ? "job:" : "pin:") + (model ?? string.Empty);
             if (!agents.TryGetValue(key, out var built))
             {
                 built = sp.GetRequiredService<IAgentFactory>().Build(new AgentRequest
                 {
                     Geo = job.Geo,
                     Model = model,
+                    // An explicit override must hold through the actor loop's turns, which run inside
+                    // the synthesis call-site scope — there the router resolves the call-site model,
+                    // bypassing the default-model field, so the pin is carried on the call-site too.
+                    CallSiteModels = modelOverride is null
+                        ? null
+                        : new Dictionary<string, string> { [Daleel.Core.Llm.LlmCallSites.Synthesis.Key] = modelOverride },
                     Language = language,
                     Log = message => _logger.LogDebug("Enrich unit {ItemId}: {Message}", item.Id, message),
                     ApiObserver = collector,

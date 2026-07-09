@@ -67,11 +67,11 @@ public sealed class SystemConfigService : ISystemConfigService
     public static readonly IReadOnlyList<SystemConfig> Defaults = new[]
     {
         // LLM-actor steps (guided process, LLM is the actor at each provider-calling step). Seeded so
-        // they appear as toggles in Admin → Settings; default ON in QA, OFF in prod. actor.catalog has
-        // no handler yet, so it stays off regardless.
+        // they appear as toggles in Admin → Settings; default ON in QA, OFF in prod. Site discovery
+        // (brand/store research) is NOT flagged: it is the only way a site is ever learned — a
+        // hostname is never fabricated from an entity's name — so it always runs when unknown.
         new SystemConfig { Key = "actor.itemdive", Value = ActorStepsDefault, Type = "bool" },
         new SystemConfig { Key = "actor.verifypage", Value = ActorStepsDefault, Type = "bool" },
-        new SystemConfig { Key = "actor.brandresearch", Value = ActorStepsDefault, Type = "bool" },
         new SystemConfig { Key = "actor.catalog", Value = "false", Type = "bool" },
         // The model the actor reason→act loops run on — always a CAPABLE model (Sonnet 5 or better),
         // NOT the user's free-tier default (gpt-4o-mini can't sustain the multi-turn action protocol).
@@ -157,9 +157,28 @@ public sealed class SystemConfigService : ISystemConfigService
     public async Task<IReadOnlyList<SystemConfig>> AllAsync(CancellationToken ct = default) =>
         await _db.SystemConfig.OrderBy(c => c.Key).ToListAsync(ct);
 
-    /// <summary>Inserts any missing default rows (idempotent; called on startup).</summary>
+    /// <summary>
+    /// Keys that WERE seeded (or hand-created) but no longer control anything. Insert-only seeding
+    /// never removes rows, and /admin/settings renders every row as a live toggle — a switch that
+    /// silently does nothing is worse than none, so retired keys are deleted here at startup.
+    /// </summary>
+    private static readonly string[] RetiredKeys =
+    {
+        // Site discovery stopped being flag-gated: it is the only way a site is ever learned, so it
+        // always runs when the site is unknown (the researcher/BrandResearchHandler own the gating).
+        "actor.brandresearch",
+        "actor.storeresearch",
+    };
+
+    /// <summary>Inserts any missing default rows and removes retired ones (idempotent; called on startup).</summary>
     public async Task SeedDefaultsAsync(CancellationToken ct = default)
     {
+        var retired = await _db.SystemConfig.Where(c => RetiredKeys.Contains(c.Key)).ToListAsync(ct);
+        if (retired.Count > 0)
+        {
+            _db.SystemConfig.RemoveRange(retired);
+        }
+
         var existing = await _db.SystemConfig.Select(c => c.Key).ToListAsync(ct);
         // Insert COPIES, never the shared static Defaults instances — otherwise EF would track the
         // static objects and a later SetAsync mutation would corrupt the process-wide defaults.
@@ -170,6 +189,10 @@ public sealed class SystemConfigService : ISystemConfigService
         if (missing.Count > 0)
         {
             _db.SystemConfig.AddRange(missing);
+        }
+
+        if (retired.Count > 0 || missing.Count > 0)
+        {
             await _db.SaveChangesAsync(ct);
         }
     }

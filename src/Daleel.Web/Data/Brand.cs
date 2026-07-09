@@ -42,6 +42,15 @@ public sealed class Brand
 
     public DateTimeOffset LastRefreshed { get; set; }
 
+    /// <summary>
+    /// When site DISCOVERY (the search→read→confirm actor) last completed for this brand — stamped
+    /// on completion whether or not a site was found. This is the negative latch: a brand with no
+    /// own website can never satisfy the Website-based freshness gates, and without a record of
+    /// "we looked, nothing exists" every later search would re-pay the full discovery loop to
+    /// re-learn it. Null = never checked.
+    /// </summary>
+    public DateTimeOffset? SiteCheckedAt { get; set; }
+
     /// <summary>Normalizes a brand name into its lookup key (case/whitespace-insensitive).</summary>
     public static string Normalize(string name) => (name ?? string.Empty).Trim().ToLowerInvariant();
 

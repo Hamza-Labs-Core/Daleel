@@ -95,12 +95,20 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
             ? (await siteRepo.GetForBrandAsync(row.Id, ct)).ToList()
             : new List<BrandSite>();
 
-        // LLM-ACTOR site discovery (flag-gated, default off): the LLM searches and READS candidate pages
-        // to pick the brand's real official/local/regional sites — replacing host-substring matching that
-        // misses rebranded/abbreviated domains and can't tell official from reseller. It runs FIRST and
-        // records what it finds, so the deterministic blocks below self-skip (Website/HasFreshSite set).
+        // LLM-ACTOR site discovery: the LLM searches and READS candidate pages to pick the brand's
+        // real official/local/regional sites — the only legitimate way to learn a site we don't
+        // already know (a hostname is never fabricated from the brand name). It runs FIRST whenever
+        // the site hierarchy is actually incomplete, and records what it finds so the deterministic
+        // blocks below self-skip (Website/HasFreshSite set). SiteCheckedAt is the NEGATIVE latch:
+        // a brand with no own site can never satisfy the Website-based gates, so without it every
+        // later search would re-pay the full actor loop to re-learn "no site exists" — one completed
+        // discovery holds that answer for the freshness window instead (LastRefreshed can't serve
+        // here: the base run's profile save stamps it minutes before this unit runs). The null-guard
+        // on the actor keeps test wiring (no actor registered) on the deterministic path.
         var actorCfg = ctx.Services.GetService<Daleel.Web.Data.ISystemConfigService>();
-        if (actorCfg is not null && await actorCfg.GetBoolAsync(Actor.ActorFlags.BrandResearch, false, ct))
+        if ((row.SiteCheckedAt is null || DateTimeOffset.UtcNow - row.SiteCheckedAt > Freshness) &&
+            (string.IsNullOrWhiteSpace(row.Website) || !HasFreshSite(sites, BrandSiteLevel.Local, geo.CountryCode)) &&
+            ctx.Services.GetService<Actor.BrandSiteActor>() is not null)
         {
             attempted++;
             try
@@ -108,6 +116,11 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
                 var brandAgent = await Actor.ActorFlags.AgentAsync(ctx, actorCfg, ct);
                 var found = await ctx.Services.GetRequiredService<Actor.BrandSiteActor>()
                     .FindAsync(brandAgent, payload.Brand, geo, ct);
+
+                // The attempt COMPLETED (even "nothing found" is an answer worth 7 days) — latch it.
+                row.SiteCheckedAt = DateTimeOffset.UtcNow;
+                row = await SaveAsync(repo, row, ct);
+
                 if (found is not null)
                 {
                     if (string.IsNullOrWhiteSpace(row.Website) && !string.IsNullOrWhiteSpace(found.Website))

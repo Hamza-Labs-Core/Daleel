@@ -263,7 +263,8 @@ public class ActorLoopTests
         var url = await new StoreSiteActor(Loop()).FindSiteAsync(Agent(found), "Smart Buy", geo, default);
         url.Should().Be("https://smartbuy-me.com/jo");
 
-        // A non-URL / null website ⇒ null (fall back to GuessDomain).
+        // A non-URL / null website ⇒ null: the store has no own site and the caller spends nothing
+        // (a hostname is never fabricated from the store's name).
         var none = new ScriptedLlm("{\"action\":\"done\",\"result\":{\"website\":null}}");
         (await new StoreSiteActor(Loop()).FindSiteAsync(Agent(none), "No Site Store", geo, default)).Should().BeNull();
     }
