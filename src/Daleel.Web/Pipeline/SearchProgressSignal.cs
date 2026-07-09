@@ -1,23 +1,23 @@
 namespace Daleel.Web.Pipeline;
 
 /// <summary>
-/// The user-visible stages of a search, in execution order. Each maps to one node on the UI's
-/// horizontal stepper. Several of the nine Elsa activities collapse into one display step (moderate +
-/// cache + aggregate all read as "comparing/finalizing"), and the enrichment activity drives two
-/// (<see cref="BuildingProfiles"/> for its brand loop, then <see cref="FindingStores"/> for its store
-/// loop) — so the order here is the order the pipeline actually reaches them, keeping the stepper
-/// monotonic (it never jumps backwards).
+/// The internal pipeline stage a progress signal belongs to — transported as its <c>int</c> value over
+/// the in-process notifier and SignalR, so the numbering is a wire contract: never renumber, only append.
+/// This is NOT what the shopper sees: <c>SearchProgress.razor</c> maps these eight stages onto six vague,
+/// non-disclosing display phases via its PhaseMap (<see cref="BuildingProfiles"/> + <see cref="FindingStores"/>
+/// share one "details" phase; the retired <see cref="CheckingVault"/> folds into the first). Order matches
+/// the order the pipeline actually reaches each stage, keeping the stepper monotonic (it never jumps back).
 /// </summary>
 public enum SearchStep
 {
-    Analyzing = 0,        // 🔍 Analyzing the query + planning
-    CheckingVault = 1,    // 📦 Checking the answers cache
-    SearchingWeb = 2,     // 🌐 Fanning out across providers (with source counts)
-    ExtractingProducts = 3, // 🏷️ LLM analyst + product extraction
-    BuildingProfiles = 4, // ⭐ Joining saved brand profiles
-    FindingStores = 5,    // 🏪 Verifying stores on Google Maps
-    ComparingPrices = 6,  // 📊 Aggregate + moderate + cache (ranking)
-    Done = 7              // ✅ Finished
+    Analyzing = 0,          // parse the query + plan
+    CheckingVault = 1,      // RETIRED (answers cache removed) — no longer emitted; kept only for wire-value stability
+    SearchingWeb = 2,       // provider fan-out
+    ExtractingProducts = 3, // product extraction
+    BuildingProfiles = 4,   // brand enrichment loop
+    FindingStores = 5,      // store enrichment loop
+    ComparingPrices = 6,    // aggregate + moderate + rank
+    Done = 7                // finished
 }
 
 /// <summary>

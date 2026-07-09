@@ -337,7 +337,7 @@
   <data name="Progress.Msg.Ranking" xml:space="preserve"><value>Weighing {0} option(s) across {1} brand(s)…</value></data>
   <data name="Progress.Msg.Reviewing" xml:space="preserve"><value>Double-checking everything…</value></data>
   <data name="Progress.Msg.Saving" xml:space="preserve"><value>Putting it all together…</value></data>
-  <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>Bringing your results together…</value></data>
+  <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>Your results are ready.</value></data>
   <data name="Progress.Msg.DoneCount" xml:space="preserve"><value>All set — {0} option(s) across {1} brand(s).</value></data>
   <data name="Progress.Msg.Done" xml:space="preserve"><value>All set!</value></data>
 
