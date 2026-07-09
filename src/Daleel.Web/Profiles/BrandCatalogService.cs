@@ -141,6 +141,15 @@ public sealed class BrandCatalogService : IBrandCatalogService
             return 0; // edge unavailable and no inline scraper either
         }
 
+        // VALIDATE THE SITE BEFORE SENDING IT: a brand domain that does not resolve costs exactly as much
+        // to crawl as a real one (Context.dev answers 400 "DNS resolution failed" and still bills the call)
+        // and can never yield a model. One free DNS lookup replaces that paid round-trip.
+        if (!await Daleel.Search.Http.SsrfGuard.IsSafePublicUrlAsync($"https://{domain}", ct).ConfigureAwait(false))
+        {
+            _logger.LogDebug("Skipping brand catalogue harvest for unsafe or unresolvable domain {Domain}", domain);
+            return 0;
+        }
+
         IReadOnlyList<CatalogProduct> catalogue;
         try
         {

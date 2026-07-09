@@ -4,6 +4,7 @@ using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
 using Daleel.Core.Pricing;
 using Daleel.Search.Abstractions;
+using Daleel.Search.Http;
 using Daleel.Search.Providers;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
@@ -427,6 +428,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         if (SignificantQueryTokens(query, geo).Count == 0 &&
             !models.Any(m => !HasPrice(m) || string.IsNullOrWhiteSpace(m.ImageUrl) || m.Specs.Count < ThinSpecThreshold))
         {
+            return (null, 0, Array.Empty<string>());
+        }
+
+        // VALIDATE THE SITE BEFORE SENDING IT. Google Places gives many stores no website, and any
+        // hostname derived from a store's display name is fiction. A crawl of a host that does not
+        // resolve bills exactly the same as a real one and comes back empty — so pay one free DNS
+        // lookup here instead of a catalogue extract plus a browser scrape. (IsSafePublicUrlAsync
+        // resolves DNS: false for an unresolvable host as well as for an internal one.)
+        if (!await SsrfGuard.IsSafePublicUrlAsync($"https://{domain}", ct).ConfigureAwait(false))
+        {
+            _logger.LogDebug("Skipping catalogue crawl for unsafe or unresolvable domain {Domain}", domain);
             return (null, 0, Array.Empty<string>());
         }
 

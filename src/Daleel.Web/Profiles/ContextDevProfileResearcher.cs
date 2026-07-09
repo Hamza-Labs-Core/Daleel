@@ -152,7 +152,13 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
     private async Task<string> GatherBrandContextAsync(string brandName, CancellationToken ct)
     {
         var sb = new StringBuilder();
-        var domain = GuessDomain(brandName);
+        if (GuessDomain(brandName) is not { } domain)
+        {
+            // Nothing guessable (e.g. an Arabic-only brand name): every provider call from here would be
+            // aimed at a hostname we invented. Spend nothing.
+            _logger.LogDebug("No guessable domain for brand {Brand} — skipping provider lookups.", brandName);
+            return sb.ToString();
+        }
 
         try
         {
@@ -181,18 +187,33 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
         sb.AppendLine($"Store: {storeName}{(string.IsNullOrWhiteSpace(geo) ? "" : $" ({geo})")}");
         // Prefer an actor-VERIFIED site (the LLM confirmed it is really this store's own domain) over the
         // GuessDomain heuristic (strip punctuation + ".com"), which misses rebranded/abbreviated domains.
-        var url = !string.IsNullOrWhiteSpace(siteUrlHint) ? siteUrlHint! : $"https://{GuessDomain(storeName)}";
+        // When neither exists there is no site to read — scraping an invented hostname only costs money.
+        var url = !string.IsNullOrWhiteSpace(siteUrlHint)
+            ? siteUrlHint!
+            : GuessDomain(storeName) is { } guessed ? $"https://{guessed}" : null;
+
+        if (url is null)
+        {
+            _logger.LogDebug("No verified or guessable site for store {Store} — skipping scrape.", storeName);
+            return sb.ToString();
+        }
+
         await AppendScrapeAsync(url, sb, ct).ConfigureAwait(false);
         return sb.ToString();
     }
 
     private async Task AppendScrapeAsync(string url, StringBuilder sb, CancellationToken ct)
     {
-        // url is built from a guessed/LLM-derived domain — refuse internal targets (SSRF) before scraping.
-        // The scrape runs on the Context.dev edge, so the DNS-free literal/localhost check is the right layer.
-        if (!SsrfGuard.IsSafePublicUrl(url))
+        // url is built from a guessed/LLM-derived domain, so VALIDATE THE SITE BEFORE SENDING IT.
+        // IsSafePublicUrlAsync resolves DNS: it refuses internal targets (SSRF) *and* returns false for a
+        // host that does not resolve at all. That second half is what matters here — the scraper bills us
+        // the same to answer "DNS resolution failed" as it does to return a page, and a guessed hostname
+        // usually does not exist. One free local lookup replaces a paid empty round-trip. (The older
+        // DNS-free check was chosen because the fetch happens on the provider's edge; that reasoning
+        // ignored the cost of the call.)
+        if (!await SsrfGuard.IsSafePublicUrlAsync(url, ct).ConfigureAwait(false))
         {
-            _logger.LogDebug("Skipped scrape for unsafe url {Url}", url);
+            _logger.LogDebug("Skipped scrape for unsafe or unresolvable url {Url}", url);
             return;
         }
 
@@ -212,12 +233,23 @@ public sealed class ContextDevProfileResearcher : IProfileResearcher
     }
 
     /// <summary>
-    /// Crude name → homepage heuristic (lower-case, strip non-alphanumerics, append ".com"). The LLM
-    /// also brings world knowledge, so even a missed guess yields a usable profile from thin context.
+    /// Crude name → homepage heuristic (lower-case, strip to ASCII letters/digits, append ".com"), or
+    /// NULL when the name gives nothing to guess with. Two traps closed here:
+    /// <list type="bullet">
+    /// <item><c>char.IsLetterOrDigit</c> is true for Arabic script, so a store named "كارفور ماركت" used
+    /// to become the hostname <c>كارفورماركت.com</c> — a host that never existed and that we then PAID a
+    /// scraper to resolve. A hostname label is ASCII letters/digits/hyphen; a non-Latin display name is
+    /// simply not guessable into one.</item>
+    /// <item>The old empty-slug fallback was the literal <c>example.com</c> — a paid scrape of the IANA
+    /// example domain.</item>
+    /// </list>
+    /// Callers must skip the lookup entirely when this returns null.
     /// </summary>
-    internal static string GuessDomain(string name)
+    internal static string? GuessDomain(string name)
     {
-        var slug = new string(name.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
-        return slug.Length == 0 ? "example.com" : $"{slug}.com";
+        var slug = new string(name
+            .Where(c => c is >= 'a' and <= 'z' or >= 'A' and <= 'Z' or >= '0' and <= '9')
+            .ToArray()).ToLowerInvariant();
+        return slug.Length < 3 ? null : $"{slug}.com";
     }
 }
