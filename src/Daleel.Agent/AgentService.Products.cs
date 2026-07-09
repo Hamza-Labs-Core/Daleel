@@ -1118,6 +1118,34 @@ public sealed partial class AgentService
         return (listings, insights);
     }
 
+    /// <summary>
+    /// Worker-INDEPENDENT product extraction from ONE already-rendered page, through the same LLM listing
+    /// extractor the main search uses. The store-catalogue fallback's last resort: when Context.dev returns
+    /// no products for a domain (an empty <c>{"products":[]}</c>, or a 400 it cannot resolve) AND the edge
+    /// extract host is empty or unavailable, the rendered store page is handed to the LLM so the store's
+    /// items can still be SEEDED. The page belongs to a store discovery already judged local, so locality
+    /// filtering is bypassed — every product on it counts. Empty on thin content or any failure.
+    /// </summary>
+    public async Task<IReadOnlyList<ProductListing>> ExtractProductsFromPageAsync(
+        string content, string query, GeoProfile geo, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return Array.Empty<ProductListing>();
+        }
+
+        // One synthetic page ⇒ BuildExtractionParts yields exactly one part, so this stays a single
+        // bounded LLM call rather than a monolithic pass over a whole bundle.
+        var bundle = new ResearchBundle
+        {
+            Pages = new[] { new ScrapedPage { Content = content, Success = true, Provider = "catalog-llm-fallback" } }
+        };
+
+        var (listings, _) = await ExtractProductListingsAsync(
+            query, geo, bundle, includeIntl: true, cancellationToken).ConfigureAwait(false);
+        return listings;
+    }
+
     /// <summary>An LLM-distilled verdict for a model: short pros/cons and a one-line summary.</summary>
     private sealed record ModelInsight(
         IReadOnlyList<string> Pros, IReadOnlyList<string> Cons, string? Summary);

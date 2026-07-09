@@ -550,6 +550,48 @@ public class AgentServiceTests
         var agent = new AgentService(PlannerAndAnalyst(), scraper: new FakeScraper("", success: false));
         (await agent.ReadPageAsync("https://store.jo/ac")).Should().BeNull();
     }
+
+    [Fact]
+    public async Task ExtractProductsFromPageAsync_SeedsItemsFromAStorePage_WhenStructuredProvidersFoundNothing()
+    {
+        // The store-catalogue fallback's last resort: Context.dev returned no products for this domain
+        // (empty array, or a 400 it could not resolve) and the edge extractor was unavailable, so the
+        // rendered store page goes to the LLM. Its items must come back as listings so the catalogue
+        // crawl can SEED them — the difference between "61 stores, 0 items" and a populated grid.
+        const string productsJson = """
+            { "products": [
+              { "name": "Philips Airfryer XL", "brand": "Philips", "model": "HD9270",
+                "offers": [ { "source": "Leaders", "price": "119 JOD", "currency": "JOD",
+                              "url": "https://leaders.jo/p/hd9270" } ] },
+              { "name": "Tefal Easy Fry", "brand": "Tefal",
+                "offers": [ { "source": "Leaders", "price": 89, "currency": "JOD" } ] }
+            ] }
+            """;
+
+        var llm = new FakeLlmClient(system =>
+            system == PromptTemplates.ProductExtractionSystem ? productsJson : "n/a");
+        var agent = new AgentService(llm, new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow });
+
+        var listings = await agent.ExtractProductsFromPageAsync(
+            "# Air fryers\n- Philips Airfryer XL — 119 JOD\n- Tefal Easy Fry — 89 JOD",
+            "air fryers", GeoProfiles.Jordan);
+
+        listings.Should().Contain(l => l.Name.Contains("Philips") && l.Price == 119m);
+        listings.Should().Contain(l => l.Name.Contains("Tefal") && l.Price == 89m);
+    }
+
+    [Fact]
+    public async Task ExtractProductsFromPageAsync_ThinContent_ReturnsEmptyWithoutSpendingAnLlmCall()
+    {
+        var calls = 0;
+        var llm = new FakeLlmClient(_ => { calls++; return "{}"; });
+        var agent = new AgentService(llm, new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow });
+
+        var listings = await agent.ExtractProductsFromPageAsync("   ", "air fryers", GeoProfiles.Jordan);
+
+        listings.Should().BeEmpty();
+        calls.Should().Be(0);
+    }
 }
 
 /// <summary>Minimal scraper that returns a fixed page, for exercising AgentService.ReadPageAsync.</summary>

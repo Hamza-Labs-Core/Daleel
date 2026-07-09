@@ -1,4 +1,5 @@
 using Daleel.Agent;
+using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
 using Daleel.Core.Pricing;
@@ -442,7 +443,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // Browser fallback fires exactly when the orchestrated path's would: nothing PRICED came
         // out of the structured extract for this domain (including the no-scraper case).
         var browserPrices = pool.All(p => p.Price is null)
-            ? await HarvestViaBrowserAsync(agent, new[] { domain }, CatalogQueryFor(models), record: null, ct)
+            ? await HarvestViaBrowserAsync(agent, new[] { domain }, CatalogQueryFor(models), geo, record: null, ct)
             : Array.Empty<BrowserPrice>();
 
         if (pool.Count == 0 && browserPrices.Count == 0)
@@ -701,7 +702,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 .Select(c => c.domain).ToList();
         }
 
-        var browserPrices = await HarvestViaBrowserAsync(agent, browserUnpriced, products.Query, record, catalogCts.Token);
+        var browserPrices = await HarvestViaBrowserAsync(
+            agent, browserUnpriced, products.Query, products.Geo, record, catalogCts.Token);
 
         if (pool.Count == 0 && browserPrices.Count == 0)
         {
@@ -1312,13 +1314,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     }
 
     private async Task<IReadOnlyList<BrowserPrice>> HarvestViaBrowserAsync(
-        AgentService agent, IReadOnlyList<string> domains, string query,
+        AgentService agent, IReadOnlyList<string> domains, string query, string? geo,
         Action<string, string, string, IReadOnlyDictionary<string, object?>?>? record, CancellationToken ct)
     {
         if (domains.Count == 0)
         {
             return Array.Empty<BrowserPrice>();
         }
+
+        // Resolved once: the LLM last-resort extractor needs a market (currency default). A market we
+        // cannot resolve simply skips that fallback rather than guessing.
+        var geoProfile = GeoProfiles.Resolve(geo);
 
         var harvested = await Task.WhenAll(domains.Select(async domain =>
         {
@@ -1361,11 +1367,37 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 }
             }
 
+            // LLM LAST RESORT (OpenRouter, worker-INDEPENDENT): Context.dev gave this domain nothing (an
+            // empty products array, or a 400 it could not resolve), the regex parser found nothing, and the
+            // edge extract host was empty or unavailable. Hand the markdown we already rendered to the
+            // agent's own LLM listing extractor — the ONLY path that still yields items for a store whose
+            // catalogue no structured provider can parse. Priced items only (a BrowserPrice needs a price),
+            // matching the edge-extract branch above. Best-effort; the empty list stands on any failure.
+            var usedLlm = false;
+            if (prices.Count == 0 && page is { Content.Length: > 0 } && geoProfile is not null)
+            {
+                try
+                {
+                    var llm = await agent.ExtractProductsFromPageAsync(page.Content, query, geoProfile, ct);
+                    prices = llm
+                        .Where(l => l.Price is not null && !string.IsNullOrWhiteSpace(l.Name))
+                        .Select(l => new BrowserPrice(
+                            l.Price!.Value, l.Currency ?? string.Empty, l.Name, domain, l.Url ?? page.Url))
+                        .ToList();
+                    usedLlm = prices.Count > 0;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch
+                {
+                    // best-effort fallback — the empty result stands
+                }
+            }
+
             record?.Invoke(EventCategory.Extract, "catalog.browser", page?.Provider ?? "cloudflare-browser",
                 new Dictionary<string, object?>
                 {
                     ["domain"] = domain, ["url"] = url, ["prices"] = prices.Count,
-                    ["edgeExtract"] = usedEdgeExtract
+                    ["edgeExtract"] = usedEdgeExtract, ["llmExtract"] = usedLlm
                 });
             return (IReadOnlyList<BrowserPrice>)prices;
         }));
