@@ -41,4 +41,39 @@ public sealed class SearchPipelineServices
     /// </summary>
     public void Report(SearchStep step, string key, params object?[] args) =>
         Progress?.Invoke(SearchProgressSignal.Encode(step, key, args));
+
+    /// <summary>
+    /// Pushes an INTERMEDIATE result (serialized answer JSON + result type) to the user's devices while
+    /// the run is still going — the UI renders the grid immediately and results keep loading as they're
+    /// ready. Seeded by the runner with the broadcaster's Partial channel; null in contexts with no live
+    /// listener (tests, CLI). Best-effort: pushes must never fail or slow the pipeline.
+    /// </summary>
+    public Func<string, string, Task>? PushPartial { get; set; }
+
+    /// <summary>
+    /// Serializes the run's CURRENT answer state and pushes it as a partial result. Best-effort by
+    /// design — a serialization or transport hiccup is superseded by the next push or the final
+    /// Completed, never surfaced as a failure.
+    /// </summary>
+    public async Task TryPushPartialAsync(SearchPipelineState state)
+    {
+        if (PushPartial is null)
+        {
+            return;
+        }
+
+        try
+        {
+            // Lean payload: partials repeat every ~800ms and the partial UI renders only the products,
+            // so the heavy research bundle (scraped pages, social posts) stays out of the push.
+            if (Conversation.WorkflowSearchRunner.SalvageResultJson(state, includeResearch: false) is { } json)
+            {
+                await PushPartial(json, "ask").ConfigureAwait(false);
+            }
+        }
+        catch
+        {
+            // Best-effort: a failed partial must never fault the search.
+        }
+    }
 }

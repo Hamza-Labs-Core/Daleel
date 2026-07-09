@@ -20,7 +20,7 @@
             <MudDivider Class="my-2" />
 
             @* Recent searches live here, in a collapsible submenu, instead of taking up a column on the
-               home page. Clicking an entry opens its saved result via /?historyId= (Home.LoadHistoryResultAsync).
+               home page. Clicking an entry opens its saved result on /search/{id} (the deep-linkable view).
                The list is loaded on init and refreshed whenever a search completes (Notifier.Completed),
                so it stays current without a page reload. Expanded by default so it's visible at a glance. *@
             <MudNavGroup Title="@L["Search.Recent"]" Icon="@Icons.Material.Filled.History" Expanded="true">
@@ -32,7 +32,7 @@
                 {
                     @foreach (var h in _recent)
                     {
-                        <MudNavLink Href="@($"/?historyId={h.Id}")" Icon="@Icons.Material.Filled.ChatBubbleOutline">
+                        <MudNavLink Href="@($"/search/{h.Id}")" Icon="@Icons.Material.Filled.ChatBubbleOutline">
                             <span dir="@Catalog.Dir(h.Query)" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;">@h.Query</span>
                         </MudNavLink>
                     }
@@ -66,10 +66,18 @@
                 {
                     <MudNavLink Href="/admin" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.AdminPanelSettings">@L["Nav.Admin"]</MudNavLink>
                 }
-                <MudNavLink Href="/logout" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Logout">@L["Nav.Logout"]</MudNavLink>
+                @* ForceLoad — MudNavLink SWALLOWS data-enhance-nav (verified: it never reaches the <a>), so
+                   without this it navigates to the static-SSR /logout page via Blazor ENHANCED navigation and
+                   the antiforgery Set-Cookie rides a fetch that doesn't persist. ForceLoad does a real full
+                   page load, which the auth pages' token+cookie handshake requires. *@
+                <MudNavLink Href="/logout" ForceLoad="true" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Logout">@L["Nav.Logout"]</MudNavLink>
             </Authorized>
             <NotAuthorized>
-                <MudNavLink Href="/login" data-enhance-nav="false" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Login">@L["Nav.Login"]</MudNavLink>
+                @* ForceLoad, NOT data-enhance-nav: MudNavLink drops data-enhance-nav (it never reaches the
+                   rendered <a>), so this link used Blazor enhanced navigation into the static-SSR /login page
+                   and the antiforgery cookie didn't persist — the FIRST login POST then failed "session
+                   expired" until a full load happened. ForceLoad forces the real full page load /login needs. *@
+                <MudNavLink Href="/login" ForceLoad="true" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Login">@L["Nav.Login"]</MudNavLink>
             </NotAuthorized>
         </AuthorizeView>
     </div>

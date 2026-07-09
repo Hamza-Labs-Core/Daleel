@@ -77,4 +77,22 @@ public class SearchProgressSignalTests
         signal.Step.Should().Be(SearchStep.Analyzing);
         signal.Key.Should().Be("Progress.Msg.Done");
     }
+
+    [Fact]
+    public void EncodeWireSafe_strips_the_internal_key_but_keeps_step_and_args()
+    {
+        // The external SignalR broadcast must not leak internal key names (e.g. "…ScrapingBrandCatalog");
+        // off-device subscribers get only the step + user-facing args.
+        SearchProgressSignal.TryDecode(
+            SearchProgressSignal.Encode(SearchStep.BuildingProfiles, "Progress.Msg.ScrapingBrandCatalog", "Samsung"),
+            out var full).Should().BeTrue();
+
+        var wire = SearchProgressSignal.EncodeWireSafe(full);
+
+        wire.Should().NotContain("Progress.Msg").And.NotContain("Scraping").And.NotContain("Catalog");
+        SearchProgressSignal.TryDecode(wire, out var decoded).Should().BeTrue();
+        decoded.Step.Should().Be(SearchStep.BuildingProfiles);   // step preserved
+        decoded.Key.Should().BeEmpty();                          // internal key gone
+        decoded.Args.Should().Equal("Samsung");                  // user-facing arg preserved
+    }
 }

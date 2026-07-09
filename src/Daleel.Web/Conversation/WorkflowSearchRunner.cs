@@ -44,18 +44,24 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private readonly ICacheStore _cache;
     private readonly IEventStore _eventStore;
     private readonly ISystemEventLog _systemLog;
+    private readonly ISearchEventSinkFactory _sinkFactory;
     private readonly ISearchEmailNotifier _emailNotifier;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IModerationPolicyProvider _moderationPolicy;
+    private readonly IRelevancePolicyProvider _relevancePolicy;
     private readonly IHalalImageClassifier _imageClassifier;
     private readonly ILogger<WorkflowSearchRunner> _logger;
+    private readonly IConversationBroadcaster? _broadcaster;
 
     public WorkflowSearchRunner(
         IAgentFactory agents, ISystemConfigService config, IApiCallLogRepository apiLog,
         IFilteredContentLogRepository filteredLog, ICacheStore cache, IEventStore eventStore,
-        ISystemEventLog systemLog, ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
-        IModerationPolicyProvider moderationPolicy, IHalalImageClassifier imageClassifier,
-        ILogger<WorkflowSearchRunner> logger)
+        ISystemEventLog systemLog, ISearchEventSinkFactory sinkFactory,
+        ISearchEmailNotifier emailNotifier, IServiceScopeFactory scopeFactory,
+        IModerationPolicyProvider moderationPolicy, IRelevancePolicyProvider relevancePolicy,
+        IHalalImageClassifier imageClassifier,
+        ILogger<WorkflowSearchRunner> logger,
+        IConversationBroadcaster? broadcaster = null)
     {
         _agents = agents;
         _config = config;
@@ -63,12 +69,16 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         _filteredLog = filteredLog;
         _cache = cache;
         _moderationPolicy = moderationPolicy;
+        _relevancePolicy = relevancePolicy;
         _imageClassifier = imageClassifier;
         _eventStore = eventStore;
         _systemLog = systemLog;
+        _sinkFactory = sinkFactory;
         _emailNotifier = emailNotifier;
         _scopeFactory = scopeFactory;
         _logger = logger;
+        // Optional so existing test wiring keeps working; production DI always supplies it.
+        _broadcaster = broadcaster;
     }
 
     public async Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct)
@@ -76,14 +86,13 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
         var resultKey = CacheKey.ForResult(job.Query, job.Geo, language);
 
-        // Per-job cost instrumentation: estimate + cap from admin config, stream each call live.
+        // Per-job cost instrumentation: estimate spend from admin pricing, stream each call live.
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
-        var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
 
-        using var capTrip = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // R1 — meter only, never cost-cancel a running search: a cost limit blocks NEW searches at
+        // submission, never an in-flight one; actual spend is charged post-hoc.
         var collector = new JobApiCallCollector(
-            line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line),
-            caps.MaxPerJob, capTrip);
+            line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line));
 
         // Ambient metering: DI-resolved components (vision identification, brand-catalogue
         // discovery/harvest, store-catalogue crawls) make paid calls on their own HTTP clients and
@@ -92,13 +101,25 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // through awaits and sub-workflow scopes; restored on dispose.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
+        // Live per-search event sink: pipeline steps emit semantic timeline events through the ambient
+        // carrier (same AsyncLocal reach as the metering observer) so this search's events appear live.
+        var eventSink = _sinkFactory.For(job.Id.ToString(), Anonymizer.HashUserId(job.UserId));
+        using var events = AmbientSearchEvents.Begin(eventSink);
+
         // Admin feedback drives moderation: the active whitelist (undo decisions) and the
         // rating-tuned thresholds ride into the agent with every run. Best-effort by contract.
         var moderation = await _moderationPolicy.GetAsync(ct).ConfigureAwait(false);
+        var relevance = await _relevancePolicy.GetAsync(job.Query, job.Geo, ct).ConfigureAwait(false);
+
+        // Per-call-site pipeline models: each LLM step (planner, extraction, …) runs the model configured
+        // for it (model.<site>), so steps can be cost-tuned independently at /admin/settings.
+        var callSiteModels = await ResolveCallSiteModelsAsync(ct).ConfigureAwait(false);
 
         // Background jobs resolve keys from server env only (browser BYO keys aren't available here).
         var agent = _agents.Build(new AgentRequest
         {
+            CallSiteModels = callSiteModels,
+            Events = eventSink,
             Geo = job.Geo,
             Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model,
             Language = language,
@@ -110,6 +131,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             ModerationWhitelist = moderation.WhitelistKeys,
             ModerationCategories = moderation.Categories,
             HalalPolicy = moderation.Policy,
+            RelevanceNegatives = relevance,
             ImageClassifier = _imageClassifier
         });
 
@@ -134,22 +156,29 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             services.Agent = agent;
             services.Cache = _cache;
             services.Progress = progress;
+            // Progressive results: activities push intermediate grids to the user's devices as soon as
+            // data exists — the UI renders them while the run keeps going (never waits on the workflow).
+            if (_broadcaster is { } bc)
+            {
+                services.PushPartial = (json, type) => bc.PartialAsync(job.UserId, job.Id, json, type);
+            }
             bufferedEvents = state.Events;
 
             var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
 
-            // Global workflow deadline: links off capTrip (so cost-cap and user cancellation still flow in)
-            // and additionally auto-cancels after WorkflowTimeout. Every activity sees this as
-            // context.CancellationToken, so a wedged step is forcibly unwound instead of hanging forever.
-            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(capTrip.Token);
+            // Global workflow deadline: links off `ct` (user cancel / service shutdown still flow in) and
+            // auto-cancels after WorkflowTimeout — a wall-clock liveness backstop, NOT a cost limit (R1:
+            // cost never cancels a running search). Every activity sees this as context.CancellationToken,
+            // so a wedged step is forcibly unwound instead of hanging forever.
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct);
             deadline.CancelAfter(WorkflowTimeout);
 
-            // The deadline/cost-cap token also cancels Elsa's own workflow-state commit, so a tripped
-            // deadline makes RunAsync THROW OperationCanceledException instead of returning a faulted
-            // result — which used to bypass the salvage below entirely and turn an almost-finished run
-            // (products already extracted, only enrichment left) into a hard "no results" failure. Catch
-            // exactly that case and fall through to the same salvage a faulted run gets; a genuine job
-            // cancellation (user cancel / service shutdown, i.e. `ct`) still propagates untouched.
+            // The deadline token also cancels Elsa's own workflow-state commit, so a tripped deadline makes
+            // RunAsync THROW OperationCanceledException instead of returning a faulted result — which used
+            // to bypass the salvage below entirely and turn an almost-finished run (products already
+            // extracted, only enrichment left) into a hard "no results" failure. Catch exactly that case
+            // and fall through to the same salvage a faulted run gets; a genuine job cancellation (user
+            // cancel / service shutdown, i.e. `ct`) still propagates untouched.
             RunWorkflowResult? run = null;
             try
             {
@@ -157,16 +186,12 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             }
             catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                var cause = capTrip.IsCancellationRequested
-                    ? "per-job cost cap"
-                    : $"{WorkflowTimeout.TotalMinutes:0}-minute deadline";
                 _logger.LogError(
-                    "Search workflow for job {JobId} was cancelled by the {Cause}; salvaging any extracted products",
-                    job.Id, cause);
+                    "Search workflow for job {JobId} was cancelled by the {Minutes}-minute deadline; salvaging any extracted products",
+                    job.Id, WorkflowTimeout.TotalMinutes);
             }
 
-            // Distinguish a timeout (deadline fired on its own) from a cost-cap/user cancel for diagnostics.
-            if (run is not null && deadline.IsCancellationRequested && !capTrip.IsCancellationRequested)
+            if (run is not null && deadline.IsCancellationRequested)
             {
                 _logger.LogError(
                     "Search workflow for job {JobId} exceeded the {Minutes}-minute deadline and was cancelled",
@@ -266,11 +291,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             {
                 // Carries the smart-cache verdict (set only on a hit) up to the worker, which decides
                 // whether to launch a background partial re-enrichment for the missing pieces.
-                CacheQuality = state.CacheQuality,
-                // When the per-job cost cap cut the run short (and the result above was salvaged), the
-                // worker must NOT launch the post-result background enrichment — it would hand the very
-                // job the cap just stopped a fresh full budget, doubling the admin-configured ceiling.
-                CostCapTripped = capTrip.IsCancellationRequested && !ct.IsCancellationRequested
+                CacheQuality = state.CacheQuality
             };
         }
         finally
@@ -295,8 +316,11 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         }
 
         var searchId = job.Id.ToString();
-        var events = new List<PipelineEvent>(collector.Calls.Count + buffered.Count);
-        events.AddRange(collector.Calls.Select(c => PipelineEventFactory.FromApiCall(c, searchId)));
+        // Provider-call firehose events (LLM/search/scrape/places) — NOT tee'd live (open decision:
+        // provider-call cost stays end-of-run), so these still bridge to the timeline below.
+        var providerEvents = collector.Calls.Select(c => PipelineEventFactory.FromApiCall(c, searchId)).ToList();
+        var events = new List<PipelineEvent>(providerEvents.Count + buffered.Count);
+        events.AddRange(providerEvents);
         events.AddRange(buffered);
 
         if (events.Count == 0)
@@ -312,10 +336,16 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         if (_systemLog.IsEnabled)
         {
             var userHash = Anonymizer.HashUserId(job.UserId);
-            var timeline = events
+            // ONLY the provider-call events — the buffered semantic events (cache/profile/item/…) are now
+            // emitted LIVE via the AmbientSearchEvents tee in {Sub}SearchPipelineState.RecordEvent, so
+            // re-projecting `buffered` here would DOUBLE-write them (SystemEvent has no idempotency key).
+            var timeline = providerEvents
                 .Select(e => SystemEventProjection.FromPipelineEvent(e, userHash))
                 .ToList();
-            await _systemLog.PublishManyAsync(timeline, CancellationToken.None).ConfigureAwait(false);
+            if (timeline.Count > 0)
+            {
+                await _systemLog.PublishManyAsync(timeline, CancellationToken.None).ConfigureAwait(false);
+            }
         }
     }
 
@@ -325,8 +355,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     /// the aggregate step assembled; falls back to a fresh answer over the extracted products. If the full
     /// answer won't serialize (the heavy research bundle — scraped pages / social posts — is the likeliest
     /// culprit), it retries without that bundle. Returns null when there is nothing worth surfacing.
+    /// <paramref name="includeResearch"/> = false skips the heavy bundle outright — used by the streamed
+    /// PARTIAL pushes, which repeat every ~800ms and whose UI renders only the products.
     /// </summary>
-    internal static string? SalvageResultJson(SearchPipelineState state)
+    internal static string? SalvageResultJson(SearchPipelineState state, bool includeResearch = true)
     {
         var answer = state.Answer ?? new AgentAnswer
         {
@@ -334,7 +366,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             Geo = state.GeoProfile?.Key ?? state.Geo,
             QueryType = state.Strategy?.QueryType ?? Daleel.Core.Models.QueryType.General,
             Summary = state.Summary,
-            Research = state.Bundle ?? new ResearchBundle(),
+            Research = includeResearch ? state.Bundle ?? new ResearchBundle() : new ResearchBundle(),
             Products = state.Products,
             GeneratedAt = DateTimeOffset.UtcNow
         };
@@ -361,78 +393,6 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 return null;
             }
         }
-    }
-
-    public async Task<SearchRunResult?> EnrichAsync(
-        SearchJob job, SearchRunResult baseResult, Action<string> progress, CancellationToken ct)
-    {
-        // Only product results have items to deep-dive.
-        if (ResultSerialization.Deserialize<AgentAnswer>(baseResult.ResultJson) is not { Products: { Models.Count: > 0 } products } answer)
-        {
-            return null;
-        }
-
-        var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
-        var resultKey = CacheKey.ForResult(job.Query, job.Geo, language);
-
-        var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
-        var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
-        using var capTrip = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        var collector = new JobApiCallCollector(
-            line => _logger.LogInformation("Enrich job {JobId} API call · {Detail}", job.Id, line),
-            caps.MaxPerJob, capTrip);
-
-        // Ambient metering (see RunAsync): routes the vision/catalogue spend made on DI-resolved
-        // components' own HTTP clients into this enrichment's collector and cost cap.
-        using var ambient = AmbientApiObserver.Begin(collector, estimator);
-
-        var agent = _agents.Build(new AgentRequest
-        {
-            Geo = job.Geo, Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model, Language = language,
-            Log = progress, ApiObserver = collector, CostEstimator = estimator, Cache = _cache, CacheTtl = CacheTtl
-        });
-
-        var enrichment = new ItemEnrichmentResult(null, Array.Empty<PipelineEvent>());
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var service = scope.ServiceProvider.GetRequiredService<IItemEnrichmentService>();
-            enrichment = await service.EnrichAsync(agent, products, progress, job.Id.ToString(), capTrip.Token)
-                .ConfigureAwait(false);
-        }
-        finally
-        {
-            // Record enrichment cost + events the same way a base run does (provider scrape calls +
-            // the custom item events), so they show in the usage dashboard too.
-            await PersistAsync(job, collector, ct).ConfigureAwait(false);
-            await PersistEventsAsync(job, collector, enrichment.Events, ct).ConfigureAwait(false);
-        }
-
-        if (enrichment.Products is not { } enrichedProducts)
-        {
-            return null; // nothing changed — no UI update needed
-        }
-
-        var enrichedJson = ResultSerialization.Serialize(answer with { Products = enrichedProducts });
-
-        // Overwrite the cached report with the enriched one (preserving the base moderation stats) so a
-        // repeat search replays the full, deep-dived result instead of re-enriching.
-        try
-        {
-            var cached = new CachedSearchResult(
-                enrichedJson, baseResult.ResultType, baseResult.FilteredCount, baseResult.FilteredCategories);
-            await _cache.SetAsync(resultKey, JsonSerializer.Serialize(cached), CacheTtl, ct).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw; // cancellation propagates; SearchJobService treats it as a cancelled enrichment
-        }
-        catch
-        {
-            // best-effort: a cache write must never fail enrichment
-        }
-
-        return baseResult with { ResultJson = enrichedJson, ResultCount = enrichedProducts.ProductCount };
     }
 
     /// <summary>Caps so a brand/store-heavy cached report can't fan re-research out into unbounded cost.</summary>
@@ -462,18 +422,22 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var resultKey = CacheKey.ForResult(job.Query, job.Geo, language);
 
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
-        var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
-        using var capTrip = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        // R1 — meter only, never cost-cancel ongoing re-enrichment.
         var collector = new JobApiCallCollector(
-            line => _logger.LogInformation("Re-enrich job {JobId} API call · {Detail}", job.Id, line),
-            caps.MaxPerJob, capTrip);
+            line => _logger.LogInformation("Re-enrich job {JobId} API call · {Detail}", job.Id, line));
 
         // Ambient metering (see RunAsync): routes the vision/catalogue spend made on DI-resolved
-        // components' own HTTP clients into this re-enrichment's collector and cost cap.
+        // components' own HTTP clients into this re-enrichment's collector.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
 
+        var reEnrichSink = _sinkFactory.For(job.Id.ToString(), Anonymizer.HashUserId(job.UserId));
+        using var eventScope = AmbientSearchEvents.Begin(reEnrichSink);
+
+        var callSiteModels = await ResolveCallSiteModelsAsync(ct).ConfigureAwait(false);
         var agent = _agents.Build(new AgentRequest
         {
+            CallSiteModels = callSiteModels,
+            Events = reEnrichSink,
             Geo = job.Geo, Model = string.IsNullOrWhiteSpace(job.Model) ? null : job.Model, Language = language,
             Log = progress, ApiObserver = collector, CostEstimator = estimator, Cache = _cache, CacheTtl = CacheTtl
         });
@@ -489,7 +453,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                 using var scope = _scopeFactory.CreateScope();
                 var itemEnricher = scope.ServiceProvider.GetRequiredService<IItemEnrichmentService>();
                 var itemResult = await itemEnricher
-                    .EnrichAsync(agent, products, progress, job.Id.ToString(), capTrip.Token).ConfigureAwait(false);
+                    .EnrichAsync(agent, products, progress, job.Id.ToString(), ct).ConfigureAwait(false);
                 events.AddRange(itemResult.Events);
                 if (itemResult.Products is { } updated)
                 {
@@ -502,7 +466,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             if (report.DeficientBrands.Count > 0)
             {
                 var (brands, brandEvents) = await ReResearchBrandsAsync(
-                    agent, products, job, report, progress, capTrip.Token).ConfigureAwait(false);
+                    agent, products, job, report, progress, ct).ConfigureAwait(false);
                 events.AddRange(brandEvents);
                 if (!brands.SequenceEqual(products.Brands))
                 {
@@ -515,7 +479,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             if (report.DeficientStores.Count > 0)
             {
                 var (stores, storeEvents) = await ReResearchStoresAsync(
-                    agent, products, job, report, progress, capTrip.Token).ConfigureAwait(false);
+                    agent, products, job, report, progress, ct).ConfigureAwait(false);
                 events.AddRange(storeEvents);
                 if (!stores.SequenceEqual(products.Stores))
                 {
@@ -683,6 +647,23 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     /// false and the worker's post-run backstop remains the hard guarantee that a cancelled job is
     /// finalized as cancelled.
     /// </summary>
+    /// <summary>Snapshots each pipeline call-site's configured model (model.&lt;site&gt;) for this run; a
+    /// missing/blank row leaves that call-site on its registry default (resolved in AgentFactory).</summary>
+    private async Task<IReadOnlyDictionary<string, string>> ResolveCallSiteModelsAsync(CancellationToken ct)
+    {
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var site in Daleel.Core.Llm.LlmCallSites.All)
+        {
+            var model = await _config.GetAsync(site.ConfigKey, ct).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(model))
+            {
+                map[site.Key] = model!;
+            }
+        }
+
+        return map;
+    }
+
     private async Task<bool> IsCancelRequestedAsync(int jobId)
     {
         try
@@ -713,7 +694,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         var rows = calls.Select(c => new ApiCallLog
         {
             UserId = hashedUser, JobId = job.Id, Provider = c.Provider, Endpoint = c.Endpoint,
-            RequestSummary = c.RequestSummary, ResponseTimeMs = c.ResponseTimeMs, ResponseBytes = c.ResponseBytes,
+            RequestSummary = c.RequestSummary, ResponseSummary = c.ResponseSummary, ResponseTimeMs = c.ResponseTimeMs, ResponseBytes = c.ResponseBytes,
             Status = c.Status.ToString().ToLowerInvariant(), EstimatedCost = c.EstimatedCost,
             Model = c.Model, InputTokens = c.InputTokens, OutputTokens = c.OutputTokens, CreatedAt = c.Timestamp
         });

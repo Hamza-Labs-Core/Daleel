@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -5,6 +6,7 @@ using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Llm;
 using Daleel.Core.Models;
+using Daleel.Core.Observability;
 using Daleel.Pipeline.Extraction;
 using Daleel.Search.Abstractions;
 
@@ -49,8 +51,14 @@ public sealed partial class AgentService
         var countryName = geo.Country;
         var includeIntl = LocalityClassifier.QueryWantsInternational(query);
 
-        bool KeepLocal(string? url, bool geoTargeted) =>
-            includeIntl || LocalityClassifier.IsLocal(url, cc, countryName, geoTargeted);
+        // Web results were fetched with gl={cc} whenever the market is known (SerpApiProvider),
+        // so the classifier may apply its geo-scoped generic-gTLD rule when the result's own text
+        // names the market: Google already constrained these hits, and a "…Jordan/JO…" title or
+        // snippet is what separates jo-cell.com from a global seller that merely ranks here.
+        var geoScopedSearch = !string.IsNullOrWhiteSpace(cc);
+
+        bool KeepLocal(string? url, bool geoTargeted, string? evidence = null) =>
+            includeIntl || LocalityClassifier.IsLocal(url, cc, countryName, geoTargeted, geoScopedSearch, evidence);
 
         var classified = bundle.WebResults
             .Select(r => (r, type: ResultClassifier.Classify(r.Url, r.Title, r.Snippet)))
@@ -77,16 +85,16 @@ public sealed partial class AgentService
                     break;
 
                 // Buyable surfaces — only kept when confirmed local AND on an actual commerce host.
-                case ResultType.StorePage when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
+                case ResultType.StorePage when KeepLocal(r.Url, false, $"{r.Title} {r.Snippet}") && !IsNonCommerceHost(r.Url):
                     AddStore(stores, r);
                     break;
-                case ResultType.Marketplace when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url):
+                case ResultType.Marketplace when KeepLocal(r.Url, false, $"{r.Title} {r.Snippet}") && !IsNonCommerceHost(r.Url):
                     AddMarketplace(marketplaces, r);
                     break;
                 // A web hit whose title is a URL/bare domain has no product identity — never surface
                 // a raw link as a product card (same rule as PickName and the extractor paths).
-                case ResultType.ProductListing when KeepLocal(r.Url, false) && !IsNonCommerceHost(r.Url)
-                    && !LooksLikeUrl(r.Title):
+                case ResultType.ProductListing when KeepLocal(r.Url, false, $"{r.Title} {r.Snippet}") && !IsNonCommerceHost(r.Url)
+                    && !LooksLikeUrl(r.Title) && !LooksLikePageTitle(r.Title) && !IsListingPageUrl(r.Url):
                     webListings.Add(WebResultToListing(r, type));
                     break;
 
@@ -99,8 +107,32 @@ public sealed partial class AgentService
             }
         }
 
-        // Shopping hits come from a geo-targeted search (gl=cc) → treated as local.
-        var shoppingListings = ListingExtractor.FromShopping(bundle.ShoppingResults);
+        // FUNNEL VISIBILITY: "are we getting all the results?" must be answerable from a job's log,
+        // not taken on faith. One line: what came in, where it landed, and why drops dropped.
+        {
+            var buyable = classified.Where(c => c.type is ResultType.StorePage or ResultType.Marketplace
+                or ResultType.ProductListing).ToList();
+            var droppedNonCommerce = buyable.Count(c => IsNonCommerceHost(c.r.Url));
+            var droppedNonLocal = buyable.Count(c =>
+                !IsNonCommerceHost(c.r.Url) && !KeepLocal(c.r.Url, false, $"{c.r.Title} {c.r.Snippet}"));
+            var droppedUrlTitle = classified.Count(c => c.type == ResultType.ProductListing &&
+                !IsNonCommerceHost(c.r.Url) && LooksLikeUrl(c.r.Title));
+            Log($"result funnel: {classified.Count} web results → stores {stores.Count}, " +
+                $"marketplaces {marketplaces.Count}, listings {webListings.Count}, brands {brands.Count}, " +
+                $"reviews/articles {reviews.Count}; dropped {droppedNonLocal} non-local, " +
+                $"{droppedNonCommerce} non-commerce(demoted), {droppedUrlTitle} url-titled; " +
+                $"shopping {bundle.ShoppingResults.Count}, places-stores {bundle.Stores.Count}");
+        }
+
+        // Shopping hits come from a geo-targeted search (gl=cc) → treated as local. But for PRODUCT
+        // searches, Google Shopping is no longer a product-card SOURCE: those hits are aggregator
+        // "lowest price" SEO rows, and the grid's product data now comes from brand sites (Context.dev)
+        // + store pages (CF-Browser) + LLM extraction. Shopping still flows into bundle.Prices and the
+        // analyst/extraction context (unchanged), and non-product intents (Deals/service/place) keep the
+        // seed — so the /deals surface, which reads ShoppingResults directly, is untouched.
+        var shoppingListings = intent == SearchIntentType.Product
+            ? Array.Empty<ProductListing>()
+            : ListingExtractor.FromShopping(bundle.ShoppingResults);
 
         // Deep-extract individual listings from the top LOCAL marketplace/store pages.
         var extracted = await ExtractListingsAsync(classified, geo, includeIntl, cancellationToken).ConfigureAwait(false);
@@ -282,6 +314,12 @@ public sealed partial class AgentService
             });
         }
 
+        // Wire the result-level research onto EACH model's own card: offers link to their selling
+        // store's site, models gain the brand's regional site + their page on the brand site, and
+        // every review/web hit that names the model is attached as an item review/mention. Runs
+        // after the stores dictionary is complete (brand-page fallbacks + Places stores included).
+        models = AttachItemResearch(models, bundle.WebResults, stores.Values, brands.Values, reviews, geo);
+
         // Aggregate the per-brand social/forum opinions into one product-level "what people say"
         // feed, deduped by quote, so real user sentiment surfaces in the results (not just in the
         // brand detail panel).
@@ -314,6 +352,351 @@ public sealed partial class AgentService
             GeneratedAt = _options.Clock()
         };
     }
+
+    /// <summary>Max item reviews attached to one model's card.</summary>
+    private const int MaxItemReviews = 5;
+
+    /// <summary>Max mention links attached to one model's card.</summary>
+    private const int MaxItemMentions = 5;
+
+    /// <summary>
+    /// Max models one review may attach to — a review naming more than this many models is a
+    /// generic roundup, not a review OF any one of them.
+    /// </summary>
+    private const int MaxModelsPerReview = 3;
+
+    /// <summary>Shared significant (3+ char) tokens required to call a review/hit "about this model".</summary>
+    private const int MinSharedIdentityTokens = 3;
+
+    /// <summary>Shared name tokens required for a brand-site hit when the model number is unknown.</summary>
+    private const int MinSharedNameTokens = 2;
+
+    /// <summary>
+    /// Wires the result-level research (stores/brand pages/review articles/raw web hits) onto EACH
+    /// <see cref="ProductModel"/>, per the item-card contract:
+    /// <list type="bullet">
+    ///   <item>Offers get <see cref="PriceOffer.StoreUrl"/> — the selling store's own site — matched
+    ///   from the stores dictionary by name (offer source) or by URL host.</item>
+    ///   <item><see cref="ProductModel.BrandRegionalUrl"/> — the brand's site for the market, from a
+    ///   classified brand page matching the model's brand (a local-looking URL preferred, the global
+    ///   site kept as a fallback: better than nothing).</item>
+    ///   <item><see cref="ProductModel.BrandSiteUrl"/> — the MODEL's page on the brand's own domain:
+    ///   a web hit whose registrable host label carries the brand AND whose text names the model.</item>
+    ///   <item><see cref="ProductModel.Reviews"/> / <see cref="ProductModel.Mentions"/> — review
+    ///   articles and remaining web hits (reddit threads included — non-commerce is exactly where
+    ///   mentions live) that name the model, token-matched and capped per model.</item>
+    /// </list>
+    /// Token sets are computed ONCE per model and once per review/result before the double loops —
+    /// grids reach 50+ models × 350 results, so the association must never re-tokenize inside them.
+    /// </summary>
+    private static IReadOnlyList<ProductModel> AttachItemResearch(
+        IReadOnlyList<ProductModel> models,
+        IReadOnlyList<SearchResult> webResults,
+        IEnumerable<StoreInfo> stores,
+        IEnumerable<BrandInfo> brandPages,
+        IReadOnlyList<ReviewSource> reviews,
+        GeoProfile geo)
+    {
+        if (models.Count == 0)
+        {
+            return models;
+        }
+
+        // Store lookups for the offer → store-site link: by display name and by URL host.
+        var storeUrlByName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var storeUrlByHost = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var s in stores)
+        {
+            if (string.IsNullOrWhiteSpace(s.Url))
+            {
+                continue;
+            }
+
+            if (!string.IsNullOrWhiteSpace(s.Name))
+            {
+                storeUrlByName.TryAdd(s.Name, s.Url!);
+            }
+
+            if (HostOf(s.Url) is { } host)
+            {
+                storeUrlByHost.TryAdd(host, s.Url!);
+            }
+        }
+
+        var brandCandidates = brandPages.Where(b => !string.IsNullOrWhiteSpace(b.Url)).ToList();
+
+        // Tokenize each side ONCE; the model × review/result loops below only intersect sets.
+        var reviewData = reviews
+            .Where(r => !string.IsNullOrWhiteSpace(r.Url))
+            .Select(r => (Review: r, Tokens: ItemTokens($"{r.Title} {r.Snippet}")))
+            .ToList();
+        var reviewUses = new int[reviewData.Count];
+
+        var resultData = webResults
+            .Where(r => !string.IsNullOrWhiteSpace(r.Url))
+            .Select(r => (
+                Result: r,
+                Tokens: ItemTokens($"{r.Title} {r.Snippet} {UrlPath(r.Url)}"),
+                HostBrand: NormalizeLabel(HostLabel(r.Url)),
+                UrlShapedTitle: LooksLikeUrl(r.Title)))
+            .ToList();
+
+        var updated = new List<ProductModel>(models.Count);
+        foreach (var m in models)
+        {
+            var identityTokens = ItemTokens($"{m.Brand} {m.Model} {m.Name}");
+            var modelTokens = ItemTokens(m.Model);
+            var nameTokens = ItemTokens(m.Name);
+            var normalizedBrand = NormalizeLabel(m.Brand);
+
+            var brandTokens = ItemTokens(m.Brand);
+
+            // "About this model": the model number's tokens all present (the strongest signal), or
+            // enough identity shared AND the DISCRIMINATING token present — for a branded model the
+            // BRAND must appear, else category words alone attach every generic roundup (live find:
+            // articles that never mention MEC attached to the MEC AC card, because ton/inverter/air
+            // overlap cleared the shared-token bar on their own).
+            bool MentionsModel(HashSet<string> candidate) =>
+                (modelTokens.Count > 0 && modelTokens.All(candidate.Contains)) ||
+                (SharedSignificantTokens(identityTokens, candidate) >= MinSharedIdentityTokens &&
+                 (brandTokens.Count == 0 || brandTokens.Any(candidate.Contains)));
+
+            // 1) StoreUrl on offers: the seller chip links to the store's own site, distinct from
+            // the offer's product-page Url (never duplicated when they're the same link).
+            var offers = m.Offers;
+            List<PriceOffer>? patched = null;
+            for (var i = 0; i < offers.Count; i++)
+            {
+                var o = offers[i];
+                if (o.StoreUrl is not null)
+                {
+                    continue;
+                }
+
+                string? storeUrl = null;
+                if (!string.IsNullOrWhiteSpace(o.Source))
+                {
+                    storeUrlByName.TryGetValue(o.Source, out storeUrl);
+                }
+
+                if (storeUrl is null && HostOf(o.Url) is { } offerHost)
+                {
+                    storeUrlByHost.TryGetValue(offerHost, out storeUrl);
+                }
+
+                if (storeUrl is null || storeUrl.Equals(o.Url, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                patched ??= offers.ToList();
+                patched[i] = o with { StoreUrl = storeUrl };
+            }
+
+            if (patched is not null)
+            {
+                offers = patched;
+            }
+
+            // 2) BrandRegionalUrl: prefer a brand page confirmed local to the market (or carrying
+            // the /{cc} path), else fall back to the brand's global site — better than nothing.
+            var brandRegionalUrl = m.BrandRegionalUrl;
+            if (brandRegionalUrl is null && !string.IsNullOrWhiteSpace(m.Brand))
+            {
+                string? globalUrl = null;
+                foreach (var bp in brandCandidates)
+                {
+                    if (!NamesMatch(bp.Name, m.Brand!))
+                    {
+                        continue;
+                    }
+
+                    if (LocalityClassifier.IsLocal(bp.Url, geo.CountryCode, geo.Country,
+                            fromGeoScopedSearch: true, marketEvidence: $"{bp.Name} {geo.Country}") ||
+                        bp.Url!.Contains($"/{geo.CountryCode}", StringComparison.OrdinalIgnoreCase))
+                    {
+                        brandRegionalUrl = bp.Url;
+                        break;
+                    }
+
+                    globalUrl ??= bp.Url;
+                }
+
+                brandRegionalUrl ??= globalUrl;
+            }
+
+            // 3) BrandSiteUrl: the model's own page on the brand's domain — the host's registrable
+            // label must carry the brand, and the hit's text must name the model. First hit wins.
+            var brandSiteUrl = m.BrandSiteUrl;
+            if (brandSiteUrl is null && normalizedBrand.Length > 0)
+            {
+                foreach (var rd in resultData)
+                {
+                    if (rd.HostBrand.Length == 0 ||
+                        !rd.HostBrand.Contains(normalizedBrand, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var namesModel = modelTokens.Count > 0
+                        ? modelTokens.All(rd.Tokens.Contains)
+                        : SharedTokens(nameTokens, rd.Tokens) >= MinSharedNameTokens;
+                    if (namesModel)
+                    {
+                        brandSiteUrl = rd.Result.Url;
+                        break;
+                    }
+                }
+            }
+
+            // 4) Reviews that name THIS model, capped per model AND per review (a review spread
+            // over many models is a roundup, not a review of any one of them).
+            var itemReviews = new List<ItemReview>();
+            for (var i = 0; i < reviewData.Count && itemReviews.Count < MaxItemReviews; i++)
+            {
+                if (reviewUses[i] >= MaxModelsPerReview || !MentionsModel(reviewData[i].Tokens))
+                {
+                    continue;
+                }
+
+                reviewUses[i]++;
+                var rv = reviewData[i].Review;
+                itemReviews.Add(new ItemReview(rv.Title, rv.Url!, rv.Snippet, rv.Source));
+            }
+
+            // 5) Mentions: any remaining web hit naming the model — a reddit thread or blog post is
+            // exactly what belongs here — skipping links already on the card and URL-shaped titles.
+            var usedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var o in offers)
+            {
+                if (!string.IsNullOrWhiteSpace(o.Url))
+                {
+                    usedUrls.Add(o.Url!);
+                }
+            }
+
+            foreach (var rv in itemReviews)
+            {
+                usedUrls.Add(rv.Url);
+            }
+
+            if (brandSiteUrl is not null)
+            {
+                usedUrls.Add(brandSiteUrl);
+            }
+
+            var mentions = new List<ItemLink>();
+            foreach (var rd in resultData)
+            {
+                if (mentions.Count >= MaxItemMentions)
+                {
+                    break;
+                }
+
+                if (rd.UrlShapedTitle || string.IsNullOrWhiteSpace(rd.Result.Title) ||
+                    usedUrls.Contains(rd.Result.Url!) || !MentionsModel(rd.Tokens))
+                {
+                    continue;
+                }
+
+                mentions.Add(new ItemLink(rd.Result.Title, rd.Result.Url!, rd.Result.Source));
+            }
+
+            updated.Add(m with
+            {
+                Offers = offers,
+                Reviews = m.Reviews.Count > 0 ? m.Reviews : itemReviews,
+                Mentions = m.Mentions.Count > 0 ? m.Mentions : mentions,
+                BrandSiteUrl = brandSiteUrl,
+                BrandRegionalUrl = brandRegionalUrl
+            });
+        }
+
+        return updated;
+
+        static bool NamesMatch(string a, string b) =>
+            a.Equals(b, StringComparison.OrdinalIgnoreCase) ||
+            a.Contains(b, StringComparison.OrdinalIgnoreCase) ||
+            b.Contains(a, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Separators for item-association tokenizing (mirrors the enrichment matcher's set).</summary>
+    private static readonly char[] ItemTokenSeparators = " \t\r\n-_/\\|,.()[]{}،:;\"'".ToCharArray();
+
+    /// <summary>
+    /// Token set for item association. Keeps 2-character tokens: variant suffixes ("FE", "5G", or a
+    /// hyphen-split model half like "S4") are exactly what distinguishes one model from another.
+    /// </summary>
+    private static HashSet<string> ItemTokens(string? text)
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return set;
+        }
+
+        foreach (var t in text.Split(ItemTokenSeparators, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (t.Length >= 2)
+            {
+                set.Add(t);
+            }
+        }
+
+        return set;
+    }
+
+    /// <summary>Count of tokens present in both sets.</summary>
+    private static int SharedTokens(HashSet<string> want, HashSet<string> have)
+    {
+        var shared = 0;
+        foreach (var t in want)
+        {
+            if (have.Contains(t))
+            {
+                shared++;
+            }
+        }
+
+        return shared;
+    }
+
+    /// <summary>Shared-token count over SIGNIFICANT (3+ char) tokens, so "of"/"in" never count.</summary>
+    private static int SharedSignificantTokens(HashSet<string> want, HashSet<string> have)
+    {
+        var shared = 0;
+        foreach (var t in want)
+        {
+            if (t.Length >= 3 && have.Contains(t))
+            {
+                shared++;
+            }
+        }
+
+        return shared;
+    }
+
+    /// <summary>Lowercased alphanumerics of a label ("Smart Buy" → "smartbuy") for host↔brand matching.</summary>
+    private static string NormalizeLabel(string? text) =>
+        string.IsNullOrWhiteSpace(text)
+            ? string.Empty
+            : new string(text!.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
+    /// <summary>Lowercased URL host without a "www." prefix, or null when unparseable.</summary>
+    private static string? HostOf(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u))
+        {
+            return null;
+        }
+
+        var host = u.Host.ToLowerInvariant();
+        return host.StartsWith("www.", StringComparison.Ordinal) ? host[4..] : host;
+    }
+
+    /// <summary>A URL's path component, for token matching ("/jo/air-conditioners/ar18" names a model).</summary>
+    private static string UrlPath(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.AbsolutePath : string.Empty;
 
     /// <summary>
     /// Per-model deep scrape: runs a focused, exact-model search across local sources, aggregates
@@ -367,10 +750,14 @@ public sealed partial class AgentService
         var context = BuildContext(bundle);
         try
         {
-            var text = await _llm.CompleteTextAsync(
-                PromptTemplates.BrandReputationSystem,
-                PromptTemplates.BrandReputations(brands, geo, context),
-                cancellationToken).ConfigureAwait(false);
+            string text;
+            using (LlmCallSiteScope.Enter(LlmCallSites.BrandReputation))
+            {
+                text = await _llm.CompleteTextAsync(
+                    PromptTemplates.BrandReputationSystem,
+                    PromptTemplates.BrandReputations(brands, geo, context),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var dto = LlmJson.Deserialize<BrandReputationsDto>(text);
             if (dto?.Brands is null)
@@ -471,10 +858,14 @@ public sealed partial class AgentService
 
         try
         {
-            var text = await _llm.CompleteTextAsync(
-                PromptTemplates.ModelDetailSystem,
-                PromptTemplates.ModelProsCons(model.Name, context),
-                cancellationToken).ConfigureAwait(false);
+            string text;
+            using (LlmCallSiteScope.Enter(LlmCallSites.EnrichModel))
+            {
+                text = await _llm.CompleteTextAsync(
+                    PromptTemplates.ModelDetailSystem,
+                    PromptTemplates.ModelProsCons(model.Name, context),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var dto = LlmJson.Deserialize<ProsConsDto>(text);
             if (dto is not null)
@@ -526,7 +917,10 @@ public sealed partial class AgentService
 
         var targets = classified
             .Where(c => c.type is ResultType.Marketplace or ResultType.StorePage && !string.IsNullOrWhiteSpace(c.r.Url))
-            .Where(c => includeIntl || LocalityClassifier.IsLocal(c.r.Url, geo.CountryCode, geo.Country))
+            .Where(c => includeIntl || LocalityClassifier.IsLocal(
+                c.r.Url, geo.CountryCode, geo.Country,
+                fromGeoScopedSearch: !string.IsNullOrWhiteSpace(geo.CountryCode),
+                marketEvidence: $"{c.r.Title} {c.r.Snippet}"))
             .Select(c => (c.r.Url!, Source: SourceName(c.r), c.type))
             .Take(_options.MaxListingUrls)
             .ToList();
@@ -536,10 +930,64 @@ public sealed partial class AgentService
             return Array.Empty<ProductListing>();
         }
 
+        // Each store URL is crawled across MULTIPLE listing pages (pagination), not just the one Google
+        // returned — bounded by StorePageDepth, stop-on-empty. Stores run in parallel; pages within a store
+        // run sequentially (stop-on-empty needs the previous page's result).
         var tasks = targets.Select(t =>
-            ListingExtractor.ExtractAsync(extractor, t.Item1, t.Source, t.type, geo.Currency, cancellationToken));
+            ExtractStorePagesAsync(extractor, t.Item1, t.Source, t.type, geo.Currency, cancellationToken));
         var batches = await Task.WhenAll(tasks).ConfigureAwait(false);
         return batches.SelectMany(b => b).ToList();
+    }
+
+    /// <summary>
+    /// Extracts a store's product listings across paginated pages: page 1 (the URL Google returned) plus up
+    /// to <see cref="AgentOptions.StorePageDepth"/>-1 derived next pages, stopping as soon as a page yields
+    /// no listings (past the last page). Only paginates a first page that actually produced products.
+    /// </summary>
+    private async Task<IReadOnlyList<ProductListing>> ExtractStorePagesAsync(
+        IExtractProvider extractor, string url, string source, ResultType type, string? currency,
+        CancellationToken cancellationToken)
+    {
+        var all = new List<ProductListing>();
+
+        var first = await ListingExtractor.ExtractAsync(extractor, url, source, type, currency, cancellationToken)
+            .ConfigureAwait(false);
+        all.AddRange(first);
+
+        // A first page that yielded nothing isn't a browsable listing page — don't paginate it.
+        if (first.Count == 0 || _options.StorePageDepth <= 1)
+        {
+            return all;
+        }
+
+        foreach (var pageUrl in StorePagination.NextPages(url, _options.StorePageDepth))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var page = await ListingExtractor.ExtractAsync(extractor, pageUrl, source, type, currency, cancellationToken)
+                .ConfigureAwait(false);
+            if (page.Count == 0)
+            {
+                break; // stop-on-empty: past the last page
+            }
+
+            all.AddRange(page);
+            EmitStorePage(source, pageUrl, page.Count);
+        }
+
+        return all;
+    }
+
+    /// <summary>Emits a store.scraped event when a paginated store page yields products.</summary>
+    private void EmitStorePage(string source, string url, int count)
+    {
+        Log($"store page {url} → {count} listings");
+        (_options.Events ?? AmbientSearchEvents.Sink)?.Emit(new SearchEvent(
+            SearchEventCategories.Store,
+            "store.scraped",
+            $"{source}: {count} products from a paginated page",
+            SearchEventLevel.Info,
+            "scrape",
+            new Dictionary<string, object?> { ["source"] = source, ["url"] = url, ["products"] = count }));
     }
 
     /// <summary>
@@ -558,25 +1006,26 @@ public sealed partial class AgentService
             (IReadOnlyList<ProductListing>)Array.Empty<ProductListing>(),
             (IReadOnlyDictionary<string, ModelInsight>)new Dictionary<string, ModelInsight>(StringComparer.Ordinal));
 
-        // Classifying context: real product/store listings are separated from editorial articles, so the
-        // extractor mines articles for which products exist without ever listing an article as an item.
-        var context = BuildExtractionContext(bundle);
-        if (context.Length == 0)
+        // Split the bundle into bounded parts (one "signals" digest + one per scraped page) and extract
+        // each in its OWN LLM call, in PARALLEL under a concurrency gate — so the uncapped "extract every
+        // model" prompt sees a bounded input per call and completes, instead of one monolithic call over
+        // everything (which hung past the deadline). The downstream ListingAggregator dedups by identity,
+        // so unioning the parts' products needs no extra dedup here.
+        var parts = BuildExtractionParts(bundle, _options.ExtractionMaxPageChars);
+        if (_options.ExtractionMaxParts > 0 && parts.Count > _options.ExtractionMaxParts)
+        {
+            parts = parts.Take(_options.ExtractionMaxParts).ToList();
+        }
+        if (parts.Count == 0)
         {
             return empty;
         }
 
-        // Ask the LLM for structured products; if its JSON can't be parsed, retry once before
-        // falling back gracefully to no LLM listings (the deterministic sources still stand).
-        var dto = await ExtractProductsDtoAsync(query, geo, context, cancellationToken, schema, intent).ConfigureAwait(false);
-        if (dto?.Products is null)
-        {
-            return empty;
-        }
+        var dtos = await ExtractPartsAsync(query, geo, parts, cancellationToken, schema, intent).ConfigureAwait(false);
 
         var listings = new List<ProductListing>();
         var insights = new Dictionary<string, ModelInsight>(StringComparer.Ordinal);
-        foreach (var p in dto.Products)
+        foreach (var p in dtos.Where(d => d?.Products is not null).SelectMany(d => d!.Products!))
         {
             var name = PickName(p.Name, p.Model);
             if (string.IsNullOrWhiteSpace(name))
@@ -595,8 +1044,9 @@ public sealed partial class AgentService
             var verdict = string.IsNullOrWhiteSpace(p.Summary) ? null : p.Summary!.Trim();
             if (pros.Count > 0 || cons.Count > 0 || verdict is not null)
             {
-                insights[ModelInsightKey(brand, model, name!.Trim())] =
-                    new ModelInsight(pros, cons, verdict);
+                // TryAdd: first non-empty insight per model wins across parts (a later page can't clobber it).
+                insights.TryAdd(ModelInsightKey(brand, model, name!.Trim()),
+                    new ModelInsight(pros, cons, verdict));
             }
             var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             if (p.Specs is { Count: > 0 })
@@ -619,7 +1069,9 @@ public sealed partial class AgentService
             var localOffers = (p.Offers ?? new List<ExtractedOfferDto>())
                 .Select(o => (o, url: string.IsNullOrWhiteSpace(o.Url) ? null : o.Url!.Trim()))
                 .Where(t => t.url is null || includeIntl ||
-                            LocalityClassifier.IsLocal(t.url, geo.CountryCode, geo.Country))
+                            LocalityClassifier.IsLocal(
+                                t.url, geo.CountryCode, geo.Country,
+                                fromGeoScopedSearch: !string.IsNullOrWhiteSpace(geo.CountryCode)))
                 .Select(t => (t.o, t.url, price: ParsePrice(t.o.Price)))
                 .ToList();
 
@@ -666,9 +1118,96 @@ public sealed partial class AgentService
         return (listings, insights);
     }
 
+    /// <summary>
+    /// Worker-INDEPENDENT product extraction from ONE already-rendered page, through the same LLM listing
+    /// extractor the main search uses. The store-catalogue fallback's last resort: when Context.dev returns
+    /// no products for a domain (an empty <c>{"products":[]}</c>, or a 400 it cannot resolve) AND the edge
+    /// extract host is empty or unavailable, the rendered store page is handed to the LLM so the store's
+    /// items can still be SEEDED. The page belongs to a store discovery already judged local, so locality
+    /// filtering is bypassed — every product on it counts. Empty on thin content or any failure.
+    /// </summary>
+    public async Task<IReadOnlyList<ProductListing>> ExtractProductsFromPageAsync(
+        string content, string query, GeoProfile geo, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return Array.Empty<ProductListing>();
+        }
+
+        // One synthetic page ⇒ BuildExtractionParts yields exactly one part, so this stays a single
+        // bounded LLM call rather than a monolithic pass over a whole bundle.
+        var bundle = new ResearchBundle
+        {
+            Pages = new[] { new ScrapedPage { Content = content, Success = true, Provider = "catalog-llm-fallback" } }
+        };
+
+        var (listings, _) = await ExtractProductListingsAsync(
+            query, geo, bundle, includeIntl: true, cancellationToken).ConfigureAwait(false);
+        return listings;
+    }
+
     /// <summary>An LLM-distilled verdict for a model: short pros/cons and a one-line summary.</summary>
     private sealed record ModelInsight(
         IReadOnlyList<string> Pros, IReadOnlyList<string> Cons, string? Summary);
+
+    /// <summary>
+    /// Runs one LLM extraction call PER part in parallel, bounded by <see cref="AgentOptions.ExtractionConcurrency"/>
+    /// (each part is a full "extract every model" call, so an ungated fan-out would storm the LLM rate limit).
+    /// A part that fails (non-cancellation) is salvaged as null; on cancellation (the workflow deadline) the
+    /// parts that already completed are kept rather than discarding the whole extraction.
+    /// </summary>
+    private async Task<IReadOnlyList<ExtractedProductsDto?>> ExtractPartsAsync(
+        string query, GeoProfile geo, IReadOnlyList<ExtractionPart> parts, CancellationToken cancellationToken,
+        ProductSchema? schema, SearchIntentType intent)
+    {
+        using var gate = new SemaphoreSlim(Math.Max(1, _options.ExtractionConcurrency));
+        var tasks = parts.Select(async part =>
+        {
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            var sw = Stopwatch.StartNew();
+            try
+            {
+                var dto = await ExtractProductsDtoAsync(query, geo, part.Content, cancellationToken, schema, intent)
+                    .ConfigureAwait(false);
+                EmitExtractionPart(part.Label, dto?.Products?.Count ?? 0, dto is not null, sw.ElapsedMilliseconds);
+                return dto;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Log($"extraction part '{part.Label}' failed: {ex.Message}");
+                EmitExtractionPart(part.Label, 0, false, sw.ElapsedMilliseconds);
+                return null;
+            }
+            finally
+            {
+                gate.Release();
+            }
+        }).ToList();
+
+        try
+        {
+            return await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Deadline hit mid-fan-out: keep whatever finished rather than losing the whole extraction.
+            return tasks.Where(t => t.IsCompletedSuccessfully).Select(t => t.Result).ToList();
+        }
+    }
+
+    /// <summary>Logs + emits a per-part extraction event so /admin/timeline shows extraction progress
+    /// (which page/signals part yielded how many products, and how long it took).</summary>
+    private void EmitExtractionPart(string label, int productCount, bool success, long elapsedMs)
+    {
+        Log($"extracted {productCount} products from {label} ({elapsedMs} ms)");
+        (_options.Events ?? AmbientSearchEvents.Sink)?.Emit(new SearchEvent(
+            SearchEventCategories.Extract,
+            "extract.part",
+            $"Extracted {productCount} products from {label}",
+            success ? SearchEventLevel.Info : SearchEventLevel.Warning,
+            "extraction",
+            new Dictionary<string, object?> { ["part"] = label, ["products"] = productCount, ["ms"] = elapsedMs }));
+    }
 
     // A URL / bare domain the LLM sometimes drops into the name field instead of the product name:
     // "https://x.com/p", "www.foo.io", "amazon.com/dp/B0…". The final label must be all letters (a TLD)
@@ -678,19 +1217,29 @@ public sealed partial class AgentService
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     /// <summary>
-    /// Chooses the product's display name, guarding against the LLM occasionally emitting the source URL
-    /// (or a bare domain) in the name field instead of the real product name. A URL-shaped name is rejected
-    /// in favour of the model number; if that is also missing or URL-shaped, the product is dropped rather
-    /// than surfacing a raw link to the shopper.
+    /// Chooses the product's display name via the shared <see cref="ListingExtractor.CleanExtractedName"/>,
+    /// so the LLM path rejects the same noise as the deterministic extractor: a source URL / bare domain
+    /// in the name field, a scraped markdown product card, or a search/category page title. Falls back to
+    /// the model number when the name is unusable; returns null (drop the product) when neither is usable.
     /// </summary>
-    private static string? PickName(string? name, string? model)
-    {
-        if (!string.IsNullOrWhiteSpace(name) && !LooksLikeUrl(name)) return name;
-        if (!string.IsNullOrWhiteSpace(model) && !LooksLikeUrl(model)) return model;
-        return null;
-    }
+    private static string? PickName(string? name, string? model) =>
+        ListingExtractor.CleanExtractedName(name) ?? ListingExtractor.CleanExtractedName(model);
 
     private static bool LooksLikeUrl(string text) => UrlLikeName.IsMatch(text.Trim());
+
+    /// <summary>
+    /// True when a "product name" is really a PAGE TITLE — a search/category/SEO page masquerading as an
+    /// item. Delegates to the shared <see cref="ListingExtractor.LooksLikePageTitle"/> so the web-results,
+    /// deterministic-extract and LLM-extract paths all reject the same titles. Kept as a forwarder for the
+    /// existing call site and the <c>AgentService.LooksLikePageTitle</c> unit tests.
+    /// </summary>
+    internal static bool LooksLikePageTitle(string text) => ListingExtractor.LooksLikePageTitle(text);
+
+    /// <summary>
+    /// True when a url is a search/category LISTING page, not a product page. Delegates to the shared
+    /// <see cref="ListingExtractor.IsListingPageUrl"/>; kept as a forwarder for the call site and tests.
+    /// </summary>
+    internal static bool IsListingPageUrl(string? url) => ListingExtractor.IsListingPageUrl(url);
 
     /// <summary>
     /// Insight-map key matching <see cref="ListingExtractor.DedupKey"/>'s identity rules
@@ -731,8 +1280,12 @@ public sealed partial class AgentService
         {
             try
             {
-                var text = await _llm.CompleteTextAsync(
-                    system, prompt, cancellationToken).ConfigureAwait(false);
+                string text;
+                using (LlmCallSiteScope.Enter(LlmCallSites.Extraction))
+                {
+                    text = await _llm.CompleteTextAsync(
+                        system, prompt, cancellationToken).ConfigureAwait(false);
+                }
 
                 var dto = LlmJson.Deserialize<ExtractedProductsDto>(text);
                 if (dto?.Products is not null)
@@ -768,10 +1321,14 @@ public sealed partial class AgentService
                     .Where(s => !string.IsNullOrWhiteSpace(s))))
                 .ToList();
 
-            var text = await _llm.CompleteTextAsync(
-                PromptTemplates.RelevanceGateSystem,
-                PromptTemplates.RelevanceGate(target, labels),
-                cancellationToken).ConfigureAwait(false);
+            string text;
+            using (LlmCallSiteScope.Enter(LlmCallSites.Relevance))
+            {
+                text = await _llm.CompleteTextAsync(
+                    PromptTemplates.RelevanceGateSystem,
+                    PromptTemplates.RelevanceGate(target, labels, _options.RelevancePolicy.Negatives),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             var dto = LlmJson.Deserialize<RelevanceVerdictsDto>(text);
             if (dto?.Drop is not { Count: > 0 } drop)
@@ -949,16 +1506,36 @@ public sealed partial class AgentService
         return first ?? r.Title;
     }
 
-    /// <summary>Title-cased registrable label of a host, e.g. "https://www.samsung.com/jo" → "Samsung".</summary>
-    private static string? HostLabel(string? url)
+    /// <summary>
+    /// Title-cased REGISTRABLE label of a host — the brand-carrying label immediately left of the
+    /// public suffix, never a subdomain: "https://www.samsung.com/jo" → "Samsung",
+    /// "jo.opensooq.com" → "Opensooq" (jo is the country subdomain, not the store),
+    /// "khaleej.com.sa" → "Khaleej", "leaders.jo" → "Leaders". Taking the FIRST label minted
+    /// country/language/mobile subdomains ("Jo", "M", "En") as store names.
+    /// </summary>
+    public static string? HostLabel(string? url)
     {
         if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var u))
         {
             return null;
         }
 
-        var host = u.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? u.Host[4..] : u.Host;
-        var label = host.Split('.').FirstOrDefault();
+        var labels = u.Host.Split('.', StringSplitOptions.RemoveEmptyEntries);
+        if (labels.Length == 0)
+        {
+            return null;
+        }
+
+        // Approximate public-suffix walk from the right: "<generic>.<cc>" pairs (com.jo, co.uk,
+        // com.sa…) are two-label suffixes, anything else is one. The label before the suffix is the
+        // registrable one — correct for any depth of subdomain without listing subdomains.
+        var suffixLen = 1;
+        if (labels.Length >= 3 && labels[^1].Length == 2 && GenericSecondLevels.Contains(labels[^2]))
+        {
+            suffixLen = 2;
+        }
+
+        var label = labels.Length > suffixLen ? labels[^(suffixLen + 1)] : labels[0];
         if (string.IsNullOrWhiteSpace(label))
         {
             return null;
@@ -966,6 +1543,10 @@ public sealed partial class AgentService
 
         return char.ToUpperInvariant(label[0]) + label[1..];
     }
+
+    /// <summary>Generic second-level labels that pair with a country code to form a public suffix.</summary>
+    private static readonly HashSet<string> GenericSecondLevels =
+        new(StringComparer.OrdinalIgnoreCase) { "com", "co", "net", "org", "gov", "edu", "mil", "ac" };
 
     /// <summary>Wire shape for the structured product-extraction LLM output.</summary>
     private sealed class ExtractedProductsDto

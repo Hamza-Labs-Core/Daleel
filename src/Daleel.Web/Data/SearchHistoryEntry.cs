@@ -40,6 +40,14 @@ public sealed class SearchHistoryEntry
 
     public DateTimeOffset CreatedAt { get; set; }
 
+    /// <summary>
+    /// Credits this search consumed — the base run plus all its background enrichment (item dives,
+    /// catalogue crawls, image lookups, actor loops). Set to the base cost at completion and
+    /// incremented by each enrichment unit as it charges, so it grows to the true total over the
+    /// minutes after the answer. Surfaced in the user's history list.
+    /// </summary>
+    public int Credits { get; set; }
+
     /// <summary>Saved results spun off from this search (back-reference; optional).</summary>
     public ICollection<SavedResult> SavedResults { get; set; } = new List<SavedResult>();
 }

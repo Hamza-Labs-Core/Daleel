@@ -50,17 +50,15 @@ public class PromptTemplatesTests
     }
 
     [Fact]
-    public void ExtractProducts_AsksForBoundedBreadthAndPerModelProsConsVerdict()
+    public void ExtractProducts_AsksForUncappedBreadthAndPerModelProsConsVerdict()
     {
         var prompt = PromptTemplates.ExtractProducts("best ACs", GeoProfiles.Jordan, "context");
 
-        // Push for many brands / multiple models so the grid isn't just the top one or two — but
-        // BOUNDED: the old "extract EVERY distinct model" instruction produced multi-minute LLM
-        // generations on article-heavy queries that blew the run's 10-minute budget, so the prompt
-        // now caps extraction at the ~20 best-evidenced models.
-        prompt.Should().Contain("~20 BEST-EVIDENCED");
+        // UNCAPPED (owner: "scale to hundreds"): extract EVERY distinct model, no ~N ceiling — the
+        // workflow deadline + partial-result salvage backstop a slow call instead of a prompt cap.
+        prompt.Should().Contain("Extract EVERY distinct model");
         prompt.Should().Contain("MULTIPLE brands");
-        prompt.Should().NotContain("EVERY distinct model");
+        prompt.Should().NotContain("CAPPED");
         // The per-model verdict fields the UI now surfaces.
         prompt.Should().Contain("\"pros\"");
         prompt.Should().Contain("\"cons\"");
@@ -134,5 +132,56 @@ public class PromptTemplatesTests
         prompt.Should().Contain("MANY brands");
         // Several review/buying-guide queries feed the "related articles" section.
         prompt.Should().Contain("buying-guide");
+    }
+
+    [Fact]
+    public void PlanProduct_AsksForLocalStoreDiscoveryInBothLanguages()
+    {
+        var prompt = PromptTemplates.PlanProduct("coffee maker", GeoProfiles.Jordan);
+
+        // The plan must explicitly push for local online-store discovery — the gap that made Daleel miss
+        // local e-commerce sites — and name the country so the queries are geo-scoped.
+        prompt.Should().Contain("LOCAL STORE DISCOVERY");
+        prompt.Should().Contain("online store");
+        prompt.Should().Contain("Jordan");
+        // Bilingual store-finder phrasing (Arabic "متجر" / "للبيع") must be requested.
+        prompt.Should().Contain("متجر");
+        prompt.Should().Contain("للبيع");
+        // And a concrete push for a broad diverse query set (16–20) so a single generic query can't starve
+        // coverage — the "scale to hundreds" breadth lever (discover more distinct brand/store sources).
+        prompt.Should().Contain("16–20");
+    }
+
+    [Fact]
+    public void ExtractProducts_RequestsFullListingDetail()
+    {
+        var prompt = PromptTemplates.ExtractProducts("coffee maker", GeoProfiles.Jordan, "some context");
+
+        // Each product should be mined for SKU, stock status and a description, not just name + price.
+        prompt.Should().Contain("sku");
+        prompt.Should().Contain("availability");
+        prompt.Should().Contain("description");
+    }
+
+    [Fact]
+    public void RelevanceGate_WithNegatives_InjectsAdvisoryCalibrationBlock()
+    {
+        var prompt = PromptTemplates.RelevanceGate("pants", new[] { "Nike Socks", "Levi 501" },
+            new[] { new RelevanceNegative("socks", "not pants") });
+
+        prompt.Should().Contain("previously flagged");
+        prompt.Should().Contain("socks (not pants)");
+        // Runaway-loop guard: judge each item on its own merits, not on resemblance.
+        prompt.Should().Contain("OWN merits");
+        prompt.Should().Contain("\"drop\"");
+    }
+
+    [Fact]
+    public void RelevanceGate_NoNegatives_OmitsCalibrationBlock()
+    {
+        var prompt = PromptTemplates.RelevanceGate("pants", new[] { "Levi 501" });
+
+        prompt.Should().NotContain("previously flagged");
+        prompt.Should().Contain("\"drop\"");
     }
 }

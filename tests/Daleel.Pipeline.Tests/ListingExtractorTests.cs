@@ -51,6 +51,35 @@ public class ListingExtractorTests
     }
 
     [Fact]
+    public void FromExtractedJson_ParsesReviews()
+    {
+        var json = Json("""
+        {
+          "products": [
+            {
+              "name": "Samsung AR24",
+              "url": "https://store.com/p/ar24",
+              "reviews": [
+                { "text": "Cools fast, quiet.", "rating": 5, "author": "Ahmad" },
+                { "text": "Good value", "rating": 4 },
+                { "rating": 3 }
+              ]
+            }
+          ]
+        }
+        """);
+
+        var listings = ListingExtractor.FromExtractedJson(json, "Store", ResultType.Marketplace);
+
+        var reviews = listings.Should().ContainSingle().Subject.RatedReviews;
+        reviews.Should().HaveCount(2); // the review with no text is skipped
+        reviews[0].Text.Should().Be("Cools fast, quiet.");
+        reviews[0].Rating.Should().Be(5);
+        reviews[0].Author.Should().Be("Ahmad");
+        reviews[1].Rating.Should().Be(4);
+    }
+
+    [Fact]
     public void FromExtractedJson_ParsesStringPriceAndBareArray()
     {
         var json = Json("""
@@ -91,6 +120,72 @@ public class ListingExtractorTests
         listings.Should().ContainSingle();
         listings[0].Name.Should().Be("AR24TXHQ");
         listings.Should().NotContain(l => l.Name.Contains("http") || l.Name.Contains("www."));
+    }
+
+    [Theory]
+    // A store CATEGORY page scraped via CF Browser returns the whole markdown product card as the
+    // "name": a link whose anchor text is [badge **Product Name** price sizes]. Unwrap the link,
+    // prefer the bolded run (the real name), and drop the badge/price/size noise.
+    [InlineData(
+        "[top rated\\ \\ **Cosmo pant in Gramercy linen blend**\\ \\ $148\\ \\ select colors $81.99\\ \\ Classic, Petite, Tall](https://www.jcrew.com/p/womens/pants/cosmo-pant/CS231?color_name=black)",
+        "Cosmo pant in Gramercy linen blend")]
+    [InlineData("**Soleil pant in linen**", "Soleil pant in linen")]
+    // A clean name is returned unchanged.
+    [InlineData("Women's Legendary Chino Pant", "Women's Legendary Chino Pant")]
+    public void CleanExtractedName_UnwrapsMarkdownCards(string raw, string expected) =>
+        ListingExtractor.CleanExtractedName(raw).Should().Be(expected);
+
+    [Theory]
+    [InlineData("https://www.jcrew.com/p/x")]        // URL-shaped
+    [InlineData("www.foo.io")]                       // bare domain
+    [InlineData("Women's Pants | Find the Lowest Prices")] // search/SEO page title
+    [InlineData("")]
+    [InlineData(null)]
+    public void CleanExtractedName_DropsNoise(string? raw) =>
+        ListingExtractor.CleanExtractedName(raw).Should().BeNull();
+
+    [Fact]
+    public void FromExtractedJson_CleansMarkdownBlobNames_AndVariantsCollapse()
+    {
+        // Store category pages (J.Crew) scraped via CF Browser return the whole markdown product card
+        // as the "name"; the color variants differ only by the URL. After cleaning, the variants share
+        // one product name and MUST aggregate to a single model — they were surfacing as many garbage
+        // "[top rated **Cosmo pant**…](url)" grid cards, one per colour (live bug, "women pants" job 21).
+        var json = Json("""
+        {
+          "products": [
+            { "name": "[top rated\\ \\ **Cosmo pant in linen**\\ \\ $148](https://jcrew.com/p/cosmo/CS231?color=black)", "url": "https://jcrew.com/p/cosmo/CS231?color=black" },
+            { "name": "[best seller\\ \\ **Cosmo pant in linen**\\ \\ $148](https://jcrew.com/p/cosmo/CS231?color=navy)", "url": "https://jcrew.com/p/cosmo/CS231?color=navy" }
+          ]
+        }
+        """);
+
+        var listings = ListingExtractor.FromExtractedJson(json, "jcrew.com", ResultType.StorePage);
+
+        listings.Should().HaveCount(2);
+        listings.Should().OnlyContain(l => l.Name == "Cosmo pant in linen");
+        // The whole point: cleaned names share a dedup key, so the aggregator collapses them to one.
+        ListingExtractor.Merge(listings).Should().ContainSingle();
+    }
+
+    [Fact]
+    public void FromExtractedJson_DropsSearchAndCategoryPages()
+    {
+        // Store search/category pages sometimes slip into the extractor's product array. They are crawl
+        // entry points, not individual items — drop them; keep the real product page alongside.
+        var json = Json("""
+        {
+          "products": [
+            { "name": "Women's Pants", "url": "https://store.com/search?q=women+pants" },
+            { "name": "Pants Collection", "url": "https://store.com/collections/womens-pants" },
+            { "name": "Cosmo Pant in Linen", "url": "https://store.com/products/cosmo-pant-CS231" }
+          ]
+        }
+        """);
+
+        var listings = ListingExtractor.FromExtractedJson(json, "store.com", ResultType.StorePage);
+
+        listings.Should().ContainSingle().Which.Name.Should().Be("Cosmo Pant in Linen");
     }
 
     [Fact]

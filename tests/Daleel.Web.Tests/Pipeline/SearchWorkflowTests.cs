@@ -26,7 +26,7 @@ public class SearchWorkflowTests
         """{ "queryType": "General", "subject": "tea", "webQueries": [], "shoppingQueries": [], "reasoning": "n/a" }""";
 
     [Fact]
-    public async Task FreshRun_ProducesSerializedReport_AndCachesIt()
+    public async Task FreshRun_ProducesSerializedReport_WithoutWritingTheVault()
     {
         var cache = new InMemoryCache();
         using var provider = BuildProvider(cache);
@@ -36,7 +36,9 @@ public class SearchWorkflowTests
         state.FromCache.Should().BeFalse();
         state.ResultJson.Should().NotBeNullOrEmpty();
         state.ResultJson.Should().Contain("tea", "the answer echoes the question");
-        (await cache.GetAsync("k1")).Should().NotBeNull("the workflow caches the completed report");
+        // The whole-query result vault was removed: the report is serialized (the runner persists it to
+        // SearchJob.ResultJson) but is NOT written to the cache.
+        (await cache.GetAsync("k1")).Should().BeNull("the whole-query vault is no longer written");
 
         // The pipeline must stream structured progress the SearchProgress UI can decode: the run starts
         // on the Analyzing step and ends on Done.
@@ -51,8 +53,10 @@ public class SearchWorkflowTests
     }
 
     [Fact]
-    public async Task PrimedCache_ShortCircuits_ToStoredReport()
+    public async Task PrimedVault_IsIgnored_SearchRunsFresh()
     {
+        // The whole-query result vault was removed: even a primed entry must NOT short-circuit — the search
+        // runs fresh, so it never serves stale products/prices and always applies the relevance/learning pass.
         var cache = new InMemoryCache();
         await cache.SetAsync("k2",
             JsonSerializer.Serialize(new CachedSearchResult("{\"cached\":true}", "ask", 3, "alcohol")),
@@ -61,10 +65,9 @@ public class SearchWorkflowTests
         using var provider = BuildProvider(cache);
         var state = await RunAsync(provider, cache, query: "tea again", resultKey: "k2");
 
-        state.FromCache.Should().BeTrue();
-        state.ResultJson.Should().Be("{\"cached\":true}");
-        state.FilteredCount.Should().Be(3, "the cached moderation telemetry is replayed");
-        state.Bundle.Should().BeNull("gather must not run on a cache hit");
+        state.FromCache.Should().BeFalse("the vault no longer short-circuits a search");
+        state.ResultJson.Should().NotBe("{\"cached\":true}", "the stored vault entry is not served");
+        state.ResultJson.Should().Contain("tea", "the fresh answer echoes the question");
     }
 
     // ── Harness ──────────────────────────────────────────────────────────────────

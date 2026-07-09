@@ -38,12 +38,14 @@ public sealed class StatusService : IStatusService
     // at cheap public endpoints and treat any response as "up".
     private static readonly (string Name, string EnvKey, string Url)[] Probes =
     {
-        ("AI models (OpenRouter)", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1/models"),
-        ("Web search (SerpAPI)", "SERPAPI_KEY", "https://serpapi.com/"),
-        ("Store search (Google Places)", "GOOGLE_PLACES_API_KEY", "https://places.googleapis.com/"),
-        ("Page reader (Context.dev)", "CONTEXT_DEV_API_KEY", "https://api.context.dev/"),
-        ("Browser render (Cloudflare)", "CLOUDFLARE_API_TOKEN", "https://api.cloudflare.com/client/v4/"),
-        ("Social posts (Apify)", "APIFY_TOKEN", "https://api.apify.com/v2/"),
+        // Display names are shown on the PUBLIC /status page — keep them capability-level, never naming the
+        // underlying vendor. The EnvKey/Url stay internal (used only for the probe, not rendered).
+        ("AI models", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1/models"),
+        ("Web search", "SERPAPI_KEY", "https://serpapi.com/"),
+        ("Store search", "GOOGLE_PLACES_API_KEY", "https://places.googleapis.com/"),
+        ("Page reader", "CONTEXT_DEV_API_KEY", "https://api.context.dev/"),
+        ("Browser render", "CLOUDFLARE_API_TOKEN", "https://api.cloudflare.com/client/v4/"),
+        ("Social posts", "APIFY_TOKEN", "https://api.apify.com/v2/"),
     };
 
     private readonly IHttpClientFactory _http;

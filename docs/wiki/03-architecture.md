@@ -107,7 +107,7 @@ In Blazor Server, **a DI scope spans the entire SignalR circuit**. A *scoped* `D
 | `ICacheStore → PostgresCacheStore` | **Singleton** | Opens its own DbContext scope per call (providers run in parallel). |
 | `CacheCleanupService` | **HostedService** | Weekly sweep of expired cache entries. |
 | `IMemoryCache`, `IIpRateLimiter → IpRateLimiter` | **Singleton** | In-memory fixed-window IP rate limiting (no Redis at this scale). |
-| `IAgentFactory → AgentFactory` | **Singleton** | Builds fully-wired `AgentService` instances; resolves keys (user key → env). |
+| `IAgentFactory → AgentFactory` | **Singleton** | Builds fully-wired `AgentService` instances; resolves keys from the server environment. |
 | `IProductDetailDbService` | **Transient** | Assembles product detail pages from saved DB rows. |
 | `MonitorService` | **Singleton** | |
 | `HttpClient` factory, `IStatusService` | Singleton/Transient | `/status` page provider probes. |
@@ -213,7 +213,7 @@ Config is layered: `appsettings.json` (base) → `appsettings.Development.json` 
 
 **GitHub secrets** (consumed by `deploy.yml`): all of the required keys above, plus `DEPLOY_SSH_HOST`/`USER`/`KEY`, the `R2_*` family, and `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_TOKEN`. **Secret validation** runs before any box mutation: unset/empty/`CHANGE_ME` placeholders abort the deploy with a clear error rather than producing a half-broken `.env` that only fails at runtime.
 
-> **Provider keys are also resolvable per-request from the browser Settings page** (`AgentRequest.Keys`). `AgentFactory.Resolve` checks the user-supplied key first, then the server env var — letting a visitor bring their own keys.
+> **Provider keys are server-environment configuration only.** There are no per-user/browser keys; `AgentFactory.Resolve` reads env vars, full stop.
 
 ---
 

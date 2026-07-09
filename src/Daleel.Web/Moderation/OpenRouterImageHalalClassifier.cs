@@ -6,6 +6,8 @@ using Daleel.Core.Caching;
 using Daleel.Core.Llm;
 using Daleel.Core.Moderation;
 using Daleel.Search.Http;
+using Daleel.Web.Data;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Daleel.Web.Moderation;
 
@@ -40,36 +42,29 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
 
     private const string CacheKeyPrefix = "halal-image:";
 
-    private const string SystemPrompt =
-        "You are a halal-content image moderator for a Muslim shopping assistant. You judge each " +
-        "image INDIVIDUALLY. Flag an image ONLY when the image itself clearly depicts haram " +
-        "content: alcoholic drinks or bars (category \"alcohol\"), pork products (\"pork\"), " +
-        "gambling (\"gambling\"), nudity or sexualized content (\"adult\"), women not dressed " +
-        "modestly per Islamic dress norms (\"immodest\"), recreational drugs (\"drugs\"), or " +
-        "smoking/tobacco products (\"tobacco\").\n\n" +
-        "Do NOT flag ordinary product photos, electronics, food that isn't pork/alcohol, logos, " +
-        "or images of men, children, or modestly-dressed women. When unsure, do not flag.\n\n" +
-        "The images are numbered in the order given. Respond with ONLY a JSON array containing " +
-        "one object PER FLAGGED image (omit clean images): {\"index\": number starting at 0, " +
-        "\"category\": string, \"confidence\": number 0-1, \"reason\": short string}.";
+    /// <summary>The built-in vision policy prompt — composed from <see cref="VisionPolicy.DefaultRules"/>,
+    /// the fallback used when no admin rule list is configured (or a rule read fails).</summary>
+    public static readonly string DefaultSystemPrompt = VisionPolicy.Compose(VisionPolicy.DefaultRules);
 
     private readonly string _apiKey;
     private readonly string _model;
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
     private readonly ICacheStore? _cache;
+    private readonly IServiceScopeFactory? _scopeFactory;
     private readonly ILogger<OpenRouterImageHalalClassifier> _logger;
 
     public bool IsConfigured => true;
 
     public OpenRouterImageHalalClassifier(
         string apiKey, string? model, ILogger<OpenRouterImageHalalClassifier> logger,
-        ICacheStore? cache = null, HttpClient? http = null)
+        ICacheStore? cache = null, HttpClient? http = null, IServiceScopeFactory? scopeFactory = null)
     {
         _apiKey = apiKey;
         _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model;
         _logger = logger;
         _cache = cache;
+        _scopeFactory = scopeFactory;
         _ownsHttp = http is null;
         _http = http ?? SharedHttpHandler.CreateClient();
         if (_http.Timeout == default || _http.Timeout == TimeSpan.FromSeconds(100))
@@ -78,19 +73,23 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
         }
     }
 
-    public async Task<IReadOnlyList<ImageVerdict>> ClassifyAsync(
-        IReadOnlyList<string> imageUrls, CancellationToken ct = default)
+    public async Task<ImageClassifierResult> ClassifyAsync(
+        IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false)
     {
-        var verdicts = new List<ImageVerdict>();
+        var flaggedVerdicts = new List<ImageVerdict>();
+        var unscreened = new List<string>();
         var toClassify = new List<string>();
 
         foreach (var url in imageUrls.Where(IsHttpUrl).Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            if (await ReadCachedAsync(url, ct).ConfigureAwait(false) is { } cached)
+            // Re-evaluation passes bypassCache: ignore the stored verdict so a rule change actually
+            // re-judges the image (the fresh verdict is written back, refreshing the cache).
+            if (!bypassCache && await ReadCachedAsync(url, ct).ConfigureAwait(false) is { } cached)
             {
+                // A cached verdict is a completed screen: haram → flagged; clean → nothing to record.
                 if (cached.IsHaram)
                 {
-                    verdicts.Add(cached);
+                    flaggedVerdicts.Add(cached);
                 }
             }
             else
@@ -99,13 +98,22 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             }
         }
 
+        // Resolve the effective policy once per screen from the admin rule LIST: the prompt composed from
+        // the active rules, plus the categories those rules may flag with. Read once (not per batch) so
+        // all batches judge by the same policy.
+        var (prompt, allowed) = await ResolvePolicyAsync(ct).ConfigureAwait(false);
+
         for (var offset = 0; offset < toClassify.Count; offset += BatchSize)
         {
             var batch = toClassify.Skip(offset).Take(BatchSize).ToList();
-            var flagged = await ClassifyBatchAsync(batch, ct).ConfigureAwait(false);
+            var flagged = await ClassifyBatchAsync(batch, prompt, allowed, ct).ConfigureAwait(false);
             if (flagged is null)
             {
-                continue; // batch failed — leave those images unscreened (and uncached)
+                // The screen could NOT run for this batch (HTTP 402 out-of-credits / 429 / 5xx /
+                // timeout / unparseable). Report the URLs as UNSCREENED so the caller fails CLOSED
+                // (hide + hold) — never mistaken for "clean". Do NOT cache: a retry must re-attempt.
+                unscreened.AddRange(batch);
+                continue;
             }
 
             foreach (var url in batch)
@@ -115,17 +123,50 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
                 await WriteCachedAsync(verdict, ct).ConfigureAwait(false);
                 if (verdict.IsHaram)
                 {
-                    verdicts.Add(verdict);
+                    flaggedVerdicts.Add(verdict);
                 }
             }
         }
 
-        return verdicts;
+        return new ImageClassifierResult(flaggedVerdicts, unscreened);
+    }
+
+    /// <summary>
+    /// The effective vision policy for this screen: the prompt composed from the admin rule LIST and the
+    /// category set those rules may flag with. Best-effort — no scope factory (e.g. tests), no active
+    /// rules, or any read failure falls back to the built-in default policy so image moderation is never
+    /// blocked by a config lookup.
+    /// </summary>
+    private async Task<(string Prompt, IReadOnlySet<string> Allowed)> ResolvePolicyAsync(CancellationToken ct)
+    {
+        var fallback = (DefaultSystemPrompt, VisionPolicy.AllowedCategories(VisionPolicy.DefaultRules));
+        if (_scopeFactory is null)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var rules = await scope.ServiceProvider.GetRequiredService<IImageModerationRuleRepository>()
+                .ActiveRulesAsync(ct).ConfigureAwait(false);
+            if (rules.Count == 0)
+            {
+                return fallback;
+            }
+
+            return (VisionPolicy.Compose(rules), VisionPolicy.AllowedCategories(rules));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Image moderation rule read failed; using the built-in default policy");
+            return fallback;
+        }
     }
 
     /// <summary>Runs one vision call over a batch. Returns null when the call failed entirely.</summary>
     private async Task<Dictionary<string, ImageVerdict>?> ClassifyBatchAsync(
-        IReadOnlyList<string> batch, CancellationToken ct)
+        IReadOnlyList<string> batch, string systemPrompt, IReadOnlySet<string> allowedCategories, CancellationToken ct)
     {
         var content = new List<object>
         {
@@ -138,7 +179,7 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             model = _model,
             messages = new object[]
             {
-                new { role = "system", content = SystemPrompt },
+                new { role = "system", content = systemPrompt },
                 new { role = "user", content }
             }
         };
@@ -163,7 +204,7 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             }
 
             var body = await resp.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
-            return Parse(body, batch);
+            return Parse(body, batch, allowedCategories);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -176,9 +217,14 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
         }
     }
 
-    /// <summary>Extracts flagged-image verdicts from an OpenAI-shaped chat-completions response.</summary>
-    internal static Dictionary<string, ImageVerdict>? Parse(string responseBody, IReadOnlyList<string> batch)
+    /// <summary>Extracts flagged-image verdicts from an OpenAI-shaped chat-completions response. The
+    /// <paramref name="allowedCategories"/> are the categories the active rules may flag with (defaults to
+    /// the built-in halal set); a verdict tagged outside that set — or with a never-filtered category — is
+    /// dropped so the model can't invent junk categories.</summary>
+    internal static Dictionary<string, ImageVerdict>? Parse(
+        string responseBody, IReadOnlyList<string> batch, IReadOnlySet<string>? allowedCategories = null)
     {
+        var allowed = allowedCategories ?? HalalPolicy.AllowedCategories;
         string? content;
         try
         {
@@ -208,7 +254,7 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             var category = dto.Category?.Trim().ToLowerInvariant();
             if (dto.Index < 0 || dto.Index >= batch.Count
                 || category is null
-                || !HalalPolicy.AllowedCategories.Contains(category)
+                || !allowed.Contains(category)
                 || HalalPolicy.NeverFiltered.Contains(category))
             {
                 continue;

@@ -1,0 +1,4 @@
+# Local-dev secrets for `wrangler dev` — copy to .dev.vars (gitignored) and fill in.
+# Note: Workers AI has no local simulator — `wrangler dev` proxies env.AI.run to the real
+# account API (requires `wrangler login`; inference is billed as usual).
+AUTH_TOKEN=dev-token

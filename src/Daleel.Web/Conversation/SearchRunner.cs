@@ -26,13 +26,6 @@ public sealed record SearchRunResult(
     /// complete and needs no follow-up.
     /// </summary>
     public Daleel.Web.Pipeline.CacheQualityReport? CacheQuality { get; init; }
-
-    /// <summary>
-    /// True when the run was cut short by the per-job cost cap (the result, if any, was salvaged).
-    /// The worker must not launch the post-result background enrichment for such a job — a fresh
-    /// enrichment budget would double the admin-configured spending ceiling exactly when it fired.
-    /// </summary>
-    public bool CostCapTripped { get; init; }
 }
 
 /// <summary>
@@ -43,14 +36,9 @@ public interface ISearchRunner
 {
     Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct);
 
-    /// <summary>
-    /// Optional post-result enrichment: deep-dives the items in an already-returned base result
-    /// (official-brand-site specs, price comparison) and returns an updated result to stream to the
-    /// UI, or null when there's nothing to enrich. Default is a no-op so legacy/test runners opt out.
-    /// </summary>
-    Task<SearchRunResult?> EnrichAsync(
-        SearchJob job, SearchRunResult baseResult, Action<string> progress, CancellationToken ct) =>
-        Task.FromResult<SearchRunResult?>(null);
+    // Full post-result enrichment is no longer a runner concern: it fans out through the durable
+    // enrichment work queue (Pipeline/Enrichment), one unit per API dive, each saved as it lands.
+    // Only the smart-cache gap refill below remains here, wrapped by the queue's CacheGapRefill unit.
 
     /// <summary>
     /// Partial re-enrichment of a cache hit that scored below the full-quality bar: re-scrapes only the
@@ -122,16 +110,15 @@ public sealed class AgentSearchRunner : ISearchRunner
         }
         await RecordResultCacheAsync(job, "miss", ct).ConfigureAwait(false);
 
-        // Per-job cost instrumentation: estimate + cap from admin config, stream each call live.
+        // Per-job cost instrumentation: estimate spend from admin pricing, stream each call live.
         var estimator = await CostConfig.BuildEstimatorAsync(_config, ct).ConfigureAwait(false);
-        var caps = await CostConfig.ReadCapsAsync(_config, ct).ConfigureAwait(false);
 
-        using var capTrip = CancellationTokenSource.CreateLinkedTokenSource(ct);
         // Per-call detail (provider/endpoint/cost/timing) is internal: route it to the server log,
         // not to the user's progress stream. Aggregate counts/cost still flow into analytics below.
+        // R1 — meter only, never cost-cancel: a running search is never interrupted by a cost limit;
+        // the limit blocks NEW searches at submission, and actual spend is charged post-hoc.
         var collector = new JobApiCallCollector(
-            line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line),
-            caps.MaxPerJob, capTrip);
+            line => _logger.LogInformation("Search job {JobId} API call · {Detail}", job.Id, line));
 
         // Admin feedback drives moderation: the active whitelist (undo decisions) and the
         // rating-tuned thresholds ride into the agent with every run.
@@ -156,7 +143,7 @@ public sealed class AgentSearchRunner : ISearchRunner
 
         try
         {
-            var answer = await agent.AskAsync(job.Query, job.Geo, capTrip.Token).ConfigureAwait(false);
+            var answer = await agent.AskAsync(job.Query, job.Geo, ct).ConfigureAwait(false);
 
             var audit = agent.ContentFilter.AuditLog;
             var filteredCategories = string.Join(",", audit
@@ -243,6 +230,7 @@ public sealed class AgentSearchRunner : ISearchRunner
             Provider = c.Provider,
             Endpoint = c.Endpoint,
             RequestSummary = c.RequestSummary,
+            ResponseSummary = c.ResponseSummary,
             ResponseTimeMs = c.ResponseTimeMs,
             ResponseBytes = c.ResponseBytes,
             Status = c.Status.ToString().ToLowerInvariant(),

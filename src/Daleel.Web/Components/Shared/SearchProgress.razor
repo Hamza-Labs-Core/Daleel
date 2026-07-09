@@ -1,12 +1,12 @@
-@* Polished, animated search-progress UI. ONE always-visible vertical stepper that tracks the Elsa
-   search workflow stage-by-stage, with a proportional bar and a *live detail line* under each stage.
-   Driven entirely by the encoded progress strings streamed from the pipeline — each message decodes
-   into a SearchProgressSignal (step + localization key + args) and is localized in the viewer's
-   culture. The latest message for a stage becomes that stage's detail line, so instead of a generic
-   "Verifying stores" the user sees the real thing happening now: "Looking up Amazon…", "Finding brand
-   site for Apple…", "Comparing prices across 5 stores for Galaxy S24…". There is no separate text feed
-   and nothing is hidden behind an expander — the stepper itself is the live narrative. See
-   SearchProgressSignal. *@
+@* Polished, animated search-progress UI. ONE always-visible vertical stepper of a handful of vague,
+   shopper-facing phases (Understanding → Scanning → Gathering → Details → Weighing → Ready), with a
+   proportional bar and a *live detail line* under each phase. Driven entirely by the encoded progress
+   strings streamed from the pipeline — each message decodes into a SearchProgressSignal (step + key +
+   args), maps onto its display phase (see PhaseMap), and is localized in the viewer's culture. The
+   latest message for a phase becomes its detail line, so the user sees warm, non-technical hints of
+   what's happening now (e.g. "Comparing prices for the top picks…") without ever exposing the
+   machinery — no provider names, no models, no scraping, no caches. The stepper itself is the whole
+   narrative; there's no separate feed and nothing behind an expander. See SearchProgressSignal. *@
 @inject IStringLocalizer<SharedResource> L
 
 <MudPaper Class="pa-3 pa-sm-4 mb-3 daleel-card daleel-progress" Outlined="true" Elevation="0" aria-live="polite">
@@ -99,21 +99,28 @@
     // Null/empty for stages that haven't reported anything specific yet.
     private string?[] _detail = Array.Empty<string?>();
 
-    // Stepper definition. The order matches the pipeline's real execution order, so the stepper only
-    // ever moves forward. Icons/labels follow the product spec.
+    // The user-facing phases. Deliberately vague: they describe what the search is doing *for the
+    // shopper*, never how — no providers, models, scraping, caches or named third-party services leak
+    // here. Several internal pipeline stages fold into one phase (see PhaseMap), so the stepper stays
+    // short and calm instead of narrating the machinery. Order matches execution, so it only moves forward.
     private readonly StepDef[] Steps =
     {
-        new(SearchStep.Analyzing,          Icons.Material.Filled.Search,        "Progress.Step.Analyzing"),
-        new(SearchStep.CheckingVault,      Icons.Material.Filled.Inventory2,    "Progress.Step.Vault"),
-        new(SearchStep.SearchingWeb,       Icons.Material.Filled.Public,        "Progress.Step.Web"),
-        new(SearchStep.ExtractingProducts, Icons.Material.Filled.Sell,          "Progress.Step.Extract"),
-        new(SearchStep.BuildingProfiles,   Icons.Material.Filled.StarBorder,    "Progress.Step.Profiles"),
-        new(SearchStep.FindingStores,      Icons.Material.Filled.Storefront,    "Progress.Step.Stores"),
-        new(SearchStep.ComparingPrices,    Icons.Material.Filled.BarChart,      "Progress.Step.Compare"),
-        new(SearchStep.Done,               Icons.Material.Filled.CheckCircle,   "Progress.Step.Done"),
+        new(Icons.Material.Filled.Search,        "Progress.Step.Analyzing"),  // Understanding your search
+        new(Icons.Material.Filled.TravelExplore, "Progress.Step.Web"),        // Scanning the market
+        new(Icons.Material.Filled.ShoppingBag,   "Progress.Step.Extract"),    // Gathering your options
+        new(Icons.Material.Filled.FactCheck,     "Progress.Step.Profiles"),   // Digging into the details
+        new(Icons.Material.Filled.Balance,       "Progress.Step.Compare"),    // Weighing your options
+        new(Icons.Material.Filled.CheckCircle,   "Progress.Step.Done"),       // Ready
     };
 
-    private readonly record struct StepDef(SearchStep Step, string Icon, string LabelKey);
+    // Maps each internal SearchStep (the wire value streamed from the pipeline — never renumbered, see
+    // SearchProgressSignal) onto its display phase above. BuildingProfiles + FindingStores share the
+    // "details" phase, and the retired cache-check stage folds into "understanding".
+    private static readonly int[] PhaseMap = { 0, 0, 1, 2, 3, 3, 4, 5 };
+
+    private static int PhaseOf(SearchStep step) => PhaseMap[Math.Clamp((int)step, 0, PhaseMap.Length - 1)];
+
+    private readonly record struct StepDef(string Icon, string LabelKey);
 
     // The visual state of step i. When the search has settled (not Active) every step reads as done so
     // the final view is a clean all-green list rather than a frozen mid-run snapshot.
@@ -131,11 +138,11 @@
         {
             if (SearchProgressSignal.TryDecode(msg, out var sig))
             {
-                var stepIndex = Math.Clamp((int)sig.Step, 0, Steps.Length - 1);
-                reached = Math.Max(reached, stepIndex);
+                var phase = PhaseOf(sig.Step);
+                reached = Math.Max(reached, phase);
                 var text = Localize(sig);
-                // Latest message for a stage wins — that's the real-time "what's happening now" line.
-                if (!string.IsNullOrWhiteSpace(text)) detail[stepIndex] = text;
+                // Latest message for a phase wins — that's the real-time "what's happening now" line.
+                if (!string.IsNullOrWhiteSpace(text)) detail[phase] = text;
             }
             // Plain (non-encoded) lines are the agent's own diagnostics; they don't belong to a stage and
             // are no longer surfaced — the stepper's per-stage detail is the user-facing narrative.

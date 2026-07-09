@@ -32,17 +32,29 @@ public static class ListingAggregator
                 .ThenByDescending(i => i.Name.Length)
                 .First();
 
+            // EVERY distinct photo across all the listings that aggregated into this model — not just
+            // the first — so the item carries its full gallery (the vision screen clears which ones show).
+            var images = items
+                .Select(i => i.ImageUrl)
+                .Where(u => !string.IsNullOrWhiteSpace(u))
+                .Select(u => u!)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
             var (rating, ratingCount) = AggregateRating(items);
             models.Add(new ProductModel
             {
                 Name = canonical.Name,
                 Brand = items.Select(i => i.Brand).FirstOrDefault(b => !string.IsNullOrWhiteSpace(b)),
                 Model = items.Select(i => i.Model).FirstOrDefault(m => !string.IsNullOrWhiteSpace(m)),
-                ImageUrl = items.Select(i => i.ImageUrl).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u)),
+                ImageUrl = images.FirstOrDefault(),
+                Images = images,
                 Rating = rating,
                 RatingCount = ratingCount,
                 Specs = MergeSpecs(items),
-                Offers = offers
+                Offers = offers,
+                RatedReviews = items.SelectMany(i => i.RatedReviews).DistinctBy(r => r.Text).Take(20).ToList(),
+                Sku = items.Select(i => i.Sku).FirstOrDefault(ProductIdentity.HasStrongSku)
             });
         }
 

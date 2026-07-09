@@ -31,7 +31,7 @@ else
         <MudText Typo="Typo.h4">@_store.Name</MudText>
         @if (_store.IsVerified)
         {
-            <MudTooltip Text="Verified on Google Maps">
+            <MudTooltip Text="Verified location">
                 <MudIcon Icon="@Icons.Material.Filled.Verified" Color="Color.Info" />
             </MudTooltip>
         }
@@ -96,7 +96,7 @@ else
     @if (MapEmbedUrl is { } embed)
     {
         <MudPaper Class="mb-3" Outlined="true" Elevation="0" Style="overflow:hidden;border-radius:8px;">
-            <iframe src="@embed" title="@($"{_store.Name} on Google Maps")" loading="lazy"
+            <iframe src="@embed" title="@($"{_store.Name} — location map")" loading="lazy"
                     style="width:100%;height:300px;border:0;" referrerpolicy="no-referrer-when-downgrade"></iframe>
         </MudPaper>
     }

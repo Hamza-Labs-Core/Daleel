@@ -64,6 +64,22 @@ public sealed record HalalClassifierResult(
 public sealed record ImageVerdict(string ImageUrl, bool IsHaram, string? Category, double Confidence, string? Reason);
 
 /// <summary>
+/// The outcome of screening a set of image URLs. <see cref="Flagged"/> are the images the model judged
+/// haram; <see cref="Unscreened"/> are URLs the screen could NOT run on (billing/infra failure — e.g.
+/// OpenRouter HTTP 402, a 5xx, or a timeout) and which therefore must be treated as NOT cleared. Any URL
+/// absent from both was screened and is clean. Mirrors <see cref="HalalClassifierResult.UnansweredIds"/>
+/// for text — it exists so a caller can tell "verified clean" from "could not verify" and fail CLOSED on
+/// the latter (hide the image, keep it queued) instead of mistaking an outage for "no haram found".
+/// </summary>
+public sealed record ImageClassifierResult(
+    IReadOnlyList<ImageVerdict> Flagged,
+    IReadOnlyCollection<string> Unscreened)
+{
+    public static readonly ImageClassifierResult Empty =
+        new(Array.Empty<ImageVerdict>(), Array.Empty<string>());
+}
+
+/// <summary>
 /// Context-aware halal text classification. Implementations batch many items into few LLM calls
 /// and must never throw for content reasons — a failed call returns an empty verdict list so the
 /// caller falls back to keyword-only decisions.
@@ -85,15 +101,23 @@ public interface IHalalClassifier
 /// <summary>
 /// Vision-based halal classification of individual images (product photos, thumbnails).
 /// Used to flag a single image — alcohol, pork, immodest dress — without removing the item it
-/// belongs to. Same failure contract as <see cref="IHalalClassifier"/>: empty list on failure.
+/// belongs to. Unlike the text classifier's fail-OPEN contract, a failed vision call reports its
+/// URLs as <see cref="ImageClassifierResult.Unscreened"/> so the caller can fail CLOSED (hide + hold).
 /// </summary>
 public interface IHalalImageClassifier
 {
     /// <summary>True when a vision-capable model is available.</summary>
     bool IsConfigured { get; }
 
-    /// <summary>Classifies each image URL. Only returns verdicts for images judged haram.</summary>
-    Task<IReadOnlyList<ImageVerdict>> ClassifyAsync(IReadOnlyList<string> imageUrls, CancellationToken ct = default);
+    /// <summary>
+    /// Screens each image URL and returns the haram <see cref="ImageClassifierResult.Flagged"/> ones plus
+    /// the <see cref="ImageClassifierResult.Unscreened"/> URLs the screen could not run on (billing/infra
+    /// failure). A URL in neither set was screened clean. When <paramref name="bypassCache"/> is true the
+    /// cached verdict is ignored and a fresh screen runs (and refreshes the cache) — used by admin
+    /// re-evaluation so a rule change actually re-judges the image instead of returning the old verdict.
+    /// </summary>
+    Task<ImageClassifierResult> ClassifyAsync(
+        IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false);
 }
 
 /// <summary>Inert image classifier used when no vision-capable key is configured.</summary>
@@ -101,9 +125,12 @@ public sealed class NullHalalImageClassifier : IHalalImageClassifier
 {
     public bool IsConfigured => false;
 
-    public Task<IReadOnlyList<ImageVerdict>> ClassifyAsync(
-        IReadOnlyList<string> imageUrls, CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<ImageVerdict>>(Array.Empty<ImageVerdict>());
+    // No model configured = moderation intentionally off (a deployment choice, not a failure): report
+    // nothing flagged AND nothing unscreened, so callers (which also guard on IsConfigured) show images
+    // as-is. Fail-CLOSED is scoped to a configured screen that can't RUN, never to "no screen at all".
+    public Task<ImageClassifierResult> ClassifyAsync(
+        IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false) =>
+        Task.FromResult(ImageClassifierResult.Empty);
 }
 
 /// <summary>

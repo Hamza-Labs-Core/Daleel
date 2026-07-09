@@ -83,9 +83,11 @@
     // DuckDuckGo's icon service (not Clearbit — its free logo API was shut down and no longer resolves).
     private static string? LogoSrc(BrandInfo b)
     {
-        if (!string.IsNullOrWhiteSpace(b.LogoUrl))
+        // Only the vision-VERIFIED logo may render; an unverified/flagged one is hidden (fail-closed).
+        // The DuckDuckGo favicon fallback below is a benign domain icon (not a product image), so it stays.
+        if (!string.IsNullOrWhiteSpace(b.DisplayLogoUrl))
         {
-            return b.LogoUrl;
+            return b.DisplayLogoUrl;
         }
 
         var host = HostOf(b.Url) ?? GuessHost(b.Name);

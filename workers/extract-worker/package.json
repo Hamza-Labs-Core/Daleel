@@ -1,0 +1,16 @@
+{
+  "name": "daleel-extract-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker hosting Daleel's structured extraction (raw HTML/markdown -> product JSON via Workers AI JSON mode; v1 synchronous single-document)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:qa": "wrangler deploy --env qa",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

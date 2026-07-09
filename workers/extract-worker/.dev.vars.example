@@ -1,0 +1,4 @@
+# Local-dev secrets for `wrangler dev` — copy to .dev.vars (gitignored) and fill in.
+# NOTE: Workers AI has no local mock — `wrangler dev` calls the real service and bills neurons.
+AUTH_TOKEN=dev-token
+ENVIRONMENT=dev

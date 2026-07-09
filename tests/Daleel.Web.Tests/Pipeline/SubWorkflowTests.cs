@@ -144,6 +144,88 @@ public class SubWorkflowTests
         state.Events.Should().Contain(e => e.EventType == "store.verify");
     }
 
+    [Fact]
+    public async Task StoreResearchWorkflow_SubmitsCatalogCrawlToEdge_WhenEnabled()
+    {
+        // Cloudflare execution path (docs/architecture/cloudflare-workers-pipeline.md, Phase 1a): with
+        // the layer configured and the admin flag on, the catalogue crawl is SUBMITTED to the
+        // scrape-worker and the sub-workflow moves on — no inline Context.dev call, no rows written
+        // here (the poll-drain service persists them whenever the edge job lands).
+        var cf = new FakeCloudflareClient();
+        var priceRepo = new InMemoryScrapedPriceRepo();
+        using var provider = BuildProvider(s =>
+        {
+            s.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(cf);
+            s.AddSingleton(FullyConfiguredCfOptions());
+            s.AddSingleton<IR2StorageService>(new FakeImageR2()); // IsConfigured = true
+            s.AddSingleton<ISystemConfigService>(new FakeSystemConfig(
+                bools: new() { [Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag] = true }));
+            s.AddSingleton<IScrapedPriceRepository>(priceRepo);
+        });
+
+        var state = await RunStoreAsync(provider,
+            new StoreInfo { Name = "ABC Store", Url = "https://www.abcstore.com" });
+
+        cf.Submits.Should().ContainSingle(s => s.Domain == "abcstore.com" && s.Store == "ABC Store",
+            "the crawl is handed to the edge with the bare registrable domain");
+        (await priceRepo.CountAsync()).Should().Be(0, "persistence belongs to the drain service now");
+        state.Events.Should().Contain(e => e.EventType == "store.prices.submitted");
+    }
+
+    [Fact]
+    public async Task StoreResearchWorkflow_StaysInline_WhenDrainPathIsIncomplete()
+    {
+        // Flag ON but no queue credentials: submitting would strand every result (nothing could ever
+        // drain it back into the ScrapedPrice series), so the activity must refuse the hand-off.
+        var cf = new FakeCloudflareClient();
+        using var provider = BuildProvider(s =>
+        {
+            s.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(cf);
+            s.AddSingleton(new Daleel.Web.Cloudflare.CloudflareWorkerOptions
+            {
+                ScrapeWorkerUrl = new Uri("https://scrape.test"),
+                ScrapeWorkerToken = "t" // no AccountId/QueuesApiToken/PollQueueId ⇒ CanDrainQueue false
+            });
+            s.AddSingleton<IR2StorageService>(new FakeImageR2());
+            s.AddSingleton<ISystemConfigService>(new FakeSystemConfig(
+                bools: new() { [Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag] = true }));
+        });
+
+        var state = await RunStoreAsync(provider,
+            new StoreInfo { Name = "ABC Store", Url = "https://www.abcstore.com" });
+
+        cf.Submits.Should().BeEmpty("a submit with no drain path would be silent, permanent price loss");
+        state.Events.Should().NotContain(e => e.EventType == "store.prices.submitted");
+    }
+
+    private static Daleel.Web.Cloudflare.CloudflareWorkerOptions FullyConfiguredCfOptions() => new()
+    {
+        ScrapeWorkerUrl = new Uri("https://scrape.test"),
+        ScrapeWorkerToken = "t",
+        AccountId = "acct",
+        QueuesApiToken = "qt",
+        PollQueueId = "q1"
+    };
+
+    [Fact]
+    public async Task StoreResearchWorkflow_StaysInline_WhenEdgeFlagIsOff()
+    {
+        var cf = new FakeCloudflareClient();
+        using var provider = BuildProvider(s =>
+        {
+            s.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(cf);
+            s.AddSingleton(FullyConfiguredCfOptions());
+            s.AddSingleton<IR2StorageService>(new FakeImageR2());
+            s.AddSingleton<ISystemConfigService>(new FakeSystemConfig(bools: new()));
+        });
+
+        var state = await RunStoreAsync(provider,
+            new StoreInfo { Name = "ABC Store", Url = "https://www.abcstore.com" });
+
+        cf.Submits.Should().BeEmpty("the admin flag is the strangler-fig switch — off means inline");
+        state.Events.Should().NotContain(e => e.EventType == "store.prices.submitted");
+    }
+
     // ── Item ───────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -226,6 +308,131 @@ public class SubWorkflowTests
         saved.Select(p => p.StoreName).Should().BeEquivalentTo(new[] { "ABC Store", "XYZ Store" });
         saved.Should().OnlyContain(p => p.ProductKey == key && p.Provider == "pipeline");
         state.Events.Should().Contain(e => e.EventType == "item.compare");
+    }
+
+    [Fact]
+    public async Task RunManyAsync_StreamsEachEntityAsItCompletes()
+    {
+        // The streaming pipeline's foundation: onCompleted fires once per entity WITH its input index,
+        // as each child lands — this is what lets the UI render results without waiting for the fan-out.
+        var researcher = new FakeResearcher
+        {
+            Store = name => new Store { Name = name, NameKey = Store.Normalize(name), Website = $"https://{name}.com" }
+        };
+        using var provider = BuildProvider(s => s.AddSingleton<IProfileResearcher>(researcher));
+
+        var stores = new[]
+        {
+            new StoreInfo { Name = "alpha" }, new StoreInfo { Name = "beta" }, new StoreInfo { Name = "gamma" }
+        };
+        var streamed = new ConcurrentBag<(int Index, string Store)>();
+
+        var results = await SubWorkflowDispatcher.RunManyAsync<StoreResearchWorkflow, StoreResearchState, StoreInfo>(
+            provider.GetRequiredService<IServiceScopeFactory>(), stores,
+            (s, svc, store) =>
+            {
+                svc.Agent = BuildAgent();
+                s.Geo = "jordan";
+                s.Store = store;
+                s.Result = store;
+            },
+            progress: null, SubWorkflowDispatcher.DefaultTimeout, CancellationToken.None,
+            onCompleted: (i, s) =>
+            {
+                streamed.Add((i, s.Store.Name));
+                return Task.CompletedTask;
+            });
+
+        results.Should().HaveCount(3);
+        streamed.Should().HaveCount(3, "every entity streams exactly once as it completes");
+        streamed.Select(x => (x.Index, x.Store)).Should().BeEquivalentTo(
+            new[] { (0, "alpha"), (1, "beta"), (2, "gamma") },
+            "each callback carries the entity's input index so slot merges are exact");
+    }
+
+    [Fact]
+    public async Task DispatchEnrichment_RunsAllThreeFanOutsConcurrently_MergingAndStreaming()
+    {
+        // The merged dispatch stage: brands, stores and models enrich concurrently; every finished
+        // entity merges into state.Products in place; partials stream while the run is still going.
+        var researcher = new FakeResearcher
+        {
+            Brand = name => new Brand
+            {
+                Name = name, NameKey = Brand.Normalize(name), ReputationScore = 8, Description = "Solid"
+            },
+            Store = name => new Store
+            {
+                Name = name, NameKey = Store.Normalize(name), GoogleRating = 4.2, GoogleReviewCount = 10
+            }
+        };
+        using var provider = BuildProvider(s =>
+        {
+            s.AddSingleton<IProfileResearcher>(researcher);
+            s.AddScoped<Daleel.Web.Pipeline.SearchPipelineState>();
+            s.AddScoped<Daleel.Web.Pipeline.SearchPipelineServices>();
+        });
+
+        using var scope = provider.CreateScope();
+        var state = scope.ServiceProvider.GetRequiredService<Daleel.Web.Pipeline.SearchPipelineState>();
+        var services = scope.ServiceProvider.GetRequiredService<Daleel.Web.Pipeline.SearchPipelineServices>();
+        services.Agent = BuildAgent();
+        var partials = new List<string>();
+        services.PushPartial = (json, _) => { lock (partials) { partials.Add(json); } return Task.CompletedTask; };
+
+        state.Query = "coffee makers";
+        state.Geo = "jordan";
+        state.Strategy = new SearchStrategy { QueryType = QueryType.ProductResearch, Subject = "coffee maker" };
+        state.Products = new ProductSearchResult
+        {
+            Query = "coffee makers", Geo = "jordan",
+            Brands = new[] { new BrandInfo { Name = "Delonghi" }, new BrandInfo { Name = "Conti" } },
+            Stores = new[] { new StoreInfo { Name = "ABC Store" } },
+            Models = new[] { new ProductModel { Name = "Conti CM3037", Brand = "Conti", Model = "CM3037",
+                Specs = new Dictionary<string, string> { ["type"] = "espresso" } } }
+        };
+
+        var runner = scope.ServiceProvider.GetRequiredService<IWorkflowRunner>();
+        var run = await runner.RunAsync(
+            new Daleel.Web.Pipeline.DispatchEnrichmentWorkflowsActivity(), cancellationToken: default);
+        run.WorkflowState.Status.Should().Be(WorkflowStatus.Finished);
+
+        // Every entity kind enriched in the single concurrent stage.
+        state.Products.Brands.Should().HaveCount(2);
+        state.Products.Brands.Should().OnlyContain(b => b.Reputation != null,
+            "each brand's sub-workflow result merged into its slot");
+        state.Products.Stores.Single().Rating.Should().Be(4.2, "the store sub-workflow verified it");
+        state.Products.Models.Should().ContainSingle(m => m.Name == "Conti CM3037");
+
+        // Results streamed while running: at least the unconditional trailing push landed, and every
+        // pushed payload is a deserializable answer carrying products.
+        partials.Should().NotBeEmpty("finished entities stream to the UI without waiting for the stage");
+        var last = Daleel.Web.Services.ResultSerialization.Deserialize<AgentAnswer>(partials[^1]);
+        last!.Products!.Brands.Should().HaveCount(2);
+
+        state.Events.Should().Contain(e => e.EventType == "profile.brand");
+        state.Events.Should().Contain(e => e.EventType == "profile.store");
+    }
+
+    [Fact]
+    public async Task RunManyAsync_SurvivesAThrowingStreamCallback()
+    {
+        using var provider = BuildProvider(_ => { });
+        var stores = new[] { new StoreInfo { Name = "alpha" }, new StoreInfo { Name = "beta" } };
+
+        var results = await SubWorkflowDispatcher.RunManyAsync<StoreResearchWorkflow, StoreResearchState, StoreInfo>(
+            provider.GetRequiredService<IServiceScopeFactory>(), stores,
+            (s, svc, store) =>
+            {
+                svc.Agent = BuildAgent();
+                s.Geo = "jordan";
+                s.Store = store;
+                s.Result = store;
+            },
+            progress: null, SubWorkflowDispatcher.DefaultTimeout, CancellationToken.None,
+            onCompleted: (_, _) => throw new InvalidOperationException("stream sink blew up"));
+
+        results.Should().HaveCount(2, "streaming is best-effort — a push failure must never sink the fan-out");
     }
 
     [Fact]
@@ -361,6 +568,15 @@ public class SubWorkflowTests
         services.AddSingleton<IScrapedPriceRepository>(new InMemoryScrapedPriceRepo());
         services.AddSingleton<IBrandModelRepository>(new InMemoryBrandModelRepo());
         services.AddSingleton<IAgentFactory>(new FakeAgentFactory());
+        // The REAL provider gateway over whatever fakes each test registers — activities resolve
+        // IProviderApi (never a provider directly), so the tests exercise the production call path.
+        services.AddSingleton<Daleel.Web.Services.IProviderApi>(sp =>
+            new Daleel.Web.Services.ProviderApi(
+                sp.GetRequiredService<IAgentFactory>(),
+                sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(),
+                fleet: null,
+                edgeOptions: sp.GetService<Daleel.Web.Cloudflare.CloudflareWorkerOptions>(),
+                r2: sp.GetService<IR2StorageService>()));
         // Smart-identification dependencies the item deep-dive now resolves. A no-op identifier keeps these
         // sequencing tests focused on the original behavior; the identifier itself is covered separately.
         services.AddSingleton<IProductIdentifier>(new NoOpProductIdentifier());
@@ -414,13 +630,14 @@ public class SubWorkflowTests
         public bool IsAvailable { get; init; } = true;
         public int BrandCalls => _brandCalls;
 
-        public Task<Brand?> ResearchBrandAsync(string brandName, string? geo, CancellationToken ct = default)
+        public Task<Brand?> ResearchBrandAsync(
+            string brandName, string? geo, CancellationToken ct = default, string? siteUrlHint = null)
         {
             Interlocked.Increment(ref _brandCalls);
             return Task.FromResult(Brand(brandName));
         }
 
-        public Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default) =>
+        public Task<Store?> ResearchStoreAsync(string storeName, string? geo, CancellationToken ct = default, string? siteUrlHint = null) =>
             Task.FromResult(Store(storeName));
     }
 
@@ -653,10 +870,54 @@ public class SubWorkflowTests
     // Resolve returns null so the store ScrapePrices step (which needs CONTEXT_DEV_API_KEY) no-ops.
     private sealed class FakeAgentFactory : IAgentFactory
     {
-        public bool HasLlm(IReadOnlyDictionary<string, string>? keys = null) => false;
-        public ProviderStatus Describe(IReadOnlyDictionary<string, string>? keys = null) => throw new NotSupportedException();
+        public bool HasLlm() => false;
+        public ProviderStatus Describe() => throw new NotSupportedException();
         public AgentService Build(AgentRequest request) => throw new NotSupportedException();
-        public ILlmClient? TryBuildLlm(string? model = null, IReadOnlyDictionary<string, string>? keys = null) => null;
-        public string? Resolve(string name, IReadOnlyDictionary<string, string>? keys = null) => null;
+        public ILlmClient? TryBuildLlm(string? model = null) => null;
+        public string? Resolve(string name) => null;
+    }
+
+    private sealed class FakeCloudflareClient : Daleel.Web.Cloudflare.ICloudflareWorkerClient
+    {
+        public List<(string Domain, string? Store, string? SearchJobId, int MaxProducts)> Submits { get; } = new();
+
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitCatalogAsync(
+            string domain, string? store, string? searchJobId, int maxProducts = 0, CancellationToken ct = default)
+        {
+            Submits.Add((domain, store, searchJobId, maxProducts));
+            return Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(
+                new Daleel.Web.Cloudflare.WorkerHandle { JobId = "j1", ResultKey = $"test/{domain}.json" });
+        }
+
+        public Task<Daleel.Web.Cloudflare.WorkerJobStatus?> GetJobStatusAsync(string jobId, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Web.Cloudflare.WorkerJobStatus?>(null);
+
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitBrandAsync(
+            string domain, string brandName, string? searchJobId, bool refresh, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(null);
+
+        public Task<Daleel.Search.Abstractions.ScrapedPage?> ScrapePageAsync(
+            string url, Daleel.Search.Abstractions.ScrapeFormat format, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Search.Abstractions.ScrapedPage?>(null);
+
+        public Task<T?> ReadResultAsync<T>(string resultKey, CancellationToken ct = default) where T : class =>
+            Task.FromResult<T?>(null);
+    }
+
+    /// <summary>Dictionary-backed ISystemConfigService — unset keys fall back like production.</summary>
+    private sealed class FakeSystemConfig : ISystemConfigService
+    {
+        private readonly Dictionary<string, bool> _bools;
+        public FakeSystemConfig(Dictionary<string, bool> bools) => _bools = bools;
+
+        public Task<string?> GetAsync(string key, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task<int> GetIntAsync(string key, int fallback, CancellationToken ct = default) => Task.FromResult(fallback);
+        public Task<bool> GetBoolAsync(string key, bool fallback, CancellationToken ct = default) =>
+            Task.FromResult(_bools.TryGetValue(key, out var v) ? v : fallback);
+        public Task SetAsync(string key, string value, string type = "string", CancellationToken ct = default) =>
+            Task.CompletedTask;
+        public Task<IReadOnlyList<SystemConfig>> AllAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SystemConfig>>(Array.Empty<SystemConfig>());
+        public Task SeedDefaultsAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 }

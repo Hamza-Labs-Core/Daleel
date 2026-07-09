@@ -65,7 +65,7 @@
     @if (_stores.Count == 0)
     {
         <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
-            No stores found. A Google Places key is required for this feature.
+            @L["Stores.NoStores"]
         </MudAlert>
     }
     else

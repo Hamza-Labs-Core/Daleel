@@ -1,6 +1,9 @@
 @page "/admin/settings"
 @attribute [Authorize(Roles = "Admin")]
+@using Daleel.Core.Llm
+@using Daleel.Web.Services
 @inject ISystemConfigService Config
+@inject IOpenRouterCatalog Catalog
 @inject ISnackbar Snackbar
 
 <PageTitle>دليل · Admin · Settings</PageTitle>
@@ -8,7 +11,7 @@
 <AdminNav />
 <MudText Typo="Typo.h4" Class="mb-1">System Settings</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
-    Rate limits, feature flags, default models per plan, and other tunables.
+    Rate limits, feature flags, per-call-site models, and other tunables.
 </MudText>
 
 @if (_error is not null)
@@ -24,7 +27,49 @@ else if (_items is null)
 }
 else
 {
+    <MudPaper Class="pa-4 mb-4" Outlined="true" Elevation="0">
+        <div class="d-flex align-center justify-space-between mb-2">
+            <div>
+                <MudText Typo="Typo.h6">Pipeline models</MudText>
+                <MudText Typo="Typo.body2" Color="Color.Secondary">
+                    Each pipeline step runs its own model — pick a provider, then a model. Costs shown are USD per
+                    million tokens (prompt / completion), pulled live from OpenRouter.
+                </MudText>
+            </div>
+            <MudButton StartIcon="@Icons.Material.Filled.Refresh" Variant="Variant.Text" Size="Size.Small"
+                       OnClick="RefreshModelsAsync" Disabled="_refreshing">
+                @(_refreshing ? "Refreshing…" : $"Refresh models ({_models.Count})")
+            </MudButton>
+        </div>
+
+        @if (_modelsNote is not null)
+        {
+            <MudAlert Severity="Severity.Warning" Variant="Variant.Text" Dense="true" Class="mb-2">@_modelsNote</MudAlert>
+        }
+
+        @foreach (var row in _modelRows)
+        {
+            <div class="d-flex align-center gap-3 mb-2 flex-wrap">
+                <div style="min-width:200px;">
+                    <MudText Typo="Typo.body2">@row.Label</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary" Style="font-family:monospace;">@row.Item.Key</MudText>
+                </div>
+                <MudAutocomplete T="string" Label="Provider" @bind-Value="row.Provider"
+                                 SearchFunc="@SearchProviders" Variant="Variant.Outlined" Margin="Margin.Dense"
+                                 Clearable="true" CoerceValue="true" MaxItems="50" Style="max-width:200px;" />
+                <MudAutocomplete T="string" Label="Model" Value="row.Item.Value"
+                                 ValueChanged="@(v => OnModelPicked(row, v))"
+                                 SearchFunc="@((v, t) => SearchModels(row, v, t))" Variant="Variant.Outlined"
+                                 Margin="Margin.Dense" Clearable="true" CoerceValue="true" MaxItems="50"
+                                 Style="min-width:340px;flex:1;">
+                    <ItemTemplate Context="modelId">@ModelLabel(modelId)</ItemTemplate>
+                </MudAutocomplete>
+            </div>
+        }
+    </MudPaper>
+
     <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+        <MudText Typo="Typo.h6" Class="mb-2">Other settings</MudText>
         @foreach (var item in _items)
         {
             <div class="d-flex align-center gap-3 mb-2">
@@ -51,9 +96,22 @@ else
 }
 
 @code {
-    private List<SystemConfig>? _items;
+    private List<SystemConfig>? _items;                 // non-model settings
+    private readonly List<ModelRow> _modelRows = new();  // model.* + actor.model, edited via autocompletes
+    private IReadOnlyList<OpenRouterModel> _models = Array.Empty<OpenRouterModel>();
+    private List<string> _providers = new();
     private string? _error;
+    private string? _modelsNote;
     private bool _saving;
+    private bool _refreshing;
+
+    /// <summary>A model-valued config row plus the provider currently narrowing its picker.</summary>
+    private sealed class ModelRow
+    {
+        public required SystemConfig Item { get; init; }
+        public required string Label { get; init; }
+        public string? Provider { get; set; }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -68,7 +126,9 @@ else
         StateHasChanged();
         try
         {
-            _items = (await Config.AllAsync()).ToList();
+            var all = (await Config.AllAsync()).ToList();
+            BuildRows(all);
+            await LoadModelsAsync(forceRefresh: false);
         }
         catch (Exception ex)
         {
@@ -77,12 +137,117 @@ else
         StateHasChanged();
     }
 
+    // A config row is a model picker when it's a string value keyed model.* or actor.model.
+    private static bool IsModelKey(SystemConfig c) =>
+        c.Type == "string" && (c.Key.StartsWith("model.", StringComparison.Ordinal) || c.Key == "actor.model");
+
+    private void BuildRows(List<SystemConfig> all)
+    {
+        _items = all.Where(c => !IsModelKey(c)).ToList();
+        _modelRows.Clear();
+        foreach (var item in all.Where(IsModelKey).OrderBy(c => c.Key, StringComparer.Ordinal))
+        {
+            var slash = item.Value.IndexOf('/');
+            _modelRows.Add(new ModelRow
+            {
+                Item = item,
+                Label = LabelFor(item.Key),
+                Provider = slash > 0 ? item.Value[..slash] : null
+            });
+        }
+    }
+
+    private static string LabelFor(string key) => key switch
+    {
+        "model.default_free" => "Default · free plan",
+        "model.default_pro" => "Default · pro plan",
+        "actor.model" => "Enrichment actors",
+        _ => LlmCallSites.All.FirstOrDefault(s => s.ConfigKey == key)?.DisplayName ?? key
+    };
+
+    private async Task LoadModelsAsync(bool forceRefresh)
+    {
+        _models = await Catalog.GetModelsAsync(forceRefresh);
+        _providers = _models.Select(m => m.Provider).Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(p => p, StringComparer.OrdinalIgnoreCase).ToList();
+        _modelsNote = _models.Count == 0
+            ? "Couldn't reach OpenRouter — you can still type a model id manually."
+            : null;
+    }
+
+    private async Task RefreshModelsAsync()
+    {
+        _refreshing = true;
+        StateHasChanged();
+        try
+        {
+            await LoadModelsAsync(forceRefresh: true);
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+        StateHasChanged();
+    }
+
+    private Task<IEnumerable<string>> SearchProviders(string? value, CancellationToken token)
+    {
+        var q = string.IsNullOrWhiteSpace(value)
+            ? _providers
+            : _providers.Where(p => p.Contains(value, StringComparison.OrdinalIgnoreCase)).ToList();
+        return Task.FromResult<IEnumerable<string>>(q);
+    }
+
+    private Task<IEnumerable<string>> SearchModels(ModelRow row, string? value, CancellationToken token)
+    {
+        IEnumerable<OpenRouterModel> q = _models;
+        if (!string.IsNullOrWhiteSpace(row.Provider))
+        {
+            q = q.Where(m => m.Provider.Equals(row.Provider, StringComparison.OrdinalIgnoreCase));
+        }
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            q = q.Where(m => m.Id.Contains(value, StringComparison.OrdinalIgnoreCase) ||
+                             m.Name.Contains(value, StringComparison.OrdinalIgnoreCase));
+        }
+        return Task.FromResult<IEnumerable<string>>(q.Select(m => m.Id).Take(50).ToList());
+    }
+
+    private void OnModelPicked(ModelRow row, string? value)
+    {
+        row.Item.Value = value ?? string.Empty;
+        var slash = row.Item.Value.IndexOf('/');
+        if (slash > 0)
+        {
+            row.Provider = row.Item.Value[..slash];
+        }
+    }
+
+    private string ModelLabel(string id)
+    {
+        var m = _models.FirstOrDefault(x => x.Id == id);
+        if (m is null) return id;
+        return m.PromptPerMTok is { } p && m.CompletionPerMTok is { } c
+            ? $"{id}  ·  ${p} / ${c} per Mtok"
+            : id;
+    }
+
     private async Task SaveAllAsync()
     {
         if (_items is null || _saving) return;
 
-        // Validate every value before writing anything, so a single bad entry can't leave the system
-        // half-saved with a misleading "Settings saved." H5.
+        // Every pipeline model must be non-blank — a blank would silently fall back to a default.
+        foreach (var row in _modelRows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Item.Value))
+            {
+                Snackbar.Add($"Pick a model for \"{row.Label}\".", Severity.Warning);
+                return;
+            }
+        }
+
+        // Validate every generic value before writing anything, so a single bad entry can't leave the
+        // system half-saved with a misleading "Settings saved." H5.
         foreach (var item in _items)
         {
             if (item.Type == "int" && !int.TryParse(item.Value, out _))
@@ -97,7 +262,6 @@ else
                     Snackbar.Add($"\"{item.Key}\" must be true or false.", Severity.Warning);
                     return;
                 }
-                // Canonicalize to lowercase ("True"/"TRUE" → "true") so persisted values stay consistent.
                 item.Value = boolValue.ToString().ToLowerInvariant();
             }
         }
@@ -105,6 +269,10 @@ else
         _saving = true;
         try
         {
+            foreach (var row in _modelRows)
+            {
+                await Config.SetAsync(row.Item.Key, row.Item.Value.Trim(), "string");
+            }
             foreach (var item in _items)
             {
                 await Config.SetAsync(item.Key, item.Value, item.Type);

@@ -23,8 +23,19 @@ public static class SubWorkflowDispatcher
     /// <summary>Hard per-entity budget; a slow brand/store/item is dropped rather than blocking the run.</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>How many child sub-workflows run at once. Bounds DB/network fan-out per dispatch step.</summary>
-    public const int MaxConcurrency = 5;
+    /// <summary>
+    /// How many child sub-workflows run at once — a throughput WIDTH (work queues for a slot, nothing
+    /// is dropped), tunable via <c>PIPELINE_SUBWORKFLOW_CONCURRENCY</c> (see <see cref="PipelineLimits"/>).
+    /// </summary>
+    public static int MaxConcurrency => PipelineLimits.SubWorkflowConcurrency;
+
+    /// <summary>
+    /// Longer budget for the store sub-workflow specifically: its last step submits/crawls the store's
+    /// whole product catalogue, which legitimately outlives the 30s default — under the default the
+    /// crawl was silently timed out and the store's catalogue lost. Bounded by <see cref="MaxConcurrency"/>
+    /// and the per-job cost cap, so it can't run away.
+    /// </summary>
+    public static readonly TimeSpan StoreResearchTimeout = TimeSpan.FromSeconds(75);
 
     /// <summary>
     /// When at least this fraction of the fanned-out children fault, the failure is treated as systematic
@@ -37,6 +48,9 @@ public static class SubWorkflowDispatcher
     /// <see cref="MaxConcurrency"/> at a time, each seeded by <paramref name="seed"/> (state + services) and
     /// bounded by <paramref name="timeout"/>. Returns the finished states in input order. The parent's
     /// <paramref name="progress"/> sink surfaces a live line if the fan-out fails systematically.
+    /// <paramref name="onCompleted"/>, when supplied, streams each entity's finished state (with its input
+    /// index) to the caller AS IT LANDS — this is what lets results reach the UI without waiting for the
+    /// whole fan-out. The callback is failure-isolated: an exception in it never faults the fan-out.
     /// </summary>
     public static async Task<IReadOnlyList<TState>> RunManyAsync<TWorkflow, TState, TItem>(
         IServiceScopeFactory scopeFactory,
@@ -44,13 +58,15 @@ public static class SubWorkflowDispatcher
         Action<TState, SubWorkflowServices, TItem> seed,
         Action<string>? progress,
         TimeSpan timeout,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<int, TState, Task>? onCompleted = null,
+        Action<Daleel.Web.Events.PipelineEvent>? onAggregateEvent = null)
         where TWorkflow : IWorkflow, new()
         where TState : SubWorkflowState
     {
         using var gate = new SemaphoreSlim(MaxConcurrency);
         var faults = 0;
-        var tasks = items.Select(async item =>
+        var tasks = items.Select(async (item, index) =>
         {
             await gate.WaitAsync(ct).ConfigureAwait(false);
             try
@@ -60,6 +76,19 @@ public static class SubWorkflowDispatcher
                 if (faulted)
                 {
                     Interlocked.Increment(ref faults);
+                }
+
+                if (onCompleted is not null)
+                {
+                    try
+                    {
+                        await onCompleted(index, state).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch
+                    {
+                        // Streaming is best-effort — a push/merge hiccup must never sink the fan-out.
+                    }
                 }
 
                 return state;
@@ -79,13 +108,27 @@ public static class SubWorkflowDispatcher
         if (items.Count > 0 && faults >= Math.Max(2, (int)Math.Ceiling(items.Count * SystematicFailureRatio)))
         {
             progress?.Invoke($"⚠️ {faults}/{items.Count} {typeof(TWorkflow).Name} sub-workflows failed — possible systematic enrichment failure.");
-            states.FirstOrDefault()?.RecordEvent("pipeline", "subworkflow_failures", "dispatcher", success: false,
+            var evt = Daleel.Web.Events.PipelineEventFactory.Custom(
+                "pipeline", "subworkflow_failures", "dispatcher",
+                states.FirstOrDefault()?.SearchId, success: false,
                 metadata: new Dictionary<string, object?>
                 {
                     ["workflow"] = typeof(TWorkflow).Name,
                     ["failed"] = faults,
                     ["total"] = items.Count
                 });
+            // When per-entity streaming is on, the children's event buffers were ALREADY harvested by
+            // onCompleted — appending to a child state here would silently drop the event. The caller's
+            // aggregate sink delivers it to the parent's stream instead; the child-state fallback keeps
+            // the non-streaming callers (background re-enrichment) unchanged.
+            if (onAggregateEvent is not null)
+            {
+                onAggregateEvent(evt);
+            }
+            else
+            {
+                states.FirstOrDefault()?.Events.Add(evt);
+            }
         }
 
         return states;

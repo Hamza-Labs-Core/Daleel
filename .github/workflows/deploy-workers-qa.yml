@@ -1,0 +1,114 @@
+# QA deploy of the Daleel Cloudflare worker fleet — mirrors the app's QA model (deploy-qa.yml):
+# a PR carrying the `qa` label deploys the PR's worker code to the isolated -qa workers; new pushes
+# while labelled re-deploy. PROD ships separately from main via deploy-workers.yml — each pipeline
+# provisions and deploys ONLY its own environment.
+#
+# Resources are CHECK-OR-CREATED per run by workers/provision.sh (idempotent): the daleel-qa-*
+# queues + DLQs + poll pull-consumer, and the daleel-qa-search-cache KV namespace.
+#
+# Required GitHub secrets: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID,
+# CONTEXT_DEV_API_KEY, SERPAPI_KEY, GOOGLE_PLACES_API_KEY. (Worker BEARERS are NOT CI secrets:
+# the QA VPS token authority mints and pushes them via the Cloudflare API — /admin/credentials.)
+name: Deploy workers (qa)
+
+on:
+  pull_request:
+    # `labeled` → deploy as soon as the `qa` label is applied; `synchronize`/`reopened` → re-deploy
+    # on new commits while the PR stays labelled. Paths-scoped: only PRs touching worker code.
+    types: [labeled, synchronize, reopened]
+    paths:
+      - "workers/**"
+      - ".github/workflows/deploy-workers-qa.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  # One in-flight QA worker deploy per PR; a newer push supersedes an older one.
+  group: deploy-workers-qa-${{ github.event.pull_request.number || 'manual' }}
+  cancel-in-progress: true
+
+# The job only reads the repo; deploy credentials are Cloudflare secrets, not the GITHUB_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: ${{ matrix.worker }}
+    runs-on: ubuntu-latest
+    # Only PRs that (a) carry the `qa` label and (b) come from a branch in THIS repo (not a fork —
+    # fork PRs don't get secrets, and we must never run a secret-bearing deploy for untrusted code).
+    # Manual dispatch (no PR context) is always allowed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(github.event.pull_request.labels.*.name, 'qa') &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - worker: scrape-worker
+            worker_secrets: |
+              CONTEXT_DEV_API_KEY
+          - worker: search-worker
+            worker_secrets: |
+              SERPAPI_KEY
+              GOOGLE_PLACES_API_KEY
+          - worker: classify-worker
+            worker_secrets: ""
+          - worker: extract-worker
+            worker_secrets: ""
+          - worker: filter-worker
+            worker_secrets: ""
+    defaults:
+      run:
+        working-directory: workers/${{ matrix.worker }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail fast with a clear message if this worker's required secrets are unset/empty.
+      - name: Validate required secrets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -z "$CLOUDFLARE_API_TOKEN" ] && missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -z "$CLOUDFLARE_ACCOUNT_ID" ] && missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::${{ matrix.worker }} QA deploy aborted — required secrets unset/empty:$missing"
+            echo "Set each with: gh secret set <NAME> --body '<value>' --repo Hamza-Labs-Core/Daleel" >&2
+            exit 1
+          fi
+          echo "All required secrets are present."
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      # CHECK-OR-CREATE this worker's QA resources (idempotent; existing resources untouched).
+      - name: Provision resources (qa)
+        working-directory: workers
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: ./provision.sh "${{ matrix.worker }}" qa
+
+      # `environment: qa` (not `command: deploy --env qa`) is load-bearing: the action's secret
+      # upload honors `environment`, so without it the vendor keys would be uploaded to the PROD
+      # worker instead of the -qa one. (Bearers aren't uploaded here at all — the QA VPS token
+      # authority pushes AUTH_TOKEN/AUTH_TOKEN_PREVIOUS to the -qa scripts via the Cloudflare API.)
+      - name: Deploy (qa)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: workers/${{ matrix.worker }}
+          command: deploy
+          environment: qa
+          secrets: ${{ matrix.worker_secrets }}
+        env:
+          CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
+          GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}

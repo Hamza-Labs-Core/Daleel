@@ -23,15 +23,18 @@ public sealed class ConversationService : IConversationService
     private readonly DaleelDbContext _db;
     private readonly IQuotaService _quota;
     private readonly ISystemConfigService? _config;
+    private readonly Daleel.Web.Moderation.IQueryPreScreen? _preScreen;
 
-    // _config is optional so tests can construct without it; DI supplies it in the app, where it
-    // provides the per-plan default model ids (model.default_free / model.default_pro).
+    // _config and _preScreen are optional so tests can construct without them; DI supplies both in the
+    // app (_config provides the per-plan default model ids; _preScreen the zero-cost haram gate).
     public ConversationService(
-        DaleelDbContext db, IQuotaService quota, ISystemConfigService? config = null)
+        DaleelDbContext db, IQuotaService quota, ISystemConfigService? config = null,
+        Daleel.Web.Moderation.IQueryPreScreen? preScreen = null)
     {
         _db = db;
         _quota = quota;
         _config = config;
+        _preScreen = preScreen;
     }
 
     public async Task<SubmitResult> SubmitAsync(
@@ -40,6 +43,24 @@ public sealed class ConversationService : IConversationService
         if (string.IsNullOrWhiteSpace(query))
         {
             return new SubmitResult(false, null, "Query is required.", 400);
+        }
+
+        // R3/R6: zero-cost pre-screen BEFORE any quota debit or provider/LLM spend. A haram consumable
+        // ("beer") is rejected at the door (no SearchJob, no cost); a riba/financial-PRODUCT query is
+        // steered to sharia-compliant terms so results surface Islamic options.
+        if (_preScreen is not null)
+        {
+            var screen = await _preScreen.ScreenAsync(query, ct);
+            if (screen.Blocked)
+            {
+                return new SubmitResult(false, null,
+                    "We can't search for that — it isn't halal-compliant.", 422);
+            }
+
+            if (!string.IsNullOrWhiteSpace(screen.SteeredQuery))
+            {
+                query = screen.SteeredQuery!;
+            }
         }
 
         // Cheap pre-check: a user with no credits left can't start a search. The actual cost is

@@ -82,6 +82,30 @@ else
             </MudPaper>
         </MudItem>
 
+        <MudItem xs="12">
+            <MudPaper Class="pa-4" Outlined="true" Elevation="0">
+                <MudText Typo="Typo.h6" Class="mb-2">LLM calls by pipeline step (30d)</MudText>
+                <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
+                    Which step fires and costs most — the basis for per-step model cost-tuning on Settings.
+                </MudText>
+                <MudSimpleTable Dense="true" Hover="true">
+                    <thead><tr><th>Call-site</th><th>Calls</th><th>Cost</th><th>Avg time</th><th>Tokens in / out</th></tr></thead>
+                    <tbody>
+                        @foreach (var c in _callSites)
+                        {
+                            <tr>
+                                <td style="font-family:monospace;">@c.CallSite</td>
+                                <td>@c.Calls</td>
+                                <td>~$@c.Cost.ToString("0.000")</td>
+                                <td>@c.AvgMs.ToString("0") ms</td>
+                                <td>@c.InputTokens.ToString("N0") / @c.OutputTokens.ToString("N0")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </MudSimpleTable>
+                @if (_callSites.Count == 0) { <MudText Typo="Typo.caption" Color="Color.Secondary">No LLM calls yet.</MudText> }
+            </MudPaper>
+        </MudItem>
         <MudItem xs="12" md="7">
             <MudPaper Class="pa-4" Outlined="true" Elevation="0">
                 <MudText Typo="Typo.h6" Class="mb-2">Provider usage &amp; health</MudText>
@@ -147,6 +171,7 @@ else
     private decimal _totalCost;
     private double _avgPerJob;
     private IReadOnlyList<ProviderUsage> _providers = new List<ProviderUsage>();
+    private IReadOnlyList<CallSiteUsage> _callSites = new List<CallSiteUsage>();
     private IReadOnlyList<TokenUsage> _tokens = new List<TokenUsage>();
     private IReadOnlyList<QueryCost> _expensive = new List<QueryCost>();
     private IReadOnlyList<(DateTime Day, decimal Cost)> _costPerDay = new List<(DateTime, decimal)>();
@@ -179,6 +204,7 @@ else
             _totalCost = await ApiLog.TotalCostAsync(sinceOffset);
             _avgPerJob = await ApiLog.AverageCostPerJobAsync(sinceOffset);
             _providers = await ApiLog.ProviderUsageAsync(sinceOffset);
+            _callSites = await ApiLog.CallSiteUsageAsync(sinceOffset);
             _tokens = await ApiLog.TokenUsageAsync(sinceOffset);
             _expensive = await ApiLog.MostExpensiveQueriesAsync(sinceOffset, 10);
             _costPerDay = await ApiLog.CostPerDayAsync(14);

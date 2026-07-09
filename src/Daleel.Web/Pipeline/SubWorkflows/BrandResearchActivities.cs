@@ -63,7 +63,10 @@ public sealed class ScrapeBrandCatalogActivity : CancellableActivity
         }
 
         services.Report(SearchStep.BuildingProfiles, "Progress.Msg.ScrapingBrandCatalog", state.Brand.Name);
-        state.Researched = await SafeResearch(researcher, state.Brand.Name, state.Geo, context.CancellationToken);
+        // The saved (stale) profile's website is a real URL a previous pass verified — hand it to
+        // the researcher so it skips re-discovery; with no hint the researcher discovers the site.
+        state.Researched = await SafeResearch(
+            researcher, state.Brand.Name, state.Geo, state.Existing?.Website, context.CancellationToken);
         state.RecordEvent(EventCategory.Profile, "profile.brand", "context.dev",
             success: state.Researched is not null,
             metadata: new Dictionary<string, object?>
@@ -74,9 +77,9 @@ public sealed class ScrapeBrandCatalogActivity : CancellableActivity
     }
 
     private static async Task<Data.Brand?> SafeResearch(
-        IProfileResearcher researcher, string name, string geo, CancellationToken ct)
+        IProfileResearcher researcher, string name, string geo, string? siteHint, CancellationToken ct)
     {
-        try { return await researcher.ResearchBrandAsync(name, geo, ct); }
+        try { return await researcher.ResearchBrandAsync(name, geo, ct, siteHint); }
         catch (OperationCanceledException) { throw; }
         catch { return null; }
     }

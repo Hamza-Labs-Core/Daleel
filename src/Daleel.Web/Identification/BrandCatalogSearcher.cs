@@ -26,8 +26,9 @@ public interface IBrandCatalogSearcher
 
 public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
 {
-    /// <summary>Cap on models harvested per regional site per pass.</summary>
-    private const int MaxModelsPerRegion = 24;
+    /// <summary>Models harvested per regional site per pass — uncapped (0 ⇒ the vendor's own ceiling);
+    /// the per-region crawl budget below bounds time, not count.</summary>
+    private const int MaxModelsPerRegion = 0;
 
     /// <summary>How many regional candidate sites we'll probe before stopping (cost guard).</summary>
     private const int MaxRegionsProbed = 4;
@@ -39,15 +40,19 @@ public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
     private readonly IAgentFactory _factory;
     private readonly ProfileOptions _options;
     private readonly ILogger<BrandCatalogSearcher> _logger;
+    private readonly Services.IProviderApi _providers;
 
     public BrandCatalogSearcher(
         IBrandModelRepository models, IAgentFactory factory,
-        ProfileOptions options, ILogger<BrandCatalogSearcher> logger)
+        ProfileOptions options, ILogger<BrandCatalogSearcher> logger,
+        Services.IProviderApi? providers = null)
     {
         _models = models;
         _factory = factory;
         _options = options;
         _logger = logger;
+        // Optional so existing test wiring keeps working; production DI always supplies the gateway.
+        _providers = providers ?? new Services.ProviderApi(factory);
     }
 
     public async Task<IReadOnlyList<BrandModel>> DiscoverAsync(Brand brand, CancellationToken ct = default)
@@ -62,10 +67,9 @@ public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
         }
 
         var root = BrandRegions.RootDomain(brand.Website);
-        var key = _factory.Resolve("CONTEXT_DEV_API_KEY");
-        if (root is null || string.IsNullOrWhiteSpace(key))
+        if (root is null || !_providers.HasScraper)
         {
-            return existing; // can't synthesize regional sites or no scraper key — keep what we have
+            return existing; // can't synthesize regional sites or no scraper configured — keep what we have
         }
 
         var candidates = BrandRegions.CandidatesFor(root);
@@ -84,14 +88,8 @@ public sealed class BrandCatalogSearcher : IBrandCatalogSearcher
             IReadOnlyList<CatalogProduct> catalogue;
             try
             {
-                var ctx = new ContextDevProvider(key);
-                // Metered through the ambient per-job observer — this crawl runs on its own provider
-                // instance, invisible to the AgentFactory's wiring (see AmbientApiObserver).
-                catalogue = await Daleel.Core.Observability.ApiCallTimer.TimeAsync(
-                    Daleel.Core.Observability.AmbientApiObserver.Observer,
-                    Daleel.Core.Observability.AmbientApiObserver.Estimator ?? new Daleel.Core.Observability.CostEstimator(),
-                    "Context.dev", "catalog/extract", domain,
-                    () => ctx.ExtractProductsAsync(domain, MaxModelsPerRegion, CrawlTimeoutMs, ct))
+                // Through the gateway — metered by construction (ambient per-job observer).
+                catalogue = await _providers.ExtractCatalogAsync(domain, MaxModelsPerRegion, CrawlTimeoutMs, ct)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException) { throw; }

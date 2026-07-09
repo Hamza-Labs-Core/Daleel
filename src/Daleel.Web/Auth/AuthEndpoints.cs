@@ -35,7 +35,8 @@ public static class AuthEndpoints
             SignInManager<ApplicationUser> signInManager,
             UserManager<ApplicationUser> userManager,
             IAnalyticsService analytics,
-            ISystemEventLog systemLog) =>
+            ISystemEventLog systemLog,
+            IConfiguration config) =>
         {
             var safeReturn = SafeLocalPath(returnUrl);
 
@@ -71,8 +72,27 @@ public static class AuthEndpoints
 
             if (result.Succeeded)
             {
+                // Admin re-sync from the DALEEL_ADMIN_EMAILS allowlist on EVERY login (promote-only):
+                // admin used to be decided only at registration, so an existing account added to the
+                // allowlist later stayed non-admin forever. Promote here and RefreshSignIn so the fresh
+                // cookie carries the Admin claim immediately (the claim is derived from IsAdmin).
+                var adminEmails = (config["DALEEL_ADMIN_EMAILS"] ?? string.Empty)
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var promoted = false;
+                if (adminEmails.Length > 0 && !user.IsAdmin &&
+                    adminEmails.Any(e => string.Equals(e, user.Email, StringComparison.OrdinalIgnoreCase)))
+                {
+                    user.IsAdmin = true;
+                    promoted = true;
+                }
+
                 user.LastActiveAt = DateTime.UtcNow;
                 await userManager.UpdateAsync(user);
+                if (promoted)
+                {
+                    await signInManager.RefreshSignInAsync(user);
+                }
+
                 await analytics.RecordLoginAsync(user.Id, "Password", http.Connection.RemoteIpAddress?.ToString());
                 await systemLog.LogAsync(
                     SystemEventCategory.User, "user.login", "User signed in",

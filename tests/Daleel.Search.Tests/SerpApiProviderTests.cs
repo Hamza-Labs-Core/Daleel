@@ -29,6 +29,28 @@ public class SerpApiProviderTests
     }
 
     [Fact]
+    public async Task SearchAsync_Web_CappedSoftBody_YieldsEmptyWithoutThrowing()
+    {
+        // When the search-worker's account-wide hourly SerpAPI cap trips, it returns HTTP 200 with a
+        // structurally-valid but EMPTY SerpAPI body (never a 429/5xx). The provider must parse that as
+        // zero results and its paged loop must break cleanly — a throw here would fault the whole
+        // search into a false "no results". This locks in the soft-cap contract the worker relies on.
+        const string capped = """
+        { "search_metadata": { "status": "Capped" },
+          "organic_results": [], "shopping_results": [], "local_results": [], "images_results": [] }
+        """;
+        var handler = new StubHttpMessageHandler(capped);
+        var provider = Build(handler);
+
+        var results = await provider.SearchAsync(
+            new SearchQuery { Query = "best AC", Kind = SearchKind.Web, MaxResults = 100 });
+
+        results.Results.Should().BeEmpty();
+        // The empty first page ends paging immediately — no runaway toward MaxPages.
+        handler.Requests.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task SearchAsync_Shopping_ParsesPrices()
     {
         const string json = """

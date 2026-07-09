@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
+using Daleel.Web.Pipeline;
 
 namespace Daleel.Web.Conversation;
 
@@ -35,6 +36,14 @@ public interface IConversationBroadcaster
     /// <summary>A refreshed result for an already-completed job (item deep-dive specs arrived) — the UI
     /// re-renders in place. Separate from Completed so the "done" state isn't reset to "running".</summary>
     Task EnrichedAsync(string userId, int jobId, string resultJson, string resultType);
+
+    /// <summary>
+    /// An intermediate result for a job that is STILL RUNNING — the UI renders the grid immediately and
+    /// keeps the search-ongoing affordance ("results load as they're ready"). The pipeline pushes one as
+    /// soon as products are extracted and again (throttled) as each enrichment sub-workflow lands, so a
+    /// user never stares at a stepper while finished data sits in memory.
+    /// </summary>
+    Task PartialAsync(string userId, int jobId, string resultJson, string resultType);
 }
 
 /// <summary>
@@ -49,6 +58,9 @@ public interface IConversationNotifier
 
     /// <summary>(userId, jobId, resultJson, resultType) — a streamed result refresh after completion.</summary>
     event Action<string, int, string, string>? Enriched;
+
+    /// <summary>(userId, jobId, resultJson, resultType) — an intermediate result while still running.</summary>
+    event Action<string, int, string, string>? Partial;
 
     /// <summary>
     /// The most recent progress signal for the user's running <paramref name="jobId"/>, or null when
@@ -69,31 +81,44 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
 
     public SignalRConversationBroadcaster(IHubContext<ConversationHub> hub) => _hub = hub;
 
-    // Latest progress signal per user, so a device that loads/reloads mid-search can seed its stepper
-    // with the job's current stage rather than waiting for the next live broadcast. Held in memory on
-    // purpose: the job queue is itself in-process (a restart loses running jobs), so this shares that
-    // durability model — and a lost entry just degrades to the first-stage seed, never an error.
-    private readonly ConcurrentDictionary<string, (int JobId, string Signal)> _latestProgress = new();
+    // Latest progress signal per (user, job), so a device that loads/reloads mid-search can seed its
+    // stepper with the job's current stage rather than waiting for the next live broadcast. Keyed by
+    // BOTH ids: jobs run concurrently now, so two of one user's searches must not clobber each other's
+    // cached signal (and completing job A must not wipe job B's). Held in memory on purpose: the job
+    // queue is itself in-process (a restart loses running jobs), so this shares that durability model —
+    // and a lost entry just degrades to the first-stage seed, never an error.
+    private readonly ConcurrentDictionary<(string UserId, int JobId), string> _latestProgress = new();
 
     public event Action<string, int, string>? Progress;
     public event Action<string, int, string, string?, string?, string?>? Completed;
     public event Action<string, int, string, string>? Enriched;
+    public event Action<string, int, string, string>? Partial;
 
     public string? LatestProgress(string userId, int jobId) =>
-        _latestProgress.TryGetValue(userId, out var p) && p.JobId == jobId ? p.Signal : null;
+        _latestProgress.TryGetValue((userId, jobId), out var signal) ? signal : null;
 
     public Task ProgressAsync(string userId, int jobId, string message)
     {
-        _latestProgress[userId] = (jobId, message);
+        _latestProgress[(userId, jobId)] = message;
         Progress?.Invoke(userId, jobId, message);
-        return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Progress", jobId, message);
+        // External SignalR subscribers (off-device/mobile clients) get a wire-safe copy: the internal
+        // localization key is stripped so pipeline internals (e.g. "Progress.Msg.ScrapingBrandCatalog")
+        // never travel off-device — only the step + user-facing args remain. Plain, non-encoded agent
+        // diagnostic lines aren't broadcast at all, matching the in-app UI (which ignores them). The
+        // in-process arm above still carries the full signal, so server-side localization is unaffected.
+        if (!SearchProgressSignal.TryDecode(message, out var signal))
+        {
+            return Task.CompletedTask;
+        }
+        return _hub.Clients.Group(ConversationHub.Group(userId))
+            .SendAsync("Progress", jobId, SearchProgressSignal.EncodeWireSafe(signal));
     }
 
     public Task CompletedAsync(string userId, int jobId, string status, string? resultJson, string? resultType, string? error)
     {
-        // The job is finished — drop its cached progress so a later page load seeds from the completed
-        // result, never a stale "running" stage.
-        _latestProgress.TryRemove(userId, out _);
+        // THIS job is finished — drop its cached progress so a later page load seeds from the completed
+        // result, never a stale "running" stage. Other concurrent jobs' entries are untouched.
+        _latestProgress.TryRemove((userId, jobId), out _);
         Completed?.Invoke(userId, jobId, status, resultJson, resultType, error);
         return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Completed", jobId, status, resultJson, resultType, error);
     }
@@ -102,5 +127,13 @@ public sealed class SignalRConversationBroadcaster : IConversationBroadcaster, I
     {
         Enriched?.Invoke(userId, jobId, resultJson, resultType);
         return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Enriched", jobId, resultJson, resultType);
+    }
+
+    public Task PartialAsync(string userId, int jobId, string resultJson, string resultType)
+    {
+        // Deliberately does NOT touch _latestProgress: the job is still running and the stepper
+        // should keep showing its live stage alongside the partial grid.
+        Partial?.Invoke(userId, jobId, resultJson, resultType);
+        return _hub.Clients.Group(ConversationHub.Group(userId)).SendAsync("Partial", jobId, resultJson, resultType);
     }
 }

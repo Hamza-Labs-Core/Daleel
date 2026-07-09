@@ -8,6 +8,10 @@ public sealed record ProviderUsage(string Provider, int Calls, decimal Cost, dou
 /// <summary>LLM token usage per model.</summary>
 public sealed record TokenUsage(string Model, long InputTokens, long OutputTokens, decimal Cost);
 
+/// <summary>Per-call-site LLM usage — which pipeline step (planner, extraction, …) fires and costs most.</summary>
+public sealed record CallSiteUsage(
+    string CallSite, int Calls, decimal Cost, double AvgMs, long InputTokens, long OutputTokens);
+
 /// <summary>A search and what it cost (for "most expensive queries").</summary>
 public sealed record QueryCost(int JobId, string Query, int Calls, decimal Cost);
 
@@ -35,6 +39,18 @@ public interface IApiCallLogRepository
     Task<double> AverageCostPerJobAsync(DateTimeOffset since, CancellationToken ct = default);
     Task<IReadOnlyList<QueryCost>> MostExpensiveQueriesAsync(DateTimeOffset since, int top, CancellationToken ct = default);
     Task<IReadOnlyList<TokenUsage>> TokenUsageAsync(DateTimeOffset since, CancellationToken ct = default);
+
+    /// <summary>Per-pipeline-call-site LLM usage over a window (planner, extraction, relevance, …).</summary>
+    Task<IReadOnlyList<CallSiteUsage>> CallSiteUsageAsync(DateTimeOffset since, CancellationToken ct = default);
+
+    /// <summary>
+    /// The most recent INDIVIDUAL provider calls (newest first) — the row source for the provider-efficiency
+    /// view. Unlike every aggregate above this keeps each call whole (request, response summary, cost), which
+    /// is the only way to see a paid-but-empty call: a Context.dev catalogue crawl that bills the same to
+    /// return "0 product(s)" as "40 product(s)". Optionally narrowed to one provider.
+    /// </summary>
+    Task<IReadOnlyList<ApiCallLog>> RecentCallsAsync(
+        DateTimeOffset since, int limit = 200, string? provider = null, CancellationToken ct = default);
 }
 
 public sealed class ApiCallLogRepository : IApiCallLogRepository
@@ -57,6 +73,23 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
         return await _db.ApiCallLogs.AsNoTracking()
             .Where(c => c.JobId == jobId && c.UserId == key)
             .OrderBy(c => c.Id)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ApiCallLog>> RecentCallsAsync(
+        DateTimeOffset since, int limit = 200, string? provider = null, CancellationToken ct = default)
+    {
+        // Admin-only surface (no owner scoping): the whole point is to see every provider's spend.
+        // (Provider, CreatedAt) is indexed, so both the filtered and unfiltered shapes stay server-side.
+        var query = _db.ApiCallLogs.AsNoTracking().Where(c => c.CreatedAt >= since);
+        if (!string.IsNullOrWhiteSpace(provider))
+        {
+            query = query.Where(c => c.Provider == provider);
+        }
+
+        return await query
+            .OrderByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id)
+            .Take(Math.Clamp(limit, 1, 1000))
             .ToListAsync(ct);
     }
 
@@ -115,6 +148,28 @@ public sealed class ApiCallLogRepository : IApiCallLogRepository
                 g.Sum(x => x.EstimatedCost),
                 g.Average(x => (double)x.ResponseTimeMs),
                 (double)g.Count(x => x.Status != "success") / g.Count()))
+            .OrderByDescending(x => x.Cost)
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<CallSiteUsage>> CallSiteUsageAsync(DateTimeOffset since, CancellationToken ct = default)
+    {
+        // LLM calls are logged with Endpoint "chat" or "chat:<callSite>" (the pipeline step that made them).
+        // Group by the step so the admin can see which step fires most and costs most.
+        var rows = await _db.ApiCallLogs.AsNoTracking()
+            .Where(c => c.CreatedAt >= since && c.Endpoint.StartsWith("chat"))
+            .Select(c => new { c.Endpoint, c.EstimatedCost, c.ResponseTimeMs, c.InputTokens, c.OutputTokens })
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(c => c.Endpoint.StartsWith("chat:") ? c.Endpoint[5..] : "(unlabeled)")
+            .Select(g => new CallSiteUsage(
+                g.Key,
+                g.Count(),
+                g.Sum(x => x.EstimatedCost),
+                g.Average(x => (double)x.ResponseTimeMs),
+                g.Sum(x => (long)(x.InputTokens ?? 0)),
+                g.Sum(x => (long)(x.OutputTokens ?? 0))))
             .OrderByDescending(x => x.Cost)
             .ToList();
     }

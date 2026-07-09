@@ -1,17 +1,16 @@
-@* Capability chips: which providers are wired up given current keys. Warns when no LLM key. *@
+@* Capability chips: which providers the SERVER environment has keys for. Warns when no LLM key. *@
 @inject IAgentFactory Agents
 @inject IStringLocalizer<SharedResource> L
 
 @{
-    var status = Agents.Describe(Keys);
+    var status = Agents.Describe();
 }
 
 @if (!status.Llm)
 {
     <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-4"
               Icon="@Icons.Material.Filled.Key">
-        @L["ProviderStatus.NoLlmKeyBefore"]
-        <MudLink Href="/settings">@L["Nav.Settings"]</MudLink> @L["ProviderStatus.NoLlmKeyAfter"] <code>OPENROUTER_API_KEY</code> @L["ProviderStatus.NoLlmKeyServer"]
+        @L["ProviderStatus.Degraded"]
     </MudAlert>
 }
 
@@ -19,13 +18,11 @@
     @Chip("AI", status.Llm, Icons.Material.Filled.AutoAwesome)
     @Chip("Web search", status.WebSearch, Icons.Material.Filled.Search)
     @Chip("Places", status.Places, Icons.Material.Filled.Place)
-    @Chip("Scraper", status.Scraper, Icons.Material.Filled.Article)
+    @Chip("Store data", status.Scraper, Icons.Material.Filled.Article)
     @Chip("Social", status.Social, Icons.Material.Filled.Forum)
 </div>
 
 @code {
-    [Parameter] public IReadOnlyDictionary<string, string>? Keys { get; set; }
-
     private RenderFragment Chip(string label, bool on, string icon) =>@<MudChip T="string" Size="Size.Small"
         Color="@(on ? Color.Success : Color.Default)"
         Variant="@(on ? Variant.Filled : Variant.Outlined)"

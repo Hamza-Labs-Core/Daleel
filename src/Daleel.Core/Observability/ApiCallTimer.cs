@@ -9,7 +9,18 @@ namespace Daleel.Core.Observability;
 /// </summary>
 public static class ApiCallTimer
 {
-    /// <summary>Times a non-LLM call. <paramref name="bytes"/> optionally measures the response size.</summary>
+    /// <summary>
+    /// Times a non-LLM call. <paramref name="bytes"/> optionally measures the response size.
+    /// <paramref name="success"/> optionally judges whether a NON-throwing result actually delivered
+    /// (e.g. an edge worker that returns a page with <c>Success == false</c> rather than throwing):
+    /// a call that returned but did not deliver is recorded as <see cref="ApiCallStatus.Error"/> at
+    /// ZERO cost, so a failed-edge-then-inline-fallback bills once, not twice.
+    /// </summary>
+    /// <remarks>
+    /// <paramref name="describe"/> optionally summarizes what the call RETURNED (e.g. "0 products").
+    /// Only invoked for a delivered result, and truncated like the request summary, so the efficiency
+    /// view can show what each paid call actually produced without ever storing a raw body.
+    /// </remarks>
     public static async Task<T> TimeAsync<T>(
         IApiCallObserver? observer,
         CostEstimator estimator,
@@ -17,7 +28,9 @@ public static class ApiCallTimer
         string endpoint,
         string? summary,
         Func<Task<T>> action,
-        Func<T, long>? bytes = null)
+        Func<T, long>? bytes = null,
+        Func<T, bool>? success = null,
+        Func<T, string?>? describe = null)
     {
         if (observer is null)
         {
@@ -45,17 +58,29 @@ public static class ApiCallTimer
         finally
         {
             sw.Stop();
-            var size = status == ApiCallStatus.Success && bytes is not null && result is not null ? bytes(result) : 0;
+            // A non-throwing call that the predicate judges undelivered is a billable NON-event:
+            // downgrade to Error and charge nothing, so the fallback that follows carries the bill.
+            var delivered = status == ApiCallStatus.Success
+                && (success is null || (result is not null && success(result)));
+            var recordedStatus = status == ApiCallStatus.Success && !delivered ? ApiCallStatus.Error : status;
+            var size = delivered && bytes is not null && result is not null ? bytes(result) : 0;
+            // Describe only a delivered result: an errored/undelivered call is already identified by
+            // Status, and its exception text is not safe to persist. A DELIVERED-but-empty response —
+            // the expensive-and-useless case — is exactly what this captures.
+            var described = delivered && describe is not null && result is not null
+                ? RequestSummaries.Truncate(describe(result))
+                : null;
             observer.Record(new ApiCall
             {
                 Timestamp = DateTimeOffset.UtcNow,
                 Provider = provider,
                 Endpoint = endpoint,
                 RequestSummary = summary,
+                ResponseSummary = described,
                 ResponseTimeMs = sw.ElapsedMilliseconds,
                 ResponseBytes = size,
-                Status = status,
-                EstimatedCost = estimator.EstimateCall(provider, endpoint)
+                Status = recordedStatus,
+                EstimatedCost = delivered ? estimator.EstimateCall(provider, endpoint) : 0m
             });
         }
     }

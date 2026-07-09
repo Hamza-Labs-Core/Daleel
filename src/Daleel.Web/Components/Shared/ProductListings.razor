@@ -83,6 +83,9 @@ else
         {
             <MudItem xs="12" sm="6" md="4" @key="model">
                 <ModelCard Model="model"
+                           Query="@Result.Query"
+                           Geo="@Result.Geo"
+                           Target="@FlagTarget"
                            Selected="@_selected.Contains(idx)"
                            CanSelectMore="@(_selected.Count < MaxCompare)"
                            SelectedChanged="@(v => ToggleCompare(idx, v))"
@@ -151,8 +154,20 @@ else
 @code {
     [Parameter, EditorRequired] public ProductSearchResult Result { get; set; } = default!;
 
+    /// <summary>The relevance target a "not relevant" flag records against — the classified product type,
+    /// else the raw query (matches the relevance gate's own target).</summary>
+    private string FlagTarget => Result.Schema.IsEmpty ? Result.Query : Result.Schema.ProductType;
+
     /// <summary>Optional brand to pre-filter by (set when drilling in from the Brands tab).</summary>
     [Parameter] public string? InitialBrand { get; set; }
+
+    /// <summary>The page to open on (1-based). Lets a host deep-link a specific page via the URL
+    /// (e.g. the /search/{id}?page=N result view). Defaults to 1.</summary>
+    [Parameter] public int InitialPage { get; set; } = 1;
+
+    /// <summary>Raised (with the new 1-based page) when the user flips pages, so a host page can
+    /// reflect it in the URL + title. When no host handles it, pagination stays purely in-component.</summary>
+    [Parameter] public EventCallback<int> PageChanged { get; set; }
 
     private const string AllValue = "__all__";
     private const int MaxCompare = 4;
@@ -203,13 +218,24 @@ else
     // re-render passing the SAME Result must not yank the user off the page they're browsing.
     private ProductSearchResult? _lastResult;
 
+    // The InitialPage last applied, so a parent re-render passing the SAME page doesn't yank the user
+    // off the page they flipped to internally — only a genuine URL/page change re-syncs.
+    private int _lastInitialPage = 1;
+
     protected override void OnParametersSet()
     {
         if (!ReferenceEquals(_lastResult, Result))
         {
+            // A genuinely new result opens on the host-requested page (deep-link ?page=N), else page 1.
             _lastResult = Result;
-            _page = 1;
+            _page = InitialPage;
         }
+        else if (InitialPage != _lastInitialPage)
+        {
+            // Same result, URL page changed (deep-link navigation / back-forward) — follow it.
+            _page = InitialPage;
+        }
+        _lastInitialPage = InitialPage;
 
         if (!string.IsNullOrWhiteSpace(InitialBrand))
         {
@@ -262,10 +288,15 @@ else
         RepageInternal();
     }
 
-    private void OnPageChanged(int page)
+    private async Task OnPageChanged(int page)
     {
         _page = page;
         RepageInternal();
+        _lastInitialPage = _page; // keep in sync so the host's URL update doesn't re-trigger a reset
+        if (PageChanged.HasDelegate)
+        {
+            await PageChanged.InvokeAsync(_page);
+        }
     }
 
     /// <summary>Recomputes the page count (clamping the current page) and the rendered slice.</summary>

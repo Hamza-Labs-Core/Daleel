@@ -159,6 +159,16 @@ public sealed class BrandModelRepository : IBrandModelRepository
         existing.GlobalPrice = model.GlobalPrice ?? existing.GlobalPrice;
         existing.Currency = model.Currency ?? existing.Currency;
         existing.SourceUrl = model.SourceUrl ?? existing.SourceUrl;
+        // Site-hierarchy attribution moves as a PAIR: only a harvest that knows its level may
+        // re-attribute the row (level + country together — coalescing them independently could
+        // pair "global" with a stale local country). Level-aware harvests run global→local, so on
+        // a (BrandId, ModelKey) collision the local attribution lands last and wins.
+        if (model.SiteLevel is not null)
+        {
+            existing.SiteLevel = model.SiteLevel;
+            existing.SiteCountry = model.SiteCountry;
+        }
+
         // IsAvailable and LastRefreshed are always current-harvest facts (no "unknown" state).
         existing.IsAvailable = model.IsAvailable;
         existing.LastRefreshed = model.LastRefreshed;

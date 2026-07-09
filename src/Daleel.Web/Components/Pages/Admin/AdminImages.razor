@@ -1,0 +1,243 @@
+@page "/admin/images"
+@attribute [Authorize(Roles = "Admin")]
+@inject IImageModerationLogRepository ImageLog
+@inject ISnackbar Snackbar
+@inject IStringLocalizer<SharedResource> L
+
+<PageTitle>دليل · Admin · Images</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">Image moderation</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Every product/brand image the halal vision screen has looked at — one row per image — and what it
+    did to each: <b>shown</b> (verified clean), <b>hidden</b> (flagged haram, with category, confidence
+    score and reason), or <b>unscreened</b> (the screen couldn't run — held hidden, fail-closed). Select
+    images (or use <b>Re-evaluate all matching</b>) to <b>re-queue them for re-screening against the
+    current rules</b>; a background worker re-judges them and updates the verdict here. Anonymous by
+    design — no user is recorded.
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load the image registry: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="LoadAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <div class="d-flex flex-wrap gap-3 align-center mb-3">
+        <div class="d-flex flex-wrap gap-1">
+            <MudButton Size="Size.Small" Variant="@FilterVariant("all")"
+                       OnClick='() => OnDecisionChanged("all")'>All</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Success" Variant="@FilterVariant(ImageModerationDecision.Shown)"
+                       OnClick="() => OnDecisionChanged(ImageModerationDecision.Shown)">Shown</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Error" Variant="@FilterVariant(ImageModerationDecision.Hidden)"
+                       OnClick="() => OnDecisionChanged(ImageModerationDecision.Hidden)">Hidden</MudButton>
+            <MudButton Size="Size.Small" Color="Color.Warning" Variant="@FilterVariant(ImageModerationDecision.Unscreened)"
+                       OnClick="() => OnDecisionChanged(ImageModerationDecision.Unscreened)">Unscreened</MudButton>
+        </div>
+        <MudTextField @bind-Value="_search" Placeholder="Filter by query or item…" Variant="Variant.Outlined"
+                      Margin="Margin.Dense" Adornment="Adornment.End" AdornmentIcon="@Icons.Material.Filled.Search"
+                      OnAdornmentClick="LoadAsync" OnKeyDown="@OnSearchKey" Style="max-width:320px;" />
+    </div>
+
+    <div class="d-flex flex-wrap gap-2 align-center mb-2">
+        @if (_selected.Count > 0)
+        {
+            <MudButton Size="Size.Small" Variant="Variant.Filled" Color="Color.Primary" Disabled="@_busy"
+                       StartIcon="@Icons.Material.Filled.Refresh" OnClick="FlagSelectedAsync">
+                Re-evaluate @_selected.Count selected
+            </MudButton>
+        }
+        <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Primary" Disabled="@_busy"
+                   StartIcon="@Icons.Material.Filled.RestartAlt" OnClick="FlagAllAsync">
+            Re-evaluate all matching
+        </MudButton>
+        @if (_counts is { Pending: > 0 } cp)
+        {
+            <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text">
+                @cp.Pending queued for re-evaluation
+            </MudChip>
+        }
+    </div>
+
+    @if (_counts is { } c)
+    {
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
+            Registry: <b>@c.Total</b> images · @c.Shown shown · @c.Hidden hidden · @c.Unscreened unscreened
+            &nbsp;·&nbsp; showing the latest @_rows.Count
+        </MudText>
+    }
+
+    @if (_rows.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">No images match this filter yet.</MudAlert>
+    }
+    else
+    {
+        <MudTable Items="_rows" Dense="true" Hover="true" Breakpoint="Breakpoint.Sm" Elevation="0" Outlined="true"
+                  MultiSelection="true" @bind-SelectedItems="_selected" T="ImageModerationLog">
+            <HeaderContent>
+                <MudTh>Image</MudTh>
+                <MudTh>Decision</MudTh>
+                <MudTh>Item</MudTh>
+                <MudTh>Reason</MudTh>
+                <MudTh>Query</MudTh>
+                <MudTh>When</MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Image">
+                    <a href="@context.ImageUrl" target="_blank" rel="noopener noreferrer">
+                        <MudImage Src="@context.ImageUrl" Width="56" Height="56" ObjectFit="ObjectFit.Cover"
+                                  Class="rounded" Elevation="0" />
+                    </a>
+                </MudTd>
+                <MudTd DataLabel="Decision">
+                    <MudChip T="string" Size="Size.Small" Color="@DecisionColor(context.Decision)"
+                             Variant="Variant.Filled">@context.Decision</MudChip>
+                    @if (context.Score is { } s && context.Decision == ImageModerationDecision.Hidden)
+                    {
+                        <MudText Typo="Typo.caption" Class="d-block mt-1">
+                            @context.Category · @(Math.Round(s * 100))% conf.
+                        </MudText>
+                    }
+                    @if (context.ReEvalRequestedAt is not null)
+                    {
+                        <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text" Class="mt-1">queued</MudChip>
+                    }
+                </MudTd>
+                <MudTd DataLabel="Item">
+                    <MudText Typo="Typo.body2">@(string.IsNullOrWhiteSpace(context.ItemName) ? "—" : context.ItemName)</MudText>
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@context.ItemKind</MudText>
+                </MudTd>
+                <MudTd DataLabel="Reason">
+                    <MudText Typo="Typo.caption">@(string.IsNullOrWhiteSpace(context.Reason) ? "—" : context.Reason)</MudText>
+                </MudTd>
+                <MudTd DataLabel="Query">
+                    <MudText Typo="Typo.caption">@context.Query</MudText>
+                    @if (context.SearchJobId is { } jid)
+                    {
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">job #@jid</MudText>
+                    }
+                </MudTd>
+                <MudTd DataLabel="When">
+                    <MudText Typo="Typo.caption">@context.CreatedAt.LocalDateTime.ToString("MMM d, HH:mm")</MudText>
+                </MudTd>
+            </RowTemplate>
+        </MudTable>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private string _decision = "all";
+    private string _search = string.Empty;
+    private IReadOnlyList<ImageModerationLog> _rows = Array.Empty<ImageModerationLog>();
+    private HashSet<ImageModerationLog> _selected = new();
+    private ImageModerationCounts? _counts;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var decision = _decision == "all" ? null : _decision;
+            var search = string.IsNullOrWhiteSpace(_search) ? null : _search;
+            _rows = await ImageLog.ListRecentAsync(500, decision, search);
+            _selected = new HashSet<ImageModerationLog>();
+            _counts = await ImageLog.RegistryCountsAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task FlagSelectedAsync()
+    {
+        if (_selected.Count == 0 || _busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var n = await ImageLog.FlagForReEvalAsync(_selected.Select(r => r.Id).ToList());
+            Snackbar.Add($"Queued {n} image(s) for re-evaluation.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't queue: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task FlagAllAsync()
+    {
+        if (_busy)
+        {
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var decision = _decision == "all" ? null : _decision;
+            var search = string.IsNullOrWhiteSpace(_search) ? null : _search;
+            var n = await ImageLog.FlagAllForReEvalAsync(decision, search);
+            Snackbar.Add($"Queued {n} image(s) matching the filter for re-evaluation.", Severity.Success);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't queue: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task OnDecisionChanged(string value)
+    {
+        _decision = string.IsNullOrEmpty(value) ? "all" : value;
+        await LoadAsync();
+    }
+
+    private async Task OnSearchKey(KeyboardEventArgs e)
+    {
+        if (e.Key is "Enter" or "NumpadEnter")
+        {
+            await LoadAsync();
+        }
+    }
+
+    private Variant FilterVariant(string decision) => _decision == decision ? Variant.Filled : Variant.Outlined;
+
+    private static Color DecisionColor(string decision) => decision switch
+    {
+        ImageModerationDecision.Shown => Color.Success,
+        ImageModerationDecision.Hidden => Color.Error,
+        ImageModerationDecision.Unscreened => Color.Warning,
+        _ => Color.Default,
+    };
+}

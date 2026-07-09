@@ -1,9 +1,9 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
 using Daleel.Web.Pipeline;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 
 namespace Daleel.Web.Conversation;
 
@@ -21,7 +21,7 @@ public sealed class SearchJobService : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConversationBroadcaster _broadcaster;
     private readonly ILogger<SearchJobService> _logger;
-    private readonly TimeSpan _enrichTimeout;
+    private readonly Pipeline.Enrichment.IEnrichmentWorkQueue _enrichQueue;
 
     /// <summary>
     /// How long to idle between polls when no job is waiting. Short enough that a freshly-queued search
@@ -34,76 +34,119 @@ public sealed class SearchJobService : BackgroundService
         IServiceScopeFactory scopeFactory,
         IConversationBroadcaster broadcaster,
         ILogger<SearchJobService> logger,
-        IConfiguration config)
+        Pipeline.Enrichment.IEnrichmentWorkQueue enrichQueue)
     {
         _scopeFactory = scopeFactory;
         _broadcaster = broadcaster;
         _logger = logger;
-        _enrichTimeout = ResolveEnrichTimeout(config);
-    }
-
-    /// <summary>
-    /// Hard ceiling on the detached enrichment pass so a hung scrape can't leak a worker. Configurable via
-    /// <c>Enrichment:TimeoutSeconds</c> (default <see cref="DefaultEnrichTimeoutSeconds"/>); generous because
-    /// the deep-dive also harvests store catalogues for live prices (a slow site crawl). Clamped to a sane
-    /// floor so a misconfiguration can't make it effectively zero.
-    /// </summary>
-    /// <remarks>
-    /// 180s proved far too small in practice: enriching ~12 items × several Context.dev scrapes each takes
-    /// minutes, and an abandoned pass is precisely why salvaged/article-derived results kept their empty
-    /// prices and images (QA job 2, 2026-07-01). The pass is detached — it never blocks the worker loop or
-    /// the user, who already has the base result on screen — so a longer ceiling only trades idle time for
-    /// filled-in prices, specs and product images.
-    /// </remarks>
-    private const int DefaultEnrichTimeoutSeconds = 600;
-
-    private static TimeSpan ResolveEnrichTimeout(IConfiguration config)
-    {
-        var seconds = config.GetValue<int?>("Enrichment:TimeoutSeconds") ?? DefaultEnrichTimeoutSeconds;
-        return TimeSpan.FromSeconds(Math.Max(30, seconds));
+        _enrichQueue = enrichQueue;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // CONCURRENT JOBS: the loop keeps claiming while work is queued and runs each job as its own
+        // tracked task — one user's slow search never queues behind another's. No job-count cap by
+        // default (each job is individually bounded by its own deadline + cost cap); the semaphore is
+        // an optional per-environment RESTRAINT via PIPELINE_MAX_CONCURRENT_JOBS. FOR UPDATE SKIP
+        // LOCKED already makes claims safe across concurrent claimers, in-process or cross-container.
+        using var jobGate = new SemaphoreSlim(Pipeline.PipelineLimits.ConcurrentJobs);
+        var running = new ConcurrentDictionary<Task, byte>();
+
         while (!stoppingToken.IsCancellationRequested)
         {
+            try
+            {
+                await jobGate.WaitAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break; // host shutdown
+            }
+
+            // The claim try-block must contain NOTHING that runs after the permit was returned —
+            // otherwise a shutdown-cancelled Delay lands in a catch that Releases a second time
+            // (SemaphoreFullException) and the drain below never runs. Idle/backoff waits happen
+            // OUTSIDE the try, each with its own cancellation-safe break.
             int jobId;
+            var backOff = false;
             try
             {
                 if (await ClaimNextQueuedJobAsync(stoppingToken) is not { } claimed)
                 {
                     // Nothing waiting — idle a beat, then poll again. Source of truth is the DB, so a job
                     // queued by another process (or a restart's leftover work) is picked up next tick.
-                    await Task.Delay(PollInterval, stoppingToken);
-                    continue;
+                    jobGate.Release();
+                    backOff = true;
+                    jobId = 0;
                 }
-                jobId = claimed;
+                else
+                {
+                    jobId = claimed;
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                throw; // host shutdown
+                jobGate.Release();
+                break; // host shutdown
             }
             catch (Exception ex)
             {
                 // A claim failure (transient DB blip) must never take the worker down — back off and retry.
+                jobGate.Release();
                 _logger.LogError(ex, "Failed to claim the next queued search job");
-                await Task.Delay(PollInterval, stoppingToken);
+                backOff = true;
+                jobId = 0;
+            }
+
+            if (backOff)
+            {
+                try
+                {
+                    await Task.Delay(PollInterval, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    break; // host shutdown — fall through to the in-flight-job drain
+                }
                 continue;
             }
 
-            // One job's failure must never take down the worker loop.
-            try
+            // Run the job detached and immediately go claim the next one — queued searches start NOW,
+            // not after the previous search finishes. One job's failure never touches the others.
+            var task = Task.Run(async () =>
             {
-                await ProcessAsync(jobId, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                throw; // host shutdown — let the worker loop exit, don't mislabel it as a crash
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Search job {JobId} crashed the processor", jobId);
-            }
+                try
+                {
+                    await ProcessAsync(jobId, stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    // host shutdown — the job's own interrupted-state reconciler handles the leftovers
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Search job {JobId} crashed the processor", jobId);
+                }
+                finally
+                {
+                    // Shutdown race: a job outliving the 10s drain finds ExecuteAsync gone and the
+                    // gate disposed — nothing waits on it anymore, so the ODE is meaningless noise.
+                    try { jobGate.Release(); }
+                    catch (ObjectDisposedException) { }
+                }
+            }, CancellationToken.None);
+            running[task] = 0;
+            _ = task.ContinueWith(t => running.TryRemove(t, out _), TaskScheduler.Default);
+        }
+
+        // Drain: give in-flight jobs a moment to observe the stop token and finalize their state.
+        try
+        {
+            await Task.WhenAll(running.Keys).WaitAsync(TimeSpan.FromSeconds(10), CancellationToken.None);
+        }
+        catch
+        {
+            // Shutdown drain is best-effort — the orphaned-job reconciler recovers anything cut off.
         }
     }
 
@@ -243,7 +286,7 @@ public sealed class SearchJobService : BackgroundService
                 _logger.LogWarning(ex, "Failed to charge {Credits} credits for job {JobId}", result.Credits, job.Id);
             }
 
-            await convos.CompleteAsync(job.UserId, "completed", result.ResultJson, result.ResultType, job.CompletedAt.Value, stoppingToken);
+            await convos.CompleteAsync(job.UserId, job.Id, "completed", result.ResultJson, result.ResultType, job.CompletedAt.Value, stoppingToken);
             // Keep the generated Id: the background enrichers update THIS exact row when they finish,
             // so a late-landing enrichment can never overwrite a newer same-query history entry.
             var historyEntry = await history.AddAsync(new SearchHistoryEntry
@@ -252,6 +295,8 @@ public sealed class SearchJobService : BackgroundService
                 Geo = job.Geo, Model = job.Model, ResultSummary = null,
                 // Persist the full result so opening this entry later re-displays it without re-running.
                 ResultJson = result.ResultJson,
+                // Base-run credits; background enrichment increments this via AddCreditsAsync as it runs.
+                Credits = result.Credits,
                 CreatedAt = job.CompletedAt.Value
             }, stoppingToken);
             // Record the search for analytics / cost optimisation — providers called, api-call
@@ -279,36 +324,37 @@ public sealed class SearchJobService : BackgroundService
                     ["servedFromCache"] = result.CacheQuality is not null
                 }, ct: stoppingToken);
 
-            // Post-result follow-up depends on where this result came from. DETACHED on purpose: it must
-            // never block this worker from picking up the next queued search, so a slow/hanging scrape
-            // can't make subsequent searches "stuck". Each runs in its own DI scope with a hard timeout;
-            // failures are swallowed (the base result is already delivered).
+            // Post-result follow-up goes through the durable enrichment WORK QUEUE: one row here, and
+            // the consumer fans it out into per-item/per-store/per-brand units, each with its own
+            // retry budget, each persisting the moment it finishes. Nothing runs under a shared
+            // lifetime, so nothing can be abandoned wholesale — a deploy mid-enrichment just means
+            // the remaining units run after the restart.
             if (result.CacheQuality is { } quality)
             {
-                // Served from cache. A below-threshold hit was shown immediately; now re-scrape ONLY the
-                // pieces the quality validator flagged as missing and stream the refilled result. A
-                // complete (ServeAsIs) hit needs nothing further.
+                // Served from cache. A below-threshold hit was shown immediately; the gap refill unit
+                // re-scrapes ONLY the pieces the quality validator flagged as missing.
                 if (quality.Decision == CacheDecision.ServeAndEnrich)
                 {
-                    _ = ReEnrichInBackgroundAsync(job.Id, job.UserId, historyEntry.Id, result, quality);
+                    await EnqueueEnrichmentAsync(
+                        job, historyEntry.Id, result, Pipeline.Enrichment.EnrichmentUnit.CacheGapRefill, quality);
                 }
-            }
-            else if (result.CostCapTripped)
-            {
-                // The per-job cost cap cut the base run short (the result above was salvaged). Launching
-                // the background deep-dive now would hand the very job the cap just stopped a FRESH full
-                // enrichment budget — doubling the admin-configured ceiling exactly when it fired. The
-                // user keeps the salvaged base result; enrichment is deliberately skipped.
-                _logger.LogWarning(
-                    "Skipping background enrichment for job {JobId}: the per-job cost cap tripped during the base run",
-                    job.Id);
+
+                // Halal image safety on a CACHE serve: a cache hit does no gather, so this run's
+                // gather-stage vision moderation never saw the served images — and an older cached
+                // result may predate the image-check unit entirely (exactly how immodest images survived
+                // on a replayed "women dress" result). So screen the final grid images here too, delayed
+                // so any gap refill above that reassigns images settles first. Fresh runs get this via the
+                // Plan fan-out; ImageCheck is idempotent, so a re-screen of an already-clean result no-ops.
+                await EnqueueEnrichmentAsync(
+                    job, historyEntry.Id, result, Pipeline.Enrichment.EnrichmentUnit.ImageCheck, quality: null,
+                    notBefore: TimeSpan.FromSeconds(160));
             }
             else
             {
-                // Fresh run: progressive enrichment — base results are already on screen, now deep-dive
-                // each item (official-brand-site specs via Context.dev) and stream the refreshed result
-                // so the UI fills specs in place.
-                _ = EnrichInBackgroundAsync(job.Id, job.UserId, historyEntry.Id, result);
+                // Fresh run: the plan unit fans out progressive enrichment — the UI fills images,
+                // prices and specs in place as each unit lands.
+                await EnqueueEnrichmentAsync(
+                    job, historyEntry.Id, result, Pipeline.Enrichment.EnrichmentUnit.Plan, quality: null);
             }
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -364,126 +410,42 @@ public sealed class SearchJobService : BackgroundService
     }
 
     /// <summary>
-    /// Runs the post-result item deep-dive OFF the worker loop, in its own DI scope and under a hard
-    /// timeout, then streams the enriched result. Fire-and-forget: never awaited by the job processor,
-    /// so it can't block the queue; all failures are logged (never silently swallowed).
+    /// Queues the post-result enrichment root unit. One insert — the queue consumer does the rest
+    /// (fan-out, retries, incremental patches, live repaints). Failure to enqueue is logged loudly:
+    /// the base result is already delivered, but the deep-dive would silently never happen.
     /// </summary>
-    private async Task EnrichInBackgroundAsync(int jobId, string userId, int historyId, SearchRunResult baseResult)
+    private async Task EnqueueEnrichmentAsync(
+        SearchJob job, int historyId, SearchRunResult result, string kind, CacheQualityReport? quality,
+        TimeSpan? notBefore = null)
     {
-        using var timeout = new CancellationTokenSource(_enrichTimeout);
         try
         {
-            using var scope = _scopeFactory.CreateScope();
-            var sp = scope.ServiceProvider;
-            var runner = sp.GetRequiredService<ISearchRunner>();
-            var db = sp.GetRequiredService<DaleelDbContext>();
-            var convos = sp.GetRequiredService<IConversationStore>();
-
-            var job = await db.SearchJobs.FirstOrDefaultAsync(j => j.Id == jobId, timeout.Token);
-            if (job is null)
+            var payload = Pipeline.Enrichment.EnrichmentWorkQueue.Payload(new Pipeline.Enrichment.PlanPayload(
+                quality is null ? null : System.Text.Json.JsonSerializer.Serialize(quality),
+                result.FilteredCount, result.FilteredCategories));
+            await _enrichQueue.EnqueueAsync(new[]
             {
-                return;
-            }
-
-            // Enrichment runs AFTER the result is on screen, so its progress must NOT be broadcast as
-            // normal progress — that would flip the UI back to "running" and hide the completed result.
-            // The UI shows a quiet "fetching specs…" hint instead; here we only log server-side.
-            void Progress(string message) => _logger.LogDebug("Enrich job {JobId}: {Message}", jobId, message);
-
-            var enriched = await runner.EnrichAsync(job, baseResult, Progress, timeout.Token);
-            if (enriched is null)
-            {
-                return; // nothing changed — no UI update
-            }
-
-            job.ResultJson = enriched.ResultJson;
-            await db.SaveChangesAsync(timeout.Token);
-            await convos.CompleteAsync(
-                userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
-            // Keep the history row in sync — without this, "open from history" replays the pre-enrichment
-            // (image/price/spec-less) result forever while a repeat search serves the enriched cache entry.
-            await sp.GetRequiredService<ISearchHistoryRepository>()
-                .UpdateResultAsync(userId, historyId, enriched.ResultJson, timeout.Token);
-            await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
-        }
-        catch (OperationCanceledException)
-        {
-            // Timed out — the base result is already on screen so there's nothing to undo, but abandoning
-            // the deep-dive silently hid that the enriched specs/prices were never persisted. Surface it so
-            // a chronically-too-short timeout (or a hung scrape) is diagnosable and the limit can be tuned.
-            _logger.LogWarning(
-                "Background enrichment for job {JobId} timed out after {TimeoutSeconds:n0}s and was abandoned; " +
-                "the base result stands but the deep-dive did not complete. Raise Enrichment:TimeoutSeconds if this recurs.",
-                jobId, _enrichTimeout.TotalSeconds);
+                new EnrichmentWorkItem
+                {
+                    SearchJobId = job.Id,
+                    UserId = job.UserId,
+                    HistoryEntryId = historyId,
+                    ResultType = result.ResultType,
+                    Kind = kind,
+                    Payload = payload,
+                    // The gap refill wraps a whole multi-phase pass, so a second full attempt is the
+                    // most a transient failure deserves; fan-out units carry the default budget.
+                    MaxAttempts = kind == Pipeline.Enrichment.EnrichmentUnit.CacheGapRefill ? 2 : 4,
+                    NotBefore = notBefore is { } delay ? DateTimeOffset.UtcNow + delay : default
+                }
+            });
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Background enrichment failed for job {JobId}", jobId);
+            _logger.LogError(ex, "Failed to enqueue enrichment for job {JobId} — deep-dive will not run", job.Id);
         }
     }
 
-    /// <summary>
-    /// Runs the smart-cache partial re-enrichment OFF the worker loop, in its own DI scope and under the
-    /// same hard timeout as the item deep-dive, then streams the refilled result. Fire-and-forget: never
-    /// awaited by the job processor, so it can't block the queue; all failures are logged and swallowed.
-    /// The base (cached) result is already on screen — this only refills the gaps the quality validator
-    /// found and re-renders in place via <c>Enriched</c>.
-    /// </summary>
-    private async Task ReEnrichInBackgroundAsync(
-        int jobId, string userId, int historyId, SearchRunResult baseResult, CacheQualityReport quality)
-    {
-        using var timeout = new CancellationTokenSource(_enrichTimeout);
-        try
-        {
-            using var scope = _scopeFactory.CreateScope();
-            var sp = scope.ServiceProvider;
-            var runner = sp.GetRequiredService<ISearchRunner>();
-            var db = sp.GetRequiredService<DaleelDbContext>();
-            var convos = sp.GetRequiredService<IConversationStore>();
-
-            var job = await db.SearchJobs.FirstOrDefaultAsync(j => j.Id == jobId, timeout.Token);
-            if (job is null)
-            {
-                return;
-            }
-
-            // Like the item deep-dive, this runs AFTER the result is on screen, so its progress must NOT
-            // be broadcast as normal progress (that would flip the UI back to "running"); only log it.
-            void Progress(string message) => _logger.LogDebug("Re-enrich job {JobId}: {Message}", jobId, message);
-
-            _logger.LogInformation(
-                "Cache hit for job {JobId} scored {Score}/100 — re-enriching: {Missing}",
-                jobId, quality.Score, string.Join("; ", quality.Missing));
-
-            var enriched = await runner.ReEnrichAsync(job, baseResult, quality, Progress, timeout.Token);
-            if (enriched is null)
-            {
-                return; // nothing could be improved — no UI update
-            }
-
-            job.ResultJson = enriched.ResultJson;
-            await db.SaveChangesAsync(timeout.Token);
-            await convos.CompleteAsync(
-                userId, "completed", enriched.ResultJson, enriched.ResultType, DateTimeOffset.UtcNow, timeout.Token);
-            // Keep the history row in sync with the refilled result (see EnrichInBackgroundAsync).
-            await sp.GetRequiredService<ISearchHistoryRepository>()
-                .UpdateResultAsync(userId, historyId, enriched.ResultJson, timeout.Token);
-            await _broadcaster.EnrichedAsync(userId, jobId, enriched.ResultJson, enriched.ResultType);
-        }
-        catch (OperationCanceledException)
-        {
-            // Timed out — the cached result is already on screen so there's nothing to undo, but log it so an
-            // abandoned partial re-enrichment (the gaps the validator flagged stay unfilled) is diagnosable.
-            _logger.LogWarning(
-                "Background cache re-enrichment for job {JobId} timed out after {TimeoutSeconds:n0}s and was abandoned; " +
-                "the cached result stands but the flagged gaps were not refilled. Raise Enrichment:TimeoutSeconds if this recurs.",
-                jobId, _enrichTimeout.TotalSeconds);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Background cache re-enrichment failed for job {JobId}", jobId);
-        }
-    }
 
     private static async Task FinishAsync(
         DaleelDbContext db, IConversationStore convos, SearchJob job,
@@ -493,6 +455,6 @@ public sealed class SearchJobService : BackgroundService
         job.Error = error;
         job.CompletedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
-        await convos.CompleteAsync(job.UserId, convoStatus, null, null, job.CompletedAt.Value, ct);
+        await convos.CompleteAsync(job.UserId, job.Id, convoStatus, null, null, job.CompletedAt.Value, ct);
     }
 }

@@ -36,12 +36,21 @@ public sealed class LoggingLlmClient : ILlmClient
         finally
         {
             sw.Stop();
+            // The pipeline step that made this call (ambient, set by the caller). Encoded into Endpoint
+            // as "chat:<callSite>" so it groups in the persisted ApiCallLog without a schema change, and
+            // also carried structured on ApiCall.CallSite.
+            var callSite = LlmCallSiteScope.Current;
             _observer.Record(new ApiCall
             {
                 Timestamp = DateTimeOffset.UtcNow,
                 Provider = "OpenRouter/" + _inner.Provider,
-                Endpoint = "chat",
+                Endpoint = callSite is null ? "chat" : "chat:" + callSite,
+                CallSite = callSite,
                 RequestSummary = response?.Model,
+                // What the model actually gave back, capped — an extraction call that returns "{}" or an
+                // empty products array is otherwise indistinguishable from a productive one on the
+                // efficiency view. Never more than the shared summary cap.
+                ResponseSummary = RequestSummaries.Truncate(Preview(response?.Content)),
                 Model = response?.Model,
                 InputTokens = response?.InputTokens,
                 OutputTokens = response?.OutputTokens,
@@ -51,5 +60,18 @@ public sealed class LoggingLlmClient : ILlmClient
                 EstimatedCost = _estimator.EstimateLlm(response?.Model, response?.InputTokens, response?.OutputTokens)
             });
         }
+    }
+
+    /// <summary>A single-line, whitespace-collapsed head of the model's reply — enough to see whether the
+    /// call produced anything, never the full completion.</summary>
+    private static string? Preview(string? content)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            return "(empty)";
+        }
+
+        var flat = string.Join(' ', content.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return flat.Length > 240 ? flat[..240] : flat;
     }
 }

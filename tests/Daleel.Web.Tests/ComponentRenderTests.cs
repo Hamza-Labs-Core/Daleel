@@ -1,6 +1,7 @@
 using Bunit;
 using Daleel.Core.Models;
 using Daleel.Web.Components.Shared;
+using Daleel.Web.Pipeline;
 using Daleel.Web.Translation;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -115,5 +116,67 @@ public class ComponentRenderTests : TestContext
         cut.Markup.Should().Contain("Smart Electronics");
         cut.Markup.Should().Contain("Mecca St, Amman");
         cut.Markup.Should().Contain("4.6");
+    }
+
+    // ── SearchProgress: the 8→6 phase collapse (redesign in commit 3168b1c). These render the REAL
+    //    component (not a mockup) and lock in every claim the commit made: six phases not eight, the
+    //    retired vault/stores steps gone, BuildingProfiles+FindingStores sharing one "details" phase,
+    //    and the six-phase percent math. Enum values live in SearchProgressSignal (Analyzing=0 … Done=7).
+    private IRenderedComponent<SearchProgress> RenderProgress(string[] messages, bool active) =>
+        RenderComponent<SearchProgress>(p => p
+            .Add(x => x.Messages, messages)
+            .Add(x => x.Active, active));
+
+    private static string Sig(SearchStep step, string key, params object[] args) =>
+        SearchProgressSignal.Encode(step, key, args);
+
+    [Fact]
+    public void SearchProgress_CollapsesEightWireStagesToSixPhases()
+    {
+        var cut = RenderProgress(new[] { Sig(SearchStep.Analyzing, "Progress.Msg.Analyzing") }, active: true);
+
+        cut.FindAll(".daleel-step-v").Count.Should().Be(6);          // six phases, not the old eight
+        cut.Markup.Should().Contain("Understanding your search");    // new vague label resolves from resx
+        cut.Markup.Should().NotContain("Checking vault");            // retired step is gone from the view
+        cut.Markup.Should().NotContain("Finding stores");
+    }
+
+    [Fact]
+    public void SearchProgress_ProfilesAndStoresShareOneDetailsPhase_LatestWins()
+    {
+        // BuildingProfiles(4) and FindingStores(5) both map to display phase index 3 ("details").
+        var msgs = new[]
+        {
+            Sig(SearchStep.BuildingProfiles, "Progress.Msg.BuildingProfiles", 3, 2),
+            Sig(SearchStep.FindingStores, "Progress.Msg.VerifyingStore", "Smart Buy"),
+        };
+
+        var cut = RenderProgress(msgs, active: true);
+
+        // Collapse proof: two wire stages produce ONE detail slot (phase 3) — not two separate lines.
+        cut.FindAll(".daleel-step-detail").Count.Should().Be(1);
+        cut.Markup.Should().Contain("67%");                          // phase 3 → step 4 of 6 → 67%
+        cut.Markup.Should().Contain("Checking out Smart Buy");       // latest signal wins the shared slot
+        cut.Markup.Should().NotContain("Getting the story behind");  // the earlier one was overwritten
+    }
+
+    [Fact]
+    public void SearchProgress_DoneReachesFinalPhaseAndSettlesAllGreen()
+    {
+        var cut = RenderProgress(new[] { Sig(SearchStep.Done, "Progress.Msg.Done") }, active: false);
+
+        cut.Markup.Should().Contain("100%");                         // Done → phase 6 of 6
+        cut.FindAll(".daleel-step-v.done").Count.Should().Be(6);     // settled view = all six done
+    }
+
+    [Fact]
+    public void SearchProgress_RetiredVaultStageFoldsIntoUnderstanding()
+    {
+        // A CheckingVault(1) signal must not surface a vault row — it folds into phase 0 ("understanding").
+        var cut = RenderProgress(new[] { Sig(SearchStep.CheckingVault, "Progress.Msg.Analyzing") }, active: true);
+
+        cut.FindAll(".daleel-step-v").Count.Should().Be(6);
+        cut.Markup.Should().Contain("17%");                          // phase 0 → step 1 of 6 → 17%
+        cut.Markup.Should().NotContain("Checking vault");
     }
 }

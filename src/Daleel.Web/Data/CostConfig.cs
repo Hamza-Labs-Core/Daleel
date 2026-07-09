@@ -3,12 +3,9 @@ using Daleel.Core.Observability;
 
 namespace Daleel.Web.Data;
 
-/// <summary>Admin-configured cost caps for a search job.</summary>
-public sealed record CostCaps(decimal MaxPerJob, decimal MonthlyAlert);
-
 /// <summary>
-/// Builds a <see cref="CostEstimator"/> and reads cost caps from admin-editable
-/// <see cref="SystemConfig"/> values, falling back to the built-in defaults.
+/// Builds a <see cref="CostEstimator"/> from admin-editable <see cref="SystemConfig"/> pricing
+/// values, falling back to the built-in defaults.
 /// </summary>
 public static class CostConfig
 {
@@ -27,19 +24,12 @@ public static class CostConfig
             PerPlaces = await Dec("pricing.places", defaults.PerPlaces),
             PerSocial = await Dec("pricing.social", defaults.PerSocial),
             PerRender = await Dec("pricing.render", defaults.PerRender),
+            PerWorkersAi = await Dec("pricing.workers_ai", defaults.PerWorkersAi),
+            PerEdgeRequest = await Dec("pricing.edge_request", defaults.PerEdgeRequest),
+            PerEdgeDrain = await Dec("pricing.edge_drain", defaults.PerEdgeDrain),
             // LLM token rates keep the built-in defaults.
         };
 
         return new CostEstimator(pricing);
-    }
-
-    public static async Task<CostCaps> ReadCapsAsync(ISystemConfigService config, CancellationToken ct = default)
-    {
-        decimal Parse(string? s, decimal fallback) =>
-            decimal.TryParse(s, NumberStyles.Any, CultureInfo.InvariantCulture, out var v) ? v : fallback;
-
-        return new CostCaps(
-            MaxPerJob: Parse(await config.GetAsync("cost.max_per_job", ct), 0m),
-            MonthlyAlert: Parse(await config.GetAsync("cost.monthly_alert", ct), 0m));
     }
 }

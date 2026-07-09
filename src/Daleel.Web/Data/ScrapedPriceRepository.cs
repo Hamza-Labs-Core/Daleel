@@ -27,6 +27,17 @@ public interface IScrapedPriceRepository
     Task<IReadOnlyList<ScrapedPrice>> LatestForStoreAsync(string storeName, CancellationToken ct = default);
 
     /// <summary>
+    /// Like <see cref="LatestForStoreAsync"/> but restricted to observations captured at or after
+    /// <paramref name="since"/>. The enrichment units use this to re-attach prices an earlier pass
+    /// (e.g. a drained edge scrape) already persisted, without re-spending a crawl. The default
+    /// composes over <see cref="LatestForStoreAsync"/> so existing implementations keep compiling;
+    /// <see cref="ScrapedPriceRepository"/> overrides it with an indexed range read.
+    /// </summary>
+    async Task<IReadOnlyList<ScrapedPrice>> ListRecentByStoreAsync(
+        string storeName, DateTimeOffset since, CancellationToken ct = default) =>
+        (await LatestForStoreAsync(storeName, ct)).Where(p => p.ScrapedAt >= since).ToList();
+
+    /// <summary>
     /// Recent raw observations for a product across all stores, newest first (capped at
     /// <paramref name="max"/>). The product page uses this to show the observed price range over time.
     /// </summary>
@@ -99,6 +110,29 @@ public sealed class ScrapedPriceRepository : IScrapedPriceRepository
         var lowered = storeName.Trim().ToLowerInvariant();
         var rows = await _db.ScrapedPrices.AsNoTracking()
             .Where(p => p.StoreName.ToLower() == lowered)
+            .OrderByDescending(p => p.ScrapedAt)
+            .ToListAsync(ct);
+
+        return rows
+            .GroupBy(p => p.ProductKey, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList();
+    }
+
+    public async Task<IReadOnlyList<ScrapedPrice>> ListRecentByStoreAsync(
+        string storeName, DateTimeOffset since, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(storeName))
+        {
+            return Array.Empty<ScrapedPrice>();
+        }
+
+        // Same case-insensitive store match as LatestForStoreAsync, cut to the recency window first
+        // (ScrapedAt's Unix-ms encoding keeps the range filter translatable and indexed) so the
+        // append-only table's depth never bleeds into this read, then the same per-product collapse.
+        var lowered = storeName.Trim().ToLowerInvariant();
+        var rows = await _db.ScrapedPrices.AsNoTracking()
+            .Where(p => p.StoreName.ToLower() == lowered && p.ScrapedAt >= since)
             .OrderByDescending(p => p.ScrapedAt)
             .ToListAsync(ct);
 

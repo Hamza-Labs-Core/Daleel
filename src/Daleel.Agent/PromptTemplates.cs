@@ -159,6 +159,25 @@ public static class PromptTemplates
         sb.AppendLine("Aim for BREADTH: cover as MANY brands as compete in this market and MULTIPLE models per brand " +
             "— generate enough queries (include brand-named and 'best <category> brands' queries) that the results " +
             "span the budget, mid-range and premium ends, not just the top one or two names.");
+        sb.AppendLine("Generate 16–20 DIVERSE webQueries so the search DISCOVERS as many distinct BRANDS, STORES and " +
+            "MARKETPLACES as possible — these are where the product ITEMS come from: their catalogues (brand sites) and " +
+            "product pages (stores) are crawled to build the grid, so the more distinct brand/store SOURCES you surface, " +
+            "the more items the crawl yields (aim for HUNDREDS). Vary them: one query per major BRAND (catalogue/official " +
+            "site), store-FINDER queries, marketplace/classifieds category queries, and buying-guide / 'best <category> " +
+            "brands' queries — NOT rephrasings of the same generic query, which just surface the same few big sites. " +
+            "Keep shoppingQueries MODEST (4–6): Google Shopping feeds the Deals/price surface, NOT the product grid.");
+        // Local-store discovery is the single biggest gap in local markets: a small, well-stocked local
+        // e-commerce store (a Shopify/WooCommerce shop, a local electronics chain's site) rarely ranks for a
+        // bare "<category>" query but DOES rank for store-finding phrasings — and once its domain is in the
+        // bundle, the store sub-workflow crawls its full catalogue. So EXPLICITLY ask for store-discovery
+        // queries in BOTH languages, without ever naming a specific store (let the engine reveal them).
+        sb.Append("CRITICAL — LOCAL STORE DISCOVERY: several webQueries MUST be store-FINDING queries that surface ")
+          .Append(geo.Country).AppendLine("-based online shops, e-commerce sites and their category/collection pages, " +
+            "in BOTH the market language and English. Use phrasings like: the category + 'online store' / 'متجر إلكتروني' / " +
+            "'اونلاين' / 'shop' / 'متجر', the category + 'buy' / 'للبيع' / 'اشتري' + the main city, the category + " +
+            "'online shopping " + geo.Country + "', and the category + the country/city name. Also include the market's " +
+            "well-known local e-commerce platforms and classifieds where a shopper actually buys this category (name them " +
+            "generically from your knowledge of this market — do NOT restrict to global sites like Amazon/AliExpress).");
         sb.AppendLine("Design the search to surface CONCRETE LISTINGS from whatever local sites rank in this market:");
         // Shopping queries must be PLAIN product+price phrases: the shopping engine (Google Shopping via
         // gl=cc) is what returns priced listings WITH thumbnails, and it returns ~nothing for site:-scoped
@@ -314,10 +333,31 @@ public static class PromptTemplates
     /// lists only the indices to DROP, so an item the model overlooks fails open (kept), and the output
     /// stays tiny regardless of how many items are kept.
     /// </summary>
-    public static string RelevanceGate(string target, IReadOnlyList<string> items)
+    public static string RelevanceGate(string target, IReadOnlyList<string> items) =>
+        RelevanceGate(target, items, Array.Empty<RelevanceNegative>());
+
+    /// <summary>
+    /// Relevance gate with LEARNED negatives: examples shoppers previously flagged as not-relevant to this
+    /// search, injected as ADVISORY calibration (the gate still judges each item on its own — a resemblance
+    /// alone is not a drop, which guards against a runaway feedback loop).
+    /// </summary>
+    public static string RelevanceGate(
+        string target, IReadOnlyList<string> items, IReadOnlyList<RelevanceNegative> negatives)
     {
         var sb = new StringBuilder();
         sb.Append("The shopper is looking for: ").AppendLine(target);
+        if (negatives.Count > 0)
+        {
+            sb.AppendLine("Shoppers previously flagged these as NOT what they wanted for this search — use them to " +
+                "CALIBRATE, but judge each item on its OWN merits (do NOT drop an item merely because it resembles one):");
+            foreach (var n in negatives.Take(20))
+            {
+                sb.Append("- ").Append(n.Label);
+                if (!string.IsNullOrWhiteSpace(n.Reason)) sb.Append(" (").Append(n.Reason).Append(')');
+                sb.AppendLine();
+            }
+        }
+
         sb.AppendLine("For each numbered item, decide: is the item ITSELF one of these? Accessories, consumables, " +
             "parts, and different product types are NOT. Also drop any item that is haram/immodest content.");
         sb.AppendLine("Items:");
@@ -448,21 +488,21 @@ public static class PromptTemplates
         sb.Append("Buy-intent query: ").AppendLine(query);
         sb.Append("Extract the concrete products a shopper in ").Append(geo.Country)
           .AppendLine(" could buy, drawn ONLY from the context below. Prefer local sellers; quote real prices and links.");
-        // Bounded breadth: an uncapped "extract EVERY model" instruction produced multi-minute LLM
-        // generations on article-heavy queries (the call flirted with the HTTP client's timeout and
-        // burned most of the run's 10-minute budget). ~20 well-evidenced models is more than the grid,
-        // compare table or a shopper can use, and keeps the extraction call fast and reliable.
-        sb.AppendLine("Extract the distinct models the context evidences, CAPPED at the ~20 BEST-EVIDENCED — prefer " +
-            "models with prices/sellers, then well-known models the guides name; within the cap span MULTIPLE brands " +
-            "and MULTIPLE models per brand (budget through premium), not just the few most prominent.");
+        // UNCAPPED (owner: "scale to hundreds"): extract EVERY distinct model the context evidences — no
+        // ~N ceiling. (The old cap guarded against multi-minute LLM generations on article-heavy queries;
+        // the workflow deadline + partial-result salvage now backstop a slow call instead.)
+        sb.AppendLine("Extract EVERY distinct model the context evidences — do NOT limit the number; more is " +
+            "better, aim for HUNDREDS when the context supports it. Prefer models with prices/sellers first, then " +
+            "well-known models the guides name; span MULTIPLE brands and MULTIPLE models per brand (budget through " +
+            "premium), not just the few most prominent.");
         sb.AppendLine("CLASSIFY before you extract. The context mixes two kinds of source: (a) real PRODUCT/STORE " +
             "listings — a concrete item sold by a real store/marketplace, with a price or a buy link — and (b) ARTICLES, " +
             "reviews, blogs and buying-guides ABOUT products. NEVER output an article, review or round-up ITSELF as a " +
             "product (its title is not a product). But DO mine articles for the models they name: a model named in a " +
             "buying guide with a name but NO price and NO seller still counts — include it with an empty offers array so " +
             "the shopper sees it exists. Attach real prices and seller links to a model's offers whenever the context " +
-            "provides them; leave offers empty when it does not. The goal is BREADTH within the cap: spread the " +
-            "~20 models across brands and price tiers, not only the few that happen to carry an in-context price.");
+            "provides them; leave offers empty when it does not. The goal is BREADTH: spread the models across " +
+            "brands and price tiers, not only the few that happen to carry an in-context price.");
         // A tighter, deterministic article guard on top of the classification rule above: an article's HEADLINE
         // (often phrased as a list/opinion and living under a blog/news URL path) is the single most common thing
         // the extractor wrongly emits as a product. Name the tells explicitly so it never leaks into "products".
@@ -473,6 +513,15 @@ public static class PromptTemplates
             "source for the models it names, but NEVER output its headline as a product's \"name\".");
         sb.AppendLine("A product's \"name\" is ALWAYS a real product/model name — NEVER a URL, domain, link, store name, " +
             "or article headline. If the only label you can find for an item is a URL or a headline, drop the item.");
+        // Capture the FULL detail a store listing exposes — not just name+price. Local store pages carry
+        // SKU/model codes, stock status, a spec-rich description and product images; pulling all of it in
+        // makes each grid card and detail panel useful instead of a bare name. specs is free-form, so the
+        // extra attributes ride along without any schema change downstream.
+        sb.AppendLine("EXTRACT MAXIMUM DETAIL per product from its listing: set \"imageUrl\" to the product's image when the " +
+            "context provides one, and add these to \"specs\" whenever the listing shows them (use these exact keys): " +
+            "\"sku\" (SKU / model code / part number, verbatim), \"availability\" (in stock / out of stock / pre-order), " +
+            "and \"description\" (a one- or two-sentence trim of the product description). Keep each offer's real price, " +
+            "currency and direct link. Never invent any of these — omit a field the listing does not show.");
         // Schema-aware extraction: when the up-front category analysis identified the specs that matter for
         // this product type, tell the extractor to fill those exact keys (so the compare table and detail
         // views line up across products) instead of returning arbitrary free-form spec keys.

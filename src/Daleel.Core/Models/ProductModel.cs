@@ -1,3 +1,5 @@
+using System;
+using System.Linq;
 using Daleel.Core.Intelligence;
 
 namespace Daleel.Core.Models;
@@ -27,6 +29,12 @@ public record PriceOffer
 
     /// <summary>Whether this offer is confirmed local to the target market.</summary>
     public bool IsLocal { get; init; }
+
+    /// <summary>
+    /// The selling store's own site/page (root or store profile), distinct from <see cref="Url"/>
+    /// (the product page). Lets the card's seller chip link to the store itself.
+    /// </summary>
+    public string? StoreUrl { get; init; }
 
     /// <summary>Whether the offer advertises free shipping.</summary>
     public bool FreeShipping { get; init; }
@@ -62,6 +70,18 @@ public record PriceOffer
     }
 }
 
+/// <summary>A review/discussion source that names a specific model (attached to its card).</summary>
+public sealed record ItemReview(string? Title, string Url, string? Snippet = null, string? Source = null);
+
+/// <summary>A buyer review scraped from a product/store page — distinct from the editorial
+/// <see cref="ItemReview"/> (articles ABOUT the model) and StoreReview (venue reviews). <c>Rating</c> is
+/// 1–5 when the source gave one.</summary>
+public sealed record ProductReview(
+    string Text, double? Rating = null, string? Author = null, DateTimeOffset? Date = null, string? Source = null);
+
+/// <summary>Any other link that mentions a specific model — article, comparison, source page.</summary>
+public sealed record ItemLink(string Title, string Url, string? Source = null);
+
 /// <summary>
 /// A distinct product model with everything known about it: identity, specs, images, an
 /// optional MSRP and LLM-distilled pros/cons, plus every place it's available aggregated
@@ -72,8 +92,59 @@ public record ProductModel
     public string Name { get; init; } = string.Empty;
     public string? Brand { get; init; }
     public string? Model { get; init; }
+
+    /// <summary>Global product id (GTIN/UPC/EAN/MPN) when known — merges the same product across stores.
+    /// A stored attribute; routing/persistence keys stay brand+model to avoid identity drift.</summary>
+    public string? Sku { get; init; }
+
     public string? ProductLine { get; init; }
+    /// <summary>The primary/first photo (kept for callers that want a single image; enrichment fills it).</summary>
     public string? ImageUrl { get; init; }
+
+    /// <summary>
+    /// EVERY photo found for this item — aggregated across ALL the listings/offers that matched it. Raw,
+    /// unscreened, distinct. The full candidate gallery is <see cref="CandidateImages"/> (these plus
+    /// <see cref="ImageUrl"/>); the user sees the VERIFIED subset (<see cref="DisplayImages"/>).
+    /// </summary>
+    public IReadOnlyList<string> Images { get; init; } = Array.Empty<string>();
+
+    /// <summary>
+    /// The subset of <see cref="CandidateImages"/> the halal vision screen VERIFIED clean. The UI renders
+    /// ONLY these (fail-closed): a photo is hidden until promoted here, and re-hides if it leaves the
+    /// candidate set. Preserving the raw candidates lets an admin whitelist / a retry un-hide one later.
+    /// </summary>
+    public IReadOnlyList<string> VerifiedImages { get; init; } = Array.Empty<string>();
+
+    /// <summary>Every distinct candidate photo, primary first — what the screen must clear before any renders.</summary>
+    public IReadOnlyList<string> CandidateImages =>
+        (string.IsNullOrWhiteSpace(ImageUrl) ? Images : Images.Prepend(ImageUrl!))
+            .Where(IsUsableImageUrl)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>
+    /// A usable product image is an absolute http(s) URL. Extractors occasionally emit junk in the image
+    /// field — the literal string "null"/"undefined", a bare word, or a relative path — which passed the
+    /// old "not whitespace" check and then, because the vision screen skips non-http urls, got promoted as
+    /// a "verified" image (rendering &lt;img src="null"&gt; → 404) and logged as a shown image. Requiring a
+    /// real http(s) url at the candidate gate keeps that junk out of screening, display, and the audit.
+    /// </summary>
+    private static bool IsUsableImageUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri) &&
+        (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+    /// <summary>The photos to actually render — verified AND still a candidate, in order. A fail-closed gallery.</summary>
+    public IReadOnlyList<string> DisplayImages
+    {
+        get
+        {
+            var verified = new HashSet<string>(VerifiedImages, StringComparer.Ordinal);
+            return CandidateImages.Where(verified.Contains).ToList();
+        }
+    }
+
+    /// <summary>The primary photo to render (first verified) — for single-image surfaces like the grid card.</summary>
+    public string? DisplayImageUrl => DisplayImages.Count > 0 ? DisplayImages[0] : null;
 
     /// <summary>
     /// Stable, URL-safe identifier used to route to the model's detail page. Products aren't persisted
@@ -106,6 +177,22 @@ public record ProductModel
 
     /// <summary>Every place the model is available, sorted cheapest-first.</summary>
     public IReadOnlyList<PriceOffer> Offers { get; init; } = Array.Empty<PriceOffer>();
+
+    /// <summary>Reviews/discussions that name THIS model — card-attached, never an orphan section.</summary>
+    public IReadOnlyList<ItemReview> Reviews { get; init; } = Array.Empty<ItemReview>();
+
+    /// <summary>Buyer reviews scraped from this model's store/product pages (rating + text), distinct from the
+    /// editorial <see cref="Reviews"/>. Populated by the store/item extraction when the page carries reviews.</summary>
+    public IReadOnlyList<ProductReview> RatedReviews { get; init; } = Array.Empty<ProductReview>();
+
+    /// <summary>Other links mentioning THIS model (articles, comparisons, sources).</summary>
+    public IReadOnlyList<ItemLink> Mentions { get; init; } = Array.Empty<ItemLink>();
+
+    /// <summary>This model's page on its brand's site, when found (regional preferred).</summary>
+    public string? BrandSiteUrl { get; init; }
+
+    /// <summary>The brand's regional site root for the market (e.g. samsung.com/jo), when known.</summary>
+    public string? BrandRegionalUrl { get; init; }
 
     /// <summary>
     /// The offer the card leads with: the cheapest EXACT price first, then the cheapest indicative

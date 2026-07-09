@@ -1,12 +1,15 @@
 @* A single aggregated product model: image, name, lowest price across all its sources,
    how many sellers carry it, deal flag, a Details button and an optional compare checkbox. *@
 @inject IStringLocalizer<SharedResource> L
+@inject Daleel.Web.Services.IRelevanceFeedbackService Feedback
+@inject Daleel.Web.Services.ICurrentUser CurrentUser
+@inject ISnackbar Snackbar
 
 <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;display:flex;flex-direction:column;">
     <div style="height:150px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--mud-palette-background-grey);">
-        @if (!string.IsNullOrWhiteSpace(Model.ImageUrl))
+        @if (!string.IsNullOrWhiteSpace(Model.DisplayImageUrl))
         {
-            <SafeImage Src="@Model.ImageUrl" Alt="@Model.Name" Style="max-height:150px;max-width:100%;object-fit:contain;" />
+            <SafeImage Src="@Model.DisplayImageUrl" Alt="@Model.Name" Style="max-height:150px;max-width:100%;object-fit:contain;" />
         }
         else
         {
@@ -20,7 +23,18 @@
         <div class="d-flex align-center justify-space-between mb-1" style="gap:8px;">
             @if (Model.LowestOffer is { } lo)
             {
-                <SourceBadge SourceType="lo.SourceType" Source="@lo.Source" />
+                @* When the offer carries the store's own site, the seller chip links to it —
+                   same affordance as the View button (new tab), visual style unchanged. *@
+                @if (lo.StoreUrl is { Length: > 0 } storeUrl)
+                {
+                    <a href="@storeUrl" target="_blank" rel="noopener" style="text-decoration:none;">
+                        <SourceBadge SourceType="lo.SourceType" Source="@lo.Source" />
+                    </a>
+                }
+                else
+                {
+                    <SourceBadge SourceType="lo.SourceType" Source="@lo.Source" />
+                }
             }
             @if (ShowCompare)
             {
@@ -33,7 +47,7 @@
            Arabic product/brand names even under an English UI. Route names through TranslatedText so they
            are translated to the current UI language at display time — cache-first and best-effort, a
            transparent pass-through when no DeepL key is set or the text already matches the UI language. *@
-        <TranslatedText Text="@Model.Name" Typo="Typo.body1" Style="font-weight:500;line-height:1.3;" />
+        <TranslatedText Text="@(Daleel.Core.Models.HtmlText.Strip(Model.Name) ?? Model.Name)" Typo="Typo.body1" Style="font-weight:500;line-height:1.3;" />
 
         @if (!string.IsNullOrWhiteSpace(BrandLine))
         {
@@ -73,7 +87,10 @@
             }
             else
             {
-                <MudText Typo="Typo.body2" Color="Color.Secondary">@L["ModelCard.PriceOnSite"]</MudText>
+                @* No numeric price could be read from any of this model's seller pages — the store
+                   link is the price source. Kept honest: never invent or estimate a number here. *@
+                <MudText Typo="Typo.body2" Color="Color.Secondary"
+                         title="@L["ModelCard.PriceOnSiteHint"]">@L["ModelCard.PriceOnSite"]</MudText>
             }
 
             @if (Model.Offers.Any(o => o.IsDeal))
@@ -82,29 +99,13 @@
             }
         </div>
 
+        @* Deliberately nothing more here: reviews, mentions, brand links, pros/cons and the review
+           summary all live on the detail surfaces ("Details & prices" dialog and the /product page).
+           The card stays compact and NOTHING on it expands. *@
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mt-1">
             <MudIcon Icon="@Icons.Material.Filled.Storefront" Size="Size.Small" />
             @Model.SellerCount @(Model.SellerCount == 1 ? L["ModelCard.Seller"] : L["Products.Sellers"])
         </MudText>
-
-        @if (!string.IsNullOrWhiteSpace(Model.ReviewSummary))
-        {
-            <MudText Typo="Typo.caption" Class="mt-2 d-block" Style="font-style:italic;"
-                     dir="@Catalog.Dir(Model.ReviewSummary!)">“@Model.ReviewSummary”</MudText>
-        }
-
-        @if (Model.Pros.Count > 0)
-        {
-            <MudList T="string" Dense="true" Class="mt-1 pa-0">
-                @foreach (var pro in Model.Pros.Take(2))
-                {
-                    <MudListItem T="string" Icon="@Icons.Material.Filled.ThumbUp" IconColor="Color.Success"
-                                 Class="pa-0">
-                        <MudText Typo="Typo.caption" dir="@Catalog.Dir(pro)">@pro</MudText>
-                    </MudListItem>
-                }
-            </MudList>
-        }
     </MudCardContent>
 
     <MudCardActions>
@@ -114,6 +115,15 @@
         {
             <MudButton Href="@url" Target="_blank" Size="Size.Small" Variant="Variant.Text"
                        StartIcon="@Icons.Material.Filled.OpenInNew">@L["Products.View"]</MudButton>
+        }
+        @if (!string.IsNullOrWhiteSpace(Query))
+        {
+            <MudSpacer />
+            <MudTooltip Text="@(_flagged ? "Flagged as not relevant" : "Not relevant to your search?")">
+                <MudIconButton Size="Size.Small" Icon="@Icons.Material.Filled.Flag"
+                               Color="@(_flagged ? Color.Warning : Color.Default)"
+                               Disabled="_flagged" OnClick="OnFlagNotRelevant" />
+            </MudTooltip>
         }
     </MudCardActions>
 </MudCard>
@@ -132,4 +142,30 @@
 
     private Task OnToggleCompare(bool value) => SelectedChanged.InvokeAsync(value);
     private Task OnDetailsClicked() => OnDetails.InvokeAsync();
+
+    // Relevancy feedback ("not relevant"): only shown when the card knows its originating query.
+    [Parameter] public string? Query { get; set; }
+    [Parameter] public string? Geo { get; set; }
+    [Parameter] public string? Target { get; set; }
+
+    private bool _flagged;
+
+    private async Task OnFlagNotRelevant()
+    {
+        if (_flagged || string.IsNullOrWhiteSpace(Query))
+        {
+            return;
+        }
+
+        var userId = await CurrentUser.GetUserIdAsync();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            Snackbar.Add("Sign in to flag results.", Severity.Info);
+            return;
+        }
+
+        await Feedback.RecordAsync(Model, Query!, Target, Geo, reason: null, userId);
+        _flagged = true;
+        Snackbar.Add("Thanks — we'll use that to improve future searches.", Severity.Success);
+    }
 }

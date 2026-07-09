@@ -5,7 +5,9 @@
 @inject IModerationRuleRepository Rules
 @inject IModerationWhitelistRepository Whitelist
 @inject Microsoft.Extensions.Caching.Memory.IMemoryCache Cache
+@inject IImageModerationRuleRepository ImageRules
 @inject ISnackbar Snackbar
+@using Daleel.Web.Moderation
 
 <PageTitle>دليل · Admin · Moderation</PageTitle>
 
@@ -130,6 +132,68 @@ else
     </MudPaper>
 
     <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
+        <MudText Typo="Typo.h6" Class="mb-1">Image moderation rules (vision policy)</MudText>
+        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-3 d-block">
+            The list of rules the vision model screens every product/brand image against. The screening
+            prompt is composed from these — <em>"the following rules apply: …"</em> — so editing the list
+            retunes image moderation with no redeploy; changes take effect on the next screen. Each rule
+            has a <b>category</b> (the tag a flagged image gets) and an <b>instruction</b>. Disable a rule
+            to drop it from the prompt without deleting it.
+        </MudText>
+
+        @if (_imageRules.Count == 0)
+        {
+            <MudText Typo="Typo.caption" Color="Color.Secondary">No rules — the built-in default policy is in effect.</MudText>
+        }
+        else
+        {
+            <MudSimpleTable Dense="true" Style="overflow-x:auto;">
+                <thead>
+                    <tr><th style="width:1%;">On</th><th>Category</th><th>Instruction</th><th style="width:1%;"></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var r in _imageRules)
+                    {
+                        var rule = r; // per-iteration local for deferred RenderFragments
+                        <tr style="@(rule.Enabled ? "" : "opacity:0.5;")">
+                            <td>
+                                <MudSwitch T="bool" Value="rule.Enabled" Color="Color.Success" Disabled="@_imageRuleBusy"
+                                           ValueChanged="@(v => ToggleImageRuleAsync(rule, v))" />
+                            </td>
+                            <td><code>@rule.Category</code></td>
+                            <td style="max-width:640px;">@rule.Instruction</td>
+                            <td>
+                                <MudIconButton Icon="@Icons.Material.Filled.Delete" Color="Color.Error" Size="Size.Small"
+                                               Disabled="@_imageRuleBusy" OnClick="() => DeleteImageRuleAsync(rule)" />
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        }
+
+        <div class="d-flex flex-wrap gap-2 align-end mt-3">
+            <MudTextField @bind-Value="_newRuleCategory" Label="Category" Placeholder="e.g. immodest"
+                          Style="min-width:150px;" Immediate="true" />
+            <MudTextField @bind-Value="_newRuleInstruction" Label="Instruction — what to flag"
+                          Style="min-width:360px; flex:1;" Immediate="true" />
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.Add"
+                       Disabled="@(_imageRuleBusy || string.IsNullOrWhiteSpace(_newRuleCategory) || string.IsNullOrWhiteSpace(_newRuleInstruction))"
+                       OnClick="AddImageRuleAsync">Add rule</MudButton>
+            <MudButton Variant="Variant.Outlined" Color="Color.Default" Size="Size.Small"
+                       StartIcon="@Icons.Material.Filled.RestartAlt" Disabled="@_imageRuleBusy"
+                       OnClick="ResetImageRulesAsync">Reset to defaults</MudButton>
+        </div>
+
+        <MudExpansionPanels Class="mt-3" Elevation="0">
+            <MudExpansionPanel Text="Preview composed prompt">
+                <pre style="white-space:pre-wrap; font-size:0.8rem; margin:0;">@_composedPreview</pre>
+            </MudExpansionPanel>
+        </MudExpansionPanels>
+    </MudPaper>
+
+    <MudPaper Class="pa-4 mt-3" Outlined="true" Elevation="0">
         <MudText Typo="Typo.h6" Class="mb-1">Whitelist (never filtered)</MudText>
         <MudText Typo="Typo.caption" Color="Color.Secondary" Class="mb-2 d-block">
             Content the moderation pipeline must always keep — created from a finding's
@@ -202,6 +266,107 @@ else
     private string _newKind = "url";
     private string? _newValue;
     private string? _newNote;
+
+    // The admin-managed halal image-moderation rule list (composed into the vision prompt).
+    private IReadOnlyList<ImageModerationRule> _imageRules = Array.Empty<ImageModerationRule>();
+    private bool _imageRuleBusy;
+    private string? _newRuleCategory;
+    private string? _newRuleInstruction;
+    private string _composedPreview = string.Empty;
+
+    private async Task LoadImageRulesAsync()
+    {
+        _imageRules = await ImageRules.ListAllAsync();
+        var active = _imageRules.Where(r => r.Enabled)
+            .Select(r => new VisionPolicy.Rule(r.Category, r.Instruction)).ToList();
+        _composedPreview = VisionPolicy.Compose(active);
+    }
+
+    private async Task AddImageRuleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newRuleCategory) || string.IsNullOrWhiteSpace(_newRuleInstruction) || _imageRuleBusy)
+        {
+            return;
+        }
+
+        _imageRuleBusy = true;
+        try
+        {
+            await ImageRules.AddAsync(_newRuleCategory!, _newRuleInstruction!);
+            _newRuleCategory = null;
+            _newRuleInstruction = null;
+            await LoadImageRulesAsync();
+            Snackbar.Add("Rule added.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't add the rule: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _imageRuleBusy = false;
+        }
+    }
+
+    private async Task ToggleImageRuleAsync(ImageModerationRule rule, bool enabled)
+    {
+        if (_imageRuleBusy)
+        {
+            return;
+        }
+
+        _imageRuleBusy = true;
+        try
+        {
+            await ImageRules.SetEnabledAsync(rule.Id, enabled);
+            await LoadImageRulesAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't update the rule: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _imageRuleBusy = false;
+        }
+    }
+
+    private async Task DeleteImageRuleAsync(ImageModerationRule rule)
+    {
+        _imageRuleBusy = true;
+        try
+        {
+            await ImageRules.DeleteAsync(rule.Id);
+            await LoadImageRulesAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't delete the rule: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _imageRuleBusy = false;
+        }
+    }
+
+    private async Task ResetImageRulesAsync()
+    {
+        _imageRuleBusy = true;
+        try
+        {
+            await ImageRules.ResetToDefaultsAsync();
+            await LoadImageRulesAsync();
+            Snackbar.Add("Image rules reset to the built-in defaults.", Severity.Success);
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add($"Couldn't reset the rules: {ex.Message}", Severity.Error);
+        }
+        finally
+        {
+            _imageRuleBusy = false;
+        }
+    }
 
     private async Task AddWhitelistAsync()
     {
@@ -328,6 +493,7 @@ else
             _ratingStats = await FilteredLog.RatingStatsAsync(DateTimeOffset.UtcNow.AddDays(-90));
             _rules = await Rules.ListOpenAsync();
             _whitelist = await Whitelist.ListEntriesAsync();
+            await LoadImageRulesAsync();
             _loading = false;
         }
         catch (Exception ex)

@@ -24,6 +24,18 @@ public record ProviderPricing
     /// <summary>Cost per Cloudflare browser render.</summary>
     public decimal PerRender { get; init; } = 0.01m;
 
+    /// <summary>Cost per Workers-AI inference call (classify / extract / filter batch).</summary>
+    public decimal PerWorkersAi { get; init; } = 0.002m;
+
+    /// <summary>
+    /// Cost of the worker HTTP request itself (submit, status, page fetch, search-proxy hop) —
+    /// billed on top of the vendor work the worker fronts, never instead of it.
+    /// </summary>
+    public decimal PerEdgeRequest { get; init; } = 0.0002m;
+
+    /// <summary>Cost of landing one drained edge result (queue pull/ack + the R2 result read).</summary>
+    public decimal PerEdgeDrain { get; init; } = 0.0005m;
+
     /// <summary>Per-million-token LLM rates keyed by model id (input/output).</summary>
     public IReadOnlyDictionary<string, LlmRate> LlmRates { get; init; } = DefaultLlmRates;
 
@@ -75,17 +87,34 @@ public sealed class CostEstimator
         var p = provider.ToLowerInvariant();
         var e = endpoint.ToLowerInvariant();
 
-        if (p.Contains("places")) return _pricing.PerPlaces;
-        if (p.Contains("apify") || e.Contains("social")) return _pricing.PerSocial;
-        if (p.Contains("cloudflare") || e.Contains("render")) return _pricing.PerRender;
-        if (p.Contains("context"))
+        // Edge-native work has no vendor bill behind it — each is its own line item.
+        if (p.StartsWith("workers-ai", StringComparison.Ordinal)) return _pricing.PerWorkersAi;
+        if (p == "cloudflare/drain") return _pricing.PerEdgeDrain;
+
+        decimal vendor;
+        if (p.Contains("places")) vendor = _pricing.PerPlaces;
+        else if (p.Contains("apify") || e.Contains("social")) vendor = _pricing.PerSocial;
+        else if (p.Contains("cloudflare") || e.Contains("render")) vendor = _pricing.PerRender;
+        else if (p.Contains("context"))
         {
-            if (e.Contains("brand")) return _pricing.PerBrandLookup;
-            if (e.Contains("extract")) return _pricing.PerExtract;
-            return _pricing.PerScrape;
+            vendor = e.Contains("brand") ? _pricing.PerBrandLookup
+                : e.Contains("extract") ? _pricing.PerExtract
+                : _pricing.PerScrape;
+        }
+        // Structured extraction metered at the ScrapeRouter boundary carries the router's synthetic
+        // provider name ("scrape-router"), not the underlying provider — but it is browser-first, so
+        // price the "extract" endpoint at the (higher) render rate rather than letting it fall through
+        // to PerSearch, which would ~2x under-report browser store extraction and mis-attribute it to
+        // SerpAPI spend. (Direct cloudflare-browser / context.dev extracts are already priced above.)
+        else if (e.Contains("extract")) vendor = _pricing.PerRender;
+        else
+        {
+            // SerpAPI / Bing and other search engines bill per search.
+            vendor = _pricing.PerSearch;
         }
 
-        // SerpAPI / Bing and other search engines bill per search.
-        return _pricing.PerSearch;
+        // A worker-fronted call ("scrape-worker/…", "search-worker/…") still does the vendor work
+        // on the edge — the worker request is real extra spend, priced on top of the vendor rate.
+        return p.Contains("-worker/") ? vendor + _pricing.PerEdgeRequest : vendor;
     }
 }

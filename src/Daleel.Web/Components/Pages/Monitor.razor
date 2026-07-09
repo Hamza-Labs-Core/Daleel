@@ -181,10 +181,10 @@
         _running = id;
         try
         {
-            var count = await Monitors.RunOnceAsync(_userId, id, Keys);
+            var count = await Monitors.RunOnceAsync(_userId, id);
             if (count == -1)
             {
-                Snackbar.Add("No Apify token — add APIFY_TOKEN in Settings to fetch posts.", Severity.Warning);
+                Snackbar.Add(L["Monitor.RunUnavailable"], Severity.Warning);
             }
             else
             {

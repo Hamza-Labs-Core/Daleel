@@ -40,6 +40,14 @@ public interface ISearchHistoryRepository
     /// switch, or another feature's entry). Returns true when the row was updated.
     /// </summary>
     Task<bool> UpdateResultAsync(string userId, int id, string resultJson, CancellationToken ct = default);
+
+    /// <summary>
+    /// Atomically ADDS <paramref name="credits"/> to a history row's running credit total (by row id;
+    /// not owner-checked — enrichment runs server-side and the id was captured at insert). Best-effort:
+    /// as each background enrichment unit charges, it bumps this so the history list shows the true
+    /// end-to-end cost of the search, not just the base run.
+    /// </summary>
+    Task AddCreditsAsync(int id, int credits, CancellationToken ct = default);
 }
 
 public sealed class SearchHistoryRepository : ISearchHistoryRepository
@@ -53,6 +61,19 @@ public sealed class SearchHistoryRepository : ISearchHistoryRepository
         _db.SearchHistory.Add(entry);
         await _db.SaveChangesAsync(ct);
         return entry;
+    }
+
+    public async Task AddCreditsAsync(int id, int credits, CancellationToken ct = default)
+    {
+        if (credits <= 0)
+        {
+            return;
+        }
+
+        // Atomic increment — concurrent enrichment units for the same search don't race.
+        await _db.SearchHistory
+            .Where(x => x.Id == id)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.Credits, x => x.Credits + credits), ct);
     }
 
     public async Task<bool> UpdateResultAsync(

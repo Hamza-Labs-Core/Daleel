@@ -38,13 +38,15 @@ public class ConversationBackendTests : IDisposable
 
         using var scope = _provider.CreateScope();
         scope.ServiceProvider.GetRequiredService<DaleelDbContext>().Database.EnsureCreated();
+        FakeRunner.CacheQuality = null; // static — reset so a prior test's cache-serve doesn't leak in
     }
 
     private DaleelDbContext NewDb() => _provider.CreateScope().ServiceProvider.GetRequiredService<DaleelDbContext>();
 
     private SearchJobService Worker() => new(
         _provider.GetRequiredService<IServiceScopeFactory>(), _broadcaster,
-        NullLogger<SearchJobService>.Instance, new ConfigurationBuilder().Build());
+        NullLogger<SearchJobService>.Instance,
+        new Daleel.Web.Pipeline.Enrichment.EnrichmentWorkQueue(_provider.GetRequiredService<IServiceScopeFactory>()));
 
     private async Task<int> SeedJobAsync(string userId = "u1")
     {
@@ -76,6 +78,25 @@ public class ConversationBackendTests : IDisposable
         (await db.AnalyticsEvents.CountAsync(e => e.EventType == "search")).Should().Be(1);
         _broadcaster.Completed.Should().ContainSingle(c => c.UserId == "u1" && c.Status == "completed");
         _broadcaster.Progress.Should().Contain(p => p.UserId == "u1");
+    }
+
+    [Fact]
+    public async Task Worker_CacheServe_EnqueuesImageCheck_ToScreenServedImages()
+    {
+        // A cache HIT does no gather, so this run's gather-stage vision moderation never sees the served
+        // images — and a replayed result can predate the image-check unit entirely (how immodest images
+        // survived on a cached "women dress" result). So a cache serve must STILL enqueue an image-check
+        // to screen the final grid images. Regression guard for that gap.
+        FakeRunner.CacheQuality = Daleel.Web.Pipeline.CacheQualityReport.Complete; // ServeAsIs
+        var jobId = await SeedJobAsync();
+
+        await Worker().ProcessAsync(jobId, CancellationToken.None);
+
+        await using var db = NewDb();
+        var kinds = await db.EnrichmentWorkItems
+            .Where(e => e.SearchJobId == jobId).Select(e => e.Kind).ToListAsync();
+        kinds.Should().Contain(Daleel.Web.Pipeline.Enrichment.EnrichmentUnit.ImageCheck,
+            "a served-from-cache result must still have its final images vision-screened");
     }
 
     [Fact]
@@ -255,9 +276,12 @@ public class ConversationBackendTests : IDisposable
         {
             var job = new SearchJob { UserId = "u1", Query = "x", Status = JobStatus.Running, CancelRequested = true, CreatedAt = now, StartedAt = now };
             seed.SearchJobs.Add(job);
-            seed.UserConversations.Add(new UserConversation { UserId = "u1", CurrentStatus = "running", CurrentJobId = 0, StartedAt = now });
             await seed.SaveChangesAsync();
             jobId = job.Id;
+            // The conversation must reference the REAL job id (as SetRunningAsync does in production):
+            // terminal conversation writes are job-scoped now, so a mismatched id is a deliberate no-op.
+            seed.UserConversations.Add(new UserConversation { UserId = "u1", CurrentStatus = "running", CurrentJobId = jobId, StartedAt = now });
+            await seed.SaveChangesAsync();
         }
 
         await Reconciler().SweepAsync(CancellationToken.None);
@@ -306,6 +330,8 @@ public class ConversationBackendTests : IDisposable
         public static bool BlockUntilCancelled;
         public static TaskCompletionSource? Started;
         public static TaskCompletionSource? Release;
+        /// <summary>When set, the run reports a cache HIT with this verdict (else a fresh run).</summary>
+        public static Daleel.Web.Pipeline.CacheQualityReport? CacheQuality;
 
         public async Task<SearchRunResult> RunAsync(SearchJob job, Action<string> progress, CancellationToken ct)
         {
@@ -321,7 +347,10 @@ public class ConversationBackendTests : IDisposable
                 }
             }
 
-            return new SearchRunResult("{\"Summary\":\"FAKE-RESULT\"}", "ask", 0, string.Empty);
+            return new SearchRunResult("{\"Summary\":\"FAKE-RESULT\"}", "ask", 0, string.Empty)
+            {
+                CacheQuality = CacheQuality
+            };
         }
     }
 
@@ -330,6 +359,7 @@ public class ConversationBackendTests : IDisposable
         public ConcurrentBag<(string UserId, int JobId, string Message)> Progress { get; } = new();
         public ConcurrentBag<(string UserId, int JobId, string Status)> Completed { get; } = new();
         public ConcurrentBag<(string UserId, int JobId, string ResultJson)> Enriched { get; } = new();
+        public ConcurrentBag<(string UserId, int JobId, string ResultJson)> Partial { get; } = new();
 
         public Task ProgressAsync(string userId, int jobId, string message)
         {
@@ -346,6 +376,12 @@ public class ConversationBackendTests : IDisposable
         public Task EnrichedAsync(string userId, int jobId, string resultJson, string resultType)
         {
             Enriched.Add((userId, jobId, resultJson));
+            return Task.CompletedTask;
+        }
+
+        public Task PartialAsync(string userId, int jobId, string resultJson, string resultType)
+        {
+            Partial.Add((userId, jobId, resultJson));
             return Task.CompletedTask;
         }
     }

@@ -57,11 +57,17 @@ public sealed record MonitorHit
 public sealed class MonitorService
 {
     private readonly IAgentFactory _factory;
+    private readonly IProviderApi _providers;
     private readonly object _gate = new();
     private readonly List<MonitorDefinition> _monitors = new();
     private readonly List<MonitorHit> _feed = new();
 
-    public MonitorService(IAgentFactory factory) => _factory = factory;
+    public MonitorService(IAgentFactory factory, IProviderApi? providers = null)
+    {
+        _factory = factory;
+        // Optional so existing test wiring keeps working; production DI always supplies the gateway.
+        _providers = providers ?? new ProviderApi(factory);
+    }
 
     /// <summary>Snapshot of one user's monitors, newest first.</summary>
     public IReadOnlyList<MonitorDefinition> MonitorsFor(string userId)
@@ -117,7 +123,7 @@ public sealed class MonitorService
     /// Returns the number of new hits, or -1 when no Apify token is configured. The monitor must be
     /// owned by <paramref name="userId"/>, else this is a no-op (returns 0).
     /// </summary>
-    public async Task<int> RunOnceAsync(string userId, string id, IReadOnlyDictionary<string, string>? keys, CancellationToken ct = default)
+    public async Task<int> RunOnceAsync(string userId, string id, CancellationToken ct = default)
     {
         MonitorDefinition? monitor;
         lock (_gate)
@@ -130,8 +136,7 @@ public sealed class MonitorService
             return 0;
         }
 
-        var token = _factory.Resolve("APIFY_TOKEN", keys);
-        if (token is null)
+        if (!_providers.HasSocial)
         {
             return -1;
         }
@@ -147,12 +152,12 @@ public sealed class MonitorService
             MaxItems = 25
         };
 
-        using var client = new ApifyClient(token);
-        var fetcher = new ApifyPostFetcher(client);
+        // Through the gateway — metered by construction (this was one of the two unmetered direct
+        // provider constructions the audit caught; monitor fetches now show in the usage log too).
         var matcher = new ArabicMatcher();
         var keywords = new[] { monitor.Keyword };
 
-        var posts = await fetcher.FetchAsync(source, monitor.Keyword, ct).ConfigureAwait(false);
+        var posts = await _providers.FetchSocialPostsAsync(source, monitor.Keyword, ct).ConfigureAwait(false);
         var hits = posts
             .Where(p => matcher.Match(p.Text, keywords, MatchMode.Contains).IsMatch)
             .Select(p => new MonitorHit

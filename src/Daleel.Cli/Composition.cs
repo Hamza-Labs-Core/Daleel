@@ -54,9 +54,7 @@ internal static class Composition
     {
         var llm = BuildLlm(model);
 
-        ISearchProvider? search = Env("SERPAPI_KEY") is not null ? new SerpApiProvider()
-            : Env("BING_SEARCH_KEY") is not null ? new BingProvider()
-            : null;
+        ISearchProvider? search = BuildSearch(log);
 
         IPlacesProvider? places = Env("GOOGLE_PLACES_API_KEY") is not null ? new GooglePlacesProvider() : null;
 
@@ -73,6 +71,42 @@ internal static class Composition
         return new AgentService(llm, options, search, places, scraper, social, matcher: null, opinions);
     }
 
+    /// <summary>
+    /// Discovery chain: SerpAPI → Bing → the no-vendor-quota browser-SERP fallback, wrapped in a
+    /// <see cref="SearchRouter"/> so a primary outage (notably SerpAPI monthly-quota exhaustion)
+    /// fails over instead of degrading web discovery to a silent empty. Mirrors AgentFactory.
+    /// </summary>
+    public static ISearchProvider? BuildSearch(Action<string>? log = null)
+    {
+        var chain = new List<ISearchProvider>();
+        if (Env("SERPAPI_KEY") is not null)
+        {
+            chain.Add(new SerpApiProvider());
+        }
+        if (Env("BING_SEARCH_KEY") is not null)
+        {
+            chain.Add(new BingProvider());
+        }
+        if (BuildCloudflareBrowser() is { } browser)
+        {
+            chain.Add(new BrowserSearchProvider(browser));
+        }
+
+        return chain.Count switch
+        {
+            0 => null,
+            1 => chain[0],
+            _ => new SearchRouter(chain.ToArray(), log is null ? null : hop =>
+                log($"Discovery: {hop.FromProvider} unavailable ({hop.Reason}) — falling back to {hop.ToProvider}."))
+        };
+    }
+
+    /// <summary>The Cloudflare edge browser when its creds are set, else null.</summary>
+    private static CloudflareBrowserProvider? BuildCloudflareBrowser() =>
+        Env("CLOUDFLARE_ACCOUNT_ID") is not null && Env("CLOUDFLARE_API_TOKEN") is not null
+            ? new CloudflareBrowserProvider()
+            : null;
+
     /// <summary>Builds the scrape router (Context.dev → Cloudflare) from whatever is configured.</summary>
     public static IScrapeProvider? BuildScraper()
     {
@@ -81,9 +115,9 @@ internal static class Composition
         {
             chain.Add(new ContextDevProvider());
         }
-        if (Env("CLOUDFLARE_ACCOUNT_ID") is not null && Env("CLOUDFLARE_API_TOKEN") is not null)
+        if (BuildCloudflareBrowser() is { } browser)
         {
-            chain.Add(new CloudflareBrowserProvider());
+            chain.Add(browser);
         }
 
         return chain.Count switch

@@ -253,6 +253,7 @@ public sealed class SaveItemProfileActivity : CancellableActivity
             Name = state.Model.Name,
             Brand = state.Model.Brand,
             Model = state.Model.Model,
+            Sku = state.Model.Sku,
             NameKey = state.Key,
             Details = state.Details,
             SpecsJson = specsJson,

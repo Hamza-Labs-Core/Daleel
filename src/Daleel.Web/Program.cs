@@ -127,6 +127,12 @@ builder.Services.AddSingleton<Daleel.Web.Events.IEventStore, Daleel.Web.Events.P
 // cross-system feed (search lifecycle, pipeline actions bridged from the firehose, logins, background
 // sweeps, errors) the /admin/timeline page reads. Best-effort like the cost event store above.
 builder.Services.AddSingleton<Daleel.Web.Events.ISystemEventLog, Daleel.Web.Events.PostgresSystemEventLog>();
+// Live per-search event sink: batches SearchEvents (emitted anywhere in the pipeline via the ambient
+// AmbientSearchEvents carrier) and flushes them to the timeline off the hot path, so each search's events
+// appear live instead of only at end-of-run.
+builder.Services.AddSingleton<Daleel.Web.Events.SystemEventWriter>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Daleel.Web.Events.SystemEventWriter>());
+builder.Services.AddSingleton<Daleel.Web.Events.ISearchEventSinkFactory, Daleel.Web.Events.SystemEventSinkFactory>();
 
 // ── Data Protection (auth-cookie encryption keys) ─────────────────────────────
 // ASP.NET encrypts the Identity auth cookie with Data Protection keys. By default those keys live in
@@ -254,19 +260,27 @@ builder.Services.AddTransient<IAnalyticsService, AnalyticsService>();
 builder.Services.AddTransient<ISystemConfigService, SystemConfigService>();
 builder.Services.AddTransient<IApiCallLogRepository, ApiCallLogRepository>();
 builder.Services.AddTransient<IFilteredContentLogRepository, FilteredContentLogRepository>();
+builder.Services.AddTransient<IRelevanceFlagRepository, RelevanceFlagRepository>();
+builder.Services.AddTransient<IRelevanceFeedbackService, RelevanceFeedbackService>();
+builder.Services.AddSingleton<IRelevancePolicyProvider, RelevancePolicyProvider>();
 builder.Services.AddTransient<IModerationWhitelistRepository, FilteredContentLogRepository>();
 builder.Services.AddTransient<IModerationRuleRepository, ModerationRuleRepository>();
+builder.Services.AddTransient<IImageModerationLogRepository, ImageModerationLogRepository>();
+builder.Services.AddTransient<IImageModerationRuleRepository, ImageModerationRuleRepository>();
 
 // The dynamic feedback loop: an LLM auditor reviews persisted findings on an interval, stores
 // auto-ratings (admin ratings always override), and self-activates keyword suppressions on
 // repeated wrong-flag consensus. Inert when no LLM key is configured.
 builder.Services.AddHostedService<Daleel.Web.Moderation.FindingAutoReviewService>();
+builder.Services.AddHostedService<Daleel.Web.Moderation.ImageReEvalService>();
 
 // The moderation feedback loop's read side: whitelist keys + rating-tuned thresholds, briefly
 // cached and handed to every search run. Singleton (scope-factory based) so background jobs share
 // the snapshot cache.
 builder.Services.AddSingleton<Daleel.Web.Moderation.IModerationPolicyProvider,
     Daleel.Web.Moderation.ModerationPolicyProvider>();
+// Zero-cost haram-consumable query pre-screen (blocks "beer" etc. at submission before any spend).
+builder.Services.AddSingleton<Daleel.Web.Moderation.IQueryPreScreen, Daleel.Web.Moderation.QueryPreScreen>();
 
 // Vision screening of individual result images (halal moderation). OpenRouter-only, like the
 // product-identification matcher; inert when no key is configured.
@@ -282,7 +296,8 @@ builder.Services.AddSingleton<Daleel.Core.Moderation.IHalalImageClassifier>(sp =
         key.Trim(),
         Environment.GetEnvironmentVariable("DALEEL_MODERATION_VISION_MODEL"),
         sp.GetRequiredService<ILogger<Daleel.Web.Moderation.OpenRouterImageHalalClassifier>>(),
-        sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>());
+        sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>(),
+        scopeFactory: sp.GetRequiredService<IServiceScopeFactory>());
 });
 builder.Services.AddHttpContextAccessor();
 
@@ -293,6 +308,7 @@ builder.Services.AddTransient<IBrandRepository, BrandRepository>();
 builder.Services.AddTransient<IStoreRepository, StoreRepository>();
 builder.Services.AddTransient<IProductProfileRepository, ProductProfileRepository>();
 builder.Services.AddTransient<IBrandModelRepository, BrandModelRepository>();
+builder.Services.AddTransient<IBrandSiteRepository, BrandSiteRepository>();
 builder.Services.AddTransient<IScrapedPriceRepository, ScrapedPriceRepository>();
 // Entity-document persistence: Postgres index row + R2 daleel-data JSON document (the source of truth)
 // for products/services/places. Transient so each save gets its own DbContext (same circuit-safety rule
@@ -343,6 +359,61 @@ if (r2Options is not null)
 else
 {
     builder.Services.AddSingleton<Daleel.Web.Storage.IR2StorageService, Daleel.Web.Storage.NullR2StorageService>();
+}
+
+// Cloudflare execution layer (docs/architecture/cloudflare-workers-pipeline.md, Phase 0/1): the client
+// the pipeline submits async scrape jobs to, the Queues pull consumer, and the drain service that
+// persists finished results INDEPENDENT of any workflow's lifetime — a crawl finishing after a search's
+// deadline still lands. Registered only when the worker endpoint is configured (same optional-capability
+// pattern as R2); whether the pipeline actually routes work there is the admin-editable
+// `cloudflare.execution.enabled` flag, so rollback is a settings toggle.
+// ── Token authority (dynamic app↔worker auth) ───────────────────────────────
+// The VPS mints, stores (encrypted, Postgres) and rotates the bearers that authenticate this app to
+// its Cloudflare workers, pushing them to the workers via the Cloudflare API — GitHub secrets are no
+// longer the bearer store (env values remain only as bootstrap fallback). Vendor API keys are also
+// vault-manageable from /admin/credentials; resolution is vault-snapshot-first, environment second.
+builder.Services.AddSingleton<Daleel.Web.Data.ICredentialVault, Daleel.Web.Data.CredentialVault>();
+builder.Services.AddSingleton<Daleel.Web.Cloudflare.ICloudflareSecretsClient>(sp =>
+    new Daleel.Web.Cloudflare.CloudflareSecretsClient(
+        Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+        sp.GetRequiredService<IConfiguration>(),
+        sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareSecretsClient>>()));
+builder.Services.AddSingleton<Daleel.Web.Cloudflare.CredentialRotationService>();
+builder.Services.AddSingleton<Daleel.Web.Cloudflare.ICredentialRotationService>(sp =>
+    sp.GetRequiredService<Daleel.Web.Cloudflare.CredentialRotationService>());
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Daleel.Web.Cloudflare.CredentialRotationService>());
+
+// Vault-first bearer lookup for a worker script of THIS environment ("worker:<script>").
+var workerSuffix = Daleel.Web.Cloudflare.WorkerNames.Suffix(builder.Configuration);
+Func<IServiceProvider, string, string?> vaultBearer = (sp, baseName) =>
+    sp.GetRequiredService<Daleel.Web.Data.ICredentialVault>().TryGetCached($"worker:{baseName}{workerSuffix}");
+
+var cfWorkerOptions = Daleel.Web.Cloudflare.CloudflareWorkerOptions.FromConfiguration(builder.Configuration);
+if (cfWorkerOptions is not null && r2Options is null)
+{
+    // Without R2 the VPS could never read an edge result back — every submitted crawl would be
+    // silently stranded. Refuse the half-configuration loudly and keep the inline path authoritative.
+    Console.WriteLine(
+        "[startup] CF_SCRAPE_WORKER_URL is set but R2 is not configured — edge results could never be " +
+        "read back, so the Cloudflare execution layer is DISABLED. Set R2_ACCESS_KEY/R2_SECRET_KEY.");
+    cfWorkerOptions = null;
+}
+if (cfWorkerOptions is not null)
+{
+    builder.Services.AddSingleton(cfWorkerOptions);
+    builder.Services.AddSingleton<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(sp =>
+        new Daleel.Web.Cloudflare.CloudflareWorkerClient(
+            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            cfWorkerOptions,
+            sp.GetRequiredService<Daleel.Web.Storage.IR2StorageService>(),
+            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareWorkerClient>>(),
+            bearer: () => vaultBearer(sp, "daleel-scrape-worker")));
+    builder.Services.AddSingleton<Daleel.Web.Cloudflare.IQueuePullClient>(sp =>
+        new Daleel.Web.Cloudflare.QueuePullClient(
+            Daleel.Search.Http.SharedHttpHandler.CreateClient(),
+            cfWorkerOptions,
+            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.QueuePullClient>>()));
+    builder.Services.AddHostedService<Daleel.Web.Cloudflare.CloudflarePollDrainService>();
 }
 
 // Transactional email (Resend). When RESEND_API_KEY is set, search-completion emails are sent via the
@@ -456,6 +527,29 @@ builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>(
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
+// The Workers-AI fleet hosts (classify / extract / filter — doc §3.2–3.4). Signals only: policy
+// stays on the VPS, and routing into the moderation/extraction hot paths waits for the doc's
+// mandated A/B validation. Registered only when at least one endpoint is configured.
+if (Daleel.Web.Cloudflare.CloudflareFleetOptions.FromConfiguration(builder.Configuration) is { } fleetOptions)
+{
+    builder.Services.AddSingleton<Daleel.Web.Cloudflare.ICloudflareFleetClient>(sp =>
+        new Daleel.Web.Cloudflare.CloudflareFleetClient(
+            fleetOptions,
+            Daleel.Search.Http.SharedHttpHandler.CreateClient,
+            sp.GetRequiredService<ILogger<Daleel.Web.Cloudflare.CloudflareFleetClient>>(),
+            bearer: capability => vaultBearer(sp, $"daleel-{capability}-worker")));
+}
+
+// THE provider gateway: every provider call made outside an AgentService flows through this — metered
+// (ambient per-job observer), cost-estimated, cap-enforced by construction. Never construct a provider
+// directly at a call site. Edge submits + fleet signals route through it too, so all spend meters identically.
+builder.Services.AddSingleton<Daleel.Web.Services.IProviderApi>(sp =>
+    new Daleel.Web.Services.ProviderApi(
+        sp.GetRequiredService<Daleel.Web.Services.IAgentFactory>(),
+        sp.GetService<Daleel.Web.Cloudflare.ICloudflareWorkerClient>(),
+        sp.GetService<Daleel.Web.Cloudflare.ICloudflareFleetClient>(),
+        sp.GetService<Daleel.Web.Cloudflare.CloudflareWorkerOptions>(),
+        sp.GetService<Daleel.Web.Storage.IR2StorageService>()));
 // Smart cache: scores a cache hit's completeness so CheckCache can serve, serve-and-refill, or reject it.
 // Stateless + side-effect-free, so a singleton is fine (resolved by the Elsa activity from its context).
 builder.Services.AddSingleton<Daleel.Web.Pipeline.ICacheQualityValidator, Daleel.Web.Pipeline.CacheQualityValidator>();
@@ -468,6 +562,58 @@ builder.Services.AddHostedService<Daleel.Web.Conversation.SearchJobService>();
 // are still "running", and fails jobs wedged past the 12-minute hung threshold. Complements the boot-time
 // OrphanedJobReconciler so a job can never spin forever between restarts. See JobReconciliationService.
 builder.Services.AddHostedService<Daleel.Web.Conversation.JobReconciliationService>();
+
+// Enrichment WORK QUEUE (Pipeline/Enrichment): post-result deep-dives run as durable per-unit work
+// items — one API dive per item, own retries/budget, saved the moment each lands. The EnrichmentWorkItems
+// table IS the queue (FOR UPDATE SKIP LOCKED claims, lease-expiry crash recovery); there is deliberately
+// no job- or phase-level enrichment timeout anywhere. Handlers are stateless singletons that resolve
+// scoped services per execution.
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentWorkQueue,
+    Daleel.Web.Pipeline.Enrichment.EnrichmentWorkQueue>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichedResultStore,
+    Daleel.Web.Pipeline.Enrichment.EnrichedResultStore>();
+// Per-search/product/brand work contexts: findings ledger + LLM synthesis (opens its own scope per call).
+builder.Services.AddSingleton<Daleel.Web.Data.IWorkContextStore, Daleel.Web.Data.WorkContextStore>();
+// The LLM-as-actor engine: a bounded reason→act→observe loop reused by converted provider-calling steps.
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.IActorLoop,
+    Daleel.Web.Pipeline.Enrichment.Actor.ActorLoop>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.ItemDiveActor>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.VerifyPageActor>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.BrandSiteActor>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.CatalogActor>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.Actor.StoreSiteActor>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.PlanEnrichmentHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ItemDiveHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.VisionUnitHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.CatalogAttachHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.BrandResearchHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ImageLookupHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ConditionsHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.CacheGapRefillHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.OfferVerificationHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.VerifyPageHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IReachabilityProbe>(_ =>
+    new Daleel.Web.Pipeline.Enrichment.ReachabilityProbe(Daleel.Search.Http.SharedHttpHandler.CreateClient()));
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ReachabilityHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.SynthesisHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.ImageCheckHandler>();
+builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
+// Read-side of /admin/queues (scoped: one DbContext per dashboard refresh tick).
+builder.Services.AddScoped<Daleel.Web.Pipeline.Enrichment.IQueueDashboardService,
+    Daleel.Web.Pipeline.Enrichment.QueueDashboardService>();
 
 // Search cache: Postgres-backed store (singleton — opens its own DbContext scope per call, since the
 // agent runs providers in parallel) plus a weekly background sweep of expired entries.
@@ -495,6 +641,8 @@ builder.Services.AddSingleton<MonitorService>();
 // /status page: HTTP probes against each provider's host + last-search lookup.
 builder.Services.AddHttpClient();
 builder.Services.AddTransient<IStatusService, StatusService>();
+// Live OpenRouter model catalogue for the admin per-call-site model picker (fetched, briefly cached).
+builder.Services.AddSingleton<IOpenRouterCatalog, OpenRouterCatalog>();
 // QA-only raw provider diagnostics (gated by DIAGNOSTICS_ENABLED — off in production).
 builder.Services.AddScoped<IProviderDiagnostics, ProviderDiagnostics>();
 
@@ -590,6 +738,8 @@ static void EnsureDatabase(WebApplication app)
 
     // Seed admin-editable system settings (idempotent).
     scope.ServiceProvider.GetRequiredService<ISystemConfigService>().SeedDefaultsAsync().GetAwaiter().GetResult();
+    // Seed the halal image-moderation rule list from the built-in defaults on first run (idempotent).
+    scope.ServiceProvider.GetRequiredService<IImageModerationRuleRepository>().SeedDefaultsIfEmptyAsync().GetAwaiter().GetResult();
 
     // Bring the event store's `daleel_events` database up to schema. The app DB Migrate() above already
     // proved the Postgres server is reachable, but the event store is a separate database, so keep this

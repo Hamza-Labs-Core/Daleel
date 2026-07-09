@@ -1,0 +1,40 @@
+// The HALAL-SIGNAL execution host of docs/architecture/cloudflare-workers-pipeline.md (§3.4):
+// the LLM and vision CLASSIFICATION layers of HalalModerator relocated to Workers AI.
+//
+// CRITICAL FRAMING — this worker returns FINDINGS ONLY, it never decides. The VPS HalalModerator
+// keeps ALL policy: whitelist, keyword layers, thresholds, riba-never-filtered, show-by-default
+// >= 0.8, haram-wins dedupe, admin veto, audit. A worker error means "no finding" and the VPS
+// fails open. Output feeds an A/B against the current OpenRouter classifier BEFORE any default
+// flips (doc §6 Phase 3).
+//
+// Mode: sync per batch (moderation is on the critical path; batches are small). No queues, no
+// R2 — the only Cloudflare resource is the account-level Workers AI binding below.
+//
+// SECRETS — `wrangler secret put AUTH_TOKEN` (add `--env qa` for QA); CI uploads on every deploy.
+{
+  "name": "daleel-filter-worker",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-01",
+
+  // Workers AI — llama-guard-3-8b (generic safety), llama-3.1-8b-instruct (halal prompt, JSON
+  // mode), llama-3.2-11b-vision-instruct (image screening). Account-level: nothing to provision.
+  "ai": { "binding": "AI" },
+
+  "observability": { "enabled": true },
+
+  // Optional model overrides for A/B iteration (defaults live in src/index.js):
+  // "vars": {
+  //   "TEXT_GUARD_MODEL": "@cf/meta/llama-guard-3-8b",
+  //   "TEXT_LLM_MODEL": "@cf/meta/llama-3.1-8b-instruct",
+  //   "VISION_MODEL": "@cf/meta/llama-3.2-11b-vision-instruct"
+  // },
+
+  // QA deployment: `wrangler deploy --env qa`. The AI binding is account-level (no daleel-qa-*
+  // resource to isolate); bindings are non-inheritable across environments, so it is re-declared.
+  "env": {
+    "qa": {
+      "name": "daleel-filter-worker-qa",
+      "ai": { "binding": "AI" }
+    }
+  }
+}

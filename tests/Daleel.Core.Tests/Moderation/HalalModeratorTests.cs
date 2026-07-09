@@ -57,11 +57,11 @@ public class HalalModeratorTests
         public FakeImageClassifier(Func<IReadOnlyList<string>, IReadOnlyList<ImageVerdict>> respond) =>
             _respond = respond;
 
-        public Task<IReadOnlyList<ImageVerdict>> ClassifyAsync(
-            IReadOnlyList<string> imageUrls, CancellationToken ct = default)
+        public Task<ImageClassifierResult> ClassifyAsync(
+            IReadOnlyList<string> imageUrls, CancellationToken ct = default, bool bypassCache = false)
         {
             Calls.Add(imageUrls);
-            return Task.FromResult(_respond(imageUrls));
+            return Task.FromResult(new ImageClassifierResult(_respond(imageUrls), Array.Empty<string>()));
         }
     }
 

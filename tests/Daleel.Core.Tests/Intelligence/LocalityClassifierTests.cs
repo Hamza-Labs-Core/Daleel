@@ -84,3 +84,63 @@ public class LocalityClassifierTests
         LocalityClassifier.QueryWantsInternational(query).Should().Be(expected);
     }
 }
+
+/// <summary>
+/// Pins the generalized geo-scoped generic-gTLD rule (the jo-cell case): real local stores live on
+/// bare .com in every market, and when Google was queried WITH gl=cc it already constrained the
+/// results — the classifier must not veto them for lacking a ccTLD.
+/// </summary>
+public class GeoScopedLocalityTests
+{
+    [Theory]
+    [InlineData("https://jo-cell.com/collections/espresso-machines", "Espresso Machines - JO Cell Amman")]
+    [InlineData("https://dumyah.com/en/home-and-kitchen", "Coffee & Tea Makers | Dumyah.com Jordan")]
+    [InlineData("https://smartbuy-me.com/collections/coffee-maker", "Coffee Makers — SmartBuy Jordan online")]
+    [InlineData("https://wholeandall.com/collections/coffee-makers", "Coffee makers and grinders, delivery across Jordan")]
+    public void Geo_scoped_generic_gtlds_with_market_evidence_are_local(string url, string evidence) =>
+        Assert.True(LocalityClassifier.IsLocal(
+            url, "jo", "Jordan", fromGeoScopedSearch: true, marketEvidence: evidence));
+
+    [Fact]
+    public void Geo_scoped_without_market_evidence_stays_non_local()
+    {
+        // AliExpress ranks under gl=jo too — a generic snippet must not make a global seller "local".
+        Assert.False(LocalityClassifier.IsLocal(
+            "https://www.aliexpress.com/item/1", "jo", "Jordan",
+            fromGeoScopedSearch: true, marketEvidence: "Espresso machine, free worldwide shipping"));
+        Assert.False(LocalityClassifier.IsLocal(
+            "https://global-store.com/product/imported-ac", "jo", "Jordan", fromGeoScopedSearch: true));
+    }
+
+    [Theory]
+    [InlineData("https://www.amazon.de/dp/1")]          // foreign ccTLD — not a generic gTLD
+    [InlineData("https://www.noon.com/uae-en/machine")] // foreign locale path on a generic gTLD
+    public void Foreign_signals_still_veto_even_when_geo_scoped(string url) =>
+        Assert.False(LocalityClassifier.IsLocal(
+            url, "jo", "Jordan", fromGeoScopedSearch: true, marketEvidence: "buy in Jordan"));
+
+    [Fact]
+    public void Own_market_locale_paths_survive_the_foreign_veto() =>
+        Assert.True(LocalityClassifier.IsLocal(
+            "https://souqprice.com/jo/en-jo/product/search", "jo", "Jordan", fromGeoScopedSearch: true));
+
+    [Fact]
+    public void Host_name_country_segment_is_local_even_unscoped()
+    {
+        // A seller that put the market as a BOUNDED segment of its domain advertises its market.
+        Assert.True(LocalityClassifier.IsLocal("https://jo-cell.com/products/x", "jo", "Jordan"));
+        Assert.True(LocalityClassifier.IsLocal("https://cell-jo.com/x", "jo", "Jordan"));
+        Assert.True(LocalityClassifier.IsLocal("https://jordan-mall.com/shop", "jo", "Jordan"));
+    }
+
+    [Theory]
+    // Mid-word substrings are NOT the country: Nike Air Jordan, a US dentist named Jordan.
+    [InlineData("https://airjordan.com/shoes")]
+    [InlineData("https://jordandental.com/book")]
+    public void Country_name_as_a_mid_word_substring_is_not_local(string url) =>
+        Assert.False(LocalityClassifier.IsLocal(url, "jo", "Jordan"));
+
+    [Fact]
+    public void Unscoped_bare_com_without_any_signal_stays_non_local() =>
+        Assert.False(LocalityClassifier.IsLocal("https://dumyah.com/en/home", "jo", "Jordan"));
+}

@@ -5,32 +5,26 @@ namespace Daleel.Web.Conversation;
 
 /// <summary>
 /// Per-job <see cref="IApiCallObserver"/>: records each external API call (timing + cost) to an
-/// internal audit sink, keeps a running cost total, accumulates the calls for persistence, and
-/// trips the cost cap (cancelling the job) when the total exceeds the limit.
+/// internal audit sink, keeps a running cost total, and accumulates the calls for persistence.
 /// </summary>
 /// <remarks>
 /// The per-call detail (provider, endpoint, cost, timing) is deliberately <em>not</em> shown to
 /// the user — it goes to the internal audit sink (server logs) and is persisted for analytics.
-/// Thread-safe: providers run in parallel during the gather phase.
+/// Thread-safe: providers run in parallel during the gather phase. Metering ONLY — cost never
+/// cancels an in-flight job (R1); the spend limit blocks NEW searches at submission, and actual
+/// spend is charged to credits post-hoc (see <see cref="TotalCredits"/>).
 /// </remarks>
 public sealed class JobApiCallCollector : IApiCallObserver
 {
     private readonly Action<string> _audit;
-    private readonly decimal _maxCost;
-    private readonly CancellationTokenSource? _capTrip;
     private readonly object _gate = new();
     private readonly List<ApiCall> _calls = new();
     private decimal _total;
-    private bool _capped;
 
     /// <param name="audit">Internal audit sink (server-side log) — never surfaced to the user.</param>
-    /// <param name="maxCost">Max cost per job; 0 = no cap.</param>
-    /// <param name="capTrip">Cancelled when the cap is exceeded, to stop the job.</param>
-    public JobApiCallCollector(Action<string> audit, decimal maxCost, CancellationTokenSource? capTrip)
+    public JobApiCallCollector(Action<string> audit)
     {
         _audit = audit;
-        _maxCost = maxCost;
-        _capTrip = capTrip;
     }
 
     public IReadOnlyList<ApiCall> Calls
@@ -50,8 +44,13 @@ public sealed class JobApiCallCollector : IApiCallObserver
         {
             lock (_gate)
             {
-                return _calls.Sum(c =>
-                    CreditCost.ForCall(c.Provider, c.Endpoint, c.InputTokens, c.OutputTokens, c.EstimatedCost));
+                // Bill for DELIVERED work only: a failed/timed-out call (incl. a failed-edge attempt
+                // that fell back to an inline provider) delivered nothing and must not be charged —
+                // otherwise a worker outage double-bills every page it degrades.
+                return _calls
+                    .Where(c => c.Status == ApiCallStatus.Success)
+                    .Sum(c =>
+                        CreditCost.ForCall(c.Provider, c.Endpoint, c.InputTokens, c.OutputTokens, c.EstimatedCost));
             }
         }
     }
@@ -59,26 +58,14 @@ public sealed class JobApiCallCollector : IApiCallObserver
     public void Record(ApiCall call)
     {
         decimal total;
-        bool tripNow = false;
         lock (_gate)
         {
             _calls.Add(call);
             _total += call.EstimatedCost;
             total = _total;
-            if (!_capped && _maxCost > 0 && _total > _maxCost)
-            {
-                _capped = true;
-                tripNow = true;
-            }
         }
 
         _audit(Format(call, total));
-
-        if (tripNow)
-        {
-            _audit($"Cost cap of ${_maxCost:0.###} exceeded (running ${total:0.###}) — stopping search.");
-            _capTrip?.Cancel();
-        }
     }
 
     private static string Format(ApiCall c, decimal runningTotal)

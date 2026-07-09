@@ -1,0 +1,16 @@
+{
+  "name": "daleel-filter-worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Worker hosting Daleel's halal LLM/vision classification signals (findings only — all moderation policy stays on the VPS HalalModerator)",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "deploy:qa": "wrangler deploy --env qa",
+    "tail": "wrangler tail"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

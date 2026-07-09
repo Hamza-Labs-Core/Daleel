@@ -74,6 +74,8 @@
   <data name="Search.Search" xml:space="preserve"><value>Search</value></data>
   <data name="Search.Searching" xml:space="preserve"><value>Searching…</value></data>
   <data name="Search.FetchingSpecs" xml:space="preserve"><value>Fetching official specs — more details loading…</value></data>
+  <data name="Search.PartialResults" xml:space="preserve"><value>Still searching — results load as they're ready…</value></data>
+  <data name="Search.EnrichingHint" xml:space="preserve"><value>Deep dive in progress — images, prices and details keep arriving</value></data>
   <data name="Market.Prompt" xml:space="preserve"><value>We couldn't detect your market. Which country are you shopping in?</value></data>
   <data name="Market.Confirm" xml:space="preserve"><value>Continue</value></data>
   <data name="Search.Results" xml:space="preserve"><value>Results</value></data>
@@ -86,6 +88,9 @@
   <data name="Search.InterruptedHint" xml:space="preserve"><value>The server restarted while your search was running. Please try again.</value></data>
   <data name="Search.Recent" xml:space="preserve"><value>Recent</value></data>
   <data name="Search.ViewAll" xml:space="preserve"><value>View all</value></data>
+  <data name="Search.NewSearch" xml:space="preserve"><value>New search</value></data>
+  <data name="Search.NotFound.Title" xml:space="preserve"><value>This search result isn't available.</value></data>
+  <data name="Search.NotFound.Back" xml:space="preserve"><value>Start a new search</value></data>
 
   <data name="Products.Products" xml:space="preserve"><value>Products</value></data>
   <data name="Products.Brands" xml:space="preserve"><value>Brands</value></data>
@@ -207,7 +212,7 @@
   <data name="Faq.Q4" xml:space="preserve"><value>Is Daleel free?</value></data>
   <data name="Faq.A4" xml:space="preserve"><value>Yes — every account starts with 500 free credits each month, no credit card required. Each search spends credits based on the providers it uses, so a quick lookup costs little and a deep search costs more. If you need more, paid plans add larger monthly credit allowances, deal monitoring and saved results. See the Pricing page for details.</value></data>
   <data name="Faq.Q5" xml:space="preserve"><value>Do I need my own API keys?</value></data>
-  <data name="Faq.A5" xml:space="preserve"><value>No. Daleel works out of the box. Power users can optionally add their own model and search provider keys under Settings — they stay in your browser and are never written to our server logs.</value></data>
+  <data name="Faq.A5" xml:space="preserve"><value>No. Daleel works out of the box — there's nothing to configure. All the heavy lifting runs on our servers, so you never need to supply any keys or settings.</value></data>
   <data name="Faq.Q6" xml:space="preserve"><value>How is my search data used?</value></data>
   <data name="Faq.A6" xml:space="preserve"><value>Your personal search history is saved only for you, under your account. Separately, searches are analyzed anonymously to improve results — we record what was searched, the market, timing and cost, but never anything that identifies you. Analytics and cost logs carry only a one-way hash, so a search can't be traced back to your account.</value></data>
   <data name="Faq.Q7" xml:space="preserve"><value>How is a brand's reputation score calculated?</value></data>
@@ -237,7 +242,7 @@
   <data name="Compare.Verdict" xml:space="preserve"><value>Verdict</value></data>
 
   <data name="Stores.Title" xml:space="preserve"><value>Store Finder</value></data>
-  <data name="Stores.Subtitle" xml:space="preserve"><value>Find physical stores selling a product near a location (Google Places).</value></data>
+  <data name="Stores.Subtitle" xml:space="preserve"><value>Find physical stores selling a product near a location.</value></data>
   <data name="Stores.ProductLabel" xml:space="preserve"><value>Product / category</value></data>
   <data name="Stores.ProductPlaceholder" xml:space="preserve"><value>e.g. air conditioner, fridge</value></data>
   <data name="Stores.Find" xml:space="preserve"><value>Find</value></data>
@@ -250,7 +255,7 @@
   <data name="Stores.Directions" xml:space="preserve"><value>Directions</value></data>
   <data name="Stores.ViewStore" xml:space="preserve"><value>View store</value></data>
   <data name="Stores.Online" xml:space="preserve"><value>Online store</value></data>
-  <data name="Stores.MapPreview" xml:space="preserve"><value>Map preview (Google Maps embed coming soon)</value></data>
+  <data name="Stores.MapPreview" xml:space="preserve"><value>Map preview (coming soon)</value></data>
   <data name="Stores.StoresCount" xml:space="preserve"><value>stores</value></data>
 
   <data name="Brand.Title" xml:space="preserve"><value>Brand Intelligence</value></data>
@@ -263,7 +268,7 @@
   <data name="Brand.Competitors" xml:space="preserve"><value>Competitors</value></data>
 
   <data name="Monitor.Title" xml:space="preserve"><value>Monitor Dashboard</value></data>
-  <data name="Monitor.Subtitle" xml:space="preserve"><value>Watch keywords across social platforms. "Run now" fetches matches via Apify when a token is set.</value></data>
+  <data name="Monitor.Subtitle" xml:space="preserve"><value>Watch keywords across social platforms. "Run now" checks for new matches.</value></data>
   <data name="Monitor.NewMonitor" xml:space="preserve"><value>New monitor</value></data>
   <data name="Monitor.KeywordLabel" xml:space="preserve"><value>Keyword</value></data>
   <data name="Monitor.IntervalLabel" xml:space="preserve"><value>Interval</value></data>
@@ -296,14 +301,12 @@
   <data name="Progress.Researching" xml:space="preserve"><value>Daleel is researching…</value></data>
   <data name="Progress.Complete" xml:space="preserve"><value>Research complete</value></data>
   <!-- Search progress stepper labels (SearchProgress.razor) -->
-  <data name="Progress.Step.Analyzing" xml:space="preserve"><value>Analyzing query</value></data>
-  <data name="Progress.Step.Vault" xml:space="preserve"><value>Checking vault</value></data>
-  <data name="Progress.Step.Web" xml:space="preserve"><value>Searching web</value></data>
-  <data name="Progress.Step.Extract" xml:space="preserve"><value>Extracting products</value></data>
-  <data name="Progress.Step.Profiles" xml:space="preserve"><value>Building profiles</value></data>
-  <data name="Progress.Step.Stores" xml:space="preserve"><value>Finding stores</value></data>
-  <data name="Progress.Step.Compare" xml:space="preserve"><value>Comparing prices</value></data>
-  <data name="Progress.Step.Done" xml:space="preserve"><value>Done</value></data>
+  <data name="Progress.Step.Analyzing" xml:space="preserve"><value>Understanding your search</value></data>
+  <data name="Progress.Step.Web" xml:space="preserve"><value>Scanning the market</value></data>
+  <data name="Progress.Step.Extract" xml:space="preserve"><value>Gathering your options</value></data>
+  <data name="Progress.Step.Profiles" xml:space="preserve"><value>Digging into the details</value></data>
+  <data name="Progress.Step.Compare" xml:space="preserve"><value>Weighing your options</value></data>
+  <data name="Progress.Step.Done" xml:space="preserve"><value>Ready</value></data>
   <!-- Compact mobile stepper: position + completed-count summaries -->
   <data name="Progress.StepCount" xml:space="preserve"><value>Step {0} of {1}</value></data>
   <data name="Progress.StepsComplete" xml:space="preserve"><value>{0} of {1} steps complete</value></data>
@@ -316,62 +319,67 @@
   <data name="Progress.Noun.Comparison" xml:space="preserve"><value>a comparison</value></data>
   <data name="Progress.Noun.Answers" xml:space="preserve"><value>answers</value></data>
   <!-- Live activity-feed messages -->
-  <data name="Progress.Msg.Strategy" xml:space="preserve"><value>Generating search strategy…</value></data>
-  <data name="Progress.Msg.Analyzing" xml:space="preserve"><value>Analyzing your request…</value></data>
-  <data name="Progress.Msg.Market" xml:space="preserve"><value>Focusing on the {0} market…</value></data>
-  <data name="Progress.Msg.LookingFor" xml:space="preserve"><value>Looking for {0}: {1}</value></data>
-  <data name="Progress.Msg.Vault" xml:space="preserve"><value>Checking our answers vault…</value></data>
-  <data name="Progress.Msg.CacheHit" xml:space="preserve"><value>⚡ Loaded from cache — an identical search ran recently.</value></data>
-  <data name="Progress.Msg.Expanding" xml:space="preserve"><value>Expanding the search across providers…</value></data>
-  <data name="Progress.Msg.Gathered" xml:space="preserve"><value>Gathered {0} web, {1} shopping and {2} store sources.</value></data>
-  <data name="Progress.Msg.Reading" xml:space="preserve"><value>Found {0} sources — reading and extracting…</value></data>
-  <data name="Progress.Msg.Identifying" xml:space="preserve"><value>Identifying brands and models…</value></data>
-  <data name="Progress.Msg.Extracted" xml:space="preserve"><value>Extracted {0} product(s) from {1} brand(s).</value></data>
-  <data name="Progress.Msg.BuildingProfiles" xml:space="preserve"><value>Building profiles for {0} brand(s) and {1} store(s)…</value></data>
-  <data name="Progress.Msg.BuildingBrand" xml:space="preserve"><value>Building profile for {0}…</value></data>
-  <data name="Progress.Msg.VerifyingStore" xml:space="preserve"><value>Verifying {0} on Google Maps…</value></data>
-  <data name="Progress.Msg.Enriched" xml:space="preserve"><value>Enriched {0} brand(s); verified {1} store(s) on Google Maps.</value></data>
-  <data name="Progress.Msg.Ranking" xml:space="preserve"><value>Ranking {0} product(s) from {1} brand(s)…</value></data>
-  <data name="Progress.Msg.Reviewing" xml:space="preserve"><value>Reviewing content quality…</value></data>
-  <data name="Progress.Msg.Saving" xml:space="preserve"><value>Saving results…</value></data>
-  <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>Loaded a saved answer.</value></data>
-  <data name="Progress.Msg.DoneCount" xml:space="preserve"><value>Done! Found {0} product(s) from {1} brand(s).</value></data>
-  <data name="Progress.Msg.Done" xml:space="preserve"><value>Done!</value></data>
+  <data name="Progress.Msg.Strategy" xml:space="preserve"><value>Mapping out where to look…</value></data>
+  <data name="Progress.Msg.Analyzing" xml:space="preserve"><value>Making sense of your search…</value></data>
+  <data name="Progress.Msg.Market" xml:space="preserve"><value>Focusing on {0}…</value></data>
+  <data name="Progress.Msg.LookingFor" xml:space="preserve"><value>On the hunt for {0}: {1}</value></data>
+  <data name="Progress.Msg.Vault" xml:space="preserve"><value>Getting started…</value></data>
+  <data name="Progress.Msg.CacheHit" xml:space="preserve"><value>Picking up where we left off…</value></data>
+  <data name="Progress.Msg.Expanding" xml:space="preserve"><value>Casting a wide net…</value></data>
+  <data name="Progress.Msg.Gathered" xml:space="preserve"><value>Pulling in what's out there…</value></data>
+  <data name="Progress.Msg.Reading" xml:space="preserve"><value>Following up on {0} leads…</value></data>
+  <data name="Progress.Msg.Identifying" xml:space="preserve"><value>Spotting the brands and models…</value></data>
+  <data name="Progress.Msg.Extracted" xml:space="preserve"><value>Rounded up {0} option(s) across {1} brand(s).</value></data>
+  <data name="Progress.Msg.BuildingProfiles" xml:space="preserve"><value>Getting the story behind {0} brand(s) and {1} store(s)…</value></data>
+  <data name="Progress.Msg.BuildingBrand" xml:space="preserve"><value>Getting to know {0}…</value></data>
+  <data name="Progress.Msg.VerifyingStore" xml:space="preserve"><value>Checking out {0}…</value></data>
+  <data name="Progress.Msg.Enriched" xml:space="preserve"><value>Got the background on {0} brand(s) and {1} store(s).</value></data>
+  <data name="Progress.Msg.Ranking" xml:space="preserve"><value>Weighing {0} option(s) across {1} brand(s)…</value></data>
+  <data name="Progress.Msg.Reviewing" xml:space="preserve"><value>Double-checking everything…</value></data>
+  <data name="Progress.Msg.Saving" xml:space="preserve"><value>Putting it all together…</value></data>
+  <data name="Progress.Msg.LoadedSaved" xml:space="preserve"><value>Your results are ready.</value></data>
+  <data name="Progress.Msg.DoneCount" xml:space="preserve"><value>All set — {0} option(s) across {1} brand(s).</value></data>
+  <data name="Progress.Msg.Done" xml:space="preserve"><value>All set!</value></data>
 
   <!-- Per-activity feed lines (previously hardcoded English Log() calls; now localized signals). -->
-  <data name="Progress.Msg.AnalyzingCategory" xml:space="preserve"><value>Analyzing {0} market requirements…</value></data>
-  <data name="Progress.Msg.LookingForStores" xml:space="preserve"><value>Looking for {0}…</value></data>
-  <data name="Progress.Msg.ExtractingSpecs" xml:space="preserve"><value>Extracting {0}…</value></data>
-  <data name="Progress.Msg.EnrichedBrandsCount" xml:space="preserve"><value>Enriched {0} brand(s).</value></data>
-  <data name="Progress.Msg.VerifiedStoresCount" xml:space="preserve"><value>Verified {0} store(s) on Google Maps.</value></data>
-  <data name="Progress.Msg.DeepDiving" xml:space="preserve"><value>Deep-diving {0} product(s) in parallel…</value></data>
-  <data name="Progress.Msg.FindingBrandSite" xml:space="preserve"><value>Finding {0}'s local site…</value></data>
-  <data name="Progress.Msg.ScrapingBrandCatalog" xml:space="preserve"><value>Scraping {0}'s catalogue via Context.dev…</value></data>
-  <data name="Progress.Msg.BuiltReputation" xml:space="preserve"><value>Built reputation profile for {0}.</value></data>
-  <data name="Progress.Msg.SavedBrandProfile" xml:space="preserve"><value>Saved {0}'s profile.</value></data>
-  <data name="Progress.Msg.LocatedLogoNoStorage" xml:space="preserve"><value>Located the {0} logo (object storage not configured).</value></data>
-  <data name="Progress.Msg.StoredLogo" xml:space="preserve"><value>Stored the {0} logo to R2.</value></data>
-  <data name="Progress.Msg.LocatedLogoNoHost" xml:space="preserve"><value>Located the {0} logo (R2 images host not set — kept the source URL).</value></data>
+  <data name="Progress.Msg.AnalyzingCategory" xml:space="preserve"><value>Getting a feel for {0}…</value></data>
+  <data name="Progress.Msg.LookingForStores" xml:space="preserve"><value>Tracking down {0}…</value></data>
+  <data name="Progress.Msg.ExtractingSpecs" xml:space="preserve"><value>Digging into {0}…</value></data>
+  <data name="Progress.Msg.EnrichedBrandsCount" xml:space="preserve"><value>Got the background on {0} brand(s).</value></data>
+  <data name="Progress.Msg.VerifiedStoresCount" xml:space="preserve"><value>Checked out {0} store(s).</value></data>
+  <data name="Progress.Msg.DeepDiving" xml:space="preserve"><value>Taking a closer look at {0} option(s)…</value></data>
+  <data name="Progress.Msg.FindingBrandSite" xml:space="preserve"><value>Looking up {0}…</value></data>
+  <data name="Progress.Msg.ScrapingBrandCatalog" xml:space="preserve"><value>Browsing {0}'s lineup…</value></data>
+  <data name="Progress.Msg.BuiltReputation" xml:space="preserve"><value>Got a read on {0}.</value></data>
+  <data name="Progress.Msg.SavedBrandProfile" xml:space="preserve"><value>All caught up on {0}.</value></data>
+  <data name="Progress.Msg.LocatedLogoNoStorage" xml:space="preserve"><value>Found {0}'s logo.</value></data>
+  <data name="Progress.Msg.StoredLogo" xml:space="preserve"><value>Found {0}'s logo.</value></data>
+  <data name="Progress.Msg.LocatedLogoNoHost" xml:space="preserve"><value>Found {0}'s logo.</value></data>
   <data name="Progress.Msg.LookingUpStore" xml:space="preserve"><value>Looking up {0}…</value></data>
-  <data name="Progress.Msg.ScrapingStoreSite" xml:space="preserve"><value>Scraping {0}'s site via Context.dev…</value></data>
-  <data name="Progress.Msg.VerifyingStoreMaps" xml:space="preserve"><value>Verifying {0} on Google Maps…</value></data>
-  <data name="Progress.Msg.SavedStoreProfile" xml:space="preserve"><value>Saved {0}'s profile.</value></data>
-  <data name="Progress.Msg.ReadingStoreCatalog" xml:space="preserve"><value>Reading {0}'s catalogue for prices…</value></data>
-  <data name="Progress.Msg.FoundPricedProducts" xml:space="preserve"><value>Found {0} priced product(s) at {1}.</value></data>
-  <data name="Progress.Msg.FetchingSpecs" xml:space="preserve"><value>Fetching official specs for {0}…</value></data>
-  <data name="Progress.Msg.ComparingItemPrices" xml:space="preserve"><value>Comparing {0} store price(s) for {1}…</value></data>
-  <data name="Progress.Msg.SavedDeepDive" xml:space="preserve"><value>Saved deep-dive for {0}.</value></data>
-  <data name="Progress.Msg.IdentifiedItem" xml:space="preserve"><value>Identified {0} as “{1}” ({2}, {3}).</value></data>
-  <data name="Progress.Msg.MergedSpecs" xml:space="preserve"><value>Merged {0} source(s) into {1} canonical spec(s) for {2}.</value></data>
-  <data name="Progress.Msg.SavedFinalSpecs" xml:space="preserve"><value>Saved canonical spec sheet for {0} ({1} spec(s)).</value></data>
+  <data name="Progress.Msg.ScrapingStoreSite" xml:space="preserve"><value>Browsing {0}…</value></data>
+  <data name="Progress.Msg.VerifyingStoreMaps" xml:space="preserve"><value>Checking out {0}…</value></data>
+  <data name="Progress.Msg.SavedStoreProfile" xml:space="preserve"><value>All caught up on {0}.</value></data>
+  <data name="Progress.Msg.ReadingStoreCatalog" xml:space="preserve"><value>Checking prices at {0}…</value></data>
+  <data name="Progress.Msg.FoundPricedProducts" xml:space="preserve"><value>Found {0} priced option(s) at {1}.</value></data>
+  <data name="Progress.Msg.FetchingSpecs" xml:space="preserve"><value>Looking up the details on {0}…</value></data>
+  <data name="Progress.Msg.ComparingItemPrices" xml:space="preserve"><value>Comparing prices across {0} shop(s) for {1}…</value></data>
+  <data name="Progress.Msg.SavedDeepDive" xml:space="preserve"><value>All caught up on {0}.</value></data>
+  <data name="Progress.Msg.IdentifiedItem" xml:space="preserve"><value>Got the details on {0}.</value></data>
+  <data name="Progress.Msg.MergedSpecs" xml:space="preserve"><value>Pulling the details together…</value></data>
+  <data name="Progress.Msg.SavedFinalSpecs" xml:space="preserve"><value>All done with {0}'s details.</value></data>
 
   <data name="Sources.Label" xml:space="preserve"><value>Sources</value></data>
 
   <data name="ModelCard.ProductRating" xml:space="preserve"><value>Buyer rating from store listings</value></data>
   <data name="ModelCard.From" xml:space="preserve"><value>from</value></data>
-  <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>Price on site</value></data>
+  <data name="ModelCard.PriceOnSite" xml:space="preserve"><value>See price on store site</value></data>
+  <data name="ModelCard.PriceOnSiteHint" xml:space="preserve"><value>We found this product at the store but could not read a price from the page — open the store to check it.</value></data>
   <data name="ModelCard.Sale" xml:space="preserve"><value>SALE</value></data>
   <data name="ModelCard.Seller" xml:space="preserve"><value>seller</value></data>
+  <data name="ModelCard.OnBrandSite" xml:space="preserve"><value>On brand site</value></data>
+  <data name="ModelCard.BrandSite" xml:space="preserve"><value>Brand site</value></data>
+  <data name="ModelCard.Reviews" xml:space="preserve"><value>Reviews</value></data>
+  <data name="ModelCard.MentionedIn" xml:space="preserve"><value>Mentioned in</value></data>
 
   <data name="History.Title" xml:space="preserve"><value>Search History</value></data>
   <data name="History.Subtitle" xml:space="preserve"><value>Every query you run is saved here automatically. Re-run it or open a saved copy.</value></data>
@@ -477,10 +485,6 @@
   <data name="Auth.Error.Duplicate" xml:space="preserve"><value>An account with that email already exists. Try signing in instead.</value></data>
   <data name="Auth.Error.WeakPassword" xml:space="preserve"><value>Password must be at least 8 characters with upper- and lower-case letters and a number.</value></data>
   <data name="Auth.Error.Failed" xml:space="preserve"><value>We couldn't create your account. Please check your details and try again.</value></data>
-
-  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>No LLM key configured. Add one on the</value></data>
-  <data name="ProviderStatus.NoLlmKeyAfter" xml:space="preserve"><value>page, or set</value></data>
-  <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>on the server.</value></data>
 
   <data name="Admin.Timeline.Title" xml:space="preserve"><value>Event timeline</value></data>
   <data name="Admin.Timeline.Subtitle" xml:space="preserve"><value>A unified, searchable feed of everything happening across the system.</value></data>
@@ -643,11 +647,26 @@
   <data name="Admin.Nav.Data" xml:space="preserve"><value>Data</value></data>
   <data name="Admin.Nav.Moderation" xml:space="preserve"><value>Moderation</value></data>
   <data name="Admin.Nav.Filtered" xml:space="preserve"><value>Filtered</value></data>
+  <data name="Admin.Nav.Images" xml:space="preserve"><value>Images</value></data>
   <data name="Admin.Nav.Brands" xml:space="preserve"><value>Brands</value></data>
   <data name="Admin.Nav.Stores" xml:space="preserve"><value>Stores</value></data>
+  <data name="Admin.Nav.Queues" xml:space="preserve"><value>Queues</value></data>
+  <data name="Admin.Nav.Credentials" xml:space="preserve"><value>Credentials</value></data>
   <data name="Admin.Nav.Settings" xml:space="preserve"><value>Settings</value></data>
   <data name="Detail.Specifications" xml:space="preserve"><value>Specifications</value></data>
   <data name="Detail.SpecsUnavailable" xml:space="preserve"><value>Detailed specifications aren't available for this product yet.</value></data>
+  <data name="Detail.Offers" xml:space="preserve"><value>Offers</value></data>
+  <data name="Detail.Specs" xml:space="preserve"><value>Specifications</value></data>
+  <data name="Detail.About" xml:space="preserve"><value>About this product</value></data>
+  <data name="Detail.ProsCons" xml:space="preserve"><value>Pros &amp; cons</value></data>
+  <data name="Detail.StillEnriching" xml:space="preserve"><value>More details may still be arriving — check back shortly</value></data>
+  <data name="Detail.BackToSearch" xml:space="preserve"><value>Back to search</value></data>
+  <data name="Detail.NotAvailable" xml:space="preserve"><value>Details not yet available — this product will be profiled on the next search.</value></data>
+  <data name="Detail.Overview" xml:space="preserve"><value>Overview</value></data>
+  <data name="Detail.ObservedRange" xml:space="preserve"><value>Observed price range: {0}</value></data>
+  <data name="Detail.PricesUpdated" xml:space="preserve"><value>Prices updated {0}</value></data>
+  <data name="Detail.Store" xml:space="preserve"><value>Store</value></data>
+  <data name="Detail.Condition" xml:space="preserve"><value>Condition</value></data>
   <data name="Search.EmailNotice" xml:space="preserve"><value>We'll email you the results when they're ready.</value></data>
   <data name="Settings.EmailResults" xml:space="preserve"><value>Email me search results</value></data>
   <data name="Settings.EmailResultsHelp" xml:space="preserve"><value>Get a summary email when your search finishes.</value></data>
@@ -695,4 +714,9 @@
   <data name="Admin.ClearData.WorkflowsNotConfigured" xml:space="preserve"><value>Workflow history persistence is not configured — nothing to clear.</value></data>
   <data name="Admin.ClearData.Error" xml:space="preserve"><value>Operation failed: {0}</value></data>
   <data name="Admin.ClearData.Busy" xml:space="preserve"><value>Working…</value></data>
+  <data name="Deals.NoPriced" xml:space="preserve"><value>No priced listings found — the summary above still highlights deals from the web.</value></data>
+  <data name="ProviderStatus.Degraded" xml:space="preserve"><value>Some search features are temporarily unavailable.</value></data>
+  <data name="Monitor.RunUnavailable" xml:space="preserve"><value>Monitoring is temporarily unavailable.</value></data>
+  <data name="Stores.NoStores" xml:space="preserve"><value>No stores found for this search.</value></data>
+  <data name="Admin.Nav.Providers" xml:space="preserve"><value>Providers</value></data>
 </root>

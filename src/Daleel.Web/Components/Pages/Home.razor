@@ -11,7 +11,9 @@
 @inject IStringLocalizer<SharedResource> L
 @inject IEmailService Email
 @inject IUserEmailPreferences EmailPrefs
+@inject IEnrichmentWorkQueue EnrichQueue
 @using Daleel.Web.Email
+@using Daleel.Web.Pipeline.Enrichment
 
 <PageTitle>دليل · Daleel</PageTitle>
 
@@ -89,6 +91,28 @@
                     @L["Search.EmailNotice"]
                 </MudAlert>
             }
+
+            @* PROGRESSIVE RESULTS: the pipeline streams partial grids while it keeps working — render
+               them immediately under the live stepper. The UI never waits on the workflow; the grid
+               fills in and re-renders in place as each enrichment sub-workflow lands. *@
+            @if (_answer?.Products is { } partial && (partial.HasListings || partial.StoreCount > 0 || partial.BrandCount > 0 || partial.ReviewCount > 0))
+            {
+                <div class="d-flex align-center mb-2 mt-3">
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                    <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Search.PartialResults"]</MudText>
+                </div>
+                @* Card-centric: the product grid IS the result (stores/brands/reviews now attach to each
+                   card), so the "Also found" accordions are gone. AdaptiveResults remains only as the
+                   fallback renderer when a search yielded no distinct product models at all. *@
+                @if (partial.HasListings)
+                {
+                    <ProductListings Result="partial" />
+                }
+                else
+                {
+                    <AdaptiveResults Result="partial" />
+                }
+            }
         }
 
         @* No raw status/error metadata: a search that yields nothing shows a neutral empty state.
@@ -136,16 +160,31 @@
         @if (_status == "completed" && _answer is not null)
         {
             <div class="daleel-results-reveal" @key="_query">
-                @if (_enriching)
+                @* The deep dive keeps patching the grid AFTER completion (images, prices, per-card
+                   reviews/mentions land via the Enriched handler). While the job still has open
+                   enrichment units (polled from the work queue), say so — otherwise a card that
+                   sprouts details seconds later looks like a glitch. *@
+                @if (_openEnrichment > 0)
                 {
                     <div class="d-flex align-center mb-2">
                         <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
-                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Search.FetchingSpecs"]</MudText>
+                        <MudText Typo="Typo.caption" Color="Color.Secondary">@L["Search.EnrichingHint"]</MudText>
                     </div>
                 }
                 @if (_answer.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
                 {
-                    <AdaptiveResults Result="products" />
+                    @* Card-centric: the product grid IS the result — the old "Also found" accordions
+                       (Stores/Brands/Related articles) and the Sources expander are gone; their data now
+                       attaches to each card. AdaptiveResults remains only as the fallback renderer when
+                       the search yielded no distinct product models at all. *@
+                    @if (products.HasListings)
+                    {
+                        <ProductListings Result="products" />
+                    }
+                    else
+                    {
+                        <AdaptiveResults Result="products" />
+                    }
                 }
                 else
                 {
@@ -157,7 +196,6 @@
                         </MudText>
                     </MudPaper>
                 }
-                <SourceChips Sources="_answer.Research.Sources" />
             </div>
         }
 </div>
@@ -186,7 +224,15 @@
     private string? _error;
     private int? _jobId;
     private bool _running => _status == "running";
-    private bool _enriching;
+
+    // Deep-dive watch: while a completed result is on screen for a known job, poll the enrichment
+    // work queue's open-unit count (pending+running) every 5s and show the "still enriching" hint
+    // while it's non-zero. Same Timer + InvokeAsync pattern as AdminQueues; the queue is a singleton
+    // that opens its own DB scopes, so calling it from the circuit is safe.
+    private int _openEnrichment;
+    private Timer? _enrichTimer;
+    private int _enrichChecks;
+    private bool _enrichSeenWork;
     private readonly List<string> _progress = new();
     private AgentAnswer? _answer;
     private List<SearchHistoryEntry> _recent = new();
@@ -200,6 +246,7 @@
         Notifier.Progress += OnProgress;
         Notifier.Completed += OnCompleted;
         Notifier.Enriched += OnEnriched;
+        Notifier.Partial += OnPartial;
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -242,7 +289,7 @@
             _query = entry.Query;
             _status = "completed";
             _jobId = null;
-            _enriching = false;
+            StopEnrichmentWatch();
             _progress.Clear();
             _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson);
         }
@@ -265,6 +312,12 @@
             if (convo.CurrentStatus == "completed" && convo.CurrentResultJson is not null)
             {
                 _answer = ResultSerialization.Deserialize<AgentAnswer>(convo.CurrentResultJson);
+                // Reconnecting to a freshly-completed search (reload / second tab): its deep dive may
+                // still be running, so resume the open-unit watch for the hint.
+                if (convo.CurrentJobId is int completedJob && _answer?.Products is { HasListings: true })
+                {
+                    StartEnrichmentWatch(completedJob);
+                }
             }
             else if (convo.CurrentStatus == "running" && convo.CurrentJobId is int runningJob)
             {
@@ -294,7 +347,7 @@
                 _query = lastWithResult.Query;
                 _status = "completed";
                 _jobId = null;
-                _enriching = false;
+                StopEnrichmentWatch();
                 _answer = ResultSerialization.Deserialize<AgentAnswer>(lastWithResult.ResultJson!);
             }
         }
@@ -381,6 +434,7 @@
         _status = "running";
         _error = null;
         _answer = null;
+        StopEnrichmentWatch(); // a new search owns the screen — drop the previous job's deep-dive hint
         _progress.Clear();
         // Encoded so SearchProgress localizes it and lights up the first stepper stage immediately.
         _progress.Add(SearchProgressSignal.Encode(SearchStep.Analyzing, "Progress.Msg.Strategy"));
@@ -401,7 +455,7 @@
         // box so the user can tweak and retry.
         _jobId = null;
         _status = "cancelled";
-        _enriching = false;
+        StopEnrichmentWatch();
         _progress.Clear();
         if (!string.IsNullOrWhiteSpace(_query))
         {
@@ -444,10 +498,17 @@
             _answer = status == "completed" && resultJson is not null
                 ? ResultSerialization.Deserialize<AgentAnswer>(resultJson)
                 : null;
-            // Base results are now on screen; the server is deep-diving item specs in the background.
-            // Show a "more coming" hint until the Enriched update arrives (auto-clears as a safety net).
-            _enriching = _answer?.Products is { HasListings: true };
-            if (_enriching) ScheduleEnrichTimeout(jobId);
+            // Base results are now on screen; the server keeps deep-diving in the background. Watch
+            // the enrichment queue's open-unit count and show the "still enriching" hint while any
+            // of this job's units are pending/running.
+            if (_status == "completed" && _answer?.Products is { HasListings: true })
+            {
+                StartEnrichmentWatch(jobId);
+            }
+            else
+            {
+                StopEnrichmentWatch();
+            }
             _recent = (await History.ListAsync(_userId!, page: 1, pageSize: 15)).Items.ToList();
             StateHasChanged();
         });
@@ -461,21 +522,83 @@
         InvokeAsync(() =>
         {
             _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson) ?? _answer;
-            _enriching = false;
+            // A unit just landed — re-check the open count right away (then back to the 5s cadence)
+            // so the hint disappears the moment the last unit finishes, not up to 5s later.
+            _enrichTimer?.Change(TimeSpan.Zero, TimeSpan.FromSeconds(5));
             StateHasChanged();
         });
     }
 
-    // Safety net so the "fetching specs" hint never sticks if no enrichment update arrives.
-    private void ScheduleEnrichTimeout(int jobId) => _ = Task.Delay(TimeSpan.FromSeconds(60)).ContinueWith(_ =>
+    // An INTERMEDIATE result while the search is still running: render the grid now and keep the
+    // stepper going — results load as they're ready, the UI never waits on the whole workflow. A
+    // partial that races the completion is ignored (Completed's answer supersedes).
+    private void OnPartial(string userId, int jobId, string resultJson, string resultType)
+    {
+        if (userId != _userId || jobId != _jobId) return;
         InvokeAsync(() =>
         {
-            if (_enriching && _jobId == jobId)
-            {
-                _enriching = false;
-                StateHasChanged();
-            }
-        }));
+            if (_status != "running") return;
+            _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson) ?? _answer;
+            StateHasChanged();
+        });
+    }
+
+    private void StartEnrichmentWatch(int jobId)
+    {
+        StopEnrichmentWatch();
+        _enrichChecks = 0;
+        _enrichSeenWork = false;
+        // First check after 1s, not immediately: the worker broadcasts completion BEFORE inserting
+        // the plan unit, so an instant poll could see an empty queue and give up prematurely.
+        _enrichTimer = new Timer(
+            _ => _ = InvokeAsync(() => CheckEnrichmentAsync(jobId)), null,
+            TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(5));
+    }
+
+    private void StopEnrichmentWatch()
+    {
+        _enrichTimer?.Dispose();
+        _enrichTimer = null;
+        _openEnrichment = 0;
+    }
+
+    private async Task CheckEnrichmentAsync(int jobId)
+    {
+        // Stale tick: the screen moved on (new search, cancel, history view) — stop watching.
+        if (_enrichTimer is null || _jobId != jobId || _status != "completed")
+        {
+            StopEnrichmentWatch();
+            return;
+        }
+
+        int open;
+        try
+        {
+            open = await EnrichQueue.OpenCountAsync(jobId);
+        }
+        catch
+        {
+            return; // transient DB blip — keep the current hint and try again next tick
+        }
+
+        _enrichChecks++;
+        if (open > 0) _enrichSeenWork = true;
+
+        // Stop at zero — but only once we've either seen work drain or given the enqueue a grace
+        // window (~3 checks): completion is broadcast before the plan unit is inserted, and some
+        // completions (cache ServeAsIs, cost-cap) legitimately never enqueue anything.
+        if (open == 0 && (_enrichSeenWork || _enrichChecks >= 3))
+        {
+            _enrichTimer?.Dispose();
+            _enrichTimer = null;
+        }
+
+        if (_openEnrichment != open)
+        {
+            _openEnrichment = open;
+            StateHasChanged();
+        }
+    }
 
     private void Prefill(string query) => _input = query;
 
@@ -497,5 +620,7 @@
         Notifier.Progress -= OnProgress;
         Notifier.Completed -= OnCompleted;
         Notifier.Enriched -= OnEnriched;
+        Notifier.Partial -= OnPartial;
+        _enrichTimer?.Dispose();
     }
 }

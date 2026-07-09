@@ -3,6 +3,7 @@ using Daleel.Agent;
 using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Models;
+using Daleel.Core.Observability;
 using Daleel.Web.Events;
 
 namespace Daleel.Web.Pipeline;
@@ -106,9 +107,22 @@ public sealed class SearchPipelineState : ISearchScopedState
     public void RecordEvent(
         string category, string eventType, string provider,
         bool success = true, decimal cost = 0m, long durationMs = 0,
-        IReadOnlyDictionary<string, object?>? metadata = null) =>
+        IReadOnlyDictionary<string, object?>? metadata = null)
+    {
         Events.Add(PipelineEventFactory.Custom(
             category, eventType, provider, SearchId, success, cost, durationMs, metadata));
+
+        // Tee the same event LIVE to the per-search timeline, mapped identically to the end-of-run
+        // projection (SystemEventProjection) so the two can never diverge — this is what makes a run's
+        // cache/profile/item events appear mid-flight. The end-of-run bridge no longer re-projects these.
+        AmbientSearchEvents.Sink?.Emit(new SearchEvent(
+            SystemEventProjection.CategoryOf(category, eventType),
+            eventType,
+            string.IsNullOrWhiteSpace(provider) ? eventType : $"{eventType} · {provider}",
+            success ? SearchEventLevel.Info : SearchEventLevel.Error,
+            string.IsNullOrWhiteSpace(provider) ? "pipeline" : $"pipeline/{provider}",
+            metadata));
+    }
 }
 
 /// <summary>
