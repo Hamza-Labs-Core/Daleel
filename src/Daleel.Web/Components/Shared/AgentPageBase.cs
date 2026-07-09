@@ -141,7 +141,8 @@ public abstract class AgentPageBase : ComponentBase
 
         if (!Agents.HasLlm())
         {
-            Error = "No LLM key configured. Add one on the Settings page, or set OPENROUTER_API_KEY on the server.";
+            // Shopper-facing: no vendor/env-var/internal detail — the search simply can't run right now.
+            Error = "Search is temporarily unavailable. Please try again shortly.";
             return;
         }
 

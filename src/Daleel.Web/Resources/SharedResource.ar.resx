@@ -212,7 +212,7 @@
   <data name="Faq.Q4" xml:space="preserve"><value>هل دليل مجاني؟</value></data>
   <data name="Faq.A4" xml:space="preserve"><value>نعم — يبدأ كل حساب بـ٥٠٠ نقطة مجانية شهريًا دون الحاجة إلى بطاقة ائتمان. تُحتسب كل عملية بحث نقاطًا بحسب المزوّدات التي تستخدمها، فالبحث السريع يكلّف القليل والبحث المعمّق يكلّف أكثر. وإذا احتجت المزيد، تتيح الباقات المدفوعة أرصدة شهرية أكبر ومتابعة للعروض وحفظًا للنتائج. راجع صفحة الأسعار للتفاصيل.</value></data>
   <data name="Faq.Q5" xml:space="preserve"><value>هل أحتاج إلى مفاتيح API خاصة بي؟</value></data>
-  <data name="Faq.A5" xml:space="preserve"><value>لا. يعمل دليل مباشرةً دون إعداد. ويمكن للمستخدمين المتقدّمين إضافة مفاتيح النماذج ومزوّدي البحث الخاصة بهم من الإعدادات — وتبقى هذه المفاتيح في متصفحك ولا تُسجَّل أبدًا في سجلّات خوادمنا.</value></data>
+  <data name="Faq.A5" xml:space="preserve"><value>لا. يعمل دليل مباشرةً دون أي إعداد. تتم كل المعالجة على خوادمنا، فلا حاجة أبدًا إلى إدخال أي مفاتيح أو إعدادات.</value></data>
   <data name="Faq.Q6" xml:space="preserve"><value>كيف تُستخدم بيانات بحثي؟</value></data>
   <data name="Faq.A6" xml:space="preserve"><value>يُحفظ سجلّ بحثك الشخصي لك وحدك ضمن حسابك. وبشكل منفصل، تُحلَّل عمليات البحث بشكل مجهول لتحسين النتائج — نسجّل ما تم البحث عنه والسوق والوقت والتكلفة، لكن لا نسجّل أي شيء يحدّد هويتك. وتحتوي سجلّات التحليلات والتكلفة على تجزئة أحادية الاتجاه فقط، بحيث لا يمكن تتبّع أي بحث إلى حسابك.</value></data>
   <data name="Faq.Q7" xml:space="preserve"><value>كيف يُحتسب تقييم سمعة العلامة التجارية؟</value></data>
@@ -242,7 +242,7 @@
   <data name="Compare.Verdict" xml:space="preserve"><value>الحكم</value></data>
 
   <data name="Stores.Title" xml:space="preserve"><value>باحث المتاجر</value></data>
-  <data name="Stores.Subtitle" xml:space="preserve"><value>اعثر على المتاجر التي تبيع منتجًا بالقرب من موقع معيّن (خرائط جوجل).</value></data>
+  <data name="Stores.Subtitle" xml:space="preserve"><value>اعثر على المتاجر التي تبيع منتجًا بالقرب من موقع معيّن.</value></data>
   <data name="Stores.ProductLabel" xml:space="preserve"><value>المنتج</value></data>
   <data name="Stores.ProductPlaceholder" xml:space="preserve"><value>مثال: مكيف، ثلاجة</value></data>
   <data name="Stores.Find" xml:space="preserve"><value>بحث</value></data>
@@ -268,7 +268,7 @@
   <data name="Brand.Competitors" xml:space="preserve"><value>المنافسون</value></data>
 
   <data name="Monitor.Title" xml:space="preserve"><value>لوحة المراقبة</value></data>
-  <data name="Monitor.Subtitle" xml:space="preserve"><value>راقب الكلمات المفتاحية عبر منصات التواصل. يجلب «تشغيل الآن» التطابقات عبر Apify عند ضبط رمز الوصول.</value></data>
+  <data name="Monitor.Subtitle" xml:space="preserve"><value>راقب الكلمات المفتاحية عبر منصات التواصل. يبحث «تشغيل الآن» عن تطابقات جديدة.</value></data>
   <data name="Monitor.NewMonitor" xml:space="preserve"><value>مراقبة جديدة</value></data>
   <data name="Monitor.KeywordLabel" xml:space="preserve"><value>الكلمة</value></data>
   <data name="Monitor.IntervalLabel" xml:space="preserve"><value>الفترة</value></data>
@@ -485,9 +485,6 @@
   <data name="Auth.Error.Duplicate" xml:space="preserve"><value>يوجد حساب بهذا البريد الإلكتروني بالفعل. جرّب تسجيل الدخول بدلاً من ذلك.</value></data>
   <data name="Auth.Error.WeakPassword" xml:space="preserve"><value>يجب أن تتكون كلمة المرور من 8 أحرف على الأقل تتضمن حروفًا كبيرة وصغيرة ورقمًا.</value></data>
   <data name="Auth.Error.Failed" xml:space="preserve"><value>تعذّر إنشاء حسابك. يُرجى التحقق من بياناتك والمحاولة مرة أخرى.</value></data>
-
-  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>لم يتم إعداد مفتاح LLM. عيِّن</value></data>
-  <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>على الخادم.</value></data>
 
   <data name="Admin.Timeline.Title" xml:space="preserve"><value>سجل الأحداث</value></data>
   <data name="Admin.Timeline.Subtitle" xml:space="preserve"><value>سجل موحّد وقابل للبحث لكل ما يجري في النظام.</value></data>
@@ -718,4 +715,8 @@
   <data name="Admin.ClearData.WorkflowsNotConfigured" xml:space="preserve"><value>تخزين سجلّ سير العمل غير مُهيّأ — لا يوجد ما يُمسح.</value></data>
   <data name="Admin.ClearData.Error" xml:space="preserve"><value>فشلت العملية: {0}</value></data>
   <data name="Admin.ClearData.Busy" xml:space="preserve"><value>جارٍ العمل…</value></data>
+  <data name="Deals.NoPriced" xml:space="preserve"><value>لم يتم العثور على عروض مُسعّرة — لا يزال الملخّص أعلاه يبرز عروضًا من الويب.</value></data>
+  <data name="ProviderStatus.Degraded" xml:space="preserve"><value>بعض ميزات البحث غير متاحة مؤقتًا.</value></data>
+  <data name="Monitor.RunUnavailable" xml:space="preserve"><value>المراقبة غير متاحة مؤقتًا.</value></data>
+  <data name="Stores.NoStores" xml:space="preserve"><value>لم يتم العثور على متاجر لهذا البحث.</value></data>
 </root>

@@ -10,7 +10,7 @@
 {
     <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-4"
               Icon="@Icons.Material.Filled.Key">
-        @L["ProviderStatus.NoLlmKeyBefore"] <code>OPENROUTER_API_KEY</code> @L["ProviderStatus.NoLlmKeyServer"]
+        @L["ProviderStatus.Degraded"]
     </MudAlert>
 }
 
@@ -18,7 +18,7 @@
     @Chip("AI", status.Llm, Icons.Material.Filled.AutoAwesome)
     @Chip("Web search", status.WebSearch, Icons.Material.Filled.Search)
     @Chip("Places", status.Places, Icons.Material.Filled.Place)
-    @Chip("Scraper", status.Scraper, Icons.Material.Filled.Article)
+    @Chip("Store data", status.Scraper, Icons.Material.Filled.Article)
     @Chip("Social", status.Social, Icons.Material.Filled.Forum)
 </div>
 

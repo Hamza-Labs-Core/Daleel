@@ -212,7 +212,7 @@
   <data name="Faq.Q4" xml:space="preserve"><value>Is Daleel free?</value></data>
   <data name="Faq.A4" xml:space="preserve"><value>Yes — every account starts with 500 free credits each month, no credit card required. Each search spends credits based on the providers it uses, so a quick lookup costs little and a deep search costs more. If you need more, paid plans add larger monthly credit allowances, deal monitoring and saved results. See the Pricing page for details.</value></data>
   <data name="Faq.Q5" xml:space="preserve"><value>Do I need my own API keys?</value></data>
-  <data name="Faq.A5" xml:space="preserve"><value>No. Daleel works out of the box. Power users can optionally add their own model and search provider keys under Settings — they stay in your browser and are never written to our server logs.</value></data>
+  <data name="Faq.A5" xml:space="preserve"><value>No. Daleel works out of the box — there's nothing to configure. All the heavy lifting runs on our servers, so you never need to supply any keys or settings.</value></data>
   <data name="Faq.Q6" xml:space="preserve"><value>How is my search data used?</value></data>
   <data name="Faq.A6" xml:space="preserve"><value>Your personal search history is saved only for you, under your account. Separately, searches are analyzed anonymously to improve results — we record what was searched, the market, timing and cost, but never anything that identifies you. Analytics and cost logs carry only a one-way hash, so a search can't be traced back to your account.</value></data>
   <data name="Faq.Q7" xml:space="preserve"><value>How is a brand's reputation score calculated?</value></data>
@@ -242,7 +242,7 @@
   <data name="Compare.Verdict" xml:space="preserve"><value>Verdict</value></data>
 
   <data name="Stores.Title" xml:space="preserve"><value>Store Finder</value></data>
-  <data name="Stores.Subtitle" xml:space="preserve"><value>Find physical stores selling a product near a location (Google Places).</value></data>
+  <data name="Stores.Subtitle" xml:space="preserve"><value>Find physical stores selling a product near a location.</value></data>
   <data name="Stores.ProductLabel" xml:space="preserve"><value>Product / category</value></data>
   <data name="Stores.ProductPlaceholder" xml:space="preserve"><value>e.g. air conditioner, fridge</value></data>
   <data name="Stores.Find" xml:space="preserve"><value>Find</value></data>
@@ -255,7 +255,7 @@
   <data name="Stores.Directions" xml:space="preserve"><value>Directions</value></data>
   <data name="Stores.ViewStore" xml:space="preserve"><value>View store</value></data>
   <data name="Stores.Online" xml:space="preserve"><value>Online store</value></data>
-  <data name="Stores.MapPreview" xml:space="preserve"><value>Map preview (Google Maps embed coming soon)</value></data>
+  <data name="Stores.MapPreview" xml:space="preserve"><value>Map preview (coming soon)</value></data>
   <data name="Stores.StoresCount" xml:space="preserve"><value>stores</value></data>
 
   <data name="Brand.Title" xml:space="preserve"><value>Brand Intelligence</value></data>
@@ -268,7 +268,7 @@
   <data name="Brand.Competitors" xml:space="preserve"><value>Competitors</value></data>
 
   <data name="Monitor.Title" xml:space="preserve"><value>Monitor Dashboard</value></data>
-  <data name="Monitor.Subtitle" xml:space="preserve"><value>Watch keywords across social platforms. "Run now" fetches matches via Apify when a token is set.</value></data>
+  <data name="Monitor.Subtitle" xml:space="preserve"><value>Watch keywords across social platforms. "Run now" checks for new matches.</value></data>
   <data name="Monitor.NewMonitor" xml:space="preserve"><value>New monitor</value></data>
   <data name="Monitor.KeywordLabel" xml:space="preserve"><value>Keyword</value></data>
   <data name="Monitor.IntervalLabel" xml:space="preserve"><value>Interval</value></data>
@@ -485,9 +485,6 @@
   <data name="Auth.Error.Duplicate" xml:space="preserve"><value>An account with that email already exists. Try signing in instead.</value></data>
   <data name="Auth.Error.WeakPassword" xml:space="preserve"><value>Password must be at least 8 characters with upper- and lower-case letters and a number.</value></data>
   <data name="Auth.Error.Failed" xml:space="preserve"><value>We couldn't create your account. Please check your details and try again.</value></data>
-
-  <data name="ProviderStatus.NoLlmKeyBefore" xml:space="preserve"><value>No LLM key configured. Set</value></data>
-  <data name="ProviderStatus.NoLlmKeyServer" xml:space="preserve"><value>on the server.</value></data>
 
   <data name="Admin.Timeline.Title" xml:space="preserve"><value>Event timeline</value></data>
   <data name="Admin.Timeline.Subtitle" xml:space="preserve"><value>A unified, searchable feed of everything happening across the system.</value></data>
@@ -717,4 +714,8 @@
   <data name="Admin.ClearData.WorkflowsNotConfigured" xml:space="preserve"><value>Workflow history persistence is not configured — nothing to clear.</value></data>
   <data name="Admin.ClearData.Error" xml:space="preserve"><value>Operation failed: {0}</value></data>
   <data name="Admin.ClearData.Busy" xml:space="preserve"><value>Working…</value></data>
+  <data name="Deals.NoPriced" xml:space="preserve"><value>No priced listings found — the summary above still highlights deals from the web.</value></data>
+  <data name="ProviderStatus.Degraded" xml:space="preserve"><value>Some search features are temporarily unavailable.</value></data>
+  <data name="Monitor.RunUnavailable" xml:space="preserve"><value>Monitoring is temporarily unavailable.</value></data>
+  <data name="Stores.NoStores" xml:space="preserve"><value>No stores found for this search.</value></data>
 </root>
