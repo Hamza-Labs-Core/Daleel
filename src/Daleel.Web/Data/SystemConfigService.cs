@@ -168,6 +168,10 @@ public sealed class SystemConfigService : ISystemConfigService
         // always runs when the site is unknown (the researcher/BrandResearchHandler own the gating).
         "actor.brandresearch",
         "actor.storeresearch",
+        // The per-job cost cap was removed with the uncapped fan-out design; nothing reads these,
+        // and an admin setting a "spend ceiling" that silently enforces nothing is a money trap.
+        "cost.max_per_job",
+        "cost.monthly_alert",
     };
 
     /// <summary>Inserts any missing default rows and removes retired ones (idempotent; called on startup).</summary>

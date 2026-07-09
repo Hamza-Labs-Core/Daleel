@@ -523,7 +523,10 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
         }
 
         var providers = ctx.Services.GetRequiredService<IProviderApi>();
-        var edgeActive = providers.HasEdge && config is not null &&
+        // EdgeDrainReady, not just HasEdge: without the full return path (poll queue + R2) the
+        // submit sites all stay inline, so no drain result can EVER arrive for this domain —
+        // waiting for one would just delay every store's enrichment by the full retry budget.
+        var edgeActive = providers.HasEdge && providers.EdgeDrainReady && config is not null &&
             await config.GetBoolAsync(Cloudflare.CloudflareWorkerOptions.EnabledFlag, false, ct);
         if (edgeActive && item.Attempts <= DrainWaitAttempts)
         {

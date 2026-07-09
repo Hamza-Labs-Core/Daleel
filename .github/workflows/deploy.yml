@@ -340,7 +340,11 @@ jobs:
           fi
           api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID"
           auth="Authorization: Bearer $CLOUDFLARE_API_TOKEN"
-          sub=$(curl -fsS -H "$auth" "$api/workers/subdomain" | jq -r '.result.subdomain // empty')
+          # The CF layer is OPTIONAL: a Cloudflare API incident must never abort the prod app
+          # deploy. Tolerate curl failures the same way an empty response is tolerated — warn,
+          # leave the outputs empty, ship the inline pipeline.
+          sub=$(curl -fsS -H "$auth" "$api/workers/subdomain" | jq -r '.result.subdomain // empty') \
+            || { sub=""; echo "::warning::Cloudflare API unreachable — worker URLs stay empty (inline pipeline)"; }
           if [ -n "$sub" ]; then
             for w in scrape search classify extract filter; do
               echo "$w"'_url=https://daleel-'"$w"'-worker.'"$sub"'.workers.dev' >> "$GITHUB_OUTPUT"
@@ -350,7 +354,8 @@ jobs:
             echo "::warning::workers.dev subdomain not resolvable — CF_*_WORKER_URL stay empty unless set as secrets"
           fi
           qid=$(curl -fsS -H "$auth" "$api/queues?per_page=100" \
-            | jq -r '.result[] | select(.queue_name == "daleel-poll-work") | .queue_id' | head -n1)
+            | jq -r '.result[] | select(.queue_name == "daleel-poll-work") | .queue_id' | head -n1) \
+            || { qid=""; echo "::warning::Cloudflare API unreachable — CF_POLL_QUEUE_ID stays empty"; }
           if [ -n "$qid" ]; then
             echo "poll_queue_id=$qid" >> "$GITHUB_OUTPUT"
             echo "Resolved poll queue id for daleel-poll-work"
