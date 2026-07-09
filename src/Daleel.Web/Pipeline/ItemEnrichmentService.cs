@@ -440,13 +440,25 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             pool = (await SafeCatalog(_providers, domain, _logger, ct)).ToList();
         }
 
+        // WHAT to search the store for. CatalogQueryFor derives its query from an existing model's
+        // gap — with ZERO models there is no gap, it returns empty, and ProductSearchUrl degrades to
+        // the store ROOT: a homepage of category links, not products. Seeding a grid from scratch (the
+        // whole point when a search found stores but no items) must search the store for what the USER
+        // asked for instead.
+        var harvestQuery = CatalogQueryFor(models) is { Length: > 0 } modelQuery
+            ? modelQuery
+            : query ?? string.Empty;
+
         // Browser fallback fires exactly when the orchestrated path's would: nothing PRICED came
-        // out of the structured extract for this domain (including the no-scraper case).
+        // out of the structured extract for this domain (including the no-scraper case). The LLM sink
+        // collects everything its last-resort extractor named — including NAME-ONLY products, which a
+        // BrowserPrice cannot carry but a seeded model happily can ("see price on store site").
+        var llmSeed = new List<ProductListing>();
         var browserPrices = pool.All(p => p.Price is null)
-            ? await HarvestViaBrowserAsync(agent, new[] { domain }, CatalogQueryFor(models), geo, record: null, ct)
+            ? await HarvestViaBrowserAsync(agent, new[] { domain }, harvestQuery, geo, record: null, ct, llmSeed)
             : Array.Empty<BrowserPrice>();
 
-        if (pool.Count == 0 && browserPrices.Count == 0)
+        if (pool.Count == 0 && browserPrices.Count == 0 && llmSeed.Count == 0)
         {
             return (null, 0, Array.Empty<string>());
         }
@@ -458,11 +470,16 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // Catalogue entries that matched nothing but ARE what the user searched for become NEW
         // models — this is how a deep local store's inventory reaches the grid at all (a 184-item
         // catalogue used to contribute zero items unless web extraction had already named them).
+        // The LLM-named products join them, priced or not: an unpriced item the shopper can still
+        // click through to is worth infinitely more than an empty grid.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated,
             pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false))
                 .Concat(browserPrices.Select(b =>
-                    (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true))),
+                    (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)))
+                .Concat(llmSeed
+                    .Where(l => !string.IsNullOrWhiteSpace(l.Name))
+                    .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, Indicative: l.Price is null))),
             storeName, query, geo);
 
         // Second chance on the DISCOVERED page: a general store's root crawl can return inventory
@@ -1313,9 +1330,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         }
     }
 
+    /// <param name="llmSink">
+    /// When supplied, every product the LLM last resort NAMES is added here — including the unpriced
+    /// ones a <see cref="BrowserPrice"/> cannot represent. The caller seeds those as new models.
+    /// </param>
     private async Task<IReadOnlyList<BrowserPrice>> HarvestViaBrowserAsync(
         AgentService agent, IReadOnlyList<string> domains, string query, string? geo,
-        Action<string, string, string, IReadOnlyDictionary<string, object?>?>? record, CancellationToken ct)
+        Action<string, string, string, IReadOnlyDictionary<string, object?>?>? record, CancellationToken ct,
+        List<ProductListing>? llmSink = null)
     {
         if (domains.Count == 0)
         {
@@ -1379,12 +1401,25 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 try
                 {
                     var llm = await agent.ExtractProductsFromPageAsync(page.Content, query, geoProfile, ct);
-                    prices = llm
-                        .Where(l => l.Price is not null && !string.IsNullOrWhiteSpace(l.Name))
+                    var named = llm.Where(l => !string.IsNullOrWhiteSpace(l.Name)).ToList();
+
+                    // Everything it NAMED goes to the sink (the caller seeds unpriced items too);
+                    // only the priced subset can become BrowserPrice observations. Task.WhenAll runs
+                    // the domains concurrently, so the shared sink is locked.
+                    if (llmSink is not null && named.Count > 0)
+                    {
+                        lock (llmSink)
+                        {
+                            llmSink.AddRange(named);
+                        }
+                    }
+
+                    prices = named
+                        .Where(l => l.Price is not null)
                         .Select(l => new BrowserPrice(
                             l.Price!.Value, l.Currency ?? string.Empty, l.Name, domain, l.Url ?? page.Url))
                         .ToList();
-                    usedLlm = prices.Count > 0;
+                    usedLlm = named.Count > 0;
                 }
                 catch (OperationCanceledException) { throw; }
                 catch
