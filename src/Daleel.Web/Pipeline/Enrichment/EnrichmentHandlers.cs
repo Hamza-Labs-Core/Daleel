@@ -237,9 +237,15 @@ public sealed class PlanEnrichmentHandler : IEnrichmentUnitHandler
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
     {
-        if (await ctx.Results.LoadAsync(item.SearchJobId, ct) is not { Products: { Models.Count: > 0 } products })
+        // Proceed for ANY product answer that has something to work with — even one with 0 items so far.
+        // A product query that surfaced STORES/BRANDS but no models yet MUST still fan out the catalog +
+        // brand crawls below: that's the ONLY way an all-hard-store category (Context.dev returns nothing)
+        // gets items SEEDED at all (AppendCatalogDiscoveries). Bail only when there's genuinely nothing —
+        // a non-product answer (no Products) or a truly empty one (no models, stores or brands).
+        if (await ctx.Results.LoadAsync(item.SearchJobId, ct) is not { Products: { } products } ||
+            (products.Models.Count == 0 && products.Stores.Count == 0 && products.Brands.Count == 0))
         {
-            return UnitOutcome.Ok; // nothing to enrich (non-product answer)
+            return UnitOutcome.Ok;
         }
 
         var svc = ctx.Services.GetRequiredService<IItemEnrichmentService>();
@@ -494,7 +500,10 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
             return new UnitOutcome.Kill("unreadable catalog payload");
         }
 
-        if (await ctx.Results.LoadAsync(item.SearchJobId, ct) is not { Products: { Models.Count: > 0 } products })
+        // Run even at 0 models: this unit SEEDS new items from the store catalogue via
+        // AppendCatalogDiscoveries, so a search that found stores but no items yet still gets a grid.
+        // Only a non-product answer (no Products object) bails.
+        if (await ctx.Results.LoadAsync(item.SearchJobId, ct) is not { Products: { } products })
         {
             return UnitOutcome.Ok;
         }
