@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Daleel.Core.Geo;
 using Daleel.Search.Providers;
 using Daleel.Web.Data;
 using Daleel.Web.Services;
@@ -150,8 +151,22 @@ public sealed class BrandCatalogService : IBrandCatalogService
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
+            // NOT a dead end any more: a vendor failure (e.g. Context.dev 400 "Domain branding not
+            // present (DNS resolution failed)") falls through to the LLM fallback below, exactly as an
+            // empty catalogue does. Aborting here is what left such brands with zero harvested models.
             _logger.LogDebug(ex, "Brand catalogue harvest failed for {Brand} ({Domain})", brand.Name, domain);
-            return 0;
+            catalogue = Array.Empty<CatalogProduct>();
+        }
+
+        // LLM LAST RESORT (worker-INDEPENDENT) — the same chain the store catalogue now uses. Context.dev
+        // named no products for this brand's site: an empty {"products":[]}, or a 400 it could not resolve.
+        // Render the site and let the agent's own LLM listing extractor name them, so a brand whose site no
+        // structured provider can parse still harvests models. Unlike the store path this keeps NAME-ONLY
+        // products too — a BrandModel needs no price.
+        if (catalogue.Count == 0 && _factory.HasLlm() && GeoProfiles.Resolve(countryCode) is { } market)
+        {
+            catalogue = await LlmHarvestAsync(brand.Name, siteUrl ?? brand.Website, market, ct)
+                .ConfigureAwait(false);
         }
 
         var harvested = 0;
@@ -214,6 +229,59 @@ public sealed class BrandCatalogService : IBrandCatalogService
         }
 
         return harvested;
+    }
+
+    /// <summary>
+    /// Renders the brand's own site and names its products with the agent's LLM listing extractor — the
+    /// worker-INDEPENDENT fallback for a brand site no structured provider can parse (Context.dev returned
+    /// an empty products array, or a 400 it could not resolve). The ambient per-job observer rides along so
+    /// the LLM call is metered like every other. Best-effort: empty on any failure, so a brand that yields
+    /// nothing simply harvests nothing.
+    /// </summary>
+    private async Task<IReadOnlyList<CatalogProduct>> LlmHarvestAsync(
+        string brandName, string? siteUrl, Daleel.Core.Geo.GeoProfile market, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(siteUrl))
+        {
+            return Array.Empty<CatalogProduct>();
+        }
+
+        try
+        {
+            var agent = _factory.Build(new AgentRequest
+            {
+                Geo = market.Key,
+                ApiObserver = Daleel.Core.Observability.AmbientApiObserver.Observer,
+                CostEstimator = Daleel.Core.Observability.AmbientApiObserver.Estimator
+            });
+
+            var page = await agent.ReadPageAsync(siteUrl!, ct).ConfigureAwait(false);
+            if (page is not { Content.Length: > 0 })
+            {
+                return Array.Empty<CatalogProduct>();
+            }
+
+            var listings = await agent
+                .ExtractProductsFromPageAsync(page.Content, brandName, market, ct).ConfigureAwait(false);
+
+            return listings
+                .Where(l => !string.IsNullOrWhiteSpace(l.Name))
+                .Select(l => new CatalogProduct
+                {
+                    Name = l.Name,
+                    Price = l.Price,
+                    Currency = l.Currency,
+                    Url = l.Url,
+                    ImageUrl = l.ImageUrl
+                })
+                .ToList();
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "LLM brand catalogue fallback failed for {Brand}", brandName);
+            return Array.Empty<CatalogProduct>();
+        }
     }
 
     /// <summary>Serializes a catalogue product's free-form detail (description/SKU) as a small JSON object.</summary>
