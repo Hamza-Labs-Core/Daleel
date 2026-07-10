@@ -102,6 +102,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IProductProfileRepository _repo;
     private readonly ProfileOptions _options;
     private readonly IAgentFactory _factory;
+    private readonly Storage.IR2StorageService? _r2;
     private readonly IBrandRepository _brands;
     private readonly IBrandModelRepository _brandModels;
     private readonly Identification.IProductIdentifier _identifier;
@@ -137,11 +138,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         IBrandRepository brands, IBrandModelRepository brandModels,
         Identification.IProductIdentifier identifier,
         ILogger<ItemEnrichmentService> logger,
-        Services.IProviderApi? providers = null)
+        Services.IProviderApi? providers = null,
+        Storage.IR2StorageService? r2 = null)
     {
         _repo = repo;
         _options = options;
         _factory = factory;
+        _r2 = r2;
         _scrapedPrices = scrapedPrices;
         _brandCatalog = brandCatalog;
         _brands = brands;
@@ -1487,7 +1490,44 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             catch { page = null; }
         }
 
+        await SaveHarvestPageAsync(url, page, ct).ConfigureAwait(false);
         return page;
+    }
+
+    /// <summary>
+    /// Persists every fetched harvest page to R2 — the save-everything rule the edge results
+    /// already follow. A paid fetch that lives only in one method call can't be replayed: when
+    /// extraction returns nothing, the page IS the evidence (and the test fixture), and
+    /// re-fetching it costs money the first fetch already spent. Best-effort by contract.
+    /// </summary>
+    private async Task SaveHarvestPageAsync(string url, ScrapedPage? page, CancellationToken ct)
+    {
+        if (_r2 is not { IsConfigured: true } || page is null || string.IsNullOrWhiteSpace(page.Content))
+        {
+            return;
+        }
+
+        try
+        {
+            var host = Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host : "unknown";
+            var slug = new string(url.Where(char.IsLetterOrDigit).TakeLast(40).ToArray());
+            var key = $"harvest/{_options.Now():yyyyMMdd}/{host}/{slug}.json";
+            await _r2.StoreJsonAsync(
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    url,
+                    fetchedAt = _options.Now(),
+                    provider = page.Provider,
+                    chars = page.Content!.Length,
+                    content = page.Content
+                }),
+                key, Storage.R2Bucket.Logs, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Saving harvest page for {Url} failed (best-effort)", url);
+        }
     }
 
     /// <summary>
