@@ -48,7 +48,8 @@ internal sealed class LoggingSearchProvider : ISearchProvider
     public Task<SearchResults> SearchAsync(SearchQuery query, CancellationToken cancellationToken = default) =>
         ApiCallTimer.TimeAsync(_observer, _estimator, _inner.Name, query.Kind.ToString().ToLowerInvariant(),
             query.Query, () => _inner.SearchAsync(query, cancellationToken),
-            r => r.Results.Sum(x => (long)((x.Title?.Length ?? 0) + (x.Snippet?.Length ?? 0))));
+            r => r.Results.Sum(x => (long)((x.Title?.Length ?? 0) + (x.Snippet?.Length ?? 0))),
+            describe: r => $"{r.Results.Count} result(s)");
 }
 
 internal class LoggingScrapeProvider : IScrapeProvider
@@ -64,7 +65,10 @@ internal class LoggingScrapeProvider : IScrapeProvider
 
     public Task<ScrapedPage> ScrapeAsync(string url, ScrapeFormat format = ScrapeFormat.Markdown, CancellationToken cancellationToken = default) =>
         ApiCallTimer.TimeAsync(Observer, Estimator, Inner.Name, $"scrape/{format.ToString().ToLowerInvariant()}",
-            url, () => Inner.ScrapeAsync(url, format, cancellationToken), p => p.Content?.Length ?? 0);
+            url, () => Inner.ScrapeAsync(url, format, cancellationToken), p => p.Content?.Length ?? 0,
+            // "empty" vs "N chars" is the whole efficiency story for a paid render — 40 blank
+            // harvest renders hid behind a dash here while billing $0.005 each.
+            describe: p => p is { Content.Length: > 0 } ? $"{p.Content.Length:N0} chars" : "empty");
 }
 
 internal sealed class LoggingScrapeExtractProvider : LoggingScrapeProvider, IExtractProvider
@@ -76,7 +80,8 @@ internal sealed class LoggingScrapeExtractProvider : LoggingScrapeProvider, IExt
 
     public Task<JsonElement> ExtractAsync(string url, object jsonSchema, CancellationToken cancellationToken = default) =>
         ApiCallTimer.TimeAsync(Observer, Estimator, Inner.Name, "extract",
-            url, () => _extract.ExtractAsync(url, jsonSchema, cancellationToken), e => e.GetRawText().Length);
+            url, () => _extract.ExtractAsync(url, jsonSchema, cancellationToken), e => e.GetRawText().Length,
+            describe: e => $"{e.GetRawText().Length:N0} chars");
 }
 
 internal sealed class LoggingPlacesProvider : IPlacesProvider
@@ -93,20 +98,24 @@ internal sealed class LoggingPlacesProvider : IPlacesProvider
     public Task<IReadOnlyList<StoreLocation>> SearchStoresAsync(
         string query, GeoPoint? near = null, double radiusMeters = 5000, string? languageCode = null, CancellationToken cancellationToken = default) =>
         ApiCallTimer.TimeAsync(_observer, _estimator, _inner.Name, "places/text-search",
-            query, () => _inner.SearchStoresAsync(query, near, radiusMeters, languageCode, cancellationToken), r => r.Count);
+            query, () => _inner.SearchStoresAsync(query, near, radiusMeters, languageCode, cancellationToken), r => r.Count,
+            describe: r => $"{r.Count} place(s)");
 
     public Task<IReadOnlyList<StoreLocation>> GetNearbyStoresAsync(
         GeoPoint center, double radiusMeters, string? type = null, CancellationToken cancellationToken = default) =>
         ApiCallTimer.TimeAsync(_observer, _estimator, _inner.Name, "places/nearby",
-            type, () => _inner.GetNearbyStoresAsync(center, radiusMeters, type, cancellationToken), r => r.Count);
+            type, () => _inner.GetNearbyStoresAsync(center, radiusMeters, type, cancellationToken), r => r.Count,
+            describe: r => $"{r.Count} place(s)");
 
     public Task<StoreLocation?> GetPlaceDetailsAsync(string placeId, CancellationToken cancellationToken = default) =>
         ApiCallTimer.TimeAsync(_observer, _estimator, _inner.Name, "places/details",
-            placeId, () => _inner.GetPlaceDetailsAsync(placeId, cancellationToken));
+            placeId, () => _inner.GetPlaceDetailsAsync(placeId, cancellationToken),
+            describe: r => r is null ? "no match" : "details");
 
     public Task<IReadOnlyList<StoreReview>> GetPlaceReviewsAsync(string placeId, CancellationToken cancellationToken = default) =>
         ApiCallTimer.TimeAsync(_observer, _estimator, _inner.Name, "places/reviews",
-            placeId, () => _inner.GetPlaceReviewsAsync(placeId, cancellationToken), r => r.Count);
+            placeId, () => _inner.GetPlaceReviewsAsync(placeId, cancellationToken), r => r.Count,
+            describe: r => $"{r.Count} review(s)");
 }
 
 internal sealed class LoggingPostFetcher : IPostFetcher
@@ -121,5 +130,6 @@ internal sealed class LoggingPostFetcher : IPostFetcher
 
     public Task<IReadOnlyList<SocialPost>> FetchAsync(Source source, string? keyword = null, CancellationToken cancellationToken = default) =>
         ApiCallTimer.TimeAsync(_observer, _estimator, _provider, "social/fetch",
-            keyword ?? source.Target, () => _inner.FetchAsync(source, keyword, cancellationToken), r => r.Count);
+            keyword ?? source.Target, () => _inner.FetchAsync(source, keyword, cancellationToken), r => r.Count,
+            describe: r => $"{r.Count} post(s)");
 }

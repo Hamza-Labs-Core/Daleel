@@ -317,7 +317,8 @@ public sealed class ProviderApi : IProviderApi
 
         return await MeterAsync(
             "workers-ai/classify", "classify/text", $"{items.Count} item(s)",
-            () => _fleet.ClassifyTextAsync(items, labels, ct)).ConfigureAwait(false);
+            () => _fleet.ClassifyTextAsync(items, labels, ct),
+            describe: r => $"{r.Count} verdict(s)").ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<CatalogProduct>> ExtractProductsFromContentAsync(
@@ -330,7 +331,8 @@ public sealed class ProviderApi : IProviderApi
 
         return await MeterAsync(
             "workers-ai/extract", "extract/products", $"{content.Length} chars",
-            () => _fleet.ExtractProductsAsync(content, market, ct)).ConfigureAwait(false);
+            () => _fleet.ExtractProductsAsync(content, market, ct),
+            describe: r => $"{r.Count} product(s)").ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<Cloudflare.FilterFindingDto>> FilterTextFindingsAsync(
@@ -343,7 +345,8 @@ public sealed class ProviderApi : IProviderApi
 
         return await MeterAsync(
             "workers-ai/filter", "filter/text", $"{items.Count} item(s)",
-            () => _fleet.FilterTextAsync(items, ct)).ConfigureAwait(false);
+            () => _fleet.FilterTextAsync(items, ct),
+            describe: r => $"{r.Count} finding(s)").ConfigureAwait(false);
     }
 
     public async Task<IReadOnlyList<Cloudflare.FilterFindingDto>> FilterImageFindingsAsync(
@@ -356,7 +359,8 @@ public sealed class ProviderApi : IProviderApi
 
         return await MeterAsync(
             "workers-ai/filter", "filter/images", $"{urls.Count} url(s)",
-            () => _fleet.FilterImagesAsync(urls, ct)).ConfigureAwait(false);
+            () => _fleet.FilterImagesAsync(urls, ct),
+            describe: r => $"{r.Count} finding(s)").ConfigureAwait(false);
     }
 
     private bool HasSearchProxy =>
