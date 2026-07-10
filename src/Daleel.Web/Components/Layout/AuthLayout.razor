@@ -4,7 +4,9 @@
    form post keeps working, so this layout must avoid anything interactive — no MudLayout/drawer/menus.
    It just supplies MudBlazor styling (a static MudThemeProvider emits the brand CSS variables) and RTL,
    then centres the page content. (Login and register now use the standard themed MainLayout.) *@
-<MudThemeProvider Theme="_theme" />
+@* IsDarkMode matches the app-wide default (dark unless the user chose otherwise) — a static page
+   can't read localStorage, so it shows the default rather than flashing light at logged-out users. *@
+<MudThemeProvider Theme="_theme" IsDarkMode="true" />
 
 <MudRTLProvider RightToLeft="@RightToLeft">
     <MudContainer MaxWidth="MaxWidth.Small" Class="py-8">
