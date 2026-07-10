@@ -1367,13 +1367,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         var harvested = await Task.WhenAll(domains.Select(async domain =>
         {
             var url = ProductSearchUrl(domain, query);
-            ScrapedPage? page;
-            try
-            {
-                page = await agent.ReadPageAsync(url, ct);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch { page = null; }
+            var page = await FetchHarvestPageAsync(agent, url, ct);
 
             var prices = page is null || string.IsNullOrWhiteSpace(page.Content)
                 ? new List<BrowserPrice>()
@@ -1444,6 +1438,9 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 }
             }
 
+            _logger.LogInformation(
+                "Harvest {Domain}: {Chars} chars via {Provider}, {Prices} price line(s) (edgeExtract={Edge}, llm={Llm})",
+                domain, page?.Content?.Length ?? 0, page?.Provider ?? "none", prices.Count, usedEdgeExtract, usedLlm);
             record?.Invoke(EventCategory.Extract, "catalog.browser", page?.Provider ?? "cloudflare-browser",
                 new Dictionary<string, object?>
                 {
@@ -1456,6 +1453,38 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return harvested.SelectMany(h => h).ToList();
     }
 
+
+    /// <summary>
+    /// Fetches one harvest page: server-side markdown FIRST (these storefronts serve their search
+    /// grids fine to a plain fetch, and it costs a quarter of a render), browser render as the
+    /// fallback for pages that genuinely need JS. The browser-first order was backwards here — a
+    /// snapshot can fire before a storefront hydrates its results client-side, returning a JS
+    /// skeleton: an empty page we still paid to render (QA: 35 of 40 harvest renders came back
+    /// empty, so neither extract fallback ever fired and 40 real store searches seeded 0 items).
+    /// </summary>
+    private async Task<ScrapedPage?> FetchHarvestPageAsync(AgentService agent, string url, CancellationToken ct)
+    {
+        ScrapedPage? page = null;
+        try
+        {
+            page = await _providers.ScrapePageAsync(url, ScrapeFormat.Markdown, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { page = null; }
+
+        if (page is null || string.IsNullOrWhiteSpace(page.Content))
+        {
+            try
+            {
+                page = await agent.ReadPageAsync(url, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { page = null; }
+        }
+
+        return page;
+    }
+
     /// <summary>
     /// Renders and extracts ONE explicit page (the store url discovery actually returned — e.g. a
     /// query-relevant collection page) into browser-price lines. Same parse → edge-extract fallback
@@ -1464,14 +1493,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private async Task<IReadOnlyList<BrowserPrice>> HarvestPageAsync(
         AgentService agent, string domain, string url, CancellationToken ct)
     {
-        ScrapedPage? page;
-        try
-        {
-            page = await agent.ReadPageAsync(url, ct);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch { page = null; }
-
+        var page = await FetchHarvestPageAsync(agent, url, ct);
         if (page is null || string.IsNullOrWhiteSpace(page.Content))
         {
             return Array.Empty<BrowserPrice>();
