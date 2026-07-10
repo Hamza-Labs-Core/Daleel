@@ -370,6 +370,15 @@ public sealed partial class AgentService
 
         // (2) One part per scraped page — FULL content (capped), NO 3-page limit. Store listing pages carry
         // the product density, so each is its own bounded extraction call.
+        // Each page: STRIP the chrome first (deterministic, no LLM), then SPLIT what remains into
+        // bounded chunks — one extraction call per chunk, so no part of a big page is ever thrown
+        // away. The old head-truncate (content[..maxPageChars]) fed the extractor whatever a page
+        // STARTS with — on a retailer's search page that is navigation and cookie banners while
+        // the product grid sits past the cap, so extraction correctly answered "no products" to
+        // pages full of them (QA: 51k-char pages read as ~10k of nav, 0 extracted). Chunks are
+        // gathered per page and round-robin flattened so the global parts cap never starves a
+        // later page because an earlier one was long.
+        var perPage = new List<List<ExtractionPart>>();
         foreach (var page in bundle.Pages)
         {
             if (string.IsNullOrWhiteSpace(page.Content))
@@ -377,11 +386,118 @@ public sealed partial class AgentService
                 continue;
             }
 
-            var content = page.Content.Length > maxPageChars ? page.Content[..maxPageChars] + "…" : page.Content;
-            parts.Add(new ExtractionPart($"page:{page.Url}", $"# Page: {page.Url}\n{content}"));
+            var chunks = ChunkForExtraction(CleanForExtraction(page.Content), maxPageChars);
+            var pageParts = new List<ExtractionPart>(chunks.Count);
+            for (var i = 0; i < chunks.Count; i++)
+            {
+                var label = chunks.Count == 1 ? $"page:{page.Url}" : $"page:{page.Url}#{i + 1}";
+                pageParts.Add(new ExtractionPart(label, $"# Page: {page.Url}\n{chunks[i]}"));
+            }
+
+            perPage.Add(pageParts);
+        }
+
+        for (var round = 0; perPage.Any(p => round < p.Count); round++)
+        {
+            foreach (var pageParts in perPage.Where(p => round < p.Count))
+            {
+                parts.Add(pageParts[round]);
+            }
         }
 
         return parts;
+    }
+
+    /// <summary>
+    /// Deterministic pre-LLM strip of page chrome. Language-neutral by design — it keys on SHAPE,
+    /// not vocabulary: image-only markdown lines carry no extractable text, and a short line that
+    /// repeats 3+ times across one page is a menu/button ("Add to cart", a nav entry rendered at
+    /// top and bottom), never a distinct product. Product lines survive because a grid row carries
+    /// a unique name (and usually a price), so it neither repeats nor is image-only. Blank runs
+    /// collapse so the budget buys content, not whitespace.
+    /// </summary>
+    internal static string CleanForExtraction(string content)
+    {
+        var lines = content.Split('\n');
+        var counts = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var line in lines)
+        {
+            var t = line.Trim();
+            if (t.Length is > 0 and < 60)
+            {
+                counts[t] = counts.GetValueOrDefault(t) + 1;
+            }
+        }
+
+        var sb = new StringBuilder(content.Length);
+        var blankRun = 0;
+        foreach (var line in lines)
+        {
+            var t = line.Trim();
+            if (t.Length == 0)
+            {
+                if (++blankRun > 1)
+                {
+                    continue;
+                }
+
+                sb.AppendLine();
+                continue;
+            }
+
+            blankRun = 0;
+            if (t.StartsWith("![", StringComparison.Ordinal) ||
+                (t.Length < 60 && counts.GetValueOrDefault(t) >= 3 && !t.Any(char.IsDigit)))
+            {
+                continue;
+            }
+
+            sb.AppendLine(line);
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Splits cleaned content into chunks of at most <paramref name="maxChars"/> on line
+    /// boundaries. NOTHING is dropped — a page bigger than one extraction call becomes several
+    /// calls, and the caller's per-part fan-out plus the global parts cap bound the total spend.
+    /// </summary>
+    internal static IReadOnlyList<string> ChunkForExtraction(string content, int maxChars)
+    {
+        if (maxChars <= 0 || content.Length <= maxChars)
+        {
+            return new[] { content };
+        }
+
+        var chunks = new List<string>();
+        var current = new StringBuilder(maxChars);
+        foreach (var line in content.Split('\n'))
+        {
+            // A single line longer than the budget is force-flushed as its own chunk rather than
+            // silently dropped (minified single-line pages still get read).
+            if (current.Length > 0 && current.Length + line.Length + 1 > maxChars)
+            {
+                chunks.Add(current.ToString());
+                current.Clear();
+            }
+
+            current.AppendLine(line);
+            while (current.Length > maxChars)
+            {
+                var s = current.ToString();
+                chunks.Add(s[..maxChars]);
+                current.Clear();
+                current.Append(s[maxChars..]);
+            }
+        }
+
+        if (current.Length > 0)
+        {
+            chunks.Add(current.ToString());
+        }
+
+        return chunks;
     }
 
     /// <summary>Appends one web result as a context bullet (title — snippet (url) [image]).</summary>

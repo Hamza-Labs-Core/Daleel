@@ -592,6 +592,81 @@ public class AgentServiceTests
         listings.Should().BeEmpty();
         calls.Should().Be(0);
     }
+
+    // ── Pre-LLM strip + split: the extractor must never read truncated chrome ────────────────────
+    // QA evidence that motivated these: a retailer's 51k-char search page reached the LLM as ~10k
+    // chars of head-sliced navigation, so it answered "no products" to a page full of them.
+
+    [Fact]
+    public void CleanForExtraction_StripsChrome_KeepsTheProductGrid()
+    {
+        var menu = string.Join('\n', Enumerable.Repeat("[Sign in](/account) | [Cart](/cart)", 4));
+        var page = menu + "\n\n\n\n![logo](https://x/logo.png)\n" +
+                   "Philips Airfryer XL — 119 JOD\nTefal Easy Fry — 89 JOD\n" + menu;
+
+        var cleaned = AgentService.CleanForExtraction(page);
+
+        cleaned.Should().NotContain("[Sign in]", "a short line repeated 3+ times is a menu, never a product");
+        cleaned.Should().NotContain("![logo]", "image-only lines carry no extractable text");
+        cleaned.Should().Contain("Philips Airfryer XL — 119 JOD").And.Contain("Tefal Easy Fry — 89 JOD");
+        cleaned.Should().NotContain("\n\n\n", "blank runs collapse so the budget buys content");
+    }
+
+    [Fact]
+    public void CleanForExtraction_NeverDropsRepeatedLinesThatCarryNumbers()
+    {
+        // Grid rows can legitimately repeat ("500 W" spec lines, identical variant prices) — the
+        // repeat rule only fires on digit-free lines, so real data survives.
+        var page = string.Join('\n', Enumerable.Repeat("500 W motor — 25 JOD", 5));
+
+        AgentService.CleanForExtraction(page).Should().Contain("500 W motor — 25 JOD");
+    }
+
+    [Fact]
+    public void ChunkForExtraction_SplitsWithoutDroppingAnything()
+    {
+        // ~100k chars of product lines: the old head-truncate kept 40k and discarded the rest —
+        // every line must now land in SOME chunk, each chunk within the per-call budget.
+        var lines = Enumerable.Range(1, 2000).Select(i => $"Product number {i} — {i} JOD").ToList();
+        var content = string.Join('\n', lines);
+
+        var chunks = AgentService.ChunkForExtraction(content, maxChars: 40_000);
+
+        chunks.Count.Should().BeGreaterThan(1);
+        chunks.Should().OnlyContain(c => c.Length <= 40_000 + 200, "each chunk is one bounded LLM call");
+        var reassembled = string.Concat(chunks);
+        reassembled.Should().Contain("Product number 1 —").And.Contain("Product number 2000 —",
+            "the tail of a long page is exactly where the old truncation lost the grid");
+    }
+
+    [Fact]
+    public void ChunkForExtraction_SmallContent_IsASingleUntouchedChunk()
+    {
+        AgentService.ChunkForExtraction("one small page", maxChars: 40_000)
+            .Should().ContainSingle().Which.Should().Be("one small page");
+    }
+
+    [Fact]
+    public async Task ExtractProductsFromPageAsync_ReadsTheWholeOversizedPage_InBoundedCalls()
+    {
+        // A synthetic retailer page: 3 repeated menu blocks, then the grid far past the per-call
+        // cap. The LLM must be called MORE than once (split, not truncated), and at least one call
+        // must carry the FINAL product — the content the head-slice used to discard.
+        var menu = string.Join('\n', Enumerable.Repeat("[Home](/) [Deals](/deals) [Help](/help)", 6));
+        var grid = string.Join('\n', Enumerable.Range(1, 1500).Select(i => $"Kettle model K{i} — {i} JOD"));
+        var page = menu + "\n" + grid;
+
+        var prompts = new List<string>();
+        var llm = new FakeLlmClient(system => "{ \"products\": [] }", user => prompts.Add(user));
+        var agent = new AgentService(llm, new AgentOptions { DefaultGeo = "jordan", Clock = () => FixedNow });
+
+        await agent.ExtractProductsFromPageAsync(page, "electric kettle", GeoProfiles.Jordan);
+
+        prompts.Count.Should().BeGreaterThan(1, "an oversized page becomes several bounded calls, not one truncated call");
+        prompts.Should().Contain(p => p.Contains("Kettle model K1500"),
+            "the tail of the grid must reach the LLM — losing it was the whole bug");
+        prompts.Should().NotContain(p => p.Contains("[Home](/)"), "chrome is stripped before the LLM ever reads");
+    }
 }
 
 /// <summary>Minimal scraper that returns a fixed page, for exercising AgentService.ReadPageAsync.</summary>
