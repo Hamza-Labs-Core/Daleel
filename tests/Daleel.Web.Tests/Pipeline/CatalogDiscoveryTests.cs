@@ -113,4 +113,35 @@ public class CatalogDiscoveryTests
         created.Should().BeEmpty("without query context there is no relevance gate, so nothing is invented");
         models.Should().HaveCount(1);
     }
+
+    [Fact]
+    public void Query_scoped_page_entries_bypass_the_name_gate_cross_language()
+    {
+        // QA live find: the store's own search for "rice cooker" returned an Arabic-named cooker —
+        // "طنجرة أرز" shares zero tokens with "rice cooker", and the English-token gate dropped a
+        // correct product. Entries from the store's OWN query-scoped search page are trusted: the
+        // store's engine already matched them, in its own language.
+        var (models, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
+            new List<ProductModel>(),
+            new[] { Entry("طنجرة أرز كهربائية 1.8 لتر بطهي سريع وفعال") },
+            storeName: "متجر عمان", query: "rice cooker in amman", geo: "jordan",
+            fromQueryScopedPage: true);
+
+        created.Should().ContainSingle().Which.Should().Contain("طنجرة أرز");
+        models.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void Domain_wide_entries_keep_the_name_gate()
+    {
+        // Same Arabic entry from a DOMAIN-WIDE catalogue (whole store, any category) must still be
+        // gated — without the source page's query scoping, an unmatched name is just noise.
+        var (models, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
+            new List<ProductModel>(),
+            new[] { Entry("طنجرة أرز كهربائية 1.8 لتر") },
+            storeName: "متجر عمان", query: "rice cooker in amman", geo: "jordan");
+
+        created.Should().BeEmpty();
+        models.Should().BeEmpty();
+    }
 }

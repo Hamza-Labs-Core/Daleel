@@ -496,15 +496,23 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // catalogue used to contribute zero items unless web extraction had already named them).
         // The LLM-named products join them, priced or not: an unpriced item the shopper can still
         // click through to is worth infinitely more than an empty grid.
+        // Two trust levels: the vendor POOL is a domain-wide crawl (whole store, any category) and
+        // keeps the query-name gate; the browser/LLM entries came off the store's own SEARCH page
+        // for this query, so the store already matched them — cross-language included.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated,
-            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false))
-                .Concat(browserPrices.Select(b =>
-                    (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)))
+            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false)),
+            storeName, query, geo);
+        var (withHarvested, harvestedCreated) = AppendCatalogDiscoveries(
+            withNew,
+            browserPrices.Select(b =>
+                    (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true))
                 .Concat(llmSeed
                     .Where(l => !string.IsNullOrWhiteSpace(l.Name))
                     .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, Indicative: l.Price is null))),
-            storeName, query, geo);
+            storeName, query, geo, fromQueryScopedPage: true);
+        withNew = withHarvested;
+        created = created.Concat(harvestedCreated).ToList();
 
         // Second chance on the DISCOVERED page: a general store's root crawl can return inventory
         // that has nothing to do with the query (jo-cell.com root is phones; its espresso machines
@@ -523,7 +531,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                     withNew,
                     entryPrices.Select(b =>
                         (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)),
-                    storeName, query, geo);
+                    storeName, query, geo, fromQueryScopedPage: true);
                 withNew = withEntry;
                 created = created.Concat(entryCreated).ToList();
             }
@@ -1735,11 +1743,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     public static (List<ProductModel> Models, List<string> Created) AppendCatalogDiscoveries(
         List<ProductModel> models,
         IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)> entries,
-        string? storeName, string? query, string? geo = null)
+        string? storeName, string? query, string? geo = null, bool fromQueryScopedPage = false)
     {
         var queryTokens = SignificantQueryTokens(query, geo);
         var created = new List<string>();
-        if (queryTokens.Count == 0)
+        if (queryTokens.Count == 0 && !fromQueryScopedPage)
         {
             return (models, created);
         }
@@ -1759,8 +1767,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             }
 
             var key = IdentityKey(e.Name);
-            if (key.StartsWith('|') || !seen.Add(key) ||
-                !NameMatchesQuery(e.Name, queryTokens) || MatchedByAnyModel(e.Name, models))
+            if (key.StartsWith('|') || !seen.Add(key) || MatchedByAnyModel(e.Name, models))
+            {
+                continue;
+            }
+
+            // The name gate keeps accessories out of DOMAIN-WIDE catalogues — but an entry harvested
+            // from the store's OWN search results for this query was already matched by the store's
+            // engine, in the store's language. Token-matching English query words against an Arabic
+            // product name here rejected correct products ("rice cooker" vs "طنجرة أرز" shares zero
+            // tokens; QA extracted the right cooker and this line dropped it). Trust the source page.
+            if (!fromQueryScopedPage && !NameMatchesQuery(e.Name, queryTokens))
             {
                 continue;
             }
