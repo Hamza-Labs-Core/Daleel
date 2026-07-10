@@ -246,6 +246,12 @@ public sealed class CloudflarePollDrainService : BackgroundService
             JsonSerializer.Serialize(new { persistedAt = DateTimeOffset.UtcNow, rows = rows.Count }),
             markerKey, R2Bucket.Data, ct).ConfigureAwait(false);
 
+        // The rows are persisted — now make the SEARCH consume them. Catalog units are fully
+        // event-driven (they submit-and-finish, never poll a timer), so this enqueue IS the event
+        // that turns a landed crawl into grid items. Post-marker and best-effort: a lost enqueue
+        // degrades to an unattached catalogue, never a duplicate persist.
+        await EnqueueAttachAsync(msg, store, rows.Count, ct).ConfigureAwait(false);
+
         await MeterDrainAsync(msg, ct).ConfigureAwait(false);
 
         await PublishEventAsync(msg, success: true,
@@ -362,6 +368,62 @@ public sealed class CloudflarePollDrainService : BackgroundService
             summary: $"Edge brand harvest for {brandName}: {harvested} model(s) persisted",
             ct).ConfigureAwait(false);
         return Outcome.Ack;
+    }
+
+    /// <summary>
+    /// Enqueues the catalogue-attach work unit for a search job whose edge crawl just landed —
+    /// the event that turns persisted price rows into grid items. The catalog units are
+    /// deliberately timer-free (submit-and-finish), so without this producer a crawl completing
+    /// after the fan-out would be paid for, persisted, and never attached. Identity fields
+    /// (user/history/result-type) are cloned from a prior unit of the same job — the exact items
+    /// whose early completion this enqueue compensates; a job with no queue history has no
+    /// patchable answer, so it is skipped. Best-effort by contract: a failure here must never
+    /// fail (or retry) a drain that already persisted.
+    /// </summary>
+    private async Task EnqueueAttachAsync(PollMessage msg, string store, int pricedRows, CancellationToken ct)
+    {
+        if (pricedRows == 0 || !int.TryParse(msg.SearchJobId, out var jobId))
+        {
+            return; // nothing attachable, or an ad-hoc crawl with no owning search
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetService<DaleelDbContext>();
+            var queue = scope.ServiceProvider.GetService<Pipeline.Enrichment.IEnrichmentWorkQueue>();
+            if (db is null || queue is null)
+            {
+                return; // test wiring without the queue — drain-only behavior
+            }
+
+            var parent = await db.EnrichmentWorkItems.AsNoTracking()
+                .Where(w => w.SearchJobId == jobId)
+                .OrderByDescending(w => w.Id)
+                .FirstOrDefaultAsync(ct).ConfigureAwait(false);
+            if (parent is null)
+            {
+                _logger.LogDebug(
+                    "Drained catalogue for job {JobId} has no enrichment history — skipping attach", jobId);
+                return;
+            }
+
+            var domain = FirstNonEmpty(msg.Domain, store) ?? store;
+            await queue.EnqueueAsync(new[]
+            {
+                Pipeline.Enrichment.HandlerHelpers.Child(parent, Pipeline.Enrichment.EnrichmentUnit.CatalogAttach,
+                    Pipeline.Enrichment.EnrichmentWorkQueue.Payload(
+                        new Pipeline.Enrichment.CatalogPayload(domain, store, FromDrain: true)),
+                    maxAttempts: 2)
+            }, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Enqueueing the catalogue attach for job {JobId} failed (best-effort) — " +
+                "the drained rows stay unattached until another unit reads them", msg.SearchJobId);
+        }
     }
 
     /// <summary>

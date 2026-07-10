@@ -481,16 +481,18 @@ public sealed class VisionUnitHandler : IEnrichmentUnitHandler
 }
 
 /// <summary>
-/// One store domain's catalogue attach. Drain-aware: prices the edge scrape-worker already landed in
-/// <c>ScrapedPrices</c> are matched FIRST (no vendor spend, no double-crawl); when the edge is on and
-/// nothing has landed yet, the unit politely waits via retry — the queue, not a timeout, mediates
-/// the race with the drain. Only after those attempts does it crawl inline as a fallback.
+/// One store domain's catalogue attach — fully event-driven, NO timers. Prices the edge
+/// scrape-worker already landed in <c>ScrapedPrices</c> are matched FIRST (no vendor spend); when
+/// the edge is on and nothing has landed yet, the unit submits the crawl (the worker dedupes
+/// re-submits via its deterministic result key + in-flight marker, so a domain the base run
+/// already submitted is never crawled twice) and finishes — the poll drain enqueues a
+/// <see cref="CatalogPayload.FromDrain"/> attach unit the moment the result lands, however long
+/// the vendor takes. A unit never polls a timer racing the drain: the old wait-3×45s-then-crawl-
+/// inline choreography both double-paid (edge crawl still running + inline crawl) and orphaned
+/// any result landing after the window. Inline crawling remains only where no edge exists.
 /// </summary>
 public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
 {
-    /// <summary>Attempts spent waiting on the edge drain before crawling inline.</summary>
-    private const int DrainWaitAttempts = 3;
-
     public string Kind => EnrichmentUnit.CatalogAttach;
     public async Task<UnitOutcome> ExecuteAsync(
         EnrichmentWorkItem item, EnrichmentUnitContext ctx, CancellationToken ct)
@@ -522,16 +524,32 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
             return UnitOutcome.Ok;
         }
 
+        if (payload.FromDrain)
+        {
+            // This unit exists because a drained result LANDED and its rows are already persisted;
+            // nothing matching means this crawl offers the answer nothing. Never submit again and
+            // never crawl inline — re-processing paid data must not spend.
+            return UnitOutcome.Ok;
+        }
+
         var providers = ctx.Services.GetRequiredService<IProviderApi>();
-        // EdgeDrainReady, not just HasEdge: without the full return path (poll queue + R2) the
-        // submit sites all stay inline, so no drain result can EVER arrive for this domain —
-        // waiting for one would just delay every store's enrichment by the full retry budget.
+        // EdgeDrainReady, not just HasEdge: without the full return path (poll queue + R2) a
+        // submit would strand the result permanently — only the complete edge path replaces inline.
         var edgeActive = providers.HasEdge && providers.EdgeDrainReady && config is not null &&
             await config.GetBoolAsync(Cloudflare.CloudflareWorkerOptions.EnabledFlag, false, ct);
-        if (edgeActive && item.Attempts <= DrainWaitAttempts)
+        if (edgeActive)
         {
-            return new UnitOutcome.Retry(
-                $"awaiting edge drain for {payload.Domain}", TimeSpan.FromSeconds(45));
+            var maxProducts = config is null
+                ? 0
+                : await config.GetIntAsync(Cloudflare.CloudflareWorkerOptions.CatalogMaxProductsKey, 0, ct);
+            var handle = await providers.SubmitEdgeCatalogAsync(
+                payload.Domain, payload.StoreName, item.SearchJobId.ToString(), maxProducts, ct);
+            if (handle is not null)
+            {
+                return UnitOutcome.Ok; // the drain re-enqueues the attach the moment the crawl lands
+            }
+            // Worker unreachable/rejecting right now — degrade to the inline crawl below,
+            // exactly like the base run's submit path does.
         }
 
         var (inline, inlinePriced, inlineCreated) = await svc.AttachCatalogForDomainAsync(

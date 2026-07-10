@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Daleel.Web.Cloudflare;
 using Daleel.Web.Data;
+using Daleel.Web.Pipeline.Enrichment;
 using Daleel.Web.Events;
 using Daleel.Web.Storage;
 using FluentAssertions;
@@ -211,6 +212,68 @@ public class CloudflareExecutionTests
         fixture.Queue.Acked.Should().ContainSingle();
         fixture.R2.Objects.Keys.Should().Contain("qa/r.json.persisted", "the idempotency marker is written");
         fixture.Events.Published.Should().ContainSingle(e => e.EventType == "store.prices.drained");
+    }
+
+    [Fact]
+    public async Task Drain_EnqueuesTheCatalogAttach_ForTheOwningSearch()
+    {
+        // The catalog units are timer-free (submit-and-finish), so THIS enqueue is the only event
+        // that turns a landed crawl into grid items — a drain that persists rows without producing
+        // the attach unit recreates the paid-for-but-never-attached hole.
+        using var db = new Daleel.Web.Tests.Data.PostgresTestContext();
+        db.Db.EnrichmentWorkItems.Add(new EnrichmentWorkItem
+        {
+            SearchJobId = 42, UserId = "u1", HistoryEntryId = 3, ResultType = "products",
+            Kind = EnrichmentUnit.Plan, Payload = "{}", Status = WorkItemStatus.Done
+        });
+        await db.Db.SaveChangesAsync();
+
+        var enrichQueue = new RecordingEnrichQueue();
+        var fixture = new DrainFixture(db.Db, enrichQueue);
+        fixture.Worker.Results["qa/r.json"] = new CatalogResultDoc
+        {
+            Kind = "catalog", Domain = "store.example", Store = "ABC Store", SearchJobId = "42",
+            CapturedAt = new DateTimeOffset(2026, 7, 9, 10, 0, 0, TimeSpan.Zero),
+            ProductCount = 1,
+            Products = { new() { Name = "Espresso X", Price = 139m, Currency = "JOD" } }
+        };
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        var unit = enrichQueue.Enqueued.Should().ContainSingle().Subject;
+        unit.Kind.Should().Be(EnrichmentUnit.CatalogAttach);
+        unit.SearchJobId.Should().Be(42);
+        unit.UserId.Should().Be("u1", "identity is cloned from the job's own enrichment history");
+        unit.HistoryEntryId.Should().Be(3);
+        var payload = EnrichmentWorkQueue.ReadPayload<CatalogPayload>(unit.Payload);
+        payload!.FromDrain.Should().BeTrue("the attach unit must never spend — it re-reads persisted rows");
+        payload.Domain.Should().Be("store.example");
+    }
+
+    [Fact]
+    public async Task Drain_SkipsTheAttach_WhenNothingWasPriced()
+    {
+        using var db = new Daleel.Web.Tests.Data.PostgresTestContext();
+        db.Db.EnrichmentWorkItems.Add(new EnrichmentWorkItem
+        {
+            SearchJobId = 42, UserId = "u1", HistoryEntryId = 3, ResultType = "products",
+            Kind = EnrichmentUnit.Plan, Payload = "{}", Status = WorkItemStatus.Done
+        });
+        await db.Db.SaveChangesAsync();
+
+        var enrichQueue = new RecordingEnrichQueue();
+        var fixture = new DrainFixture(db.Db, enrichQueue);
+        fixture.Worker.Results["qa/r.json"] = new CatalogResultDoc
+        {
+            Kind = "catalog", Domain = "store.example", Store = "ABC Store", SearchJobId = "42",
+            ProductCount = 1, Products = { new() { Name = "Unpriced", Price = null } }
+        };
+        fixture.Queue.Enqueue(PollJson(status: "done", resultKey: "qa/r.json", store: "ABC Store"));
+
+        await fixture.Service.DrainOnceAsync(CancellationToken.None);
+
+        enrichQueue.Enqueued.Should().BeEmpty("a crawl with no attachable rows has nothing for the search");
     }
 
     [Fact]
@@ -493,18 +556,55 @@ public class CloudflareExecutionTests
         public FakeApiCallLog ApiLog { get; } = new();
         public CloudflarePollDrainService Service { get; }
 
-        public DrainFixture()
+        public DrainFixture(DaleelDbContext? db = null, IEnrichmentWorkQueue? enrichQueue = null)
         {
             var services = new ServiceCollection();
             services.AddSingleton<IScrapedPriceRepository>(Prices);
             services.AddSingleton<ISystemEventLog>(Events);
             services.AddSingleton<IApiCallLogRepository>(ApiLog);
+            // Optional: the drained-catalog → attach-unit producer resolves these; absent (the
+            // default) means the drain persists prices only, like the pre-attach tests expect.
+            if (db is not null)
+            {
+                services.AddSingleton(db);
+            }
+            if (enrichQueue is not null)
+            {
+                services.AddSingleton(enrichQueue);
+            }
             var provider = services.BuildServiceProvider();
 
             Service = new CloudflarePollDrainService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 Queue, Worker, R2, NullLogger<CloudflarePollDrainService>.Instance);
         }
+    }
+
+    private sealed class RecordingEnrichQueue : IEnrichmentWorkQueue
+    {
+        public List<EnrichmentWorkItem> Enqueued { get; } = new();
+
+        public Task EnqueueAsync(IReadOnlyList<EnrichmentWorkItem> items, CancellationToken ct = default)
+        {
+            Enqueued.AddRange(items);
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> EnqueueFanOutAsync(
+            int searchJobId, string selfKind, IReadOnlyList<EnrichmentWorkItem> children, CancellationToken ct = default)
+        {
+            Enqueued.AddRange(children);
+            return Task.FromResult(children.Count > 0);
+        }
+
+        public Task<IReadOnlyList<EnrichmentWorkItem>> ClaimAsync(int max, TimeSpan lease, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<EnrichmentWorkItem>>(Array.Empty<EnrichmentWorkItem>());
+        public Task CompleteAsync(long id, CancellationToken ct = default) => Task.CompletedTask;
+        public Task RetryAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task RequeueAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) => Task.CompletedTask;
+        public Task KillAsync(long id, string reason, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default) => Task.FromResult(0);
+        public Task<int> ReapExhaustedAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 
     private sealed class StubHandler : HttpMessageHandler
