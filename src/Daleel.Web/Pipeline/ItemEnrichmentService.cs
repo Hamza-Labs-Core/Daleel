@@ -461,9 +461,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // the store ROOT: a homepage of category links, not products. Seeding a grid from scratch (the
         // whole point when a search found stores but no items) must search the store for what the USER
         // asked for instead.
+        // The RAW user query is the wrong thing to type into a STORE's search box: store engines
+        // AND-match terms, and geo/filler words ("electric kettle IN AMMAN") match no product title,
+        // so the store's own search returns its no-results page — 100k chars of navigation with zero
+        // products (QA: extra.com, 108,765 chars, 0 extracted). Search the store for the significant
+        // product tokens only; the search as a whole is already scoped to the market.
         var harvestQuery = CatalogQueryFor(models) is { Length: > 0 } modelQuery
             ? modelQuery
-            : query ?? string.Empty;
+            : string.Join(' ', SignificantQueryTokens(query, geo));
 
         // Browser fallback fires exactly when the orchestrated path's would: nothing PRICED came
         // out of the structured extract for this domain (including the no-scraper case). The LLM sink
