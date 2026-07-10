@@ -546,9 +546,24 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
                 payload.Domain, payload.StoreName, item.SearchJobId.ToString(), maxProducts, ct);
             if (handle is not null)
             {
-                return UnitOutcome.Ok; // the drain re-enqueues the attach the moment the crawl lands
+                // The broad catalogue is on the edge now (the drain re-enqueues the attach the
+                // moment it lands) — but that crawl is QUERY-BLIND: it walks the domain, not the
+                // store's search page, so its products rarely name what the user asked for and the
+                // relevance gate rightly drops them from the grid. The query-scoped harvest is a
+                // different, targeted render (browser-first through the gateway — also the edge)
+                // that seeds query-relevant items NOW instead of never.
+                var (seeded, _, seededCreated) = await svc.AttachCatalogForDomainAsync(
+                    ctx.Agent(), products.Models.ToList(), payload.Domain, payload.StoreName,
+                    products.Geo, item.SearchJobId.ToString(), ctx.Job.Query, payload.EntryUrl, ct,
+                    skipVendorCatalog: true);
+                if (seeded is not null)
+                {
+                    await ApplyAsync(ctx, item, config, seeded, seededCreated, ct);
+                }
+
+                return UnitOutcome.Ok;
             }
-            // Worker unreachable/rejecting right now — degrade to the inline crawl below,
+            // Worker unreachable/rejecting right now — degrade to the full inline crawl below,
             // exactly like the base run's submit path does.
         }
 

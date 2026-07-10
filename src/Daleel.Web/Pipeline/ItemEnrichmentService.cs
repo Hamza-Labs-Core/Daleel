@@ -41,7 +41,7 @@ public interface IItemEnrichmentService
     Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
     /// <summary>Phase 4 for ONE store domain over the whole list (inline Context.dev extract + browser fallback + persist observations + match; entryUrl = the DISCOVERED page, second-chance harvested when the domain pass creates nothing). Models null = unchanged.</summary>
-    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct);
+    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct, bool skipVendorCatalog = false);
 
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
     Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
@@ -420,7 +420,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
     public async Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
         AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo,
-        string? searchId, string? query, string? entryUrl, CancellationToken ct)
+        string? searchId, string? query, string? entryUrl, CancellationToken ct,
+        bool skipVendorCatalog = false)
     {
         // geo/searchId ride on the queue contract; this unit needs neither (events are dropped here).
         // The gap gate only short-circuits when there's no query to discover NEW models for — a store
@@ -445,8 +446,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // No internal phase-budget CancellationTokenSource (unlike AttachCatalogDataAsync's
         // catalogCts): the queue consumer owns this unit's timeout, so cancelling ct must surface
         // as a plain OperationCanceledException instead of faulting a shared multi-domain phase.
+        // skipVendorCatalog: the caller already has the broad domain catalogue covered (an edge
+        // submit is in flight and the drain will attach its rows) — this pass exists only for the
+        // QUERY-scoped harvest below, which is what actually creates query-relevant grid items.
         var pool = new List<CatalogProduct>();
-        if (_providers.HasScraper)
+        if (_providers.HasScraper && !skipVendorCatalog)
         {
             _logger.LogInformation("Reading the {Domain} catalogue for live prices", domain);
             pool = (await SafeCatalog(_providers, domain, _logger, ct)).ToList();

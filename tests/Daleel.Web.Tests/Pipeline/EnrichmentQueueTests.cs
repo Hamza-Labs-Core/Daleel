@@ -498,10 +498,13 @@ public class EnrichmentHandlerTests
         public Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
             Task.FromResult<ProductModel?>(null);
 
+        public bool? LastSkipVendorCatalog { get; private set; }
+
         public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
-            AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct)
+            AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct, bool skipVendorCatalog = false)
         {
             InlineCatalogCalls++;
+            LastSkipVendorCatalog = skipVendorCatalog;
             return Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>)>((null, 0, Array.Empty<string>()));
         }
 
@@ -630,7 +633,8 @@ public class EnrichmentHandlerTests
         // Event-driven, no timers: with the edge active and nothing drained yet, the unit submits
         // (the worker dedupes re-submits) and completes — the drain enqueues the attach when the
         // crawl lands. The old behavior here was a Retry polling loop; that must never come back.
-        var (ctx, _, store, svc) = Build(ProductAnswer("A"),
+        // The harvest pass legitimately builds an agent; the fake service just ignores it.
+        var (ctx, _, store, svc) = Build(ProductAnswer("A"), agent: () => null!,
             providers: new FakeEdgeProviders { Edge = true, DrainReady = true, SubmitSucceeds = true },
             config: new EdgeFlagConfig(enabled: true));
 
@@ -641,7 +645,9 @@ public class EnrichmentHandlerTests
 
         outcome.Should().BeOfType<UnitOutcome.Done>("the unit must finish, not retry-wait on a timer");
         ((FakeEdgeProviders)ctx.Services.GetRequiredService<IProviderApi>()).CatalogSubmits.Should().Be(1);
-        svc.InlineCatalogCalls.Should().Be(0, "an accepted submit replaces the inline crawl");
+        svc.InlineCatalogCalls.Should().Be(1, "the query-scoped harvest seeds relevant items immediately");
+        svc.LastSkipVendorCatalog.Should().BeTrue(
+            "the broad domain catalogue is the edge submit's job — re-crawling it inline would double-pay");
         store.Patches.Should().Be(0);
     }
 
@@ -660,6 +666,7 @@ public class EnrichmentHandlerTests
 
         outcome.Should().BeOfType<UnitOutcome.Done>();
         svc.InlineCatalogCalls.Should().Be(1, "an unreachable worker degrades to the inline crawl");
+        svc.LastSkipVendorCatalog.Should().BeFalse("with no edge crawl in flight the vendor catalogue is this unit's job");
     }
 
     [Fact]
