@@ -1565,9 +1565,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // Geography words never appear in product names ("best acs in JORDAN") — counting them
         // toward the two-token requirement effectively demanded geo-in-name and killed every
         // discovery for short queries. They are market scope, not product identity.
-        var geoTokens = string.IsNullOrWhiteSpace(geo)
-            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            : Tokens(geo!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var geoTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(geo))
+        {
+            geoTokens.UnionWith(Tokens(geo!));
+            // The market's own place names are market scope too: the raw geo key strips "jordan"
+            // but not "amman", and "coffee grinder AMMAN" typed into a store's search box
+            // AND-matches nothing — the store answers with its no-results page (QA: 61 harvests).
+            var profile = GeoProfiles.ResolveOrDefault(geo);
+            geoTokens.UnionWith(Tokens(profile.Country));
+            geoTokens.UnionWith(Tokens(profile.CenterCity));
+        }
         // ShortTokens (2+ chars): two-letter categories are real products — "AC", "TV" — and the
         // stopword list already removes the two-letter noise words ("in", "me").
         return ShortTokens(query!)
