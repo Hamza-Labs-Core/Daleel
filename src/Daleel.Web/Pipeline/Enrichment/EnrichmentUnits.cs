@@ -74,7 +74,14 @@ public sealed record PlanPayload(string? QualityJson = null, int FilteredCount =
 /// <summary>One-item payload. Name double-checks the index — items move when vision renames models.</summary>
 public sealed record ItemPayload(int Index, string Name);
 
-public sealed record CatalogPayload(string Domain, string? StoreName, string? EntryUrl = null);
+/// <summary>
+/// <paramref name="FromDrain"/> marks a unit the poll drain enqueued because an edge catalogue
+/// RESULT just landed (the original fan-out unit may have already given up waiting and finished).
+/// Such a unit only re-reads the persisted rows — it must never wait for further drains or crawl
+/// inline: it exists to attach data that is already paid for, not to spend again.
+/// </summary>
+public sealed record CatalogPayload(
+    string Domain, string? StoreName, string? EntryUrl = null, bool FromDrain = false);
 
 public sealed record BrandPayload(string Brand);
 

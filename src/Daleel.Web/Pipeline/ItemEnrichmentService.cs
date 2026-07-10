@@ -41,7 +41,7 @@ public interface IItemEnrichmentService
     Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
     /// <summary>Phase 4 for ONE store domain over the whole list (inline Context.dev extract + browser fallback + persist observations + match; entryUrl = the DISCOVERED page, second-chance harvested when the domain pass creates nothing). Models null = unchanged.</summary>
-    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct);
+    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct, bool skipVendorCatalog = false);
 
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
     Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
@@ -102,6 +102,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IProductProfileRepository _repo;
     private readonly ProfileOptions _options;
     private readonly IAgentFactory _factory;
+    private readonly Storage.IR2StorageService? _r2;
     private readonly IBrandRepository _brands;
     private readonly IBrandModelRepository _brandModels;
     private readonly Identification.IProductIdentifier _identifier;
@@ -137,11 +138,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         IBrandRepository brands, IBrandModelRepository brandModels,
         Identification.IProductIdentifier identifier,
         ILogger<ItemEnrichmentService> logger,
-        Services.IProviderApi? providers = null)
+        Services.IProviderApi? providers = null,
+        Storage.IR2StorageService? r2 = null)
     {
         _repo = repo;
         _options = options;
         _factory = factory;
+        _r2 = r2;
         _scrapedPrices = scrapedPrices;
         _brandCatalog = brandCatalog;
         _brands = brands;
@@ -420,7 +423,8 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
     public async Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
         AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo,
-        string? searchId, string? query, string? entryUrl, CancellationToken ct)
+        string? searchId, string? query, string? entryUrl, CancellationToken ct,
+        bool skipVendorCatalog = false)
     {
         // geo/searchId ride on the queue contract; this unit needs neither (events are dropped here).
         // The gap gate only short-circuits when there's no query to discover NEW models for — a store
@@ -445,8 +449,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // No internal phase-budget CancellationTokenSource (unlike AttachCatalogDataAsync's
         // catalogCts): the queue consumer owns this unit's timeout, so cancelling ct must surface
         // as a plain OperationCanceledException instead of faulting a shared multi-domain phase.
+        // skipVendorCatalog: the caller already has the broad domain catalogue covered (an edge
+        // submit is in flight and the drain will attach its rows) — this pass exists only for the
+        // QUERY-scoped harvest below, which is what actually creates query-relevant grid items.
         var pool = new List<CatalogProduct>();
-        if (_providers.HasScraper)
+        if (_providers.HasScraper && !skipVendorCatalog)
         {
             _logger.LogInformation("Reading the {Domain} catalogue for live prices", domain);
             pool = (await SafeCatalog(_providers, domain, _logger, ct)).ToList();
@@ -457,9 +464,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // the store ROOT: a homepage of category links, not products. Seeding a grid from scratch (the
         // whole point when a search found stores but no items) must search the store for what the USER
         // asked for instead.
+        // The RAW user query is the wrong thing to type into a STORE's search box: store engines
+        // AND-match terms, and geo/filler words ("electric kettle IN AMMAN") match no product title,
+        // so the store's own search returns its no-results page — 100k chars of navigation with zero
+        // products (QA: extra.com, 108,765 chars, 0 extracted). Search the store for the significant
+        // product tokens only; the search as a whole is already scoped to the market.
         var harvestQuery = CatalogQueryFor(models) is { Length: > 0 } modelQuery
             ? modelQuery
-            : query ?? string.Empty;
+            : string.Join(' ', SignificantQueryTokens(query, geo));
 
         // Browser fallback fires exactly when the orchestrated path's would: nothing PRICED came
         // out of the structured extract for this domain (including the no-scraper case). The LLM sink
@@ -484,15 +496,27 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // catalogue used to contribute zero items unless web extraction had already named them).
         // The LLM-named products join them, priced or not: an unpriced item the shopper can still
         // click through to is worth infinitely more than an empty grid.
+        // Trust levels, learned the hard way (QA: 44 "products" of "Sale price38.990 JOD" junk):
+        // - vendor POOL (domain-wide crawl, structured names) creates models behind the query gate;
+        // - the LLM SEED (structured extraction from the store's own query-scoped search page)
+        //   creates models WITHOUT the gate — the store's engine already matched them, in the
+        //   store's language, and the LLM produced a real name;
+        // - raw REGEX price lines create NOTHING, ever: a line-with-a-price is "Sale price38.990
+        //   JOD" or a shipping banner as often as a product, and a junk model self-propagates (its
+        //   gap-query sends stores searching for the junk). They only ATTACH prices to existing
+        //   models via AttachPoolToModels above.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated,
-            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false))
-                .Concat(browserPrices.Select(b =>
-                    (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)))
-                .Concat(llmSeed
-                    .Where(l => !string.IsNullOrWhiteSpace(l.Name))
-                    .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, Indicative: l.Price is null))),
+            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false)),
             storeName, query, geo);
+        var (withHarvested, harvestedCreated) = AppendCatalogDiscoveries(
+            withNew,
+            llmSeed
+                .Where(l => !string.IsNullOrWhiteSpace(l.Name))
+                .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, Indicative: l.Price is null)),
+            storeName, query, geo, fromQueryScopedPage: true);
+        withNew = withHarvested;
+        created = created.Concat(harvestedCreated).ToList();
 
         // Second chance on the DISCOVERED page: a general store's root crawl can return inventory
         // that has nothing to do with the query (jo-cell.com root is phones; its espresso machines
@@ -504,16 +528,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             var entryPrices = await HarvestPageAsync(agent, domain, entryUrl!, ct);
             if (entryPrices.Count > 0)
             {
+                // Regex lines: price attachment only — model creation is reserved for structured
+                // names (vendor pool, LLM seed); see the trust-level note above.
                 (withNew, var entryPriced, _, _, _) =
                     AttachPoolToModels(withNew, new List<CatalogProduct>(), entryPrices, storeName);
                 priced += entryPriced;
-                var (withEntry, entryCreated) = AppendCatalogDiscoveries(
-                    withNew,
-                    entryPrices.Select(b =>
-                        (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)),
-                    storeName, query, geo);
-                withNew = withEntry;
-                created = created.Concat(entryCreated).ToList();
             }
         }
 
@@ -1363,13 +1382,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         var harvested = await Task.WhenAll(domains.Select(async domain =>
         {
             var url = ProductSearchUrl(domain, query);
-            ScrapedPage? page;
-            try
-            {
-                page = await agent.ReadPageAsync(url, ct);
-            }
-            catch (OperationCanceledException) { throw; }
-            catch { page = null; }
+            var page = await FetchHarvestPageAsync(agent, url, ct);
 
             var prices = page is null || string.IsNullOrWhiteSpace(page.Content)
                 ? new List<BrowserPrice>()
@@ -1440,6 +1453,9 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 }
             }
 
+            _logger.LogInformation(
+                "Harvest {Domain}: {Chars} chars via {Provider}, {Prices} price line(s) (edgeExtract={Edge}, llm={Llm})",
+                domain, page?.Content?.Length ?? 0, page?.Provider ?? "none", prices.Count, usedEdgeExtract, usedLlm);
             record?.Invoke(EventCategory.Extract, "catalog.browser", page?.Provider ?? "cloudflare-browser",
                 new Dictionary<string, object?>
                 {
@@ -1452,6 +1468,75 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return harvested.SelectMany(h => h).ToList();
     }
 
+
+    /// <summary>
+    /// Fetches one harvest page: server-side markdown FIRST (these storefronts serve their search
+    /// grids fine to a plain fetch, and it costs a quarter of a render), browser render as the
+    /// fallback for pages that genuinely need JS. The browser-first order was backwards here — a
+    /// snapshot can fire before a storefront hydrates its results client-side, returning a JS
+    /// skeleton: an empty page we still paid to render (QA: 35 of 40 harvest renders came back
+    /// empty, so neither extract fallback ever fired and 40 real store searches seeded 0 items).
+    /// </summary>
+    private async Task<ScrapedPage?> FetchHarvestPageAsync(AgentService agent, string url, CancellationToken ct)
+    {
+        ScrapedPage? page = null;
+        try
+        {
+            page = await _providers.ScrapePageAsync(url, ScrapeFormat.Markdown, ct);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch { page = null; }
+
+        if (page is null || string.IsNullOrWhiteSpace(page.Content))
+        {
+            try
+            {
+                page = await agent.ReadPageAsync(url, ct);
+            }
+            catch (OperationCanceledException) { throw; }
+            catch { page = null; }
+        }
+
+        await SaveHarvestPageAsync(url, page, ct).ConfigureAwait(false);
+        return page;
+    }
+
+    /// <summary>
+    /// Persists every fetched harvest page to R2 — the save-everything rule the edge results
+    /// already follow. A paid fetch that lives only in one method call can't be replayed: when
+    /// extraction returns nothing, the page IS the evidence (and the test fixture), and
+    /// re-fetching it costs money the first fetch already spent. Best-effort by contract.
+    /// </summary>
+    private async Task SaveHarvestPageAsync(string url, ScrapedPage? page, CancellationToken ct)
+    {
+        if (_r2 is not { IsConfigured: true } || page is null || string.IsNullOrWhiteSpace(page.Content))
+        {
+            return;
+        }
+
+        try
+        {
+            var host = Uri.TryCreate(url, UriKind.Absolute, out var u) ? u.Host : "unknown";
+            var slug = new string(url.Where(char.IsLetterOrDigit).TakeLast(40).ToArray());
+            var key = $"harvest/{_options.Now():yyyyMMdd}/{host}/{slug}.json";
+            await _r2.StoreJsonAsync(
+                System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    url,
+                    fetchedAt = _options.Now(),
+                    provider = page.Provider,
+                    chars = page.Content!.Length,
+                    content = page.Content
+                }),
+                key, Storage.R2Bucket.Logs, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Saving harvest page for {Url} failed (best-effort)", url);
+        }
+    }
+
     /// <summary>
     /// Renders and extracts ONE explicit page (the store url discovery actually returned — e.g. a
     /// query-relevant collection page) into browser-price lines. Same parse → edge-extract fallback
@@ -1460,14 +1545,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private async Task<IReadOnlyList<BrowserPrice>> HarvestPageAsync(
         AgentService agent, string domain, string url, CancellationToken ct)
     {
-        ScrapedPage? page;
-        try
-        {
-            page = await agent.ReadPageAsync(url, ct);
-        }
-        catch (OperationCanceledException) { throw; }
-        catch { page = null; }
-
+        var page = await FetchHarvestPageAsync(agent, url, ct);
         if (page is null || string.IsNullOrWhiteSpace(page.Content))
         {
             return Array.Empty<BrowserPrice>();
@@ -1534,9 +1612,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // Geography words never appear in product names ("best acs in JORDAN") — counting them
         // toward the two-token requirement effectively demanded geo-in-name and killed every
         // discovery for short queries. They are market scope, not product identity.
-        var geoTokens = string.IsNullOrWhiteSpace(geo)
-            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            : Tokens(geo!).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var geoTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(geo))
+        {
+            geoTokens.UnionWith(Tokens(geo!));
+            // The market's own place names are market scope too: the raw geo key strips "jordan"
+            // but not "amman", and "coffee grinder AMMAN" typed into a store's search box
+            // AND-matches nothing — the store answers with its no-results page (QA: 61 harvests).
+            var profile = GeoProfiles.ResolveOrDefault(geo);
+            geoTokens.UnionWith(Tokens(profile.Country));
+            geoTokens.UnionWith(Tokens(profile.CenterCity));
+        }
         // ShortTokens (2+ chars): two-letter categories are real products — "AC", "TV" — and the
         // stopword list already removes the two-letter noise words ("in", "me").
         return ShortTokens(query!)
@@ -1656,11 +1742,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     public static (List<ProductModel> Models, List<string> Created) AppendCatalogDiscoveries(
         List<ProductModel> models,
         IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)> entries,
-        string? storeName, string? query, string? geo = null)
+        string? storeName, string? query, string? geo = null, bool fromQueryScopedPage = false)
     {
         var queryTokens = SignificantQueryTokens(query, geo);
         var created = new List<string>();
-        if (queryTokens.Count == 0)
+        if (queryTokens.Count == 0 && !fromQueryScopedPage)
         {
             return (models, created);
         }
@@ -1680,8 +1766,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             }
 
             var key = IdentityKey(e.Name);
-            if (key.StartsWith('|') || !seen.Add(key) ||
-                !NameMatchesQuery(e.Name, queryTokens) || MatchedByAnyModel(e.Name, models))
+            if (key.StartsWith('|') || !seen.Add(key) || MatchedByAnyModel(e.Name, models))
+            {
+                continue;
+            }
+
+            // The name gate keeps accessories out of DOMAIN-WIDE catalogues — but an entry harvested
+            // from the store's OWN search results for this query was already matched by the store's
+            // engine, in the store's language. Token-matching English query words against an Arabic
+            // product name here rejected correct products ("rice cooker" vs "طنجرة أرز" shares zero
+            // tokens; QA extracted the right cooker and this line dropped it). Trust the source page.
+            if (!fromQueryScopedPage && !NameMatchesQuery(e.Name, queryTokens))
             {
                 continue;
             }

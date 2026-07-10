@@ -8,7 +8,11 @@ namespace Daleel.Web.Services;
 /// </summary>
 public sealed class LayoutState
 {
-    /// <summary>Dark by default — this is a media-intelligence console.</summary>
+    /// <summary>
+    /// Dark by default. A user's explicit toggle choice (persisted in localStorage by
+    /// AppBarControls, read back by InteractiveProviders on circuit start) overrides this;
+    /// the OS theme deliberately does not.
+    /// </summary>
     public bool IsDarkMode { get; private set; } = true;
 
     /// <summary>Raised whenever the theme changes.</summary>

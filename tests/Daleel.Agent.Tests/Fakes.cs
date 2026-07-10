@@ -9,15 +9,21 @@ namespace Daleel.Agent.Tests;
 public sealed class FakeLlmClient : ILlmClient
 {
     private readonly Func<string, string> _bySystemPrompt;
+    private readonly Action<string>? _onUserPrompt;
     public string Provider => "fake";
     public List<string> SystemPromptsSeen { get; } = new();
 
-    public FakeLlmClient(Func<string, string> bySystemPrompt) => _bySystemPrompt = bySystemPrompt;
+    public FakeLlmClient(Func<string, string> bySystemPrompt, Action<string>? onUserPrompt = null)
+        => (_bySystemPrompt, _onUserPrompt) = (bySystemPrompt, onUserPrompt);
 
     public Task<LlmResponse> CompleteAsync(
         string systemPrompt, IReadOnlyList<LlmMessage> messages, CancellationToken ct = default)
     {
         SystemPromptsSeen.Add(systemPrompt);
+        foreach (var m in messages)
+        {
+            _onUserPrompt?.Invoke(m.Content);
+        }
         return Task.FromResult(new LlmResponse { Content = _bySystemPrompt(systemPrompt) });
     }
 }

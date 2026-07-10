@@ -404,6 +404,83 @@ public class EnrichmentHandlerTests
         }
     }
 
+    /// <summary>Flag-only config double: cloudflare.execution.enabled + int fallbacks, nothing else.</summary>
+    private sealed class EdgeFlagConfig : ISystemConfigService
+    {
+        private readonly bool _enabled;
+        public EdgeFlagConfig(bool enabled) => _enabled = enabled;
+
+        public Task<bool> GetBoolAsync(string key, bool fallback, CancellationToken ct = default) =>
+            Task.FromResult(key == Daleel.Web.Cloudflare.CloudflareWorkerOptions.EnabledFlag ? _enabled : fallback);
+        public Task<string?> GetAsync(string key, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task<int> GetIntAsync(string key, int fallback, CancellationToken ct = default) => Task.FromResult(fallback);
+        public Task SetAsync(string key, string value, string type = "string", CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<SystemConfig>> AllAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SystemConfig>>(Array.Empty<SystemConfig>());
+        public Task SeedDefaultsAsync(CancellationToken ct = default) => Task.CompletedTask;
+    }
+
+    /// <summary>Edge-focused provider double: records catalog submits, everything else inert.</summary>
+    private sealed class FakeEdgeProviders : IProviderApi
+    {
+        public bool Edge { get; init; }
+        public bool DrainReady { get; init; }
+        public bool SubmitSucceeds { get; init; }
+        public int CatalogSubmits { get; private set; }
+
+        public bool HasEdge => Edge;
+        public bool EdgeDrainReady => DrainReady;
+        public bool HasScraper => false;
+        public bool HasPlaces => false;
+        public bool HasSocial => false;
+        public bool HasEdgeExtract => false;
+        public bool HasEdgeClassify => false;
+        public bool HasEdgeFilter => false;
+
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitEdgeCatalogAsync(
+            string domain, string? store, string? searchJobId, int maxProducts = 0, CancellationToken ct = default)
+        {
+            CatalogSubmits++;
+            return Task.FromResult(SubmitSucceeds
+                ? new Daleel.Web.Cloudflare.WorkerHandle { JobId = "j1", ResultKey = "k1" }
+                : (Daleel.Web.Cloudflare.WorkerHandle?)null);
+        }
+
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitEdgeBrandAsync(
+            string domain, string brandName, string? searchJobId, bool refresh = false, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(null);
+        public Task<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>> ExtractCatalogAsync(
+            string domain, int maxProducts = 0, int timeoutMs = 45_000, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>>(Array.Empty<Daleel.Search.Providers.CatalogProduct>());
+        public Task<Daleel.Search.Providers.BrandProfile?> GetBrandAsync(string domain, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Search.Providers.BrandProfile?>(null);
+        public Task<Daleel.Search.Abstractions.ScrapedPage?> ScrapePageAsync(
+            string url, Daleel.Search.Abstractions.ScrapeFormat format = Daleel.Search.Abstractions.ScrapeFormat.Markdown,
+            CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Search.Abstractions.ScrapedPage?>(null);
+        public Task<IReadOnlyList<StoreLocation>> SearchPlacesAsync(
+            string query, Daleel.Core.Geo.GeoPoint? near = null, double radiusMeters = 5000,
+            string? languageCode = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<StoreLocation>>(Array.Empty<StoreLocation>());
+        public Task<StoreLocation?> GetPlaceDetailsAsync(string placeId, CancellationToken ct = default) =>
+            Task.FromResult<StoreLocation?>(null);
+        public Task<IReadOnlyList<SocialPost>> FetchSocialPostsAsync(
+            Source source, string? keyword = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SocialPost>>(Array.Empty<SocialPost>());
+        public Task<IReadOnlyList<Daleel.Web.Cloudflare.ClassifyVerdict>> ClassifyTextAsync(
+            IReadOnlyList<(string Id, string Text)> items, IReadOnlyList<string> labels, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Web.Cloudflare.ClassifyVerdict>>(Array.Empty<Daleel.Web.Cloudflare.ClassifyVerdict>());
+        public Task<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>> ExtractProductsFromContentAsync(
+            string content, string? market = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>>(Array.Empty<Daleel.Search.Providers.CatalogProduct>());
+        public Task<IReadOnlyList<Daleel.Web.Cloudflare.FilterFindingDto>> FilterTextFindingsAsync(
+            IReadOnlyList<(string Id, string Text, string? SourceUrl)> items, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Web.Cloudflare.FilterFindingDto>>(Array.Empty<Daleel.Web.Cloudflare.FilterFindingDto>());
+        public Task<IReadOnlyList<Daleel.Web.Cloudflare.FilterFindingDto>> FilterImageFindingsAsync(
+            IReadOnlyList<string> urls, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Web.Cloudflare.FilterFindingDto>>(Array.Empty<Daleel.Web.Cloudflare.FilterFindingDto>());
+    }
+
     private sealed class FakeEnrichmentService : IItemEnrichmentService
     {
         public (List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created) DrainedResult { get; set; } =
@@ -421,10 +498,13 @@ public class EnrichmentHandlerTests
         public Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
             Task.FromResult<ProductModel?>(null);
 
+        public bool? LastSkipVendorCatalog { get; private set; }
+
         public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
-            AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct)
+            AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct, bool skipVendorCatalog = false)
         {
             InlineCatalogCalls++;
+            LastSkipVendorCatalog = skipVendorCatalog;
             return Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>)>((null, 0, Array.Empty<string>()));
         }
 
@@ -443,13 +523,22 @@ public class EnrichmentHandlerTests
     }
 
     private static (EnrichmentUnitContext Ctx, RecordingQueue Queue, FixedResultStore Store, FakeEnrichmentService Svc)
-        Build(AgentAnswer? answer, Func<AgentService>? agent = null)
+        Build(AgentAnswer? answer, Func<AgentService>? agent = null,
+            IProviderApi? providers = null, ISystemConfigService? config = null)
     {
         var queue = new RecordingQueue();
         var store = new FixedResultStore { Answer = answer };
         var svc = new FakeEnrichmentService();
         var services = new ServiceCollection();
         services.AddSingleton<IItemEnrichmentService>(svc);
+        if (providers is not null)
+        {
+            services.AddSingleton(providers);
+        }
+        if (config is not null)
+        {
+            services.AddSingleton(config);
+        }
         var ctx = new EnrichmentUnitContext
         {
             Services = services.BuildServiceProvider(),
@@ -518,6 +607,66 @@ public class EnrichmentHandlerTests
         outcome.Should().BeOfType<UnitOutcome.Done>();
         svc.InlineCatalogCalls.Should().Be(0, "drained edge rows make the inline crawl (and its spend) unnecessary");
         store.Patches.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Catalog_from_drain_unit_never_spends()
+    {
+        // A FromDrain unit exists to re-read rows the drain just persisted. When nothing matches,
+        // it must simply finish: no second submit, no inline crawl — the data was already paid for.
+        // No IProviderApi is registered, so even CONSULTING the edge would throw here.
+        var (ctx, _, store, svc) = Build(ProductAnswer("A"));
+
+        var outcome = await new CatalogAttachHandler().ExecuteAsync(
+            Root(EnrichmentUnit.CatalogAttach,
+                EnrichmentWorkQueue.Payload(new CatalogPayload("store-a.jo", "Store A", FromDrain: true))),
+            ctx, default);
+
+        outcome.Should().BeOfType<UnitOutcome.Done>();
+        svc.InlineCatalogCalls.Should().Be(0);
+        store.Patches.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Catalog_submits_to_edge_and_finishes_without_waiting()
+    {
+        // Event-driven, no timers: with the edge active and nothing drained yet, the unit submits
+        // (the worker dedupes re-submits) and completes — the drain enqueues the attach when the
+        // crawl lands. The old behavior here was a Retry polling loop; that must never come back.
+        // The harvest pass legitimately builds an agent; the fake service just ignores it.
+        var (ctx, _, store, svc) = Build(ProductAnswer("A"), agent: () => null!,
+            providers: new FakeEdgeProviders { Edge = true, DrainReady = true, SubmitSucceeds = true },
+            config: new EdgeFlagConfig(enabled: true));
+
+        var outcome = await new CatalogAttachHandler().ExecuteAsync(
+            Root(EnrichmentUnit.CatalogAttach,
+                EnrichmentWorkQueue.Payload(new CatalogPayload("store-a.jo", "Store A"))),
+            ctx, default);
+
+        outcome.Should().BeOfType<UnitOutcome.Done>("the unit must finish, not retry-wait on a timer");
+        ((FakeEdgeProviders)ctx.Services.GetRequiredService<IProviderApi>()).CatalogSubmits.Should().Be(1);
+        svc.InlineCatalogCalls.Should().Be(1, "the query-scoped harvest seeds relevant items immediately");
+        svc.LastSkipVendorCatalog.Should().BeTrue(
+            "the broad domain catalogue is the edge submit's job — re-crawling it inline would double-pay");
+        store.Patches.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Catalog_falls_inline_when_the_edge_submit_fails()
+    {
+        // The inline fallback legitimately builds an agent; the fake service just ignores it.
+        var (ctx, _, _, svc) = Build(ProductAnswer("A"), agent: () => null!,
+            providers: new FakeEdgeProviders { Edge = true, DrainReady = true, SubmitSucceeds = false },
+            config: new EdgeFlagConfig(enabled: true));
+
+        var outcome = await new CatalogAttachHandler().ExecuteAsync(
+            Root(EnrichmentUnit.CatalogAttach,
+                EnrichmentWorkQueue.Payload(new CatalogPayload("store-a.jo", "Store A"))),
+            ctx, default);
+
+        outcome.Should().BeOfType<UnitOutcome.Done>();
+        svc.InlineCatalogCalls.Should().Be(1, "an unreachable worker degrades to the inline crawl");
+        svc.LastSkipVendorCatalog.Should().BeFalse("with no edge crawl in flight the vendor catalogue is this unit's job");
     }
 
     [Fact]

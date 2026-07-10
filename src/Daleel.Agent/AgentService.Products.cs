@@ -1134,8 +1134,9 @@ public sealed partial class AgentService
             return Array.Empty<ProductListing>();
         }
 
-        // One synthetic page ⇒ BuildExtractionParts yields exactly one part, so this stays a single
-        // bounded LLM call rather than a monolithic pass over a whole bundle.
+        // One synthetic page ⇒ BuildExtractionParts strips its chrome and yields one bounded part
+        // per chunk — a huge store page becomes a few bounded calls (nothing truncated away),
+        // never a monolithic pass over a whole bundle.
         var bundle = new ResearchBundle
         {
             Pages = new[] { new ScrapedPage { Content = content, Success = true, Provider = "catalog-llm-fallback" } }
