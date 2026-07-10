@@ -496,20 +496,24 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // catalogue used to contribute zero items unless web extraction had already named them).
         // The LLM-named products join them, priced or not: an unpriced item the shopper can still
         // click through to is worth infinitely more than an empty grid.
-        // Two trust levels: the vendor POOL is a domain-wide crawl (whole store, any category) and
-        // keeps the query-name gate; the browser/LLM entries came off the store's own SEARCH page
-        // for this query, so the store already matched them — cross-language included.
+        // Trust levels, learned the hard way (QA: 44 "products" of "Sale price38.990 JOD" junk):
+        // - vendor POOL (domain-wide crawl, structured names) creates models behind the query gate;
+        // - the LLM SEED (structured extraction from the store's own query-scoped search page)
+        //   creates models WITHOUT the gate — the store's engine already matched them, in the
+        //   store's language, and the LLM produced a real name;
+        // - raw REGEX price lines create NOTHING, ever: a line-with-a-price is "Sale price38.990
+        //   JOD" or a shipping banner as often as a product, and a junk model self-propagates (its
+        //   gap-query sends stores searching for the junk). They only ATTACH prices to existing
+        //   models via AttachPoolToModels above.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated,
             pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false)),
             storeName, query, geo);
         var (withHarvested, harvestedCreated) = AppendCatalogDiscoveries(
             withNew,
-            browserPrices.Select(b =>
-                    (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true))
-                .Concat(llmSeed
-                    .Where(l => !string.IsNullOrWhiteSpace(l.Name))
-                    .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, Indicative: l.Price is null))),
+            llmSeed
+                .Where(l => !string.IsNullOrWhiteSpace(l.Name))
+                .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, Indicative: l.Price is null)),
             storeName, query, geo, fromQueryScopedPage: true);
         withNew = withHarvested;
         created = created.Concat(harvestedCreated).ToList();
@@ -524,16 +528,11 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             var entryPrices = await HarvestPageAsync(agent, domain, entryUrl!, ct);
             if (entryPrices.Count > 0)
             {
+                // Regex lines: price attachment only — model creation is reserved for structured
+                // names (vendor pool, LLM seed); see the trust-level note above.
                 (withNew, var entryPriced, _, _, _) =
                     AttachPoolToModels(withNew, new List<CatalogProduct>(), entryPrices, storeName);
                 priced += entryPriced;
-                var (withEntry, entryCreated) = AppendCatalogDiscoveries(
-                    withNew,
-                    entryPrices.Select(b =>
-                        (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)),
-                    storeName, query, geo, fromQueryScopedPage: true);
-                withNew = withEntry;
-                created = created.Concat(entryCreated).ToList();
             }
         }
 
