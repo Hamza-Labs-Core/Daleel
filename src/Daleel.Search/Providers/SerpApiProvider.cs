@@ -30,11 +30,21 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
     public string Name => "serpapi";
     protected override string ProviderName => Name;
 
+    /// <param name="perAttemptTimeout">
+    /// Hard cap on each individual SerpAPI request attempt. SerpAPI — and, in prod, the edge
+    /// search-worker it is proxied through — normally answers in a few seconds; left unbounded a
+    /// stalled call rode <see cref="HttpClient"/>'s 100s default across all three attempts (~5 min)
+    /// before <see cref="SearchRouter"/> could fail over to Bing/browser, which is the "slow, never
+    /// falls over" failure this guards against. Null resolves the default (env
+    /// <c>SERPAPI_TIMEOUT_SECONDS</c>, else 20s, clamped 1–30s).
+    /// </param>
     public SerpApiProvider(
         string? apiKey = null,
         HttpClient? httpClient = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
-        : base(ConfigureClient(httpClient), maxRetries: 2, delay)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        TimeSpan? perAttemptTimeout = null)
+        : base(ConfigureClient(httpClient), maxRetries: 2, delay,
+            perAttemptTimeout ?? ResolveAttemptTimeout("SERPAPI_TIMEOUT_SECONDS", 20))
     {
         _apiKey = apiKey
                   ?? Environment.GetEnvironmentVariable("SERPAPI_KEY")

@@ -147,6 +147,20 @@ public abstract class HttpProviderBase
         };
     }
 
+    /// <summary>
+    /// Resolves a per-attempt wall-clock timeout from an optional whole-seconds env override,
+    /// falling back to <paramref name="defaultSeconds"/> and clamping the result to 1–30s. Providers
+    /// pass the result as <c>perAttemptTimeout</c> so a stalled vendor call is bounded to seconds
+    /// instead of riding <see cref="HttpClient"/>'s 100s default across every retry — which is what
+    /// let a slow primary (SerpAPI) block discovery for minutes before the router could fail over.
+    /// </summary>
+    protected static TimeSpan ResolveAttemptTimeout(string envVar, int defaultSeconds)
+    {
+        var raw = Environment.GetEnvironmentVariable(envVar);
+        var seconds = int.TryParse(raw, out var parsed) && parsed > 0 ? parsed : defaultSeconds;
+        return TimeSpan.FromSeconds(Math.Clamp(seconds, 1, 30));
+    }
+
     private static bool IsTransient(HttpStatusCode status) =>
         status == HttpStatusCode.RequestTimeout ||
         status == (HttpStatusCode)429 ||
