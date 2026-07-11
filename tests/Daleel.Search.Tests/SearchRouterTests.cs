@@ -135,6 +135,85 @@ public class SearchRouterTests
         browser.Calls.Should().Be(0);
     }
 
+    /// <summary>A provider that blocks for <c>delay</c> (honouring cancellation) before answering,
+    /// so tests can exercise a slow primary being overtaken by a hedged fallback.</summary>
+    private sealed class DelayedProvider : ISearchProvider
+    {
+        private readonly TimeSpan _delay;
+        private readonly SearchResults _result;
+
+        public DelayedProvider(string name, TimeSpan delay, SearchResults result)
+            => (Name, _delay, _result) = (name, delay, result);
+
+        public string Name { get; }
+        public bool Started { get; private set; }
+        public bool CompletedNormally { get; private set; }
+        public bool Supports(SearchKind kind) => true;
+
+        public async Task<SearchResults> SearchAsync(SearchQuery query, CancellationToken cancellationToken = default)
+        {
+            Started = true;
+            await Task.Delay(_delay, cancellationToken).ConfigureAwait(false);
+            CompletedNormally = true;
+            return _result;
+        }
+    }
+
+    [Fact]
+    public async Task HedgesToFallbackWhenPrimaryLags_WithoutWaitingItOut()
+    {
+        // The primary would take 10s; the hedge is 20ms. The router must spin up the fallback the
+        // moment the primary lags past the hedge and return it — never blocking on the slow primary.
+        var slowPrimary = new DelayedProvider("serpapi", TimeSpan.FromSeconds(10), Hits("serpapi", "https://a"));
+        var fastFallback = new FakeProvider("bing", _ => Hits("bing", "https://b"));
+        var router = new SearchRouter(
+            new ISearchProvider[] { slowPrimary, fastFallback },
+            onFailover: null, hedgeDelay: TimeSpan.FromMilliseconds(20));
+
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var results = await router.SearchAsync(Web);
+        stopwatch.Stop();
+
+        results.Provider.Should().Be("bing", "the fallback answered first once the primary lagged past the hedge");
+        stopwatch.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(5), "the 10s primary must not be waited out");
+        slowPrimary.Started.Should().BeTrue();
+        slowPrimary.CompletedNormally.Should().BeFalse("the overtaken primary is cancelled once a winner is found");
+    }
+
+    [Fact]
+    public async Task ReportsSlowHopWhenPrimaryLags()
+    {
+        var hops = new List<SearchFailover>();
+        var slowPrimary = new DelayedProvider("serpapi", TimeSpan.FromSeconds(10), Hits("serpapi", "https://a"));
+        var router = new SearchRouter(
+            new ISearchProvider[] { slowPrimary, new FakeProvider("bing", _ => Hits("bing", "https://b")) },
+            hops.Add, hedgeDelay: TimeSpan.FromMilliseconds(20));
+
+        await router.SearchAsync(Web);
+
+        hops.Should().ContainSingle();
+        hops[0].FromProvider.Should().Be("serpapi");
+        hops[0].ToProvider.Should().Be("bing");
+        hops[0].Reason.Should().Contain("slow");
+    }
+
+    [Fact]
+    public async Task ZeroHedge_RacesFallbackImmediately()
+    {
+        // Hedge delay 0 collapses to full-parallel racing: the fallback is started at once and wins
+        // while the slow primary is still running.
+        var slowPrimary = new DelayedProvider("serpapi", TimeSpan.FromSeconds(10), Hits("serpapi", "https://a"));
+        var fastFallback = new FakeProvider("bing", _ => Hits("bing", "https://b"));
+        var router = new SearchRouter(
+            new ISearchProvider[] { slowPrimary, fastFallback },
+            onFailover: null, hedgeDelay: TimeSpan.Zero);
+
+        var results = await router.SearchAsync(Web);
+
+        results.Provider.Should().Be("bing");
+        fastFallback.Calls.Should().Be(1);
+    }
+
     [Fact]
     public void Supports_TrueIfAnyMemberSupports()
     {
