@@ -607,9 +607,26 @@ public class AgentServiceTests
         var cleaned = AgentService.CleanForExtraction(page);
 
         cleaned.Should().NotContain("[Sign in]", "a short line repeated 3+ times is a menu, never a product");
-        cleaned.Should().NotContain("![logo]", "image-only lines carry no extractable text");
+        cleaned.Should().NotContain("![logo]", "markdown image syntax is rewritten to a compact marker");
+        cleaned.Should().Contain("[image: https://x/logo.png]",
+            "the image URL is kept as a marker — dropping it blanked every product photo");
         cleaned.Should().Contain("Philips Airfryer XL — 119 JOD").And.Contain("Tefal Easy Fry — 89 JOD");
         cleaned.Should().NotContain("\n\n\n", "blank runs collapse so the budget buys content");
+    }
+
+    [Fact]
+    public void CleanForExtraction_KeepsProductImageUrlNextToItsProduct()
+    {
+        // A store grid renders each product's photo as its own markdown-image line right before the
+        // name/price. The URL must survive (as an [image: ...] marker) so the LLM can attach it — the
+        // old strip deleted the whole line, which is why every taghareedstore product showed a placeholder.
+        var page = "![Samsung 55\" QLED](https://taghareedstore.com/media/tv.jpg)\n" +
+                   "Samsung 55\" QLED — 320 JOD";
+
+        var cleaned = AgentService.CleanForExtraction(page);
+
+        cleaned.Should().Contain("[image: https://taghareedstore.com/media/tv.jpg]");
+        cleaned.Should().Contain("Samsung 55\" QLED — 320 JOD");
     }
 
     [Fact]

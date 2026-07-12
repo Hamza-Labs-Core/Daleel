@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Daleel.Core.Analysis;
 using Daleel.Core.Arabic;
 using Daleel.Core.Geo;
@@ -409,16 +410,36 @@ public sealed partial class AgentService
     }
 
     /// <summary>
+    /// Pulls the URL out of a markdown image so the strip can KEEP it as a compact
+    /// <c>[image: url]</c> marker (the same convention the extraction context uses for search-result
+    /// images) instead of discarding it. <c>![alt](https://host/p.jpg "title")</c> → the bare URL.
+    /// </summary>
+    private static readonly Regex MarkdownImage =
+        new(@"!\[[^\]]*\]\(\s*(?<url>[^)\s]+)(?:\s+""[^""]*"")?\s*\)", RegexOptions.Compiled);
+
+    /// <summary>
     /// Deterministic pre-LLM strip of page chrome. Language-neutral by design — it keys on SHAPE,
-    /// not vocabulary: image-only markdown lines carry no extractable text, and a short line that
-    /// repeats 3+ times across one page is a menu/button ("Add to cart", a nav entry rendered at
-    /// top and bottom), never a distinct product. Product lines survive because a grid row carries
-    /// a unique name (and usually a price), so it neither repeats nor is image-only. Blank runs
-    /// collapse so the budget buys content, not whitespace.
+    /// not vocabulary. Markdown images are REWRITTEN to a compact <c>[image: url]</c> marker rather than
+    /// dropped: a store grid renders each product's photo as its own <c>![name](url)</c> line, and that
+    /// URL is exactly what the item card needs — deleting the line (the old behaviour) blanked every
+    /// product image. Rewriting sheds the alt-text bloat that motivated the strip while keeping the URL
+    /// next to its product so the LLM can attach it. A short line that repeats 3+ times across one page
+    /// is a menu/button ("Add to cart", a nav entry rendered top and bottom), never a distinct product,
+    /// so it is still culled. Blank runs collapse so the budget buys content, not whitespace.
     /// </summary>
     internal static string CleanForExtraction(string content)
     {
         var lines = content.Split('\n');
+        // Rewrite markdown images to compact markers FIRST so the repeat/chrome rules below see the same
+        // shortened form the LLM will (and a decorative logo repeated in header+footer still de-dupes).
+        for (var i = 0; i < lines.Length; i++)
+        {
+            if (lines[i].Contains("![", StringComparison.Ordinal))
+            {
+                lines[i] = MarkdownImage.Replace(lines[i], m => $"[image: {m.Groups["url"].Value}]");
+            }
+        }
+
         var counts = new Dictionary<string, int>(StringComparer.Ordinal);
         foreach (var line in lines)
         {
@@ -446,6 +467,8 @@ public sealed partial class AgentService
             }
 
             blankRun = 0;
+            // A malformed image whose URL couldn't be lifted (still starts with "![") carries no
+            // extractable text, and a short line repeated 3+ times is page chrome — drop both.
             if (t.StartsWith("![", StringComparison.Ordinal) ||
                 (t.Length < 60 && counts.GetValueOrDefault(t) >= 3 && !t.Any(char.IsDigit)))
             {
