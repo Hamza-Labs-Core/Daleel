@@ -17,11 +17,19 @@ public sealed class BingProvider : HttpProviderBase, ISearchProvider
     public string Name => "bing";
     protected override string ProviderName => Name;
 
+    /// <param name="perAttemptTimeout">
+    /// Hard cap on each Bing request attempt. As the discovery fallback, an unbounded Bing call would
+    /// just relocate the "slow" problem — a stall here rode <see cref="HttpClient"/>'s 100s default
+    /// across every retry before the router reached the browser-SERP last resort. Null resolves the
+    /// default (env <c>BING_TIMEOUT_SECONDS</c>, else 20s, clamped 1–30s).
+    /// </param>
     public BingProvider(
         string? apiKey = null,
         HttpClient? httpClient = null,
-        Func<TimeSpan, CancellationToken, Task>? delay = null)
-        : base(ConfigureClient(httpClient), maxRetries: 2, delay)
+        Func<TimeSpan, CancellationToken, Task>? delay = null,
+        TimeSpan? perAttemptTimeout = null)
+        : base(ConfigureClient(httpClient), maxRetries: 2, delay,
+            perAttemptTimeout ?? ResolveAttemptTimeout("BING_TIMEOUT_SECONDS", 20))
     {
         _apiKey = apiKey
                   ?? Environment.GetEnvironmentVariable("BING_SEARCH_KEY")

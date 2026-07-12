@@ -1,4 +1,5 @@
 using Daleel.Search.Abstractions;
+using Daleel.Search.Http;
 using Daleel.Search.Providers;
 using FluentAssertions;
 using Xunit;
@@ -229,6 +230,46 @@ public class SerpApiProviderTests
         var query = req.RequestUri!.Query;
         var match = System.Text.RegularExpressions.Regex.Match(query, "start=(\\d+)");
         return match.Success ? int.Parse(match.Groups[1].Value) : 0;
+    }
+
+    [Fact]
+    public async Task SearchAsync_StalledAttempt_IsBoundedByPerAttemptTimeout_AndFailsTransient()
+    {
+        // A stalled SerpAPI call (or a stalled edge search-worker proxying it) used to ride
+        // HttpClient's 100s default across all three attempts — ~5 min — before SearchRouter could
+        // fail over. With a per-attempt cap each attempt aborts fast and the provider surfaces a
+        // TRANSIENT ProviderException, which the router treats exactly like an empty result and fails
+        // over on. A 50ms cap keeps the test instant; the stub honours the cancellation token.
+        using var handler = new HangingHttpMessageHandler();
+        var provider = new SerpApiProvider(
+            apiKey: "k",
+            httpClient: new HttpClient(handler) { BaseAddress = new Uri(SerpApiProvider.DefaultBaseUrl) },
+            delay: (_, _) => Task.CompletedTask, // skip the real backoff between retries
+            perAttemptTimeout: TimeSpan.FromMilliseconds(50));
+
+        var act = () => provider.SearchAsync(new SearchQuery { Query = "x", Kind = SearchKind.Web, MaxResults = 5 });
+
+        var thrown = await act.Should().ThrowAsync<ProviderException>();
+        thrown.Which.IsTransient.Should().BeTrue();
+        // Initial attempt + 2 retries, each aborted by the per-attempt timeout — never a 100s hang.
+        handler.Attempts.Should().Be(3);
+    }
+
+    /// <summary>A handler that never answers within the per-attempt window: it awaits far longer than
+    /// any test timeout but honours the linked cancellation token, so a per-attempt timeout aborts it
+    /// immediately. Records how many attempts were started.</summary>
+    private sealed class HangingHttpMessageHandler : HttpMessageHandler
+    {
+        private int _attempts;
+        public int Attempts => _attempts;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _attempts);
+            await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+            return new HttpResponseMessage(System.Net.HttpStatusCode.OK);
+        }
     }
 
     [Fact]
