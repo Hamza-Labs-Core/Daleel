@@ -220,7 +220,7 @@ public class ActorLoopTests
         var actor = new BrandSiteActor(Loop());
         var geo = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault("jordan");
 
-        var sites = await actor.FindAsync(Agent(llm), "DeLonghi", geo, default);
+        var sites = await actor.FindAsync(Agent(llm), "DeLonghi", geo, productContext: null, default);
 
         sites.Should().NotBeNull();
         sites!.Website.Should().Be("https://www.delonghi.com");
@@ -267,6 +267,41 @@ public class ActorLoopTests
         // (a hostname is never fabricated from the store's name).
         var none = new ScriptedLlm("{\"action\":\"done\",\"result\":{\"website\":null}}");
         (await new StoreSiteActor(Loop()).FindSiteAsync(Agent(none), "No Site Store", geo, default)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Brand_site_actor_grounds_disambiguation_in_the_product_category()
+    {
+        // "Sharp" is a San Diego hospital chain AND the electronics maker; "Mini" is a car and an
+        // appliance brand. With only the bare name the actor can't tell them apart and lands on
+        // whatever the top web hit is (QA showed Sharp → Sharp HealthCare). The originating search's
+        // product category MUST reach the actor's prompt so it seeks the RIGHT same-named entity.
+        var capture = new CapturingLoop();
+        var actor = new BrandSiteActor(capture);
+        var geo = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault("jordan");
+
+        await actor.FindAsync(
+            Agent(new ScriptedLlm("{\"action\":\"done\",\"result\":{}}")),
+            "Sharp", geo, productContext: "televisions", ct: default);
+
+        (capture.System + "\n" + capture.Context).Should().Contain("televisions",
+            "the actor must know which kind of 'Sharp' brand to look for");
+    }
+
+    /// <summary>Captures the guiding system + initial context the actor hands the loop (no LLM run).</summary>
+    private sealed class CapturingLoop : IActorLoop
+    {
+        public string System = string.Empty;
+        public string Context = string.Empty;
+
+        public Task<ActorResult> RunAsync(
+            AgentService agent, string guidingSystem, string initialContext,
+            IReadOnlyList<ActorTool> tools, ActorToolDispatch dispatch, ActorBounds bounds, CancellationToken ct)
+        {
+            System = guidingSystem;
+            Context = initialContext;
+            return Task.FromResult(new ActorResult(false, null, new string[0]));
+        }
     }
 
     /// <summary>An ILlmClient that replays a fixed script of completions, one per call.</summary>

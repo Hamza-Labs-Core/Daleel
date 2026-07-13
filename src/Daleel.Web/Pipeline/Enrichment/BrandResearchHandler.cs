@@ -115,7 +115,7 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
             {
                 var brandAgent = await Actor.ActorFlags.AgentAsync(ctx, actorCfg, ct);
                 var found = await ctx.Services.GetRequiredService<Actor.BrandSiteActor>()
-                    .FindAsync(brandAgent, payload.Brand, geo, ct);
+                    .FindAsync(brandAgent, payload.Brand, geo, productContext: ctx.Job.Query, ct);
 
                 // The attempt COMPLETED (even "nothing found" is an answer worth 7 days) — latch it.
                 row.SiteCheckedAt = DateTimeOffset.UtcNow;

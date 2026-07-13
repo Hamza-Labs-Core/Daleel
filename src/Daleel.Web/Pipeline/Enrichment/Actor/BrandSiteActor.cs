@@ -24,8 +24,15 @@ public sealed class BrandSiteActor
     public sealed record BrandSites(
         string? Website, string? LocalUrl, string? RegionalUrl, string? Description, IReadOnlyList<string> Social);
 
+    /// <param name="productContext">
+    /// What the originating search was about (its query/category, e.g. "televisions", "espresso
+    /// machines") — the disambiguation anchor. Many brand names are shared by unrelated organizations
+    /// (Sharp = electronics maker AND a hospital chain; Mini = a car AND an appliance brand); without
+    /// the category the actor lands on whatever the top web hit is. Null/empty ⇒ the un-grounded prompt
+    /// (the prior behaviour), for callers with no category to give.
+    /// </param>
     public async Task<BrandSites?> FindAsync(
-        AgentService agent, string brand, GeoProfile geo, CancellationToken ct)
+        AgentService agent, string brand, GeoProfile geo, string? productContext, CancellationToken ct)
     {
         var tools = new[]
         {
@@ -33,19 +40,29 @@ public sealed class BrandSiteActor
             new ActorTool("fetch_page", "{\"url\":\"...\"} — open a page to confirm it is the brand's own site"),
         };
 
+        var hasContext = !string.IsNullOrWhiteSpace(productContext);
+        var sells = hasContext ? " that makes " + productContext!.Trim() : string.Empty;
+
         var system =
-            "ROLE: You find the official web presence of a product brand for a " + geo.Country + " shopper.\n" +
+            "ROLE: You find the official web presence of a product brand" + sells + " for a " + geo.Country + " shopper.\n" +
             "GOAL: identify (1) the brand's OFFICIAL global site (the manufacturer's own domain, NOT a " +
             "marketplace or reseller listing about the brand), (2) its market-local storefront for " +
             geo.Country + " if one exists, (3) a regional site if distinct, and (4) official social profiles.\n" +
             "RAILS: confirm a site is the brand's OWN before trusting it — open it if unsure. Prefer the " +
             "manufacturer domain over any reseller. A missing local/regional site is a fine answer (null). " +
             "Do not invent URLs.\n" +
+            (hasContext
+                ? "DISAMBIGUATION: this brand MAKES " + productContext!.Trim() + ". Other organizations may " +
+                  "share the name (a hospital, a car, a software product); if the top result is one of those, " +
+                  "REJECT it and keep searching for the " + productContext!.Trim() + " brand.\n"
+                : string.Empty) +
             "OUTPUT (done result): {\"website\":\"<official global url>\"|null, \"localUrl\":\"<" + geo.Country +
             " site>\"|null, \"regionalUrl\":\"<regional site>\"|null, \"description\":\"<one line about the " +
             "brand from its site>\"|null, \"social\":[\"<profile url>\", ...]}.";
 
-        var context = "Brand: " + brand + "\nMarket: " + geo.Country + " (" + geo.CountryCode + ")";
+        var context = "Brand: " + brand +
+            (hasContext ? "\nProduct category: " + productContext!.Trim() : string.Empty) +
+            "\nMarket: " + geo.Country + " (" + geo.CountryCode + ")";
 
         ActorToolDispatch dispatch = async (tool, args, c) =>
         {
