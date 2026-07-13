@@ -5,6 +5,7 @@ using Daleel.Web.Conversation;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
 using Daleel.Web.Services;
+using Microsoft.Extensions.Logging;
 
 namespace Daleel.Web.Pipeline.Enrichment;
 
@@ -582,27 +583,47 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
     }
 
     /// <summary>
-    /// Records ONE per-store diagnostic on the admin timeline: which gate this domain hit and how many
-    /// grid items it produced. This is what turns an unexplained "only one store had items" into an
-    /// operator-readable list of WHY each of the other stores contributed nothing. Best-effort — the
-    /// event log swallows its own failures, and an absent log (test wiring) is a no-op.
+    /// Records ONE per-store diagnostic of which gate this domain hit and how many grid items it
+    /// produced — what turns an unexplained "only one store had items" into an operator-readable list of
+    /// WHY each of the other stores contributed nothing. Emitted on TWO channels so it's readable
+    /// without admin: (1) ILogger under the pipeline source context → Serilog's R2 sink → the log viewer;
+    /// (2) the admin timeline (Postgres), filterable per job. Best-effort — both swallow their own
+    /// failures, and an absent sink (test wiring) is a no-op.
     /// </summary>
     private static async Task EmitGateAsync(
         EnrichmentUnitContext ctx, EnrichmentWorkItem item, CatalogPayload payload,
         CatalogGate gate, int itemsCreated, CancellationToken ct)
     {
+        var store = string.IsNullOrWhiteSpace(payload.StoreName) ? payload.Domain : payload.StoreName!;
+        // A store that produced items is routine (Info); every other gate is a MISS an operator is
+        // hunting for, so it surfaces at Warning to stand out in both the log viewer and the timeline.
+        var isMiss = gate != CatalogGate.ProducedItems;
+
+        // Channel 1 — ILogger under "Daleel.Pipeline" (the same source context c3d289c bridges to the
+        // R2 sink), so the per-store gate lands in daleel-logs / daleel-qa-logs and is greppable via the
+        // log viewer even for a non-admin operator.
+        var logger = ctx.Services.GetService<ILoggerFactory>()?.CreateLogger("Daleel.Pipeline");
+        if (logger is not null)
+        {
+            const string tmpl = "catalog.store.result {Domain} gate={Gate} items={Items} job={Job}";
+            if (isMiss)
+            {
+                logger.LogWarning(tmpl, payload.Domain, gate, itemsCreated, item.SearchJobId);
+            }
+            else
+            {
+                logger.LogInformation(tmpl, payload.Domain, gate, itemsCreated, item.SearchJobId);
+            }
+        }
+
+        // Channel 2 — the admin timeline (Postgres), correlated to the job.
         var log = ctx.Services.GetService<ISystemEventLog>();
         if (log is null || !log.IsEnabled)
         {
             return;
         }
 
-        // A store that produced items is routine (Info); every other gate is a MISS an operator is
-        // hunting for, so it surfaces at Warning to stand out in the timeline filter.
-        var severity = gate == CatalogGate.ProducedItems
-            ? SystemEventSeverity.Info
-            : SystemEventSeverity.Warning;
-        var store = string.IsNullOrWhiteSpace(payload.StoreName) ? payload.Domain : payload.StoreName!;
+        var severity = isMiss ? SystemEventSeverity.Warning : SystemEventSeverity.Info;
         await log.LogAsync(
             SystemEventCategory.Store, "catalog.store.result",
             $"{store} — {gate} ({itemsCreated} item(s))",
