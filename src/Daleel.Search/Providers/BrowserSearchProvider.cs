@@ -27,11 +27,12 @@ namespace Daleel.Search.Providers;
 public sealed class BrowserSearchProvider : ISearchProvider
 {
     /// <summary>
-    /// Bing web search — the CF edge browser renders it fine (a full SERP), while it does NOT need a
-    /// search-vendor quota. DuckDuckGo's endpoints refuse Cloudflare's datacenter IPs outright (0-char
-    /// render), so Bing is the reliable engine here. Placeholders: {q} escaped query, {cc} country, {lang}.
+    /// DuckDuckGo's HTML endpoint — a no-JS, scraper-friendly SERP that renders to a few KB of clean
+    /// markdown with organic results wrapped in <c>/l/?uddg=</c>. Bing serves Cloudflare's datacenter
+    /// browser only a ~300-char consent/block stub, so DDG is the reliable engine (the earlier "0-char"
+    /// DDG render was the browser-rendering token's 401, not DDG). Placeholders: {q} {cc} {lang}.
     /// </summary>
-    public const string DefaultEngine = "https://www.bing.com/search?q={q}&cc={cc}&setlang={lang}";
+    public const string DefaultEngine = "https://html.duckduckgo.com/html/?q={q}";
 
     /// <summary>Every markdown link on the page; which ones are organic results is decided per-link below.</summary>
     private static readonly Regex MarkdownLink = new(

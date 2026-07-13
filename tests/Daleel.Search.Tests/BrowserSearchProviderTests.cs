@@ -49,7 +49,7 @@ public class BrowserSearchProviderTests
     }
 
     [Fact]
-    public async Task Renders_bing_as_markdown_with_the_escaped_query()
+    public async Task Renders_the_ddg_html_endpoint_as_markdown_with_the_escaped_query()
     {
         var scraper = new FakeScraper(DdgMarkdown);
         var provider = new BrowserSearchProvider(scraper);
@@ -57,7 +57,7 @@ public class BrowserSearchProviderTests
         await provider.SearchAsync(new SearchQuery { Query = "coffee & tea", Kind = SearchKind.Web });
 
         scraper.LastFormat.Should().Be(ScrapeFormat.Markdown);
-        scraper.LastUrl.Should().StartWith("https://www.bing.com/search?q=");
+        scraper.LastUrl.Should().StartWith("https://html.duckduckgo.com/html/?q=");
         scraper.LastUrl.Should().Contain("coffee%20%26%20tea");
     }
 
@@ -114,7 +114,7 @@ public class BrowserSearchProviderTests
             new SearchQuery { Query = "x", Kind = SearchKind.Web });
 
         r.Results.Should().BeEmpty();
-        r.Diagnostic.Should().Contain("rendered").And.Contain("chars").And.Contain("bing.com",
+        r.Diagnostic.Should().Contain("rendered").And.Contain("chars").And.Contain("duckduckgo.com",
             "the diagnostic must reveal whether the engine rendered anything at all");
     }
 
