@@ -26,8 +26,12 @@ namespace Daleel.Search.Providers;
 /// </remarks>
 public sealed class BrowserSearchProvider : ISearchProvider
 {
-    /// <summary>DuckDuckGo HTML search. Placeholders: {q} the escaped query, {cc} country, {lang} language.</summary>
-    public const string DefaultEngine = "https://html.duckduckgo.com/html/?q={q}";
+    /// <summary>
+    /// Bing web search — the CF edge browser renders it fine (a full SERP), while it does NOT need a
+    /// search-vendor quota. DuckDuckGo's endpoints refuse Cloudflare's datacenter IPs outright (0-char
+    /// render), so Bing is the reliable engine here. Placeholders: {q} escaped query, {cc} country, {lang}.
+    /// </summary>
+    public const string DefaultEngine = "https://www.bing.com/search?q={q}&cc={cc}&setlang={lang}";
 
     /// <summary>Every markdown link on the page; which ones are organic results is decided per-link below.</summary>
     private static readonly Regex MarkdownLink = new(
@@ -119,34 +123,68 @@ public sealed class BrowserSearchProvider : ISearchProvider
         }
     }
 
+    /// <summary>Search-engine hosts whose own links (nav, ads, redirects we couldn't decode) are never results.</summary>
+    private static readonly string[] EngineHosts = { "bing.com", "microsoft.com", "msn.com", "duckduckgo.com", "google.com" };
+
     /// <summary>
-    /// The real destination of a markdown link if it is an organic result, else null. DDG wraps organic
-    /// URLs in <c>/l/?uddg=&lt;encoded&gt;</c>; the CF markdown converter sometimes resolves that redirect
-    /// to the final URL instead — so BOTH forms count, while DuckDuckGo's own chrome/nav and ad links
-    /// (<c>/y.js</c>) do not.
+    /// The real destination of a markdown link if it is an organic result, else null. Handles the SERP
+    /// redirect wrappers (Bing <c>/ck/a?...u=&lt;base64url&gt;</c>, DDG <c>/l/?uddg=&lt;encoded&gt;</c>) AND
+    /// links the markdown converter already resolved to the final URL; search-engine chrome/ads are dropped.
     /// </summary>
     private static string? ResolveResultUrl(string href)
     {
         var link = href.StartsWith("//", StringComparison.Ordinal) ? "https:" + href : href;
-
-        // Wrapped organic result: /l/?...uddg=<encoded real url>.
-        if (link.Contains("duckduckgo.com/l/", StringComparison.OrdinalIgnoreCase) &&
-            link.IndexOf('?') is var q && q >= 0)
-        {
-            var uddg = HttpUtility.ParseQueryString(link[(q + 1)..]).Get("uddg");
-            var decoded = string.IsNullOrWhiteSpace(uddg) ? null : Uri.UnescapeDataString(uddg);
-            return decoded is not null && decoded.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                ? decoded : null;
-        }
-
-        // Resolved/direct external result: an absolute http(s) URL that isn't a search-engine host.
-        if (!Uri.TryCreate(link, UriKind.Absolute, out var u) ||
-            u.Scheme is not ("http" or "https"))
+        if (!Uri.TryCreate(link, UriKind.Absolute, out var u) || u.Scheme is not ("http" or "https"))
         {
             return null;
         }
 
         var host = u.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? u.Host[4..] : u.Host;
-        return host.EndsWith("duckduckgo.com", StringComparison.OrdinalIgnoreCase) ? null : link;
+        var query = HttpUtility.ParseQueryString(u.Query);
+
+        // Bing wraps organic results in /ck/a?...&u=a1<base64url(real url)>.
+        if (host.EndsWith("bing.com", StringComparison.OrdinalIgnoreCase) &&
+            u.AbsolutePath.StartsWith("/ck/", StringComparison.OrdinalIgnoreCase))
+        {
+            return DecodeBingU(query.Get("u"));
+        }
+
+        // DuckDuckGo wraps organic results in /l/?uddg=<encoded real url>.
+        if (host.EndsWith("duckduckgo.com", StringComparison.OrdinalIgnoreCase) &&
+            u.AbsolutePath.StartsWith("/l/", StringComparison.OrdinalIgnoreCase))
+        {
+            var uddg = query.Get("uddg");
+            var decoded = string.IsNullOrWhiteSpace(uddg) ? null : Uri.UnescapeDataString(uddg);
+            return Http(decoded);
+        }
+
+        // Otherwise: a direct/resolved external result — keep it unless it's a search-engine host.
+        return EngineHosts.Any(e => host.Equals(e, StringComparison.OrdinalIgnoreCase) ||
+                                    host.EndsWith("." + e, StringComparison.OrdinalIgnoreCase))
+            ? null
+            : link;
     }
+
+    /// <summary>Bing's <c>u</c> param is <c>"a1" + base64url(real url)</c>.</summary>
+    private static string? DecodeBingU(string? u)
+    {
+        if (string.IsNullOrWhiteSpace(u) || !u.StartsWith("a1", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var b64 = u[2..].Replace('-', '+').Replace('_', '/');
+        b64 = b64.PadRight(b64.Length + (4 - b64.Length % 4) % 4, '=');
+        try
+        {
+            return Http(System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(b64)));
+        }
+        catch (FormatException)
+        {
+            return null;
+        }
+    }
+
+    private static string? Http(string? url) =>
+        url is not null && url.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? url : null;
 }

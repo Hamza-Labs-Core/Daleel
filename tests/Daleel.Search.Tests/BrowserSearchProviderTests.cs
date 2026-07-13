@@ -40,8 +40,16 @@ public class BrowserSearchProviderTests
 
     private static BrowserSearchProvider Build(string markdown) => new(new FakeScraper(markdown));
 
+    // Bing organic results, rendered to markdown, wrap the real URL in /ck/a?...&u=a1<base64url>.
+    private static string BingCkA(string title, string realUrl)
+    {
+        var b64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(realUrl))
+            .Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        return $"[{title}](https://www.bing.com/ck/a?!&&p=abc&u=a1{b64}&ntb=1)";
+    }
+
     [Fact]
-    public async Task Renders_the_ddg_endpoint_as_markdown_with_the_escaped_query()
+    public async Task Renders_bing_as_markdown_with_the_escaped_query()
     {
         var scraper = new FakeScraper(DdgMarkdown);
         var provider = new BrowserSearchProvider(scraper);
@@ -49,8 +57,23 @@ public class BrowserSearchProviderTests
         await provider.SearchAsync(new SearchQuery { Query = "coffee & tea", Kind = SearchKind.Web });
 
         scraper.LastFormat.Should().Be(ScrapeFormat.Markdown);
-        scraper.LastUrl.Should().StartWith("https://html.duckduckgo.com/html/?q=");
+        scraper.LastUrl.Should().StartWith("https://www.bing.com/search?q=");
         scraper.LastUrl.Should().Contain("coffee%20%26%20tea");
+    }
+
+    [Fact]
+    public async Task Decodes_bing_ck_a_redirects_and_skips_bing_chrome()
+    {
+        var markdown = string.Join("\n",
+            "[Images](https://www.bing.com/images/search?q=x)",
+            BingCkA("Coffee Grinders - Ammancart", "https://www.ammancart.com/ar/coffee-grinders"),
+            BingCkA("Leaders Center", "https://leaders.jo/en/coffee"));
+        var results = (await Build(markdown).SearchAsync(
+            new SearchQuery { Query = "x", Kind = SearchKind.Web })).Results;
+
+        results.Select(r => r.Url).Should().Equal(
+            "https://www.ammancart.com/ar/coffee-grinders", "https://leaders.jo/en/coffee");
+        results[0].Title.Should().Be("Coffee Grinders - Ammancart");
     }
 
     [Fact]
@@ -91,7 +114,7 @@ public class BrowserSearchProviderTests
             new SearchQuery { Query = "x", Kind = SearchKind.Web });
 
         r.Results.Should().BeEmpty();
-        r.Diagnostic.Should().Contain("rendered").And.Contain("chars").And.Contain("duckduckgo.com",
+        r.Diagnostic.Should().Contain("rendered").And.Contain("chars").And.Contain("bing.com",
             "the diagnostic must reveal whether the engine rendered anything at all");
     }
 
