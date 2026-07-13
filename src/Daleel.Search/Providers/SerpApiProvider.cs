@@ -92,7 +92,7 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
 
         // Web and shopping go deep — page through results (up to MaxPages) until we reach the
         // requested count. Maps/News/Images stay single-page (their result shapes don't paginate usefully here).
-        var results = query.Kind is SearchKind.Web or SearchKind.Shopping
+        var (results, capped) = query.Kind is SearchKind.Web or SearchKind.Shopping
             ? await SearchPagedAsync(engine, query, cancellationToken).ConfigureAwait(false)
             : await SearchSinglePageAsync(engine, query, cancellationToken).ConfigureAwait(false);
 
@@ -101,9 +101,23 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
             Provider = Name,
             Query = query.Query,
             Kind = query.Kind,
-            Results = results
+            Results = results,
+            // The worker's capped soft-empty parses identically to "no hits" — mark it so the
+            // router's failover event says the hourly cap tripped instead of a generic "no results".
+            Diagnostic = capped && results.Count == 0
+                ? "edge hourly SerpAPI cap tripped (soft-empty SERP served)"
+                : null
         };
     }
+
+    /// <summary>True when the body is the search-worker's capped placeholder (hourly SerpAPI budget
+    /// spent): a structurally-valid SERP whose <c>search_metadata.status</c> is "Capped".</summary>
+    private static bool IsCappedBody(JsonElement root) =>
+        root.TryGetProperty("search_metadata", out var meta) &&
+        meta.ValueKind == JsonValueKind.Object &&
+        meta.TryGetProperty("status", out var status) &&
+        status.ValueKind == JsonValueKind.String &&
+        string.Equals(status.GetString(), "Capped", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Deep search: walk pages via the <c>start</c> offset, aggregating + de-duplicating until we
@@ -111,7 +125,7 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
     /// <see cref="MaxPages"/>. Each page asks for <see cref="PageSize"/> rather than trusting a large
     /// <c>num</c>, which Google often clamps back to ~10.
     /// </summary>
-    private async Task<List<SearchResult>> SearchPagedAsync(
+    private async Task<(List<SearchResult> Results, bool Capped)> SearchPagedAsync(
         string engine, SearchQuery query, CancellationToken cancellationToken)
     {
         var collected = new List<SearchResult>();
@@ -137,7 +151,7 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
                 // Google Shopping doesn't operate in this country — remember it so every later
                 // shopping query for the market skips the call instead of burning another request.
                 ShoppingUnsupportedGl.TryAdd(gl, 0);
-                return collected;
+                return (collected, false);
             }
 
             using var _ = doc;
@@ -148,7 +162,8 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
 
             if (pageResults.Count == 0)
             {
-                break; // No more results — Google has nothing past this offset.
+                // No more results — Google has nothing past this offset — OR the worker's cap tripped.
+                return (collected, IsCappedBody(doc.RootElement));
             }
 
             var added = 0;
@@ -162,7 +177,7 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
                     added++;
                     if (collected.Count >= query.MaxResults)
                     {
-                        return collected;
+                        return (collected, false);
                     }
                 }
             }
@@ -174,22 +189,23 @@ public sealed class SerpApiProvider : HttpProviderBase, ISearchProvider
             }
         }
 
-        return collected;
+        return (collected, false);
     }
 
-    private async Task<List<SearchResult>> SearchSinglePageAsync(
+    private async Task<(List<SearchResult> Results, bool Capped)> SearchSinglePageAsync(
         string engine, SearchQuery query, CancellationToken cancellationToken)
     {
         var url = BuildUrl(engine, query, start: 0, num: query.MaxResults);
         using var doc = await SendJsonAsync(
             () => new HttpRequestMessage(HttpMethod.Get, url), cancellationToken).ConfigureAwait(false);
 
-        return query.Kind switch
+        var results = query.Kind switch
         {
             SearchKind.Maps => ParseLocal(doc.RootElement, query.MaxResults),
             SearchKind.Images => ParseImages(doc.RootElement, query.MaxResults),
             _ => ParseOrganic(doc.RootElement, query.MaxResults)
         };
+        return (results, results.Count == 0 && IsCappedBody(doc.RootElement));
     }
 
     private string BuildUrl(string engine, SearchQuery query, int start, int num)

@@ -105,6 +105,26 @@ public class SearchRouterTests
     }
 
     [Fact]
+    public async Task EmptyResultWithDiagnostic_ReportsDiagnosticAsFailoverReason()
+    {
+        // An empty result can hide a cause (the edge worker's capped soft-empty SERP): when the
+        // provider attaches a Diagnostic, the failover hop must surface IT instead of the generic
+        // "no results", so the timeline distinguishes cap-tripped from a genuinely dry query.
+        var hops = new List<SearchFailover>();
+        var router = new SearchRouter(
+            new ISearchProvider[]
+            {
+                new FakeProvider("serpapi", _ => Empty("serpapi") with { Diagnostic = "edge hourly cap tripped" }),
+                new FakeProvider("browser-serp", _ => Hits("browser-serp", "https://b"))
+            },
+            hops.Add);
+
+        await router.SearchAsync(Web);
+
+        hops.Should().ContainSingle().Which.Reason.Should().Be("edge hourly cap tripped");
+    }
+
+    [Fact]
     public async Task DoesNotReportFailoverWhenPrimarySucceeds()
     {
         var hops = new List<SearchFailover>();

@@ -166,7 +166,10 @@ public sealed class SearchRouter : ISearchProvider
         try
         {
             var results = await provider.SearchAsync(query, cancellationToken).ConfigureAwait(false);
-            return new Attempt(index, results, results.Results.Count > 0 ? null : "no results");
+            // An empty outcome may carry its own cause (e.g. the edge worker's capped soft-empty
+            // SERP) — surface that as the failover reason instead of the generic "no results".
+            return new Attempt(index, results,
+                results.Results.Count > 0 ? null : results.Diagnostic ?? "no results");
         }
         catch (OperationCanceledException)
         {

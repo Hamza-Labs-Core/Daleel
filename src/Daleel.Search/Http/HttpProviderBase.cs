@@ -120,7 +120,17 @@ public abstract class HttpProviderBase
                     };
                 }
 
-                last = new ProviderException($"{ProviderName}: transient HTTP {(int)response.StatusCode}.");
+                // Keep the status TYPED and a body snippet in the remembered failure: when retries
+                // exhaust, this is the only evidence distinguishing vendor quota (429 + "exceeding
+                // your searches") from an edge-worker misconfig 500 ({code:"server_misconfigured"}).
+                var transientBody = await SafeBodyAsync(response).ConfigureAwait(false);
+                var transientStatus = response.StatusCode;
+                last = new ProviderException(
+                    $"{ProviderName}: transient HTTP {(int)transientStatus} {transientStatus}.{Snippet(transientBody)}")
+                {
+                    StatusCode = (int)transientStatus,
+                    IsTransient = true,
+                };
                 response.Dispose();
             }
             catch (HttpRequestException ex)
@@ -140,11 +150,38 @@ public abstract class HttpProviderBase
             }
         }
 
-        throw new ProviderException($"{ProviderName}: request failed after retries.", last!)
+        // The failover timeline shows only THIS message (the inner exception never leaves the
+        // process), so the last attempt's cause — status + body snippet, timeout, or transport
+        // error — must ride along or ops can't tell key-vs-quota-vs-timeout at a glance.
+        throw new ProviderException(
+            $"{ProviderName}: request failed after retries ({LastAttemptDetail(last!)})", last!)
         {
             IsTransient = true,
             StatusCode = (last as ProviderException)?.StatusCode,
         };
+    }
+
+    /// <summary>The last attempt's failure, condensed for the exhausted-retries message — with the
+    /// redundant "provider:" prefix stripped from our own exceptions to avoid "serpapi: … (serpapi: …)".</summary>
+    private string LastAttemptDetail(Exception last)
+    {
+        var message = last.Message;
+        var prefix = ProviderName + ": ";
+        return message.StartsWith(prefix, StringComparison.Ordinal) ? message[prefix.Length..] : message;
+    }
+
+    /// <summary>A short single-line body excerpt (empty for a blank body), leading-space-prefixed for
+    /// direct concatenation into the transient-failure message.</summary>
+    private static string Snippet(string body)
+    {
+        var flat = body.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (flat.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        const int max = 300;
+        return " " + (flat.Length <= max ? flat : flat[..max] + "…");
     }
 
     /// <summary>
