@@ -111,6 +111,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     private readonly IBrandCatalogService _brandCatalog;
     private readonly ILogger<ItemEnrichmentService> _logger;
     private readonly Services.IProviderApi _providers;
+    private readonly Data.ISiteSearchProfileRepository? _siteProfiles;
 
     /// <summary>
     /// Cap on per-run image-search lookups for models the pipeline left imageless (~one grid page).
@@ -140,8 +141,10 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         Identification.IProductIdentifier identifier,
         ILogger<ItemEnrichmentService> logger,
         Services.IProviderApi? providers = null,
-        Storage.IR2StorageService? r2 = null)
+        Storage.IR2StorageService? r2 = null,
+        Data.ISiteSearchProfileRepository? siteProfiles = null)
     {
+        _siteProfiles = siteProfiles;
         _repo = repo;
         _options = options;
         _factory = factory;
@@ -1387,10 +1390,40 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // cannot resolve simply skips that fallback rather than guessing.
         var geoProfile = GeoProfiles.Resolve(geo);
 
+        // Learned search interfaces, loaded BEFORE the concurrent fan-out and written back AFTER it —
+        // the scoped DbContext must never be touched from inside Task.WhenAll (the same concurrency
+        // rule the Blazor circuit crash taught). Missing repo (test wiring) ⇒ probes only.
+        var profiles = new Dictionary<string, Data.SiteSearchProfile?>(StringComparer.OrdinalIgnoreCase);
+        if (_siteProfiles is not null)
+        {
+            foreach (var d in domains.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                profiles[d] = await SafeGetSiteProfileAsync(d, ct).ConfigureAwait(false);
+            }
+        }
+
+        var outcomes = new System.Collections.Concurrent.ConcurrentDictionary<string, string?>(
+            StringComparer.OrdinalIgnoreCase);
+
         var harvested = await Task.WhenAll(domains.Select(async domain =>
         {
-            var url = ProductSearchUrl(domain, query);
-            var page = await FetchHarvestPageAsync(agent, url, ct);
+            // Candidate search URLs in learned-first order (Shopify /search?q=, WooCommerce /?s=, …).
+            // The judge skips error/no-result shells — an HTTP-200 soft-404 used to be "extracted" as
+            // an inexplicable zero — so the next convention gets its chance. The extra fetch is paid
+            // ONLY when the previous candidate came back unusable.
+            ScrapedPage? page = null;
+            string? url = null;
+            foreach (var candidate in SiteSearch.SiteSearchCandidates.For(
+                         domain, query, profiles.GetValueOrDefault(domain)))
+            {
+                var fetched = await FetchHarvestPageAsync(agent, candidate, ct).ConfigureAwait(false);
+                url ??= candidate; // first candidate names the attempt even if everything is unusable
+                if (fetched is not null && SiteSearch.HarvestPageJudge.IsUsable(fetched.Content))
+                {
+                    (page, url) = (fetched, candidate);
+                    break;
+                }
+            }
 
             var prices = page is null || string.IsNullOrWhiteSpace(page.Content)
                 ? new List<BrowserPrice>()
@@ -1470,10 +1503,64 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                     ["domain"] = domain, ["url"] = url, ["prices"] = prices.Count,
                     ["edgeExtract"] = usedEdgeExtract, ["llmExtract"] = usedLlm
                 });
+
+            // LEARN: a candidate that yielded extractable products is this domain's search interface —
+            // persist its template (after the fan-out) so the next harvest leads with it. A learned
+            // profile that yielded nothing records a failure so a stale template eventually relearns.
+            var yielded = prices.Count > 0 || usedLlm;
+            if (yielded && url is not null &&
+                SiteSearch.SiteSearchCandidates.TemplateFor(url) is { } template)
+            {
+                outcomes[domain] = template;
+            }
+            else if (!yielded && profiles.GetValueOrDefault(domain) is not null)
+            {
+                outcomes[domain] = null;
+            }
+
             return (IReadOnlyList<BrowserPrice>)prices;
         }));
 
+        // Write the learning back OUTSIDE the concurrent region (single-threaded DbContext rule).
+        if (_siteProfiles is not null)
+        {
+            foreach (var (domain, template) in outcomes)
+            {
+                await SafeRecordSiteOutcomeAsync(domain, template, ct).ConfigureAwait(false);
+            }
+        }
+
         return harvested.SelectMany(h => h).ToList();
+    }
+
+    /// <summary>Best-effort profile read: a DB blip must cost the probes, never the harvest.</summary>
+    private async Task<Data.SiteSearchProfile?> SafeGetSiteProfileAsync(string domain, CancellationToken ct)
+    {
+        try { return await _siteProfiles!.GetByDomainAsync(domain, ct).ConfigureAwait(false); }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Site-search profile read failed for {Domain}", domain);
+            return null;
+        }
+    }
+
+    /// <summary>Best-effort learning write: losing a lesson must never fail the harvest that taught it.</summary>
+    private async Task SafeRecordSiteOutcomeAsync(string domain, string? template, CancellationToken ct)
+    {
+        try
+        {
+            await _siteProfiles!.RecordOutcomeAsync(domain, template, _options.Now(), ct).ConfigureAwait(false);
+            if (template is not null)
+            {
+                _logger.LogInformation("Learned search interface for {Domain}: {Template}", domain, template);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Site-search profile write failed for {Domain}", domain);
+        }
     }
 
 
@@ -1583,22 +1670,9 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return prices;
     }
 
-    /// <summary>
-    /// A store's on-site search URL for <paramref name="query"/>, so the browser fallback renders a
-    /// product-relevant page (results for what the user searched) rather than the homepage — whose
-    /// featured/deal prices would be mis-attributed to our items. Uses the widely-supported
-    /// <c>/search?q=</c> convention; falls back to the bare domain only when there's no query.
-    /// </summary>
-    private static string ProductSearchUrl(string domain, string query)
-    {
-        var root = domain.Contains("://", StringComparison.Ordinal) ? domain : $"https://{domain}";
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            return root;
-        }
-
-        return $"{root.TrimEnd('/')}/search?q={Uri.EscapeDataString(query)}";
-    }
+    // ProductSearchUrl (the hardcoded /search?q= guess) is gone: the gate audit proved that Shopify-only
+    // convention 404'd nearly every non-Shopify store — SiteSearchCandidates now tries the learned
+    // per-domain template first, then the known platform conventions.
 
     /// <summary>
     /// Query words that carry no product identity — never enough on their own to call a catalogue
