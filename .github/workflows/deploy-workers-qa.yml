@@ -58,6 +58,11 @@ jobs:
             worker_secrets: ""
           - worker: filter-worker
             worker_secrets: ""
+          # Read-only R2 log viewer — the QA env (wrangler --env qa) binds daleel-qa-logs. Its
+          # AUTH_TOKEN is a standalone read bearer (not token-authority-managed), uploaded from a secret.
+          - worker: log-viewer
+            worker_secrets: |
+              AUTH_TOKEN
     defaults:
       run:
         working-directory: workers/${{ matrix.worker }}
@@ -112,3 +117,5 @@ jobs:
           CONTEXT_DEV_API_KEY: ${{ secrets.CONTEXT_DEV_API_KEY }}
           SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
           GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+          # Only uploaded for log-viewer (the sole worker listing AUTH_TOKEN in worker_secrets).
+          AUTH_TOKEN: ${{ secrets.LOG_VIEWER_AUTH_TOKEN }}

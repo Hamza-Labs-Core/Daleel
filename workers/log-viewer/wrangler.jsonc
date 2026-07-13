@@ -16,5 +16,19 @@
     { "binding": "LOGS_BUCKET", "bucket_name": "daleel-logs" }
   ],
 
-  "observability": { "enabled": true }
+  "observability": { "enabled": true },
+
+  // QA reads a SEPARATE bucket: the QA app writes its logs to daleel-qa-logs
+  // (deploy-qa.yml renders R2_BUCKET_LOGS=daleel-qa-logs), so the prod viewer above —
+  // bound to daleel-logs — never sees them. Deploy this env with `wrangler deploy --env qa`;
+  // its AUTH_TOKEN is a per-env secret: `wrangler secret put AUTH_TOKEN --env qa`.
+  "env": {
+    "qa": {
+      "name": "daleel-qa-log-viewer",
+      "r2_buckets": [
+        { "binding": "LOGS_BUCKET", "bucket_name": "daleel-qa-logs" }
+      ],
+      "observability": { "enabled": true }
+    }
+  }
 }
