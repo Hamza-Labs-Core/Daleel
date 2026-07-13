@@ -417,6 +417,10 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             return null;
         }
 
+        // The repair pass is its own execution entry point (not under the job worker's scope), so it
+        // stamps SearchJobId on its log lines itself — same per-search traceability as the base run.
+        using var logScope = Logging.SearchLogScope.Begin(_logger, job.Id);
+
         var products = seed;
         var language = string.IsNullOrWhiteSpace(job.Language) ? "en" : job.Language;
         var resultKey = CacheKey.ForResult(job.Query, job.Geo, language);

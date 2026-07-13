@@ -169,6 +169,11 @@ public sealed class EnrichmentQueueService : BackgroundService
         ISystemConfigService config, Daleel.Core.Observability.CostEstimator estimator,
         IEnrichmentUnitHandler handler, CancellationToken stoppingToken)
     {
+        // Every ILogger line this unit emits (handlers, ItemEnrichmentService, actors, EF) carries
+        // SearchJobId + UnitKind as structured properties in the JSON log sinks — the queue path's
+        // direct ILogger calls otherwise have no per-search identity at all.
+        using var logScope = Logging.SearchLogScope.Begin(_logger, item.SearchJobId, item.Kind);
+
         // The ONLY bound is the lease: an attempt must finish before its lease can expire (or a second
         // consumer could claim the unit while this one still runs it). It is crash-recovery/liveness,
         // NOT a cost limit — cost never cancels ongoing work (R1).
