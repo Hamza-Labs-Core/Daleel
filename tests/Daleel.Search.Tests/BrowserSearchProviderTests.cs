@@ -68,6 +68,34 @@ public class BrowserSearchProviderTests
     }
 
     [Fact]
+    public async Task Also_handles_links_the_markdown_converter_already_resolved()
+    {
+        // CF's /markdown sometimes follows DDG's /l/ redirect and emits the FINAL url instead of the
+        // wrapper — those direct external links must count as results too (search-engine hosts don't).
+        const string resolved = """
+            [Web](https://duckduckgo.com/?q=x)
+            [Coffee grinder - Amman Hardware](https://www.ammanhardware.com/en/coffee-grinder)
+            [Bunni Coffee](https://bunni.coffee/collections/grinders)
+            """;
+        var results = (await Build(resolved).SearchAsync(
+            new SearchQuery { Query = "x", Kind = SearchKind.Web })).Results;
+
+        results.Select(r => r.Url).Should().Equal(
+            "https://www.ammanhardware.com/en/coffee-grinder", "https://bunni.coffee/collections/grinders");
+    }
+
+    [Fact]
+    public async Task Empty_results_carry_a_render_diagnostic_for_the_timeline()
+    {
+        var r = await Build("a challenge page with no links, 42 chars here").SearchAsync(
+            new SearchQuery { Query = "x", Kind = SearchKind.Web });
+
+        r.Results.Should().BeEmpty();
+        r.Diagnostic.Should().Contain("rendered").And.Contain("chars").And.Contain("duckduckgo.com",
+            "the diagnostic must reveal whether the engine rendered anything at all");
+    }
+
+    [Fact]
     public async Task Skips_ads_and_internal_navigation_links()
     {
         var results = (await Build(DdgMarkdown).SearchAsync(
