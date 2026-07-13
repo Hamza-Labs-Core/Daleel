@@ -49,7 +49,11 @@ internal sealed class LoggingSearchProvider : ISearchProvider
         ApiCallTimer.TimeAsync(_observer, _estimator, _inner.Name, query.Kind.ToString().ToLowerInvariant(),
             query.Query, () => _inner.SearchAsync(query, cancellationToken),
             r => r.Results.Sum(x => (long)((x.Title?.Length ?? 0) + (x.Snippet?.Length ?? 0))),
-            describe: r => $"{r.Results.Count} result(s)");
+            // A zero-result provider surfaces its Diagnostic (e.g. browser-serp's render char count) so
+            // "paid for nothing" rows on /admin/providers say WHY, not just "0 result(s)".
+            describe: r => r.Results.Count > 0
+                ? $"{r.Results.Count} result(s)"
+                : r.Diagnostic ?? "0 result(s)");
 }
 
 internal class LoggingScrapeProvider : IScrapeProvider
