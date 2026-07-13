@@ -126,6 +126,12 @@ public sealed class CloudflarePollDrainService : BackgroundService
             return Outcome.Ack; // a poison message must not loop forever
         }
 
+        // Drained results belong to a search too: stamp its id on every log line this message
+        // produces so the drain leg shows up when tracing a search's flow (ad-hoc crawls have none).
+        using var logScope = int.TryParse(msg.SearchJobId, out var scopeJobId)
+            ? Logging.SearchLogScope.Begin(_logger, scopeJobId)
+            : null;
+
         // Terminal worker failure: surface a real error on the timeline (faulted ≠ empty), then ack.
         // A DISTINCT '.failed' marker (never '.persisted') de-dupes a redelivered failure without
         // blocking a later SUCCESS under the same eternal jobId: a failed delivery must never make a

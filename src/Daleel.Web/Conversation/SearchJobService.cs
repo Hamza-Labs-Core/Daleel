@@ -209,6 +209,10 @@ public sealed class SearchJobService : BackgroundService
             return;
         }
 
+        // Every ILogger line the whole run emits — pipeline, Elsa, agent, EF — carries SearchJobId
+        // as a structured property, so one grep in the JSON log sinks reconstructs this search's flow.
+        using var logScope = Logging.SearchLogScope.Begin(_logger, job.Id);
+
         // The unified timeline's correlation id is the job id; the actor is the hashed (never raw) user.
         var correlationId = job.Id.ToString();
         var userHash = Anonymizer.HashUserId(job.UserId);

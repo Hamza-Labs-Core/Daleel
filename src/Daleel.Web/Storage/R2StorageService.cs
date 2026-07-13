@@ -100,6 +100,16 @@ public interface IR2StorageService
     /// <c>&lt;img&gt;</c> src or a download link without the bucket being public. Returns null when unconfigured.
     /// </summary>
     string? DownloadUrl(string key, R2Bucket bucket = R2Bucket.Data, TimeSpan? expiry = null);
+
+    /// <summary>
+    /// Uploads a complete local log day file to the <see cref="R2Bucket.Logs"/> bucket with an HONEST
+    /// success signal — unlike <see cref="StoreJsonAsync"/>, whose null return conflates "failed" with
+    /// "stored on a private bucket" and whose 4MB cap a day of logs outgrows. Used only by the
+    /// <see cref="Daleel.Web.Logging.LogFileMirror"/>; the default is a no-op so existing fakes and the
+    /// null store need no change.
+    /// </summary>
+    Task<bool> StoreLogFileAsync(string content, string objectKey, CancellationToken ct = default) =>
+        Task.FromResult(false);
 }
 
 /// <summary>No-op storage used when R2 is unconfigured: keeps the original URL so images still render.</summary>
@@ -334,6 +344,42 @@ public sealed class R2StorageService : IR2StorageService, IDisposable
             // never created in Cloudflare, which fails EVERY specs/data write — is visible without a live probe.
             _logger.LogWarning(ex, "R2 JSON store failed for {Bucket}/{Key}", BucketName(bucket), key);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Full-file log mirror upload (see the interface remarks): no public-host dependency in the return,
+    /// no <see cref="MaxJsonBytes"/> cap (the mirror applies its own), newline-delimited JSON content type.
+    /// </summary>
+    public async Task<bool> StoreLogFileAsync(string content, string objectKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(content) || string.IsNullOrWhiteSpace(objectKey))
+        {
+            return false;
+        }
+
+        var key = NormalizeObjectKey(objectKey);
+        try
+        {
+            await _s3.PutObjectAsync(new PutObjectRequest
+            {
+                BucketName = BucketName(R2Bucket.Logs),
+                Key = key,
+                InputStream = new MemoryStream(Encoding.UTF8.GetBytes(content)),
+                ContentType = "application/x-ndjson",
+                // R2 rejects AWS SigV4 streaming payload signing — same fix as every other upload here.
+                DisablePayloadSigning = true
+            }, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "R2 log mirror upload failed for {Key}", key);
+            return false;
         }
     }
 

@@ -8,6 +8,7 @@ using Daleel.Search.Http;
 using Daleel.Search.Providers;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
+using Daleel.Web.Pipeline.Enrichment;
 using Daleel.Web.Profiles;
 using Daleel.Web.Services;
 using Daleel.Web.Storage;
@@ -40,8 +41,8 @@ public interface IItemEnrichmentService
     /// <summary>Phases 1–3 for ONE item: fresh-profile reuse, else official-page scrape + ProductProfile upsert. Null = unchanged.</summary>
     Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
-    /// <summary>Phase 4 for ONE store domain over the whole list (inline Context.dev extract + browser fallback + persist observations + match; entryUrl = the DISCOVERED page, second-chance harvested when the domain pass creates nothing). Models null = unchanged.</summary>
-    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct, bool skipVendorCatalog = false);
+    /// <summary>Phase 4 for ONE store domain over the whole list (inline Context.dev extract + browser fallback + persist observations + match; entryUrl = the DISCOVERED page, second-chance harvested when the domain pass creates nothing). Models null = unchanged. Gate = the per-store diagnostic (which gate this domain hit) for the admin timeline.</summary>
+    Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created, CatalogGate Gate)> AttachCatalogForDomainAsync(AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct, bool skipVendorCatalog = false);
 
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
     Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
@@ -421,7 +422,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         return WithDetail(item, content!);
     }
 
-    public async Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
+    public async Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created, CatalogGate Gate)> AttachCatalogForDomainAsync(
         AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo,
         string? searchId, string? query, string? entryUrl, CancellationToken ct,
         bool skipVendorCatalog = false)
@@ -432,7 +433,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         if (SignificantQueryTokens(query, geo).Count == 0 &&
             !models.Any(m => !HasPrice(m) || string.IsNullOrWhiteSpace(m.ImageUrl) || m.Specs.Count < ThinSpecThreshold))
         {
-            return (null, 0, Array.Empty<string>());
+            return (null, 0, Array.Empty<string>(), CatalogGate.NoQueryGap);
         }
 
         // VALIDATE THE SITE BEFORE SENDING IT. Google Places gives many stores no website, and any
@@ -443,7 +444,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         if (!await SsrfGuard.IsSafePublicUrlAsync($"https://{domain}", ct).ConfigureAwait(false))
         {
             _logger.LogDebug("Skipping catalogue crawl for unsafe or unresolvable domain {Domain}", domain);
-            return (null, 0, Array.Empty<string>());
+            return (null, 0, Array.Empty<string>(), CatalogGate.Unresolvable);
         }
 
         // No internal phase-budget CancellationTokenSource (unlike AttachCatalogDataAsync's
@@ -484,7 +485,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         if (pool.Count == 0 && browserPrices.Count == 0 && llmSeed.Count == 0)
         {
-            return (null, 0, Array.Empty<string>());
+            return (null, 0, Array.Empty<string>(), CatalogGate.EmptyCrawl);
         }
 
         var (updated, priced, images, specsFilled, observations) =
@@ -536,16 +537,23 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             }
         }
 
+        // Past the empty-crawl gate, so at least one source returned something: the gate now turns on
+        // whether that produced a NEW grid item (ProducedItems) or only matched existing ones (MatchedNoNewItems).
+        var gate = CatalogGateClassifier.Classify(new CatalogAttemptSignals(
+            ResolvableDomain: true, HasQueryGap: true,
+            VendorPoolCount: pool.Count, BrowserPriceCount: browserPrices.Count,
+            LlmSeedCount: llmSeed.Count, ItemsCreated: created.Count));
+
         if (priced + images + specsFilled == 0 && created.Count == 0)
         {
-            return (null, 0, Array.Empty<string>());
+            return (null, 0, Array.Empty<string>(), gate);
         }
 
         _logger.LogInformation(
             "Store catalogue {Domain} matched {Priced} price(s), {Images} image(s), {Specs} spec set(s), " +
             "added {Created} new model(s)",
             domain, priced, images, specsFilled, created.Count);
-        return (withNew, priced, created);
+        return (withNew, priced, created, gate);
     }
 
     public async Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(
