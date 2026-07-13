@@ -75,6 +75,81 @@ public class CloudflareFleetTests
     }
 
     [Fact]
+    public async Task FilterText_ChunksToTheWorkerCap_AndMergesFindings()
+    {
+        // QA job #48: the halal-shadow comparison sent one 59-item batch and the filter worker
+        // 400'd it ("too many items (max 50)"), losing EVERY finding. The client must split
+        // (50 + 9) and merge so no caller can ever trip the worker cap.
+        var bodies = new List<string>();
+        var handler = new StubHandler(request =>
+        {
+            using var reader = new StreamReader(request.Content!.ReadAsStream());
+            bodies.Add(reader.ReadToEnd());
+            return (HttpStatusCode.OK, bodies.Count == 1
+                ? """{ "ok": true, "result": { "findings": [ { "id": "item-0", "category": "alcohol", "confidence": 0.9, "source": "llm" } ] } }"""
+                : """{ "ok": true, "result": { "findings": [ { "id": "item-50", "category": "pork", "confidence": 0.8, "source": "keyword" } ] } }""");
+        });
+        var client = Client(handler, filter: true);
+
+        var findings = await client.FilterTextAsync(
+            Enumerable.Range(0, 59).Select(i => ($"item-{i}", $"text {i}", (string?)null)).ToArray());
+
+        handler.Requests.Should().HaveCount(2, "59 items exceed the worker's 50-item cap and must split");
+        handler.Requests.Should().OnlyContain(r => r.RequestUri!.AbsolutePath == "/filter/text");
+        ItemCount(bodies[0]).Should().Be(50);
+        ItemCount(bodies[1]).Should().Be(9);
+        findings.Select(f => f.Id).Should().Equal("item-0", "item-50");
+    }
+
+    [Fact]
+    public async Task FilterText_FailedChunkLosesOnlyItsOwnFindings()
+    {
+        var calls = 0;
+        var handler = new StubHandler(_ => ++calls == 1
+            ? (HttpStatusCode.BadRequest,
+                """{ "ok": false, "error": { "code": "bad_request", "message": "too many items (max 50)", "retryable": false } }""")
+            : (HttpStatusCode.OK,
+                """{ "ok": true, "result": { "findings": [ { "id": "item-55", "category": "alcohol", "confidence": 0.9, "source": "llm" } ] } }"""));
+        var client = Client(handler, filter: true);
+
+        var findings = await client.FilterTextAsync(
+            Enumerable.Range(0, 59).Select(i => ($"item-{i}", $"text {i}", (string?)null)).ToArray());
+
+        handler.Requests.Should().HaveCount(2, "a rejected chunk must not stop the remaining chunks");
+        findings.Should().ContainSingle(f => f.Id == "item-55" && f.Category == "alcohol");
+    }
+
+    [Fact]
+    public async Task ClassifyText_ChunksToTheWorkerCap_AndMergesVerdicts()
+    {
+        // The classify worker rejects batches over 100 items (payload_too_large) — same defect
+        // class as the filter cap, fixed at the same client layer.
+        var bodies = new List<string>();
+        var handler = new StubHandler(request =>
+        {
+            using var reader = new StreamReader(request.Content!.ReadAsStream());
+            bodies.Add(reader.ReadToEnd());
+            return (HttpStatusCode.OK, bodies.Count == 1
+                ? """{ "ok": true, "result": { "verdicts": [ { "id": "item-0", "label": "new", "confidence": 0.9 } ] } }"""
+                : """{ "ok": true, "result": { "verdicts": [ { "id": "item-100", "label": "used", "confidence": 0.8 } ] } }""");
+        });
+        var client = Client(handler, classify: true);
+
+        var verdicts = await client.ClassifyTextAsync(
+            Enumerable.Range(0, 101).Select(i => ($"item-{i}", $"text {i}")).ToArray(),
+            new[] { "new", "used" });
+
+        handler.Requests.Should().HaveCount(2, "101 items exceed the worker's 100-item cap and must split");
+        handler.Requests.Should().OnlyContain(r => r.RequestUri!.AbsolutePath == "/classify/text");
+        ItemCount(bodies[0]).Should().Be(100);
+        ItemCount(bodies[1]).Should().Be(1);
+        verdicts.Select(v => v.Id).Should().Equal("item-0", "item-100");
+    }
+
+    private static int ItemCount(string body) =>
+        System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("items").GetArrayLength();
+
+    [Fact]
     public async Task FilterImages_ChunksToTheWorkerCap_AndMergesFindings()
     {
         // The filter worker rejects batches over 20 urls, but the VPS vision budget is 24 — the

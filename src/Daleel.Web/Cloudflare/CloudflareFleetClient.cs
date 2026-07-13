@@ -106,15 +106,20 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
     public bool HasExtract => _extract is not null;
     public bool HasFilter => _filter is not null;
 
+    // Mirrors MAX_TEXT_ITEMS in workers/classify-worker/src/index.js — the worker 400s any larger
+    // batch, so both constants must move together.
+    private const int MaxClassifyTextItemsPerCall = 100;
+
     public async Task<IReadOnlyList<ClassifyVerdict>> ClassifyTextAsync(
         IReadOnlyList<(string Id, string Text)> items, IReadOnlyList<string> labels, CancellationToken ct = default)
     {
-        var result = await PostAsync<ClassifyResponse>(_classify, "classify", "/classify/text", new
-        {
-            items = items.Select(i => new { id = i.Id, text = i.Text }),
-            labels
-        }, ct).ConfigureAwait(false);
-        return result?.Verdicts ?? (IReadOnlyList<ClassifyVerdict>)Array.Empty<ClassifyVerdict>();
+        var verdicts = await PostChunkedAsync(items, MaxClassifyTextItemsPerCall, chunk =>
+            PostAsync<ClassifyResponse>(_classify, "classify", "/classify/text", new
+            {
+                items = chunk.Select(i => new { id = i.Id, text = i.Text }),
+                labels
+            }, ct), r => r.Verdicts).ConfigureAwait(false);
+        return verdicts ?? (IReadOnlyList<ClassifyVerdict>)Array.Empty<ClassifyVerdict>();
     }
 
     public async Task<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>> ExtractProductsAsync(
@@ -128,14 +133,19 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
         return result?.Products ?? (IReadOnlyList<Daleel.Search.Providers.CatalogProduct>)Array.Empty<Daleel.Search.Providers.CatalogProduct>();
     }
 
+    // Mirrors MAX_TEXT_ITEMS in workers/filter-worker/src/index.js — the worker 400s any larger
+    // batch (QA job #48 lost a 59-item halal batch that way), so both constants must move together.
+    private const int MaxFilterTextItemsPerCall = 50;
+
     public async Task<IReadOnlyList<FilterFindingDto>> FilterTextAsync(
         IReadOnlyList<(string Id, string Text, string? SourceUrl)> items, CancellationToken ct = default)
     {
-        var result = await PostAsync<FilterResponse>(_filter, "filter", "/filter/text", new
-        {
-            items = items.Select(i => new { id = i.Id, text = i.Text, sourceUrl = i.SourceUrl })
-        }, ct).ConfigureAwait(false);
-        return result?.Findings ?? (IReadOnlyList<FilterFindingDto>)Array.Empty<FilterFindingDto>();
+        var findings = await PostChunkedAsync(items, MaxFilterTextItemsPerCall, chunk =>
+            PostAsync<FilterResponse>(_filter, "filter", "/filter/text", new
+            {
+                items = chunk.Select(i => new { id = i.Id, text = i.Text, sourceUrl = i.SourceUrl })
+            }, ct), r => r.Findings).ConfigureAwait(false);
+        return findings ?? (IReadOnlyList<FilterFindingDto>)Array.Empty<FilterFindingDto>();
     }
 
     // Mirrors MAX_IMAGE_URLS in workers/filter-worker/src/index.js — the worker 400s any larger
@@ -145,21 +155,35 @@ public sealed class CloudflareFleetClient : ICloudflareFleetClient
     public async Task<IReadOnlyList<FilterFindingDto>> FilterImagesAsync(
         IReadOnlyList<string> urls, CancellationToken ct = default)
     {
-        // Callers may hand over more urls than the worker accepts per call (the vision budget is
-        // 24); chunks go out sequentially, and a failed chunk loses only its own findings.
-        List<FilterFindingDto>? findings = null;
-        for (var offset = 0; offset < urls.Count; offset += MaxImageUrlsPerCall)
+        var findings = await PostChunkedAsync(urls, MaxImageUrlsPerCall, chunk =>
+            PostAsync<FilterResponse>(_filter, "filter", "/filter/images", new { urls = chunk }, ct),
+            r => r.Findings).ConfigureAwait(false);
+        return findings ?? (IReadOnlyList<FilterFindingDto>)Array.Empty<FilterFindingDto>();
+    }
+
+    /// <summary>
+    /// Splits a batch into worker-cap-sized chunks and merges results in input order. Every fleet
+    /// host hard-400s oversized batches, so the cap is enforced HERE — callers batch freely (the
+    /// halal shadow sends whole moderation runs) and must never learn per-worker limits. Chunks go
+    /// out sequentially, and a failed chunk loses only its own results (best-effort contract).
+    /// </summary>
+    private static async Task<List<TResult>?> PostChunkedAsync<TItem, TResponse, TResult>(
+        IReadOnlyList<TItem> items, int maxPerCall, Func<TItem[], Task<TResponse?>> post,
+        Func<TResponse, List<TResult>?> select)
+        where TResponse : class
+    {
+        List<TResult>? merged = null;
+        for (var offset = 0; offset < items.Count; offset += maxPerCall)
         {
-            var chunk = urls.Skip(offset).Take(MaxImageUrlsPerCall).ToArray();
-            var result = await PostAsync<FilterResponse>(_filter, "filter", "/filter/images", new { urls = chunk }, ct)
-                .ConfigureAwait(false);
-            if (result?.Findings is { Count: > 0 })
+            var chunk = items.Skip(offset).Take(maxPerCall).ToArray();
+            var response = await post(chunk).ConfigureAwait(false);
+            if (response is not null && select(response) is { Count: > 0 } results)
             {
-                (findings ??= new List<FilterFindingDto>()).AddRange(result.Findings);
+                (merged ??= new List<TResult>()).AddRange(results);
             }
         }
 
-        return findings ?? (IReadOnlyList<FilterFindingDto>)Array.Empty<FilterFindingDto>();
+        return merged;
     }
 
     /// <summary>POSTs to a fleet host and unwraps the {ok, result} envelope; null on any failure.</summary>
