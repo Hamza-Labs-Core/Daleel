@@ -42,7 +42,8 @@ public class SearchLogScopeTests
 
         using var _ = SearchLogScope.Begin(logger, searchJobId: 46, unitKind: "enrich.catalog");
 
-        var state = (IEnumerable<KeyValuePair<string, object?>>)logger.Scopes.Single();
+        var state = logger.Scopes.Single()
+            .Should().BeAssignableTo<IEnumerable<KeyValuePair<string, object?>>>().Subject;
         state.Should().Contain(new KeyValuePair<string, object?>("SearchJobId", 46));
         state.Should().Contain(new KeyValuePair<string, object?>("UnitKind", "enrich.catalog"));
     }
