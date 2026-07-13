@@ -355,6 +355,11 @@ if (r2Options is not null)
             // pulls attacker-influenced image URLs onto our own host, so it gets the hardened client.
             Daleel.Search.Http.SsrfGuard.CreateGuardedClient(),
             sp.GetRequiredService<ILogger<Daleel.Web.Storage.R2StorageService>>()));
+
+    // Mirrors the Serilog file sink's day file to R2 in full — replaces the AmazonS3 sink, whose
+    // per-batch uploads under one fixed day key clobbered each other, leaving R2 with only the last
+    // few seconds of logs (see LogFileMirror). Registered only alongside the real storage service.
+    builder.Services.AddHostedService<Daleel.Web.Logging.R2LogMirrorService>();
 }
 else
 {

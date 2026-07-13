@@ -85,15 +85,11 @@ public static class SerilogConfiguration
             .WriteTo.Console(outputTemplate: ConsoleOutputTemplate);
 
         // (1) File sink — ALWAYS on. The full trail at the host minimum level, on the persisted volume.
+        // R2 is NOT a Serilog sink any more: the AmazonS3 sink re-uploaded each flush BATCH under one
+        // fixed day key, so every upload clobbered the previous object and the R2 "day file" held only
+        // the last few seconds of logs (the 702-byte day files that made every log search come back
+        // empty). R2LogMirrorService now mirrors this local day file to R2 in full, on a timer.
         ConfigureFileSink(loggerConfiguration, configuration, minimumLevel);
-
-        // (4) R2 sink — additional, full trail at the host minimum level, when configured. Mirrors the
-        // file sink off-box so the log-viewer Worker can read it.
-        var r2 = R2Options.FromConfiguration(configuration);
-        if (r2 is not null)
-        {
-            ConfigureR2Sink(loggerConfiguration, r2, minimumLevel);
-        }
     }
 
     /// <summary>
@@ -124,55 +120,6 @@ public static class SerilogConfiguration
             retainedFileCountLimit: 14,
             // Flush to disk promptly so a crash doesn't swallow the last few seconds of logs.
             flushToDiskInterval: TimeSpan.FromSeconds(2));
-    }
-
-    /// <summary>
-    /// The full operational trail (at <paramref name="minimumLevel"/> and above — Information in prod,
-    /// Debug in dev) mirrored to the R2 <see cref="R2Bucket.Logs"/> bucket as JSON Lines under a
-    /// <c>logs/</c> prefix, one object per day: <c>logs/daleel-20260630.jsonl</c>. This is exactly the
-    /// prefix the log-viewer Worker scans, and the date in the filename lets it window by day. The
-    /// scraped-data objects (site-data/, final-specs/, …) keep their own prefixes and are untouched.
-    /// </summary>
-    private static void ConfigureR2Sink(
-        LoggerConfiguration loggerConfiguration, R2Options r2, LogEventLevel minimumLevel)
-    {
-        // The date is fixed at process start and baked into the object key. Daleel redeploys (and thus
-        // restarts) frequently, so the filename tracks the current day in practice; a process that ran
-        // uninterrupted past midnight would keep appending to its start-day object. RollingInterval.Infinite
-        // keeps the key exactly as given (no extra date suffix) since the date already lives in the name.
-        var objectName = $"daleel-{DateTime.UtcNow:yyyyMMdd}.jsonl";
-
-        // The AmazonS3 sink first writes each event to a LOCAL buffer file (`path`), then uploads that file
-        // to R2. `path` resolves relative to the content root (WORKDIR /app in the container), which is NOT
-        // writable — a bare `daleel-20260701.jsonl` became `/app/daleel-20260701.jsonl` → "Access to the
-        // path ... is denied". Buffer under the persisted, writable data volume instead. A dedicated
-        // `r2-buffer/` subdirectory keeps this file out of the File sink's own `data/logs/daleel-*.jsonl`
-        // set so the two sinks never write the same path. The R2 object key is derived from the filename +
-        // `bucketPath`, so it stays `logs/daleel-20260701.jsonl` regardless of the local buffer directory.
-        var bufferDirectory = Path.Combine(DefaultFileLogDirectory, "r2-buffer");
-        Directory.CreateDirectory(bufferDirectory);
-        var bufferPath = Path.Combine(bufferDirectory, objectName);
-
-        loggerConfiguration.WriteTo.AmazonS3(
-            path: bufferPath,
-            bucketName: r2.Logs.BucketName,
-            serviceUrl: r2.ServiceUrl,
-            awsAccessKeyId: r2.AccessKey,
-            awsSecretAccessKey: r2.SecretKey,
-            // JsonFormatter writes one JSON object per line — that is the .jsonl format.
-            formatter: new JsonFormatter(renderMessage: true),
-            // Information+ in prod (Debug in dev): the whole picture, matching the file sink — not errors-only.
-            restrictedToMinimumLevel: minimumLevel,
-            // The AmazonS3 sink defines its own RollingInterval enum, distinct from the File sink's.
-            rollingInterval: Serilog.Sinks.AmazonS3.RollingInterval.Infinite,
-            // Group every app-log object under a single prefix so the Worker can list/search just `logs/`
-            // and never trips over the scraped-data objects sharing this bucket.
-            bucketPath: "logs",
-            // Cloudflare R2 does not support AWS SigV4 *streaming* payload signing; disabling it is
-            // the documented fix for S3-compatible uploads to R2.
-            disablePayloadSigning: true,
-            // Don't wait for the batch timer to flush the very first error of a run.
-            eagerlyEmitFirstEvent: true);
     }
 
     /// <summary>
