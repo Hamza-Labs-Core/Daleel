@@ -92,9 +92,9 @@ public class BrandResearchTests
             Task.FromResult<List<ProductModel>?>(null);
         public Task<ProductModel?> DeepDiveItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
             Task.FromResult<ProductModel?>(null);
-        public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
+        public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created, CatalogGate Gate)> AttachCatalogForDomainAsync(
             AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct, bool skipVendorCatalog = false) =>
-            Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>)>((null, 0, Array.Empty<string>()));
+            Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>, CatalogGate)>((null, 0, Array.Empty<string>(), CatalogGate.EmptyCrawl));
         public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(
             List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct) =>
             Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>)>((null, 0, Array.Empty<string>()));

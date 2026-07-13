@@ -499,13 +499,14 @@ public class EnrichmentHandlerTests
             Task.FromResult<ProductModel?>(null);
 
         public bool? LastSkipVendorCatalog { get; private set; }
+        public CatalogGate InlineGate { get; set; } = CatalogGate.EmptyCrawl;
 
-        public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachCatalogForDomainAsync(
+        public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created, CatalogGate Gate)> AttachCatalogForDomainAsync(
             AgentService agent, List<ProductModel> models, string domain, string? storeName, string? geo, string? searchId, string? query, string? entryUrl, CancellationToken ct, bool skipVendorCatalog = false)
         {
             InlineCatalogCalls++;
             LastSkipVendorCatalog = skipVendorCatalog;
-            return Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>)>((null, 0, Array.Empty<string>()));
+            return Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>, CatalogGate)>((null, 0, Array.Empty<string>(), InlineGate));
         }
 
         public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(
@@ -522,9 +523,28 @@ public class EnrichmentHandlerTests
         public IReadOnlyList<string> SelectBrandsForHarvest(ProductSearchResult products) => new[] { "Krups" };
     }
 
+    private sealed class RecordingSystemEventLog : ISystemEventLog
+    {
+        public List<SystemEvent> Events { get; } = new();
+        public bool IsEnabled => true;
+        public Task PublishAsync(SystemEvent ev, CancellationToken ct = default)
+        {
+            Events.Add(ev);
+            return Task.CompletedTask;
+        }
+        public Task PublishManyAsync(IReadOnlyCollection<SystemEvent> events, CancellationToken ct = default)
+        {
+            Events.AddRange(events);
+            return Task.CompletedTask;
+        }
+        public Task<SystemEventPage> QueryAsync(SystemEventQuery query, CancellationToken ct = default) =>
+            Task.FromResult(SystemEventPage.Empty(query));
+    }
+
     private static (EnrichmentUnitContext Ctx, RecordingQueue Queue, FixedResultStore Store, FakeEnrichmentService Svc)
         Build(AgentAnswer? answer, Func<AgentService>? agent = null,
-            IProviderApi? providers = null, ISystemConfigService? config = null)
+            IProviderApi? providers = null, ISystemConfigService? config = null,
+            ISystemEventLog? eventLog = null)
     {
         var queue = new RecordingQueue();
         var store = new FixedResultStore { Answer = answer };
@@ -538,6 +558,10 @@ public class EnrichmentHandlerTests
         if (config is not null)
         {
             services.AddSingleton(config);
+        }
+        if (eventLog is not null)
+        {
+            services.AddSingleton(eventLog);
         }
         var ctx = new EnrichmentUnitContext
         {
@@ -607,6 +631,29 @@ public class EnrichmentHandlerTests
         outcome.Should().BeOfType<UnitOutcome.Done>();
         svc.InlineCatalogCalls.Should().Be(0, "drained edge rows make the inline crawl (and its spend) unnecessary");
         store.Patches.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Catalog_attach_records_the_per_store_gate_on_the_timeline()
+    {
+        // The diagnostic that answers "why did only one store produce items": every store's CatalogAttach
+        // unit records WHICH gate it hit, correlated to the job, so an operator reads the whole per-store
+        // breakdown on the admin timeline instead of an unexplained single-store grid.
+        var log = new RecordingSystemEventLog();
+        var (ctx, _, _, svc) = Build(ProductAnswer("A"), agent: () => null!,
+            providers: new FakeEdgeProviders { Edge = false }, eventLog: log);
+        svc.InlineGate = CatalogGate.EmptyCrawl; // this store's render came back empty
+
+        var outcome = await new CatalogAttachHandler().ExecuteAsync(
+            Root(EnrichmentUnit.CatalogAttach, EnrichmentWorkQueue.Payload(new CatalogPayload("store-b.jo", "Store B"))),
+            ctx, default);
+
+        outcome.Should().BeOfType<UnitOutcome.Done>();
+        var ev = log.Events.Should().ContainSingle(e => e.EventType == "catalog.store.result").Subject;
+        ev.Category.Should().Be(SystemEventCategory.Store);
+        ev.CorrelationId.Should().Be("7", "the per-store diagnostic must be filterable to its search job");
+        ev.Severity.Should().Be(SystemEventSeverity.Warning, "a store that produced nothing is a miss to surface");
+        ev.DetailsJson.Should().Contain("EmptyCrawl").And.Contain("store-b.jo");
     }
 
     [Fact]

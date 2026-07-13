@@ -3,6 +3,7 @@ using Daleel.Agent;
 using Daleel.Core.Models;
 using Daleel.Web.Conversation;
 using Daleel.Web.Data;
+using Daleel.Web.Events;
 using Daleel.Web.Services;
 
 namespace Daleel.Web.Pipeline.Enrichment;
@@ -552,7 +553,7 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
                 // relevance gate rightly drops them from the grid. The query-scoped harvest is a
                 // different, targeted render (browser-first through the gateway — also the edge)
                 // that seeds query-relevant items NOW instead of never.
-                var (seeded, _, seededCreated) = await svc.AttachCatalogForDomainAsync(
+                var (seeded, _, seededCreated, seededGate) = await svc.AttachCatalogForDomainAsync(
                     ctx.Agent(), products.Models.ToList(), payload.Domain, payload.StoreName,
                     products.Geo, item.SearchJobId.ToString(), ctx.Job.Query, payload.EntryUrl, ct,
                     skipVendorCatalog: true);
@@ -561,13 +562,14 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
                     await ApplyAsync(ctx, item, config, seeded, seededCreated, ct);
                 }
 
+                await EmitGateAsync(ctx, item, payload, seededGate, seededCreated.Count, ct);
                 return UnitOutcome.Ok;
             }
             // Worker unreachable/rejecting right now — degrade to the full inline crawl below,
             // exactly like the base run's submit path does.
         }
 
-        var (inline, inlinePriced, inlineCreated) = await svc.AttachCatalogForDomainAsync(
+        var (inline, inlinePriced, inlineCreated, inlineGate) = await svc.AttachCatalogForDomainAsync(
             ctx.Agent(), products.Models.ToList(), payload.Domain, payload.StoreName,
             products.Geo, item.SearchJobId.ToString(), ctx.Job.Query, payload.EntryUrl, ct);
         if (inline is not null && inlinePriced >= 0)
@@ -575,7 +577,45 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
             await ApplyAsync(ctx, item, config, inline, inlineCreated, ct);
         }
 
+        await EmitGateAsync(ctx, item, payload, inlineGate, inlineCreated.Count, ct);
         return UnitOutcome.Ok;
+    }
+
+    /// <summary>
+    /// Records ONE per-store diagnostic on the admin timeline: which gate this domain hit and how many
+    /// grid items it produced. This is what turns an unexplained "only one store had items" into an
+    /// operator-readable list of WHY each of the other stores contributed nothing. Best-effort — the
+    /// event log swallows its own failures, and an absent log (test wiring) is a no-op.
+    /// </summary>
+    private static async Task EmitGateAsync(
+        EnrichmentUnitContext ctx, EnrichmentWorkItem item, CatalogPayload payload,
+        CatalogGate gate, int itemsCreated, CancellationToken ct)
+    {
+        var log = ctx.Services.GetService<ISystemEventLog>();
+        if (log is null || !log.IsEnabled)
+        {
+            return;
+        }
+
+        // A store that produced items is routine (Info); every other gate is a MISS an operator is
+        // hunting for, so it surfaces at Warning to stand out in the timeline filter.
+        var severity = gate == CatalogGate.ProducedItems
+            ? SystemEventSeverity.Info
+            : SystemEventSeverity.Warning;
+        var store = string.IsNullOrWhiteSpace(payload.StoreName) ? payload.Domain : payload.StoreName!;
+        await log.LogAsync(
+            SystemEventCategory.Store, "catalog.store.result",
+            $"{store} — {gate} ({itemsCreated} item(s))",
+            severity: severity, source: "catalog-attach",
+            correlationId: item.SearchJobId.ToString(),
+            userHash: Anonymizer.HashUserId(item.UserId),
+            details: new Dictionary<string, object?>
+            {
+                ["domain"] = payload.Domain,
+                ["store"] = payload.StoreName,
+                ["gate"] = gate.ToString(),
+                ["itemsCreated"] = itemsCreated
+            }, ct);
     }
 
     /// <summary>
