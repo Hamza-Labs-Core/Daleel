@@ -1,36 +1,49 @@
-using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Web;
 using Daleel.Search.Abstractions;
 
 namespace Daleel.Search.Providers;
 
 /// <summary>
-/// A web-discovery fallback that needs NO search-vendor quota: it renders a search-engine results
-/// page with the Cloudflare edge browser and pulls the organic result links out with Workers-AI
-/// structured extraction (the same <c>/browser-rendering/json</c> path the store extractor uses).
+/// A web-discovery fallback that needs NO search-vendor quota: it renders the DuckDuckGo HTML search
+/// endpoint with the edge browser and parses the organic result links out of the rendered markdown.
 /// </summary>
 /// <remarks>
-/// Its reason to exist is SerpAPI monthly-quota exhaustion: when the vendor returns non-2xx, web
-/// discovery — the seed for every store/brand crawl — would otherwise degrade to a silent empty.
-/// This scrapes a SERP instead. Discovery only (<see cref="SearchKind.Web"/>/<see cref="SearchKind.News"/>);
+/// Its reason to exist is SerpAPI monthly-quota exhaustion: when the vendor is out, web discovery — the
+/// seed for every store/brand crawl — would otherwise degrade to a silent empty.
+///
+/// It renders the <b>DuckDuckGo HTML endpoint</b> (<c>html.duckduckgo.com/html/</c>), NOT Bing, and
+/// parses the markdown deterministically, NOT via AI-schema extraction. The previous version asked
+/// Cloudflare's <c>/browser-rendering/json</c> AI extractor to pull organic results from a rendered Bing
+/// SERP; verified live on QA (jobs 49/50) that returned 0 results on EVERY call while still billing —
+/// a ~240k-char SERP is far past what schema extraction can parse. DuckDuckGo's HTML endpoint renders
+/// to a few KB of clean markdown, serves relevant geo-targeted results to a headless datacenter browser
+/// without a consent/captcha wall, and — crucially — wraps every organic result URL in a
+/// <c>/l/?uddg=&lt;real-url&gt;</c> redirect, so organic results are trivially separable from ads
+/// (<c>/y.js</c>) and internal nav links. Discovery only (<see cref="SearchKind.Web"/>/<see cref="SearchKind.News"/>);
 /// Shopping and Maps have their own dedicated providers. The engine is a URL template so an operator
-/// can retarget it (<c>SEARCH_SERP_ENGINE</c>) without a redeploy; it defaults to Bing, which serves
-/// results to a headless browser without the consent/captcha wall Google throws at datacenter IPs.
+/// can retarget it (<c>SEARCH_SERP_ENGINE</c>) without a redeploy.
 /// </remarks>
 public sealed class BrowserSearchProvider : ISearchProvider
 {
-    /// <summary>Bing web search with geo/language targeting. Placeholders: {q} {cc} {lang}.</summary>
-    public const string DefaultEngine = "https://www.bing.com/search?q={q}&cc={cc}&setlang={lang}";
+    /// <summary>DuckDuckGo HTML search. Placeholders: {q} the escaped query, {cc} country, {lang} language.</summary>
+    public const string DefaultEngine = "https://html.duckduckgo.com/html/?q={q}";
 
-    private readonly IExtractProvider _browser;
+    /// <summary>DDG wraps every organic result URL in <c>/l/?uddg=&lt;url-encoded real url&gt;</c>.</summary>
+    private static readonly Regex ResultLink = new(
+        @"\[(?<title>[^\]]*)\]\(\s*(?<href>[^)\s]*duckduckgo\.com/l/\?[^)\s]*uddg=[^)\s]+)\)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    private readonly IScrapeProvider _scraper;
     private readonly string _engine;
 
     public string Name => "browser-serp";
 
-    /// <param name="browser">The rendering extractor (Cloudflare edge browser, or any IExtractProvider).</param>
-    /// <param name="engine">SERP URL template; null reads <c>SEARCH_SERP_ENGINE</c>, then falls to Bing.</param>
-    public BrowserSearchProvider(IExtractProvider browser, string? engine = null)
+    /// <param name="scraper">The rendering scraper (Cloudflare edge browser, or any IScrapeProvider).</param>
+    /// <param name="engine">SERP URL template; null reads <c>SEARCH_SERP_ENGINE</c>, then falls to DuckDuckGo.</param>
+    public BrowserSearchProvider(IScrapeProvider scraper, string? engine = null)
     {
-        _browser = browser ?? throw new ArgumentNullException(nameof(browser));
+        _scraper = scraper ?? throw new ArgumentNullException(nameof(scraper));
         _engine = string.IsNullOrWhiteSpace(engine)
             ? (Environment.GetEnvironmentVariable("SEARCH_SERP_ENGINE") ?? DefaultEngine)
             : engine;
@@ -47,9 +60,9 @@ public sealed class BrowserSearchProvider : ISearchProvider
         }
 
         var url = BuildUrl(query);
-        var extracted = await _browser.ExtractAsync(url, SerpSchema, cancellationToken).ConfigureAwait(false);
+        var page = await _scraper.ScrapeAsync(url, ScrapeFormat.Markdown, cancellationToken).ConfigureAwait(false);
 
-        var results = ParseResults(extracted, query)
+        var results = ParseResults(page?.Content, query)
             .Take(Math.Max(1, query.MaxResults))
             .ToList();
 
@@ -67,63 +80,29 @@ public sealed class BrowserSearchProvider : ISearchProvider
         .Replace("{cc}", Uri.EscapeDataString(query.CountryCode ?? string.Empty))
         .Replace("{lang}", Uri.EscapeDataString(query.LanguageCode ?? string.Empty));
 
-    /// <summary>The schema handed to Workers-AI extraction: the SERP's organic result list.</summary>
-    private static readonly object SerpSchema = new
+    private IEnumerable<SearchResult> ParseResults(string? markdown, SearchQuery query)
     {
-        type = "object",
-        properties = new
-        {
-            results = new
-            {
-                type = "array",
-                items = new
-                {
-                    type = "object",
-                    properties = new
-                    {
-                        title = new { type = "string" },
-                        url = new { type = "string" },
-                        snippet = new { type = "string" }
-                    }
-                }
-            }
-        }
-    };
-
-    /// <summary>Wrapper keys the extraction may nest the result array under (tolerant of model drift).</summary>
-    private static readonly string[] ArrayKeys = { "results", "items", "organic_results", "links" };
-
-    private IEnumerable<SearchResult> ParseResults(JsonElement root, SearchQuery query)
-    {
-        var array = ResolveArray(root);
-        if (array is null)
+        if (string.IsNullOrWhiteSpace(markdown))
         {
             yield break;
         }
 
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var position = 0;
-        foreach (var item in array.Value.EnumerateArray())
+        foreach (Match m in ResultLink.Matches(markdown))
         {
-            if (item.ValueKind != JsonValueKind.Object)
+            var real = UnwrapUddg(m.Groups["href"].Value);
+            if (real is null || !seen.Add(real))
             {
-                continue;
-            }
-
-            var url = Str(item, "url");
-            var title = Str(item, "title");
-
-            // A SERP row with neither a link nor a title is noise (ad slot, "people also ask", etc.).
-            if (string.IsNullOrWhiteSpace(url) && string.IsNullOrWhiteSpace(title))
-            {
-                continue;
+                continue; // undecodable, or a duplicate result already emitted
             }
 
             position++;
             yield return new SearchResult
             {
-                Title = title ?? string.Empty,
-                Url = string.IsNullOrWhiteSpace(url) ? null : url,
-                Snippet = Str(item, "snippet") ?? string.Empty,
+                Title = m.Groups["title"].Value.Trim(),
+                Url = real,
+                Snippet = string.Empty,
                 Source = Name,
                 Kind = query.Kind,
                 Position = position
@@ -131,29 +110,22 @@ public sealed class BrowserSearchProvider : ISearchProvider
         }
     }
 
-    private static JsonElement? ResolveArray(JsonElement root)
+    /// <summary>Pulls the real destination out of a DDG <c>/l/?...uddg=&lt;encoded&gt;...</c> redirect.</summary>
+    private static string? UnwrapUddg(string href)
     {
-        if (root.ValueKind == JsonValueKind.Array)
-        {
-            return root;
-        }
-
-        if (root.ValueKind != JsonValueKind.Object)
+        var q = href.IndexOf('?');
+        if (q < 0)
         {
             return null;
         }
 
-        foreach (var key in ArrayKeys)
+        var uddg = HttpUtility.ParseQueryString(href[(q + 1)..]).Get("uddg");
+        if (string.IsNullOrWhiteSpace(uddg))
         {
-            if (root.TryGetProperty(key, out var arr) && arr.ValueKind == JsonValueKind.Array)
-            {
-                return arr;
-            }
+            return null;
         }
 
-        return null;
+        var decoded = Uri.UnescapeDataString(uddg);
+        return decoded.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? decoded : null;
     }
-
-    private static string? Str(JsonElement obj, string name) =>
-        obj.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 }
