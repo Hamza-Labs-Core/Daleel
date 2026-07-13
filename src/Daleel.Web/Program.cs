@@ -306,6 +306,8 @@ builder.Services.AddHttpContextAccessor();
 // Transient for the same Blazor-circuit concurrency reason as the repositories above.
 builder.Services.AddTransient<IBrandRepository, BrandRepository>();
 builder.Services.AddTransient<IStoreRepository, StoreRepository>();
+// Learned per-domain store-search interfaces (SiteSearchCandidates leads with the winning template).
+builder.Services.AddTransient<ISiteSearchProfileRepository, SiteSearchProfileRepository>();
 builder.Services.AddTransient<IProductProfileRepository, ProductProfileRepository>();
 builder.Services.AddTransient<IBrandModelRepository, BrandModelRepository>();
 builder.Services.AddTransient<IBrandSiteRepository, BrandSiteRepository>();

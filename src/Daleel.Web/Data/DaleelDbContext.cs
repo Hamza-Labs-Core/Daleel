@@ -48,6 +48,9 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
 
     /// <summary>A brand's discovered site hierarchy: global / regional / local. See <see cref="BrandSite"/>.</summary>
     public DbSet<BrandSite> BrandSites => Set<BrandSite>();
+
+    /// <summary>Learned per-domain store-search interfaces. See <see cref="SiteSearchProfile"/>.</summary>
+    public DbSet<SiteSearchProfile> SiteSearchProfiles => Set<SiteSearchProfile>();
     public DbSet<ScrapedPrice> ScrapedPrices => Set<ScrapedPrice>();
 
     /// <summary>The VPS token authority: minted worker bearers + admin-stored vendor keys (encrypted).</summary>
@@ -166,6 +169,15 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.GoogleMapsUrl).HasMaxLength(500);
             e.Property(x => x.OpeningHours).HasConversion(stringListConverter, stringListComparer);
             e.Property(x => x.LastRefreshed).HasConversion(toUnixMs);
+        });
+
+        builder.Entity<SiteSearchProfile>(e =>
+        {
+            e.HasIndex(x => x.Domain).IsUnique();
+            e.Property(x => x.Domain).HasMaxLength(200);
+            e.Property(x => x.SearchUrlTemplate).HasMaxLength(500);
+            e.Property(x => x.DiscoveredVia).HasMaxLength(40);
+            e.Property(x => x.LastSuccessAt).HasConversion(toUnixMs);
         });
 
         builder.Entity<ProductProfile>(e =>
