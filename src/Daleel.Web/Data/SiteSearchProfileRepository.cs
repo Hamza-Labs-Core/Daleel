@@ -54,6 +54,14 @@ public sealed class SiteSearchProfileRepository : ISiteSearchProfileRepository
         else if (existing is not null)
         {
             existing.ConsecutiveFailures++;
+            // A template that keeps yielding nothing is stale (the site was likely redesigned) — discard
+            // it so the next harvest falls back to the platform conventions and relearns. Clearing the
+            // template makes SiteSearchCandidates treat this domain like an unlearned one.
+            if (Pipeline.SiteSearch.SiteSearchLearning.ShouldDiscardTemplate(existing.ConsecutiveFailures))
+            {
+                existing.SearchUrlTemplate = string.Empty;
+                existing.ConsecutiveFailures = 0;
+            }
         }
         else
         {

@@ -4,6 +4,20 @@ using Daleel.Web.Data;
 namespace Daleel.Web.Pipeline.SiteSearch;
 
 /// <summary>
+/// The relearn latch for learned templates: a site can be redesigned (its search URL changes), so a
+/// template that stops yielding must eventually be discarded and the platform conventions re-probed.
+/// </summary>
+public static class SiteSearchLearning
+{
+    /// <summary>Consecutive failed harvests after which a learned template is thrown away to relearn.</summary>
+    public const int RelearnAfterFailures = 3;
+
+    /// <summary>Given the failure count AFTER this harvest's increment, should the template be discarded?</summary>
+    public static bool ShouldDiscardTemplate(int consecutiveFailuresAfterIncrement) =>
+        consecutiveFailuresAfterIncrement >= RelearnAfterFailures;
+}
+
+/// <summary>
 /// The ordered search-URL candidates for one store domain: the LEARNED per-domain template first
 /// (see <see cref="SiteSearchProfile"/>), then the known platform conventions. This replaces the old
 /// single hardcoded Shopify-style <c>/search?q=</c> guess — the gate audit's biggest finding: Jordan's
@@ -87,9 +101,14 @@ public static class HarvestPageJudge
         @"\b404\b|page not found|nothing found|الصفحة غير موجودة",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    /// <summary>Explicit empty-result verdicts, anywhere: these phrases only appear as the answer.</summary>
+    /// <summary>Explicit empty-result verdicts.</summary>
     private static readonly Regex NoResults = new(
         @"no (results|products) (were )?found|\b0 results\b|لا توجد نتائج|لم يتم العثور",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>A price/currency token — the signal that a page actually carries products to extract.</summary>
+    private static readonly Regex ProductSignal = new(
+        @"\b(JOD|JD|SAR|AED|EGP|USD)\b|د\.?ا|دينار|ريال|درهم|جنيه|\$\s?\d|\d[\d,.]*\s?(JOD|JD|دينار|ريال)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public static bool IsUsable(string? content)
@@ -100,6 +119,14 @@ public static class HarvestPageJudge
         }
 
         var head = content.Length <= 300 ? content : content[..300];
-        return !ErrorHead.IsMatch(head) && !NoResults.IsMatch(content);
+        if (ErrorHead.IsMatch(head))
+        {
+            return false; // a soft-404 shell has nothing to extract regardless of body
+        }
+
+        // A "no results" phrase is authoritative ONLY when the page shows no product signal. Many stores
+        // (Shopify default search, Arabic WooCommerce themes) render "no exact match, here are suggestions"
+        // ABOVE a real priced grid — scanning the whole body for the phrase alone rejected exactly those.
+        return !NoResults.IsMatch(content) || ProductSignal.IsMatch(content);
     }
 }

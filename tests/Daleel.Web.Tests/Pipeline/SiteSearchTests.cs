@@ -56,6 +56,33 @@ public class SiteSearchCandidatesTests
     }
 }
 
+public class SiteSearchRelearnTests
+{
+    [Fact]
+    public void A_learned_template_is_kept_until_it_fails_the_relearn_threshold()
+    {
+        // Below the threshold: the template survives (a one-off empty harvest isn't a redesign).
+        SiteSearchLearning.ShouldDiscardTemplate(consecutiveFailuresAfterIncrement: 1).Should().BeFalse();
+        SiteSearchLearning.ShouldDiscardTemplate(SiteSearchLearning.RelearnAfterFailures - 1).Should().BeFalse();
+    }
+
+    [Fact]
+    public void A_template_that_keeps_failing_is_discarded_so_the_domain_relearns()
+    {
+        SiteSearchLearning.ShouldDiscardTemplate(SiteSearchLearning.RelearnAfterFailures).Should().BeTrue();
+        SiteSearchLearning.ShouldDiscardTemplate(SiteSearchLearning.RelearnAfterFailures + 5).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Discarding_a_template_makes_candidates_fall_back_to_the_platform_conventions()
+    {
+        // A profile whose template was cleared must behave exactly like "no profile" (conventions only).
+        var cleared = new Daleel.Web.Data.SiteSearchProfile { Domain = "x.jo", SearchUrlTemplate = "" };
+        SiteSearchCandidates.For("x.jo", "coffee", cleared)
+            .Should().Equal(SiteSearchCandidates.For("x.jo", "coffee", profile: null));
+    }
+}
+
 public class HarvestPageJudgeTests
 {
     [Fact]
@@ -84,6 +111,29 @@ public class HarvestPageJudgeTests
                 "Search results for \"coffee machines\"\n79 RESULTS FOUND FOR “COFFEE MACHINES”\n" +
                 "Krups Sensation Milk EA912B10 Super-Automatic Coffee Machine — 399 JOD\nAdd to cart")
             .Should().BeTrue("counted results with products must never be mistaken for a no-results page");
+    }
+
+    [Fact]
+    public void A_no_exact_match_banner_ABOVE_a_real_product_grid_is_usable()
+    {
+        // The common Arabic/WooCommerce UX: "no exact match, here are suggestions" then real products
+        // with prices. Rejecting it (the old full-page scan) discards exactly the stores this unlocks.
+        HarvestPageJudge.IsUsable(
+                "لم يتم العثور على نتائج مطابقة، إليك منتجات مشابهة:\n" +
+                "ماكينة قهوة ديلونجي ECAM — 429 دينار\nماكينة إسبريسو بروين — 315 دينار")
+            .Should().BeTrue("a no-results banner over a priced product grid still has products to extract");
+        // English equivalent
+        HarvestPageJudge.IsUsable(
+                "No results found for \"coffee machine\" — you may like:\n" +
+                "De'Longhi Magnifica — 429 JOD\nBraun Espresso — 315 JOD")
+            .Should().BeTrue();
+    }
+
+    [Fact]
+    public void A_no_results_page_with_no_product_signal_stays_unusable()
+    {
+        HarvestPageJudge.IsUsable("Search results\nNo results found for \"coffee machines\". Try again.")
+            .Should().BeFalse("a no-results banner with no prices/products is a genuine miss");
     }
 
     [Fact]
