@@ -78,11 +78,12 @@ public sealed class BrowserSearchProvider : ISearchProvider
             Kind = query.Kind,
             Results = results,
             // When empty, carry WHY to the timeline (SearchRouter surfaces an empty attempt's Diagnostic):
-            // a tiny render ⇒ the engine blocked/challenged the datacenter browser; a big render with no
-            // links ⇒ the markdown shape changed and the parser missed them.
+            // the render char count AND the scraper's own error/success — so we can tell a 0-char render
+            // caused by a failing/exhausted scraper apart from a rendered page the parser missed.
             Diagnostic = results.Count > 0
                 ? null
-                : $"browser-serp: {Name} rendered {content.Length} chars but parsed 0 organic links from {Host(url)}"
+                : $"browser-serp: {Name} rendered {content.Length} chars from {Host(url)} " +
+                  $"(scrape ok={page?.Success}, err={page?.Error ?? "none"})"
         };
     }
 
