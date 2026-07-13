@@ -78,6 +78,14 @@ public record SearchResults
     public SearchKind Kind { get; init; } = SearchKind.Web;
     public IReadOnlyList<SearchResult> Results { get; init; } = Array.Empty<SearchResult>();
 
+    /// <summary>
+    /// Optional short cause attached to an EMPTY outcome that isn't a plain "the query had no hits"
+    /// — e.g. the edge search-worker served its capped soft-empty SERP. <see cref="SearchRouter"/>
+    /// surfaces it as the failover reason so the timeline can tell cap-tripped from genuinely dry.
+    /// Null for ordinary results (empty or not).
+    /// </summary>
+    public string? Diagnostic { get; init; }
+
     public static SearchResults Empty(string provider, string query, SearchKind kind) =>
         new() { Provider = provider, Query = query, Kind = kind };
 }

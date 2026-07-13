@@ -49,6 +49,20 @@ public class SerpApiProviderTests
         results.Results.Should().BeEmpty();
         // The empty first page ends paging immediately — no runaway toward MaxPages.
         handler.Requests.Should().ContainSingle();
+        // A capped soft-empty is indistinguishable from "genuinely no hits" without this marker —
+        // the router surfaces it as the failover reason so the timeline says CAP, not "no results".
+        results.Diagnostic.Should().Contain("cap");
+    }
+
+    [Fact]
+    public async Task SearchAsync_Web_GenuinelyEmptyBody_HasNoDiagnostic()
+    {
+        var provider = Build(new StubHttpMessageHandler("""{ "organic_results": [] }"""));
+
+        var results = await provider.SearchAsync(new SearchQuery { Query = "x", Kind = SearchKind.Web });
+
+        results.Results.Should().BeEmpty();
+        results.Diagnostic.Should().BeNull("an ordinary empty SERP must still read as plain 'no results'");
     }
 
     [Fact]
@@ -251,8 +265,49 @@ public class SerpApiProviderTests
 
         var thrown = await act.Should().ThrowAsync<ProviderException>();
         thrown.Which.IsTransient.Should().BeTrue();
+        // The exhausted-retries message must NAME the underlying cause — a bare "request failed
+        // after retries" left ops unable to tell timeout from quota from misconfig (QA outage).
+        thrown.Which.Message.Should().Contain("timed out");
         // Initial attempt + 2 retries, each aborted by the per-attempt timeout — never a 100s hang.
         handler.Attempts.Should().Be(3);
+    }
+
+    [Fact]
+    public async Task SearchAsync_TransientVendor429_SurfacesStatusAndBodyInRetriesError()
+    {
+        // SerpAPI plan exhaustion answers 429 with an explanatory JSON body on EVERY attempt. The
+        // exhausted-retries ProviderException must carry the status (typed + in the message) and a
+        // body snippet, so the discovery-failover timeline event says "quota", not just "failed".
+        var handler = new StubHttpMessageHandler(
+            """{ "error": "You are exceeding your searches per month." }""",
+            (System.Net.HttpStatusCode)429);
+        var provider = Build(handler);
+
+        var act = () => provider.SearchAsync(new SearchQuery { Query = "x", Kind = SearchKind.Web });
+
+        var thrown = await act.Should().ThrowAsync<ProviderException>();
+        thrown.Which.IsTransient.Should().BeTrue();
+        thrown.Which.StatusCode.Should().Be(429);
+        thrown.Which.Message.Should().Contain("429");
+        thrown.Which.Message.Should().Contain("exceeding your searches per month");
+    }
+
+    [Fact]
+    public async Task SearchAsync_TransientWorker500_SurfacesMisconfigBodyInRetriesError()
+    {
+        // The edge search-worker fails CLOSED with a 500 + {code:"server_misconfigured"} body when
+        // its SERPAPI_KEY/AUTH_TOKEN secret is unset. That body is the entire diagnosis — it must
+        // survive into the exhausted-retries message instead of being discarded with the response.
+        var handler = new StubHttpMessageHandler(
+            """{ "ok": false, "error": { "code": "server_misconfigured", "message": "SERPAPI_KEY secret is not set", "retryable": false } }""",
+            System.Net.HttpStatusCode.InternalServerError);
+        var provider = Build(handler);
+
+        var act = () => provider.SearchAsync(new SearchQuery { Query = "x", Kind = SearchKind.Web });
+
+        var thrown = await act.Should().ThrowAsync<ProviderException>();
+        thrown.Which.StatusCode.Should().Be(500);
+        thrown.Which.Message.Should().Contain("server_misconfigured");
     }
 
     /// <summary>A handler that never answers within the per-attempt window: it awaits far longer than
