@@ -88,28 +88,46 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
     public async Task<JsonElement> ExtractAsync(
         string url, object jsonSchema, CancellationToken cancellationToken = default)
     {
-        // Cloudflare's /browser-rendering/json validates response_format strictly, and the
-        // ONLY documented type is "json_schema" whose body is a bare JSON Schema object
-        // (https://developers.cloudflare.com/browser-rendering/rest-api/json-endpoint/) — NOT
-        // an OpenAI-style { name, schema } envelope, which CF's validator rejects with 422.
-        // When we hold a real schema, send it bare; otherwise omit response_format entirely
-        // and let CF do prompt-guided freeform extraction (the documented schema-less mode).
-        // The earlier `response_format.type = "json"` fallback was itself an invalid type and
-        // 422'd on every empty-schema call, so it never fixed anything for those pages.
-        object body = TryAsSchemaElement(jsonSchema, out var schema)
-            ? new { url, response_format = new { type = "json_schema", json_schema = schema } }
-            : new { url, prompt = FreeformExtractionPrompt };
+        // Cloudflare's /browser-rendering/json validates response_format strictly, and its
+        // accepted schema shape has proven brittle: whatever exact json_schema envelope we send,
+        // some store pages still come back 422 (the validator's rules aren't fully documented and
+        // shift). Rather than keep chasing the "correct" schema body — every past attempt only
+        // REDUCED the 422s — we treat a 422 as CF's signal to drop the constraint: retry the SAME
+        // page schema-less (omit response_format, pass a prompt) and let Workers-AI return freeform
+        // JSON we still parse. This keeps the failure INSIDE this provider. It must never escape to
+        // the router, because the router's only fallback is Context.dev, which is depleted whenever
+        // CF is carrying store extraction on its own — bouncing there guarantees a harvest failure.
+        if (TryAsSchemaElement(jsonSchema, out var schema))
+        {
+            try
+            {
+                var schemaBody = new { url, response_format = new { type = "json_schema", json_schema = schema } };
+                var raw = await PostAsync(Endpoint("json"), schemaBody, cancellationToken).ConfigureAwait(false);
+                return ParseExtraction(raw);
+            }
+            catch (ProviderException ex) when (ex.StatusCode == 422)
+            {
+                // Schema rejected — fall through to the schema-less retry below. Same URL, no
+                // response_format; CF owns its own recovery rather than failing over to a dead provider.
+            }
+        }
 
-        var raw = await PostAsync(Endpoint("json"), body, cancellationToken).ConfigureAwait(false);
-        return ParseExtraction(raw);
+        var freeform = new { url, prompt = FreeformExtractionPrompt };
+        var freeformRaw = await PostAsync(Endpoint("json"), freeform, cancellationToken).ConfigureAwait(false);
+        return ParseExtraction(freeformRaw);
     }
 
     /// <summary>
-    /// Generic instruction used when the caller has no schema to constrain the extraction. Sent as the
-    /// <c>prompt</c> on a response_format-less request — the shape CF's docs show for schema-less mode.
+    /// Instruction used when no schema constrains the extraction — either because the caller supplied
+    /// none, or because a schema-constrained request 422'd and we retried schema-less. It biases the
+    /// freeform output toward the <c>{ "products": [...] }</c> shape the store pipeline expects, so
+    /// <c>ListingExtractor.FromExtractedJson</c> and the router's product check recognise the result.
     /// </summary>
     private const string FreeformExtractionPrompt =
-        "Extract the main structured data from this page as JSON.";
+        "Extract every product listing on this page as JSON of the form " +
+        "{\"products\":[{\"name\":...,\"price\":...,\"image\":...,\"url\":...}]}. " +
+        "Include each product's name, price, image URL, and product page URL when present. " +
+        "If the page has no products, extract the main structured data as JSON.";
 
     /// <summary>
     /// Serializes the caller's schema and returns it as a <see cref="JsonElement"/> only when it is a
