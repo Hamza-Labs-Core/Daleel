@@ -55,7 +55,7 @@ search that lacks the new metadata renders exactly as it does today.
 | Scope | One combined spec, all four pieces, implemented in stages |
 | Where the metadata lives | **Fold into `SearchStrategy`** — it becomes THE search object, not a separate type |
 | Goal | **Open free-text string**; the planner also emits a concrete `DefaultSort` recommendation |
-| Filters | **Hybrid** — planner names the facet *dimensions*; option *values* are data-driven from result `Specs` |
+| Filters | **Hybrid** — planner names the facet *dimensions* (and may supply candidate values); option *values* are the union of those and the values data-driven from result `Specs`. Named facets are **always shown**, never hidden |
 | Reviews | **On each product card** — compact signal (rating + count + sentiment + source icons) expanding to the reviews |
 | Search-object UX | **Internal only** — persisted and drives the grid; no UI for the object itself |
 
@@ -86,9 +86,10 @@ SearchStrategy {
 }
 
 SearchFacet {
-  Key:   string     // binds to a ProductModel.Specs key (e.g. "Screen Size")
-  Label: string     // localized display label
-  Unit:  string?    // optional unit hint ("inch", "L")
+  Key:    string                    // binds to a ProductModel.Specs key (e.g. "Screen Size")
+  Label:  string                    // localized display label
+  Unit:   string?                   // optional unit hint ("inch", "L")
+  Values: IReadOnlyList<string>     // optional candidate options from the planner (may be empty)
 }
 ```
 
@@ -131,13 +132,16 @@ strategy deserialize with an empty/absent one.
 ### 4. Product-type facet filters (hybrid)
 
 - The grid renders one filter control per `SearchFacet` in `Result.Strategy.Facets`,
-  **alongside** the existing generic filters (not replacing them).
-- Options for a facet come from the **distinct `ProductModel.Specs[Facet.Key]`
-  values present across the results** (data-driven). A facet the planner names
-  but for which fewer than 2 distinct values exist is **hidden** (no useful
-  filter).
-- Selecting a facet value keeps models whose `Specs[Key]` matches. Query `Specs`
-  that correspond to a facet **pre-select** that facet's value on first render.
+  **alongside** the existing generic filters (not replacing them). Every named
+  facet is **always shown** — never hidden for having few/no matching values.
+- A facet's options are the **union of the planner's candidate `Values` and the
+  distinct `ProductModel.Specs[Facet.Key]` values present across the results**
+  (both normalized, de-duplicated). This is what makes an always-shown facet
+  useful even when the results carry sparse or inconsistent specs.
+- Selecting a facet value keeps models whose `Specs[Key]` matches. A value with
+  no matching results is still selectable (it yields an empty grid — an honest
+  "none in stock here" rather than a missing control). Query `Specs` that
+  correspond to a facet **pre-select** that facet's value on first render.
 - **Value normalization:** result specs vary (`55"` vs `55 inch`, Arabic vs
   English). Keys and values are normalized when bucketing options (trim, case-
   fold, unit-normalize where cheap). Imperfect matches fragment options rather
@@ -167,7 +171,7 @@ strategy deserialize with an empty/absent one.
 | `SearchStrategy` (+`SearchFacet`) | The search object: classification + plan + query metadata | none (Core model) |
 | Planner prompt/DTO (`AgentService.PlanAsync`) | Fill `Product`/`Specs`/`Location`/`Goal`/`Facets`/`DefaultSort` | LLM |
 | `SortResolver` (goal→sort) | Map `Goal`/`DefaultSort` to a concrete sort key + heuristic fallback | pure |
-| `FacetBuilder` | From `Strategy.Facets` + result `Specs`, produce renderable facets with normalized options; drop <2-value facets | pure |
+| `FacetBuilder` | From `Strategy.Facets` (incl. planner `Values`) + result `Specs`, produce every named facet with its normalized, de-duplicated union of options | pure |
 | `ProductListings.razor` | Render facets + generic filters, seed sort from strategy, apply facet filtering + `rating` sort | `FacetBuilder`, `SortResolver` |
 | `ReviewSignal.razor` | Compact per-card review signal + expand | `ProductModel`, `StoreReview` lookup |
 
@@ -178,8 +182,9 @@ unit-tested without a browser or an LLM.
 
 - Planner omits the new fields → empty metadata → grid falls back to generic
   filters + `relevance` sort. Search never regresses.
-- Sparse/inconsistent specs → facet hidden (<2 distinct values); no broken
-  controls.
+- Sparse/inconsistent specs → facet still shown; options come from the planner's
+  candidate `Values` (and whatever result values exist). A facet with genuinely
+  zero options renders disabled/empty rather than being removed.
 - Empty/unparseable `Goal`/`DefaultSort` → keyword heuristic → `relevance`.
 - Missing review data for a card → no `ReviewSignal`.
 - Old cached `ResultJson` (no strategy) → renders as today.
@@ -188,7 +193,8 @@ unit-tested without a browser or an LLM.
 
 - **Unit:** planner DTO→`SearchStrategy` mapping (new fields); `SortResolver`
   (explicit `DefaultSort`, heuristic fallbacks, `relevance` final fallback);
-  `FacetBuilder` (option derivation, normalization, <2-value hide rule,
+  `FacetBuilder` (option derivation as the union of planner `Values` + result
+  specs, normalization/de-dup, always-shown facets incl. the empty-options case,
   query-spec pre-selection); `rating` sort ordering (nulls last, tie-break).
 - **Component:** `ReviewSignal` across present/absent/partial review data;
   `ProductListings` renders facets from a strategy and falls back cleanly when
