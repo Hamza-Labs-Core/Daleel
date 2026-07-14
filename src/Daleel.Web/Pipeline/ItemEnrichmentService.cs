@@ -1821,6 +1821,26 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// items web extraction happened to name. Deduped by normalized name; uncapped by design — the
     /// relevance gate and the store's own inventory are the bounds.
     /// </summary>
+    /// <summary>
+    /// Maps a brand's harvested <see cref="BrandModel"/> rows to the catalogue-entry shape
+    /// <see cref="AppendCatalogDiscoveries"/> turns into grid products — so a discovered brand's
+    /// catalogue becomes a GRID SOURCE (each model a product), not just enrichment of items already
+    /// found. Relevance + dedup are AppendCatalogDiscoveries' job, so a "coffee machine" search only
+    /// gains the brand's coffee machines. The price is the brand-site LOCAL price, marked indicative
+    /// (a lead to verify at a store, like every non-store-offer price), never a live local offer.
+    /// </summary>
+    public static IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)>
+        BrandCatalogEntries(IEnumerable<BrandModel> models) =>
+        models
+            .Where(m => !string.IsNullOrWhiteSpace(m.ModelName))
+            .Select(m => (
+                Name: m.ModelName.Trim(),
+                Price: m.LocalPrice,
+                Currency: m.Currency,
+                Url: m.SourceUrl,
+                Image: m.ImageUrl,
+                Indicative: true));
+
     public static (List<ProductModel> Models, List<string> Created) AppendCatalogDiscoveries(
         List<ProductModel> models,
         IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)> entries,

@@ -115,7 +115,7 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
             {
                 var brandAgent = await Actor.ActorFlags.AgentAsync(ctx, actorCfg, ct);
                 var found = await ctx.Services.GetRequiredService<Actor.BrandSiteActor>()
-                    .FindAsync(brandAgent, payload.Brand, geo, ct);
+                    .FindAsync(brandAgent, payload.Brand, geo, productContext: ctx.Job.Query, ct);
 
                 // The attempt COMPLETED (even "nothing found" is an answer worth 7 days) — latch it.
                 row.SiteCheckedAt = DateTimeOffset.UtcNow;
@@ -422,6 +422,30 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
     }
 
     /// <summary>
+    /// Reads the brand's harvested <see cref="BrandModel"/> rows and maps them to catalogue entries for
+    /// the grid append. Best-effort: a DB blip yields no entries, never faults the brand unit.
+    /// </summary>
+    private static async Task<IReadOnlyList<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)>>
+        LoadBrandCatalogEntriesAsync(EnrichmentUnitContext ctx, int brandId, CancellationToken ct)
+    {
+        if (brandId <= 0)
+        {
+            return Array.Empty<(string, decimal?, string?, string?, string?, bool)>();
+        }
+
+        try
+        {
+            var rows = await ctx.Services.GetRequiredService<IBrandModelRepository>().ListByBrandAsync(brandId, ct);
+            return ItemEnrichmentService.BrandCatalogEntries(rows).ToList();
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return Array.Empty<(string, decimal?, string?, string?, string?, bool)>();
+        }
+    }
+
+    /// <summary>
     /// Pushes the saved brand back onto the result: brand card URL/reputation/DbId, the models'
     /// regional brand URL (the site hierarchy's most market-relevant level: local for the search's
     /// market, else regional, else global), and the brand-DB read-through (images/specs/prices
@@ -469,6 +493,13 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
             siteUrl = row.Website; // additive, same rule as the read-through above
         }
 
+        // Brand catalogue → GRID SOURCE: the brand's harvested models become NEW grid products (not
+        // just enrichment of existing ones), relevance-gated + deduped by AppendCatalogDiscoveries.
+        // This is the "hundreds of items" lever — a brand's full catalogue is dozens of products.
+        // Read here (scoped DbContext, before the pure patch), append inside.
+        var brandEntries = await LoadBrandCatalogEntriesAsync(ctx, row.Id, ct);
+        var geo = string.IsNullOrWhiteSpace(products.Geo) ? ctx.Job.Geo : products.Geo;
+
         await ctx.Results.PatchAsync(item, answer =>
         {
             if (answer.Products is not { } p)
@@ -488,6 +519,15 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
             else
             {
                 models = p.Models.ToList();
+            }
+
+            // Append the brand's catalogue as new grid products (relevance-gated inside).
+            var (withBrandModels, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
+                models, brandEntries, storeName: payload.Brand, query: ctx.Job.Query, geo: geo);
+            if (created.Count > 0)
+            {
+                models = withBrandModels;
+                changed = true;
             }
 
             if (!string.IsNullOrWhiteSpace(siteUrl))
