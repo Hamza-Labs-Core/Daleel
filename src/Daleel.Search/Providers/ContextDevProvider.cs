@@ -50,6 +50,24 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
     public string Name => "context.dev";
     protected override string ProviderName => Name;
 
+    /// <summary>
+    /// The code Context.dev returns once the account's usage quota is spent. Hitting it is EXPECTED,
+    /// not a bug: the provider chain exists precisely so Cloudflare Browser takes over from here.
+    /// </summary>
+    private const string DepletionMarker = "USAGE_EXCEEDED";
+
+    /// <summary>
+    /// Latched true the first time Context.dev reports <see cref="DepletionMarker"/>. Depletion is a
+    /// run-long steady state, so once seen, every further call is a guaranteed miss plus three wasted
+    /// retry round-trips per page. The latch short-circuits those calls straight to the fallback.
+    /// Monotonic (only ever false→true), so a plain volatile read is enough — a rare torn read just
+    /// costs one extra HTTP attempt, never wrong behaviour.
+    /// </summary>
+    private volatile bool _depleted;
+
+    /// <summary>Whether Context.dev has reported its quota exhausted this run (see <see cref="_depleted"/>).</summary>
+    public bool IsDepleted => _depleted;
+
     public ContextDevProvider(
         string? apiKey = null,
         HttpClient? httpClient = null,
@@ -263,25 +281,83 @@ public sealed class ContextDevProvider : HttpProviderBase, IScrapeProvider, IExt
     }
 
     /// <summary>GET helper — Context.dev's web/brand endpoints take query params with a Bearer token.</summary>
-    private async Task<JsonDocument> GetAsync(string pathAndQuery, CancellationToken cancellationToken) =>
-        await SendJsonAsync(
-            () =>
-            {
-                var req = new HttpRequestMessage(HttpMethod.Get, pathAndQuery);
-                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
-                return req;
-            },
-            cancellationToken).ConfigureAwait(false);
+    private Task<JsonDocument> GetAsync(string pathAndQuery, CancellationToken cancellationToken) =>
+        SendTrackedAsync(() =>
+        {
+            var req = new HttpRequestMessage(HttpMethod.Get, pathAndQuery);
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+            return req;
+        }, cancellationToken);
 
-    private async Task<JsonDocument> PostAsync(string path, object body, CancellationToken cancellationToken) =>
-        await SendJsonAsync(
-            () =>
+    private Task<JsonDocument> PostAsync(string path, object body, CancellationToken cancellationToken) =>
+        SendTrackedAsync(() =>
+        {
+            var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonBody(body) };
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
+            return req;
+        }, cancellationToken);
+
+    /// <summary>
+    /// Wraps every Context.dev call with the depletion latch: once the quota is spent, fail fast
+    /// (before any HTTP) so the router drops to Cloudflare Browser instantly instead of re-hammering a
+    /// dead quota. Otherwise it watches both the response body and the (post-retry) error message for
+    /// <see cref="DepletionMarker"/> and latches it for every subsequent call this run.
+    /// </summary>
+    private async Task<JsonDocument> SendTrackedAsync(
+        Func<HttpRequestMessage> requestFactory, CancellationToken cancellationToken)
+    {
+        if (_depleted)
+        {
+            throw new ProviderException(
+                $"{ProviderName}: usage quota exhausted ({DepletionMarker}); short-circuiting to the fallback provider.")
             {
-                var req = new HttpRequestMessage(HttpMethod.Post, path) { Content = JsonBody(body) };
-                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _apiKey);
-                return req;
-            },
-            cancellationToken).ConfigureAwait(false);
+                StatusCode = 429,
+            };
+        }
+
+        try
+        {
+            var doc = await SendJsonAsync(requestFactory, cancellationToken).ConfigureAwait(false);
+            NoteDepletion(doc.RootElement); // A depletion payload can arrive as a 200 with success:false.
+            return doc;
+        }
+        catch (ProviderException ex)
+        {
+            NoteDepletion(ex.Message); // A quota HTTP error folds its body (the marker) into the message.
+            throw;
+        }
+    }
+
+    /// <summary>Latches <see cref="_depleted"/> when the marker appears anywhere in a response/error string.</summary>
+    private void NoteDepletion(string? text)
+    {
+        if (!_depleted && text is not null &&
+            text.Contains(DepletionMarker, StringComparison.OrdinalIgnoreCase))
+        {
+            _depleted = true;
+        }
+    }
+
+    /// <summary>
+    /// Safety net for a depletion signalled as an HTTP 200 whose body carries the marker in a small
+    /// status field (<c>error</c>/<c>code</c>/<c>message</c>/<c>reason</c>) — checked without
+    /// re-serializing large scrape payloads.
+    /// </summary>
+    private void NoteDepletion(JsonElement root)
+    {
+        if (_depleted || root.ValueKind != JsonValueKind.Object)
+        {
+            return;
+        }
+
+        foreach (var key in new[] { "error", "code", "message", "reason" })
+        {
+            if (root.TryGetProperty(key, out var v) && v.ValueKind == JsonValueKind.String)
+            {
+                NoteDepletion(v.GetString());
+            }
+        }
+    }
 
     private static string? FirstString(JsonElement e, params string[] keys)
     {
