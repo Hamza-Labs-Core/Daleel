@@ -382,6 +382,13 @@
   <data name="ModelCard.Reviews" xml:space="preserve"><value>Reviews</value></data>
   <data name="ModelCard.MentionedIn" xml:space="preserve"><value>Mentioned in</value></data>
 
+  <data name="Reviews.Signal" xml:space="preserve"><value>Ratings and reviews</value></data>
+  <data name="Reviews.NReviews" xml:space="preserve"><value>{0} reviews</value></data>
+  <data name="Reviews.FromBuyers" xml:space="preserve"><value>Buyer reviews</value></data>
+  <data name="Reviews.FromSocial" xml:space="preserve"><value>Social media</value></data>
+  <data name="Reviews.FromStores" xml:space="preserve"><value>Store reviews</value></data>
+  <data name="Reviews.StoreReview" xml:space="preserve"><value>store review</value></data>
+
   <data name="History.Title" xml:space="preserve"><value>Search History</value></data>
   <data name="History.Subtitle" xml:space="preserve"><value>Every query you run is saved here automatically. Re-run it or open a saved copy.</value></data>
   <data name="History.SignInPrompt" xml:space="preserve"><value>Sign in to save your searches.</value></data>

@@ -382,6 +382,13 @@
   <data name="ModelCard.Reviews" xml:space="preserve"><value>مراجعات</value></data>
   <data name="ModelCard.MentionedIn" xml:space="preserve"><value>ورد في</value></data>
 
+  <data name="Reviews.Signal" xml:space="preserve"><value>التقييمات والمراجعات</value></data>
+  <data name="Reviews.NReviews" xml:space="preserve"><value>{0} مراجعة</value></data>
+  <data name="Reviews.FromBuyers" xml:space="preserve"><value>مراجعات المشترين</value></data>
+  <data name="Reviews.FromSocial" xml:space="preserve"><value>وسائل التواصل</value></data>
+  <data name="Reviews.FromStores" xml:space="preserve"><value>مراجعات المتاجر</value></data>
+  <data name="Reviews.StoreReview" xml:space="preserve"><value>مراجعة متجر</value></data>
+
   <data name="History.Title" xml:space="preserve"><value>سجل البحث</value></data>
   <data name="History.Subtitle" xml:space="preserve"><value>يُحفظ كل استعلام تجريه هنا تلقائيًا. أعد تشغيله أو افتح نسخة محفوظة.</value></data>
   <data name="History.SignInPrompt" xml:space="preserve"><value>سجّل الدخول لحفظ عمليات بحثك.</value></data>

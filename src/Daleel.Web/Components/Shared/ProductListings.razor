@@ -100,6 +100,7 @@ else
         {
             <MudItem xs="12" sm="6" md="4" @key="model">
                 <ModelCard Model="model"
+                           StoreReviews="@StoreReviewMatcher.ReviewsFor(model, Result.Stores)"
                            Query="@Result.Query"
                            Geo="@Result.Geo"
                            Target="@FlagTarget"
