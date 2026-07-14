@@ -1,7 +1,7 @@
 # Search object & result-grid design
 
 **Date:** 2026-07-14
-**Status:** Approved design — ready for implementation planning
+**Status:** Implemented on feat/search-object-and-grid (see docs/superpowers/plans/2026-07-14-search-object-and-grid.md)
 **Scope:** One combined spec covering four connected pieces: (1) a structured
 search object, (2) goal-driven default sort, (3) product-type facet filters,
 (4) reviews surfaced on each result card.
