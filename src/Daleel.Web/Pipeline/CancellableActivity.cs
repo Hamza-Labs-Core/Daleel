@@ -96,7 +96,8 @@ public abstract class CancellableActivity : CodeActivity
         Try<SearchPipelineState>(context)
         ?? Try<BrandResearchState>(context)
         ?? Try<StoreResearchState>(context)
-        ?? Try<ItemDeepDiveState>(context);
+        ?? Try<ItemDeepDiveState>(context)
+        ?? Try<SiteCrawlState>(context);
 
     private static int? Try<T>(ActivityExecutionContext context) where T : class =>
         context.GetService<T>() is ISearchScopedState { SearchId: { } id } && int.TryParse(id, out var jobId)

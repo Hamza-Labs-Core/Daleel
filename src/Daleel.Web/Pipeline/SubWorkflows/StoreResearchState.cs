@@ -13,6 +13,17 @@ public sealed class StoreResearchState : SubWorkflowState
     /// <summary>The store as extracted from the search (input).</summary>
     public StoreInfo Store { get; set; } = default!;
 
+    /// <summary>The shopper's original search query — threaded down so the LLM site-crawl can navigate toward it.</summary>
+    public string Query { get; set; } = string.Empty;
+
+    /// <summary>
+    /// True once the LLM site-crawl (<see cref="SiteCrawlWorkflow"/>) has harvested this store's catalogue —
+    /// the intelligent replacement for the single-page fetch. When set, <see cref="ScrapePricesActivity"/>
+    /// skips its now-redundant single-page catalogue call; when the crawl is unavailable it stays false and
+    /// the single-page fetch runs as the fallback.
+    /// </summary>
+    public bool CrawledSite { get; set; }
+
     /// <summary>The enriched store (output). Starts equal to <see cref="Store"/>; folds in verified fields.</summary>
     public StoreInfo Result { get; set; } = default!;
 
