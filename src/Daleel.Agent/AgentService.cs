@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Daleel.Core.Analysis;
@@ -644,7 +645,10 @@ public sealed partial class AgentService
         [JsonPropertyName("urlsToRead")] public List<string>? UrlsToRead { get; set; }
         [JsonPropertyName("reasoning")] public string? Reasoning { get; set; }
         [JsonPropertyName("product")] public string? Product { get; set; }
-        [JsonPropertyName("specs")] public Dictionary<string, string>? Specs { get; set; }
+
+        // Tolerant of mixed value types: LLMs emit spec values as strings, numbers or bools, and a
+        // strict Dictionary<string, string> would throw — discarding the ENTIRE strategy.
+        [JsonPropertyName("specs")] public Dictionary<string, JsonElement>? Specs { get; set; }
         [JsonPropertyName("location")] public string? Location { get; set; }
         [JsonPropertyName("goal")] public string? Goal { get; set; }
         [JsonPropertyName("defaultSort")] public string? DefaultSort { get; set; }
@@ -664,7 +668,10 @@ public sealed partial class AgentService
             UrlsToRead = UrlsToRead ?? new List<string>(),
             Reasoning = Reasoning,
             Product = Product ?? string.Empty,
-            Specs = Specs ?? new Dictionary<string, string>(),
+            Specs = (Specs ?? new Dictionary<string, JsonElement>())
+                .Select(kv => (kv.Key, Value: SpecValue(kv.Value)))
+                .Where(kv => !string.IsNullOrWhiteSpace(kv.Key) && kv.Value is { Length: > 0 })
+                .ToDictionary(kv => kv.Key.Trim(), kv => kv.Value!),
             Location = Location ?? string.Empty,
             Goal = Goal ?? string.Empty,
             DefaultSort = DefaultSort ?? string.Empty,

@@ -80,12 +80,14 @@ public static class PromptTemplates
           "urlsToRead": ["specific URLs worth deep-reading, may be empty"],
           "reasoning": "one sentence on the plan",
           "product": "the bare product/thing wanted, e.g. 'diapers' — no geo words, no qualifiers",
-          "specs": { "constraints stated in the query, e.g. size, color, capacity": "value" },
+          "specs": { "key": "value" },
           "location": "the city/place the user named, or '' if none",
           "goal": "the user's goal in their words: 'cheapest', 'best', 'most reliable', or '' if none",
           "defaultSort": "one of: relevance | price_asc | price_desc | rating | sellers — pick from the goal ('cheapest'→price_asc, 'best'/quality→rating); use 'relevance' when unsure",
           "facets": [ { "key": "the spec dimension shoppers filter THIS product type by, e.g. 'size' for diapers, 'screen size' for TVs", "label": "display label", "unit": "unit or null", "values": ["typical options a store would offer, e.g. sizes 1-6 for diapers"] } ]
         }
+        Fill "specs" with the constraints stated IN the query — the key is the constraint dimension
+        (e.g. "size", "color", "capacity") and the value is what the user asked for; use {} when none.
         Give 2-4 facets for a product query (the dimensions a shopper actually narrows by), each with
         its typical values in this market. For non-product queries use [] and leave product/goal empty.
         Generate queries in BOTH the market's primary language and English. No prose outside the JSON.
