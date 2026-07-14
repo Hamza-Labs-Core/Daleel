@@ -25,6 +25,10 @@ public class SearchWorkflowTests
     private const string StrategyJson =
         """{ "queryType": "General", "subject": "tea", "webQueries": [], "shoppingQueries": [], "reasoning": "n/a" }""";
 
+    // A buy-intent strategy: drives the extract-products path so the run assembles a structured result.
+    private const string ProductStrategyJson =
+        """{ "queryType": "ProductResearch", "subject": "coffee maker", "webQueries": [], "shoppingQueries": [], "reasoning": "n/a" }""";
+
     [Fact]
     public async Task FreshRun_ProducesSerializedReport_WithoutWritingTheVault()
     {
@@ -70,15 +74,32 @@ public class SearchWorkflowTests
         state.ResultJson.Should().Contain("tea", "the fresh answer echoes the question");
     }
 
+    [Fact]
+    public async Task ProductRun_StampsSearchStrategy_OnFinalAnswerProducts()
+    {
+        // The aggregate step must attach the planner's search object to the structured result it
+        // assembles — that record serializes into SearchJob.ResultJson and is what the grid binds.
+        var cache = new InMemoryCache();
+        using var provider = BuildProvider(cache);
+        var state = await RunAsync(provider, cache, query: "best coffee maker", resultKey: "k3",
+            strategyJson: ProductStrategyJson);
+
+        state.Answer.Should().NotBeNull();
+        state.Answer!.Products.Should().NotBeNull("a ProductResearch run projects a structured result");
+        state.Answer.Products!.Strategy.Should().NotBeNull("the aggregate step stamps the search object");
+        state.Answer.Products.Strategy!.Subject.Should().Be("coffee maker");
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────────
 
     private static async Task<SearchPipelineState> RunAsync(
-        ServiceProvider provider, ICacheStore cache, string query, string resultKey, Action<string>? progress = null)
+        ServiceProvider provider, ICacheStore cache, string query, string resultKey,
+        Action<string>? progress = null, string strategyJson = StrategyJson)
     {
         using var scope = provider.CreateScope();
         var state = scope.ServiceProvider.GetRequiredService<SearchPipelineState>();
         var services = scope.ServiceProvider.GetRequiredService<SearchPipelineServices>();
-        services.Agent = new AgentService(new FixedLlm(StrategyJson), new AgentOptions { DefaultGeo = "jordan" });
+        services.Agent = new AgentService(new FixedLlm(strategyJson), new AgentOptions { DefaultGeo = "jordan" });
         state.Query = query;
         state.Geo = "jordan";
         state.ResultKey = resultKey;

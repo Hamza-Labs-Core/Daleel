@@ -367,10 +367,8 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             QueryType = state.Strategy?.QueryType ?? Daleel.Core.Models.QueryType.General,
             Summary = state.Summary,
             Research = includeResearch ? state.Bundle ?? new ResearchBundle() : new ResearchBundle(),
-            // This fallback must carry the search object too: a salvaged faulted run PERSISTS this
-            // ResultJson, and the partial pushes deliver it to the grid mid-run — either way a
-            // strategy-less Products would lose the facets/sort for that search.
-            Products = state.Products is { } prod ? prod with { Strategy = state.Strategy } : null,
+            // The salvage/partial-push fallback must carry the search object too (a salvaged run persists this ResultJson).
+            Products = state.Products.WithStrategy(state.Strategy),
             GeneratedAt = DateTimeOffset.UtcNow
         };
 

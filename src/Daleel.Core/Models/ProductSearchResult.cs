@@ -293,3 +293,13 @@ public record ComparisonGroup
     /// <summary>The pick within this tier (e.g. best value), as prose.</summary>
     public string? Recommendation { get; init; }
 }
+
+/// <summary>
+/// Stamps the search object onto a result (null-safe): the salvage, aggregate, and agent paths all
+/// persist/deliver through this one expression.
+/// </summary>
+public static class ProductSearchResultStrategyExtensions
+{
+    public static ProductSearchResult? WithStrategy(this ProductSearchResult? products, SearchStrategy? strategy) =>
+        products is { } p ? p with { Strategy = strategy } : null;
+}
