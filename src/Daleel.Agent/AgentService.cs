@@ -668,10 +668,7 @@ public sealed partial class AgentService
             UrlsToRead = UrlsToRead ?? new List<string>(),
             Reasoning = Reasoning,
             Product = Product ?? string.Empty,
-            Specs = (Specs ?? new Dictionary<string, JsonElement>())
-                .Select(kv => (kv.Key, Value: SpecValue(kv.Value)))
-                .Where(kv => !string.IsNullOrWhiteSpace(kv.Key) && kv.Value is { Length: > 0 })
-                .ToDictionary(kv => kv.Key.Trim(), kv => kv.Value!),
+            Specs = CoerceSpecs(Specs),
             Location = Location ?? string.Empty,
             Goal = Goal ?? string.Empty,
             DefaultSort = DefaultSort ?? string.Empty,
@@ -686,6 +683,25 @@ public sealed partial class AgentService
                 })
                 .ToList()
         };
+
+        // Manual loop + indexer assignment (same pattern as the product-extraction path): keys that
+        // collide after trimming ("size" + "size ") must resolve last-wins, never throw — a thrown
+        // ArgumentException here escapes LlmJson's catch and faults the whole plan.
+        private static Dictionary<string, string> CoerceSpecs(Dictionary<string, JsonElement>? raw)
+        {
+            var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (raw is { Count: > 0 })
+            {
+                foreach (var (key, value) in raw)
+                {
+                    if (!string.IsNullOrWhiteSpace(key) && SpecValue(value) is { Length: > 0 } sv)
+                    {
+                        specs[key.Trim()] = sv;
+                    }
+                }
+            }
+            return specs;
+        }
     }
 
     /// <summary>Wire shape for one planner-named facet.</summary>

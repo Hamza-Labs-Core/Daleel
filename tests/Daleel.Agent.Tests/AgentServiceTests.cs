@@ -743,7 +743,7 @@ public class AgentServiceTests
               "webQueries": ["kettles Jordan"], "shoppingQueries": [], "socialQueries": [],
               "placesQueries": [], "urlsToRead": [], "reasoning": "kettles",
               "product": "kettle",
-              "specs": { "capacity": 5, "size": "4", "cordless": true, "note": null },
+              "specs": { "capacity": 5, "size": "4", " size ": "9", "cordless": true, "note": null },
               "facets": [
                 { "key": "   ", "label": "Dropped" },
                 { "key": "capacity", "values": ["1.5L", "1.7L"] }
@@ -755,7 +755,7 @@ public class AgentServiceTests
 
         s.WebQueries.Should().NotBeEmpty("a messy specs object must never discard the whole plan");
         s.Specs["capacity"].Should().Be("5", "numeric spec values are coerced to strings");
-        s.Specs["size"].Should().Be("4");
+        s.Specs["size"].Should().Be("9", "keys colliding after trim resolve last-wins instead of throwing");
         s.Specs["cordless"].Should().Be("true");
         s.Specs.Should().NotContainKey("note", "null spec values are dropped");
         s.Facets.Should().ContainSingle("a facet with a blank key is dropped");
