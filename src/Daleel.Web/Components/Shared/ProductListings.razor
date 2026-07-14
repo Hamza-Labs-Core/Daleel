@@ -100,7 +100,7 @@ else
         {
             <MudItem xs="12" sm="6" md="4" @key="model">
                 <ModelCard Model="model"
-                           StoreReviews="@StoreReviewMatcher.ReviewsFor(model, Result.Stores)"
+                           StoreReviews="@StoreReviewsFor(model)"
                            Query="@Result.Query"
                            Geo="@Result.Geo"
                            Target="@FlagTarget"
@@ -246,6 +246,18 @@ else
         }
     }
 
+    // Memoized store-review join per card. StoreReviewMatcher.ReviewsFor is a fuzzy O(offers×stores)
+    // scan, and calling it inline from the grid markup would re-run it for every card on EVERY render
+    // (against this file's Recompute()-caches discipline). Keyed by model reference — a new Result
+    // carries new model instances, so the cache is cleared in the new-Result branch below.
+    private readonly Dictionary<ProductModel, IReadOnlyList<StoreReview>> _storeReviewCache = new();
+
+    /// <summary>The (cached) reviews of the stores selling this model, for the card's review signal.</summary>
+    private IReadOnlyList<StoreReview> StoreReviewsFor(ProductModel m) =>
+        _storeReviewCache.TryGetValue(m, out var r)
+            ? r
+            : _storeReviewCache[m] = StoreReviewMatcher.ReviewsFor(m, Result.Stores);
+
     // The Result last seen by OnParametersSet: page 1 is forced only when a genuinely NEW result
     // arrives (fresh search, or the background enrichment streaming a refreshed result) — a parent
     // re-render passing the SAME Result must not yank the user off the page they're browsing.
@@ -266,6 +278,9 @@ else
             // A genuinely new result opens on the host-requested page (deep-link ?page=N), else page 1.
             _lastResult = Result;
             _page = InitialPage;
+
+            // New Result = new model instances (reference-keyed cache would only grow stale entries).
+            _storeReviewCache.Clear();
 
             // Rebuild the facet OPTIONS on every new Result reference — streamed results widen the
             // option union as more products arrive.

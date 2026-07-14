@@ -77,21 +77,26 @@
 
     private bool HasAny => Model.Rating is not null || TotalReviews > 0;
 
-    /// <summary>Positive-majority social sentiment tints the chip; negative warns; neutral stays default.</summary>
+    /// <summary>
+    /// Positive-majority sentiment tints the chip green; negative-majority warns red; a tie (or no
+    /// polarity at all) stays default. Honesty rule: the tally covers every PRODUCT opinion the chip
+    /// counts — social quotes by their labelled sentiment PLUS buyer reviews by their star rating
+    /// (4–5 = positive, 1–2 = negative, 3/unrated = neutral) — so ten 1-star buyer reviews can't
+    /// hide behind one glowing social quote. Store reviews are deliberately EXCLUDED from the tint:
+    /// they rate the selling venue, not this product.
+    /// </summary>
     private Color SentimentColor
     {
         get
         {
             var social = Model.BrandReputation?.Social;
-            if (social is not { HasReviews: true })
-            {
-                return Color.Default;
-            }
-            if (social.Positive > social.Negative)
+            var positive = (social?.Positive ?? 0) + BuyerReviews.Count(r => r.Rating is >= 4);
+            var negative = (social?.Negative ?? 0) + BuyerReviews.Count(r => r.Rating is <= 2);
+            if (positive > negative)
             {
                 return Color.Success;
             }
-            return social.Negative > social.Positive ? Color.Error : Color.Default;
+            return negative > positive ? Color.Error : Color.Default;
         }
     }
 }

@@ -84,4 +84,24 @@ public class ReviewSignalTests : TestContext
             .Add(x => x.StoreReviews, new[] { new StoreReview { Text = "fast delivery" } }));
         cut.Markup.Should().Contain("fast delivery");
     }
+
+    [Fact]
+    public void Header_Click_TogglesCollapse()
+    {
+        var model = new ProductModel
+        {
+            Name = "m",
+            Rating = 4.5,
+            RatedReviews = new[] { new ProductReview("Loved it", 5, "Aisha") }
+        };
+        var cut = RenderComponent<ReviewSignal>(p => p.Add(x => x.Model, model));
+
+        // Verified markup behavior: MudCollapse always renders its container (children stay in the
+        // DOM), and expanding adds the "mud-collapse-entering" transition class to it.
+        cut.Find(".mud-collapse-container").ClassList.Should().NotContain("mud-collapse-entering");
+
+        cut.Find("div[title]").Click();
+
+        cut.Find(".mud-collapse-container").ClassList.Should().Contain("mud-collapse-entering");
+    }
 }
