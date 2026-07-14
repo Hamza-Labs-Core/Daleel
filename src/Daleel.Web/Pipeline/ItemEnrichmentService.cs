@@ -573,15 +573,15 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             rows.AddRange(await _scrapedPrices.ListRecentByStoreAsync(storeName!, since, ct));
         }
 
-        // The exact shape the shared matcher consumes: name/price/currency/sourceUrl — no image, so
-        // this path can only contribute offers, like the browser fallback it rides through. That
-        // branch also marks the offer indicative, which is right here too: an up-to-an-hour-old
+        // The shape the shared matcher consumes: name/price/currency/sourceUrl (+ the crawl's image when
+        // it stored one). This branch marks the offer indicative, which is right here: an up-to-an-hour-old
         // observation is a lead to verify at the store, not a live quote.
         var pool = rows
             .Where(r => r.Price is not null && !string.IsNullOrWhiteSpace(r.ProductName))
             .Select(r => new BrowserPrice(
                 r.Price!.Value, r.Currency ?? string.Empty, r.ProductName,
-                string.IsNullOrWhiteSpace(r.StoreName) ? domain : r.StoreName, r.SourceUrl ?? string.Empty))
+                string.IsNullOrWhiteSpace(r.StoreName) ? domain : r.StoreName, r.SourceUrl ?? string.Empty,
+                string.IsNullOrWhiteSpace(r.ImageUrl) ? null : r.ImageUrl))
             .ToList();
         if (pool.Count == 0)
         {
@@ -592,10 +592,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // and persisting them again would duplicate the append-only series.
         var (updated, priced, _, _, _) = AttachPoolToModels(models, new List<CatalogProduct>(), pool, storeName);
 
-        // Drained edge catalogues create models too — indicative offers, like every drained price.
+        // Drained edge catalogues create models too — indicative offers, like every drained price. When
+        // the crawl stored a photo on the row, the new model carries it (the site-crawl's own image),
+        // instead of landing imageless and needing a paid image lookup that may find nothing.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated ?? models,
-            pool.Select(b => (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)),
+            pool.Select(b => (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, b.ImageUrl, Indicative: true)),
             storeName, query);
         return priced > 0 || created.Count > 0
             ? (withNew, priced, created)
@@ -861,6 +863,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 };
                 item = item with { Offers = item.Offers.Append(offer).ToList() };
                 priced++;
+
+                // The scraped-price path (unlike a live rendered line) may carry the crawl's own photo —
+                // fill it when this model has none, so an imageless web-discovered item gets the store's image.
+                if (string.IsNullOrWhiteSpace(item.ImageUrl) && bp.ImageUrl is { Length: > 0 } bpImg)
+                {
+                    item = item with { ImageUrl = bpImg };
+                    images++;
+                }
                 observations.Add(new ScrapedPrice
                 {
                     ProductName = m.Name,
@@ -1977,8 +1987,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         }
     }
 
-    /// <summary>A price scraped off a rendered store page, with the source line for token matching.</summary>
-    private readonly record struct BrowserPrice(decimal Price, string Currency, string Line, string Store, string Url);
+    /// <summary>
+    /// A price scraped off a rendered store page, with the source line for token matching. <see cref="ImageUrl"/>
+    /// is carried only by the persisted-price path (<see cref="AttachScrapedPricesAsync"/>), where the LLM
+    /// site-crawl stored a photo on the row; the live browser-harvest sources leave it null (a rendered price
+    /// line has no image), which the image-fill below treats as "nothing to attach".
+    /// </summary>
+    private readonly record struct BrowserPrice(
+        decimal Price, string Currency, string Line, string Store, string Url, string? ImageUrl = null);
 
     private static bool HasPrice(ProductModel m) => m.Offers.Any(o => o.Price is not null);
 

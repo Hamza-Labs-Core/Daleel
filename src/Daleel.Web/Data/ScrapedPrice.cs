@@ -35,6 +35,14 @@ public sealed class ScrapedPrice
     /// <summary>The page the price was read from.</summary>
     public string? SourceUrl { get; set; }
 
+    /// <summary>
+    /// The product's image URL as scraped, when the source carried one. The LLM site-crawl extracts a
+    /// photo per listing; persisting it here is what lets the grid-builder (which rebuilds the live grid
+    /// from these rows, NOT from the rich entity documents) show the crawl's own images instead of leaving
+    /// every crawled item imageless and falling back to a paid image search.
+    /// </summary>
+    public string? ImageUrl { get; set; }
+
     /// <summary>Which scraper produced this observation ("context.dev" or "cloudflare-browser").</summary>
     public string Provider { get; set; } = string.Empty;
 

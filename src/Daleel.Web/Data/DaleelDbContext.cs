@@ -314,6 +314,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.StoreName).HasMaxLength(200);
             e.Property(x => x.Currency).HasMaxLength(16);
             e.Property(x => x.SourceUrl).HasMaxLength(1000);
+            e.Property(x => x.ImageUrl).HasMaxLength(1000);
             e.Property(x => x.Provider).HasMaxLength(64);
             e.Property(x => x.Price).HasColumnType("decimal(18,2)");
 
