@@ -88,24 +88,35 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
     public async Task<JsonElement> ExtractAsync(
         string url, object jsonSchema, CancellationToken cancellationToken = default)
     {
-        // Cloudflare's /browser-rendering/json validates response_format strictly: a
-        // "json_schema" type with a null/empty json_schema body is rejected with HTTP 422
-        // on every request. Only ask for schema-constrained output when we actually hold a
-        // non-empty schema; otherwise fall back to freeform "json" extraction so the render
-        // still runs instead of hard-failing the whole page.
+        // Cloudflare's /browser-rendering/json validates response_format strictly, and the
+        // ONLY documented type is "json_schema" whose body is a bare JSON Schema object
+        // (https://developers.cloudflare.com/browser-rendering/rest-api/json-endpoint/) — NOT
+        // an OpenAI-style { name, schema } envelope, which CF's validator rejects with 422.
+        // When we hold a real schema, send it bare; otherwise omit response_format entirely
+        // and let CF do prompt-guided freeform extraction (the documented schema-less mode).
+        // The earlier `response_format.type = "json"` fallback was itself an invalid type and
+        // 422'd on every empty-schema call, so it never fixed anything for those pages.
         object body = TryAsSchemaElement(jsonSchema, out var schema)
             ? new { url, response_format = new { type = "json_schema", json_schema = schema } }
-            : new { url, response_format = new { type = "json" } };
+            : new { url, prompt = FreeformExtractionPrompt };
 
         var raw = await PostAsync(Endpoint("json"), body, cancellationToken).ConfigureAwait(false);
         return ParseExtraction(raw);
     }
 
     /// <summary>
+    /// Generic instruction used when the caller has no schema to constrain the extraction. Sent as the
+    /// <c>prompt</c> on a response_format-less request — the shape CF's docs show for schema-less mode.
+    /// </summary>
+    private const string FreeformExtractionPrompt =
+        "Extract the main structured data from this page as JSON.";
+
+    /// <summary>
     /// Serializes the caller's schema and returns it as a <see cref="JsonElement"/> only when it is a
     /// non-empty JSON object — the shape Cloudflare's json_schema mode requires. A null schema, a
-    /// non-object, or an object with no properties yields <c>false</c> so the caller drops to freeform
-    /// "json" mode rather than sending an empty json_schema body (which CF answers with a 422).
+    /// non-object, or an object with no properties yields <c>false</c> so the caller omits
+    /// response_format and drops to prompt-only extraction rather than sending an empty (or invalidly
+    /// typed) json_schema body, both of which CF answers with a 422.
     /// </summary>
     private static bool TryAsSchemaElement(object? jsonSchema, out JsonElement schema)
     {
