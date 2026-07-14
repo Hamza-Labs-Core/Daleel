@@ -97,8 +97,15 @@ public record SearchStrategy
 /// </summary>
 public record SearchFacet
 {
+    /// <summary>The spec key this facet filters on — binds to a <c>ProductModel.Specs</c> key.</summary>
     public string Key { get; init; } = string.Empty;
+
+    /// <summary>Human-readable display label for the facet ("Screen Size").</summary>
     public string Label { get; init; } = string.Empty;
+
+    /// <summary>Optional unit hint for the dimension ("inch", "kg"); null when unitless.</summary>
     public string? Unit { get; init; }
+
+    /// <summary>Planner-supplied candidate options; the grid merges these with values seen in results.</summary>
     public IReadOnlyList<string> Values { get; init; } = Array.Empty<string>();
 }

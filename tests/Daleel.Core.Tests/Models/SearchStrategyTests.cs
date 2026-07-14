@@ -1,9 +1,10 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Daleel.Core.Models;
 using FluentAssertions;
 using Xunit;
 
-namespace Daleel.Core.Tests;
+namespace Daleel.Core.Tests.Models;
 
 /// <summary>
 /// The search-object fields on SearchStrategy: defaults are empty (fully additive), and the
@@ -12,6 +13,19 @@ namespace Daleel.Core.Tests;
 /// </summary>
 public class SearchStrategyTests
 {
+    /// <summary>
+    /// Mirrors Daleel.Web.Services.ResultSerialization.Options (the persistence path for
+    /// SearchJob.ResultJson). That type lives in Daleel.Web, which this test project can't
+    /// reference, so the configuration is duplicated here: compact output, nulls omitted,
+    /// enums as names. Keep in sync if ResultSerialization ever changes.
+    /// </summary>
+    private static readonly JsonSerializerOptions PersistenceOptions = new()
+    {
+        WriteIndented = false,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     [Fact]
     public void NewFields_DefaultToEmpty()
     {
@@ -40,7 +54,8 @@ public class SearchStrategyTests
             }
         };
 
-        var back = JsonSerializer.Deserialize<SearchStrategy>(JsonSerializer.Serialize(s))!;
+        var back = JsonSerializer.Deserialize<SearchStrategy>(
+            JsonSerializer.Serialize(s, PersistenceOptions), PersistenceOptions)!;
         back.Product.Should().Be("diapers");
         back.Specs["size"].Should().Be("4");
         back.Goal.Should().Be("cheapest");
@@ -52,7 +67,7 @@ public class SearchStrategyTests
     public void OldJson_WithoutNewFields_DeserializesToEmptyDefaults()
     {
         const string oldJson = """{ "QueryType": 0, "Subject": "AC", "WebQueries": ["best AC"] }""";
-        var s = JsonSerializer.Deserialize<SearchStrategy>(oldJson)!;
+        var s = JsonSerializer.Deserialize<SearchStrategy>(oldJson, PersistenceOptions)!;
         s.Subject.Should().Be("AC");
         s.Product.Should().BeEmpty();
         s.Facets.Should().BeEmpty();
