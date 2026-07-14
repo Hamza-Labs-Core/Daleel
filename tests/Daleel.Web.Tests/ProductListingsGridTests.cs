@@ -76,6 +76,12 @@ public class ProductListingsGridTests : TestContext
     private static ProductSearchResult Result(SearchStrategy? strategy, string query, params ProductModel[] models) =>
         new() { Query = query, Geo = "jordan", Country = "Jordan", Models = models, Strategy = strategy };
 
+    private static ProductModel WithSpec(string name, string key, string value, decimal price = 100m)
+    {
+        var m = Model(name, price);
+        return m with { Specs = new Dictionary<string, string> { [key] = value } };
+    }
+
     // MudSelect (the sort/filter dropdowns) resolves popovers through MudPopoverProvider at render
     // time — render it alongside the grid, same as MudBlazor's own component-test setup requires.
     private IRenderedComponent<ProductListings> Render(ProductSearchResult result)
@@ -151,5 +157,41 @@ public class ProductListingsGridTests : TestContext
             x => x.Result, Result(new SearchStrategy { DefaultSort = "price_desc" }, "q2", models)));
         CardOrder(cut, "Expensive", "Cheap", "Middle")
             .Should().ContainInOrder("Expensive", "Middle", "Cheap");
+    }
+
+    [Fact]
+    public void FacetControl_RendersWithUnionOptions()
+    {
+        var strategy = new SearchStrategy
+        {
+            Facets = new[] { new SearchFacet { Key = "size", Label = "Diaper Size", Values = new[] { "3" } } }
+        };
+        var cut = Render(Result(strategy, WithSpec("A", "Size", "4"), WithSpec("B", "size", "5")));
+
+        cut.Markup.Should().Contain("Diaper Size"); // the facet control label renders
+    }
+
+    [Fact]
+    public void FacetPreselection_FromQuerySpecs_FiltersTheGrid()
+    {
+        var strategy = new SearchStrategy
+        {
+            Specs = new Dictionary<string, string> { ["size"] = "4" }, // the user SAID size 4
+            Facets = new[] { new SearchFacet { Key = "size", Label = "Size" } }
+        };
+        var cut = Render(Result(strategy,
+            WithSpec("SizeFour", "Size", "4"),
+            WithSpec("SizeFive", "Size", "5")));
+
+        cut.Markup.Should().Contain("SizeFour");
+        cut.Markup.Should().NotContain("SizeFive"); // filtered out by the pre-selected facet
+    }
+
+    [Fact]
+    public void NoStrategy_RendersNoFacetControls_AndAllModels()
+    {
+        var cut = Render(Result(null, Model("One", 100m), Model("Two", 200m)));
+        cut.Markup.Should().Contain("One");
+        cut.Markup.Should().Contain("Two");
     }
 }

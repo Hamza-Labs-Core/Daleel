@@ -47,6 +47,22 @@
                 <MudSelectItem T="string" Value="@("rating")">@L["Filter.TopRated"]</MudSelectItem>
             </MudSelect>
         </MudItem>
+        @foreach (var facet in _facets)
+        {
+            <MudItem xs="6" sm="3" @key="facet.Key">
+                <MudSelect T="string"
+                           Value="@_facetSelections.GetValueOrDefault(facet.Key, AllValue)"
+                           ValueChanged="@(v => SetFacet(facet.Key, v))"
+                           Label="@(facet.Unit is { Length: > 0 } u ? $"{facet.Label} ({u})" : facet.Label)"
+                           Dense="true" Margin="Margin.Dense" Disabled="@(facet.Options.Count == 0)">
+                    <MudSelectItem T="string" Value="@AllValue">@L["ProductFilters.Any"]</MudSelectItem>
+                    @foreach (var opt in facet.Options)
+                    {
+                        <MudSelectItem T="string" Value="@opt">@opt</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        }
         <MudItem xs="12" sm="6">
             <div class="d-flex align-center gap-2">
                 <MudNumericField T="decimal?" @bind-Value="MinPrice" Label="@L["Filter.MinPrice"]" Variant="Variant.Text"
@@ -184,6 +200,12 @@ else
     private decimal? _maxPrice;
     private readonly HashSet<int> _selected = new();
 
+    // Facet filters (the search object's product-type dimensions). _facets rebuilds on every new
+    // Result (streamed results refresh the options); _facetSelections resets only on a new SEARCH
+    // (same identity rule as the sort seed — a mid-run facet choice must survive streaming pushes).
+    private IReadOnlyList<FacetView> _facets = Array.Empty<FacetView>();
+    private readonly Dictionary<string, string> _facetSelections = new(StringComparer.OrdinalIgnoreCase);
+
     private List<string> _brands = new();
     private List<(int Index, ProductModel Model)> _indexed = new();
 
@@ -214,6 +236,19 @@ else
         Recompute();
     }
 
+    private void SetFacet(string key, string value)
+    {
+        if (_facetSelections.GetValueOrDefault(key, AllValue) != value)
+        {
+            _facetSelections[key] = value;
+            OnFilterChanged();
+        }
+    }
+
+    /// <summary>Same loose key normalization FacetBuilder uses (case + separators stripped).</summary>
+    private static string NormalizeKey(string key) =>
+        new(key.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
     // The Result last seen by OnParametersSet: page 1 is forced only when a genuinely NEW result
     // arrives (fresh search, or the background enrichment streaming a refreshed result) — a parent
     // re-render passing the SAME Result must not yank the user off the page they're browsing.
@@ -235,14 +270,31 @@ else
             _lastResult = Result;
             _page = InitialPage;
 
-            // Seed the sort from the search object's goal ONLY when a genuinely new SEARCH arrives.
-            // Streaming pushes a NEW Result reference every ~800ms for the SAME search (Query+Geo
-            // unchanged), and reseeding on each push would clobber the user's mid-run sort choice.
+            // Rebuild the facet OPTIONS on every new Result reference — streamed results widen the
+            // option union as more products arrive.
+            _facets = FacetBuilder.Build(Result.Strategy, Result.Schema, Result.Models);
+
+            // Seed the sort/facet SELECTIONS from the search object ONLY when a genuinely new SEARCH
+            // arrives. Streaming pushes a NEW Result reference every ~800ms for the SAME search
+            // (Query+Geo unchanged), and reseeding on each push would clobber the user's mid-run
+            // sort/facet choices.
             var identity = (Result.Query, Result.Geo);
             if (_lastSeedIdentity != identity)
             {
                 _lastSeedIdentity = identity;
                 _sort = SortResolver.Resolve(Result.Strategy);
+
+                // New search: reset facet selections, pre-selecting the constraints the user put IN
+                // the query ("size 4 diapers" opens with size=4 already applied).
+                _facetSelections.Clear();
+                foreach (var facet in _facets)
+                {
+                    var stated = Result.Strategy?.Specs.FirstOrDefault(
+                        kv => NormalizeKey(kv.Key) == NormalizeKey(facet.Key));
+                    _facetSelections[facet.Key] = stated is { Key.Length: > 0 } kv2
+                        ? kv2.Value.Trim()
+                        : AllValue;
+                }
             }
         }
         else if (InitialPage != _lastInitialPage)
@@ -281,6 +333,14 @@ else
 
         if (_condition != AllValue)
             q = q.Where(x => x.Model.Offers.Any(o => string.Equals(o.Condition, _condition, StringComparison.OrdinalIgnoreCase)));
+
+        foreach (var (facetKey, selected) in _facetSelections)
+        {
+            if (selected != AllValue)
+            {
+                q = q.Where(x => FacetBuilder.Matches(x.Model, facetKey, selected));
+            }
+        }
 
         // Sort/filter by the DISPLAYED price (LowestOffer's — exact preferred over indicative), so
         // the grid order always matches the figures on the cards. Keying off LowestPrice (min over
