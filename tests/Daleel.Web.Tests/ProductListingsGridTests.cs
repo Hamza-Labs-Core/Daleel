@@ -71,7 +71,10 @@ public class ProductListingsGridTests : TestContext
         };
 
     private static ProductSearchResult Result(SearchStrategy? strategy, params ProductModel[] models) =>
-        new() { Query = "q", Geo = "jordan", Country = "Jordan", Models = models, Strategy = strategy };
+        Result(strategy, "q", models);
+
+    private static ProductSearchResult Result(SearchStrategy? strategy, string query, params ProductModel[] models) =>
+        new() { Query = query, Geo = "jordan", Country = "Jordan", Models = models, Strategy = strategy };
 
     // MudSelect (the sort/filter dropdowns) resolves popovers through MudPopoverProvider at render
     // time — render it alongside the grid, same as MudBlazor's own component-test setup requires.
@@ -82,7 +85,15 @@ public class ProductListingsGridTests : TestContext
     }
 
     private static IReadOnlyList<string> CardOrder(IRenderedComponent<ProductListings> cut, params string[] names)
-        => names.OrderBy(n => cut.Markup.IndexOf(n, StringComparison.Ordinal)).ToList();
+    {
+        // Guard the ordering against vacuous passes: a missing name gets IndexOf -1 and would
+        // sort FIRST — exactly the position these tests assert.
+        foreach (var n in names)
+        {
+            cut.Markup.Should().Contain(n, "every asserted card must actually render");
+        }
+        return names.OrderBy(n => cut.Markup.IndexOf(n, StringComparison.Ordinal)).ToList();
+    }
 
     [Fact]
     public void DefaultSort_FromStrategy_OrdersByPriceAscending()
@@ -114,5 +125,31 @@ public class ProductListingsGridTests : TestContext
         var cut = Render(Result(null, Model("First", 900m), Model("Second", 100m)));
         // relevance = incoming order, so the pricier "First" must stay first.
         CardOrder(cut, "First", "Second").Should().ContainInOrder("First", "Second");
+    }
+
+    [Fact]
+    public void StreamingPush_SameSearch_DoesNotReseedSort_ButNewSearchDoes()
+    {
+        // A live search streams a NEW ProductSearchResult reference per push for the SAME search
+        // (Query+Geo unchanged) — those pushes must not re-derive the sort. Only a genuinely new
+        // SEARCH may reseed it.
+        var models = new[] { Model("Expensive", 900m), Model("Cheap", 100m), Model("Middle", 400m) };
+
+        var cut = Render(Result(new SearchStrategy { DefaultSort = "price_asc" }, "q", models));
+        CardOrder(cut, "Expensive", "Cheap", "Middle")
+            .Should().ContainInOrder("Cheap", "Middle", "Expensive");
+
+        // Streaming push: new Result INSTANCE, same Query/Geo, but a strategy now claiming
+        // price_desc. No reseed may happen — the grid must stay price-ascending.
+        cut.SetParametersAndRender(p => p.Add(
+            x => x.Result, Result(new SearchStrategy { DefaultSort = "price_desc" }, "q", models)));
+        CardOrder(cut, "Expensive", "Cheap", "Middle")
+            .Should().ContainInOrder("Cheap", "Middle", "Expensive");
+
+        // A genuinely NEW search (different Query) with the same strategy DOES reseed: order flips.
+        cut.SetParametersAndRender(p => p.Add(
+            x => x.Result, Result(new SearchStrategy { DefaultSort = "price_desc" }, "q2", models)));
+        CardOrder(cut, "Expensive", "Cheap", "Middle")
+            .Should().ContainInOrder("Expensive", "Middle", "Cheap");
     }
 }

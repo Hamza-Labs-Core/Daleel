@@ -223,6 +223,10 @@ else
     // off the page they flipped to internally — only a genuine URL/page change re-syncs.
     private int _lastInitialPage = 1;
 
+    // The SEARCH (not result) the sort was last seeded for. Streaming pushes a new Result
+    // reference per update for the same search, so reference identity alone can't gate the seed.
+    private (string Query, string Geo)? _lastSeedIdentity;
+
     protected override void OnParametersSet()
     {
         if (!ReferenceEquals(_lastResult, Result))
@@ -231,9 +235,15 @@ else
             _lastResult = Result;
             _page = InitialPage;
 
-            // A genuinely NEW result seeds the sort from the search object's goal ("cheapest" →
-            // price_asc). Only here — re-renders of the same result must not undo a user's choice.
-            _sort = SortResolver.Resolve(Result.Strategy);
+            // Seed the sort from the search object's goal ONLY when a genuinely new SEARCH arrives.
+            // Streaming pushes a NEW Result reference every ~800ms for the SAME search (Query+Geo
+            // unchanged), and reseeding on each push would clobber the user's mid-run sort choice.
+            var identity = (Result.Query, Result.Geo);
+            if (_lastSeedIdentity != identity)
+            {
+                _lastSeedIdentity = identity;
+                _sort = SortResolver.Resolve(Result.Strategy);
+            }
         }
         else if (InitialPage != _lastInitialPage)
         {
