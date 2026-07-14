@@ -104,12 +104,24 @@ grid falls back to today's behavior. Never faults the search.
 
 ### 2. Persistence & delivery to the grid
 
-`SearchStrategy` currently lives only in `SearchPipelineState.Strategy`
-(in-memory). To be "the search object persisted with the id" **and** to reach
-the grid, it is attached to `ProductSearchResult`, which already serializes into
-`SearchJob.ResultJson` under the job's `Id` and is the exact object the grid
-reads. One write persists it with the search and delivers it to the UI — **no
-new DB column**.
+`SearchStrategy` already flows through the pipeline
+(`AgentGatherResult.Strategy`, and `SearchPipelineState.Strategy`), but it never
+reaches the persisted result or the grid. The serialization/display chain is:
+
+```
+state.Answer : AgentAnswer                         ← ResultSerialization.Serialize → SearchJob.ResultJson (keyed by SearchJob.Id)
+    └─ Products : ProductSearchResult?              ← the grid binds THIS as `Result`
+```
+
+So the search object is delivered by adding `Strategy` to **`ProductSearchResult`**
+(nested as `AgentAnswer.Products`). This single addition both persists it (it
+serializes inside `ResultJson` under the job's `Id`) and delivers it to the grid
+(which already binds `AgentAnswer.Products` as `Result`) — **no new DB column**.
+
+**Wiring point:** where `AgentAnswer.Products` is constructed, copy the pipeline's
+`SearchStrategy` onto it (`Products = products with { Strategy = strategy }`). The
+top-level `AgentAnswer` also exposes `QueryType`; the full strategy now travels on
+`Products` so the grid can read it without threading a second parameter.
 
 The `ResultJson` deserializer must tolerate missing/extra fields (it already
 does; the additions are optional properties). Old cached results without a
@@ -158,9 +170,19 @@ strategy deserialize with an empty/absent one.
     (`ProductReview`), `Rating`, `RatingCount`;
   - social — `ProductModel.SocialProof` (`Reviews` + `Sentiment`);
   - brand — `ProductModel.BrandReputation`;
-  - store — `StoreReview` on `Result.Stores`, associated to a card via its
-    offers' sellers (a product's store reviews = reviews of the stores selling it).
+  - store — `StoreReview` on `Result.Stores[].Reviews` (`StoreInfo`), associated
+    to a card by matching a store to the product's offers.
 - No data for a card → **no widget** (no empty shell).
+
+**Store-review association is a fuzzy, best-effort join** (the shakiest part of
+this piece). There is no shared id between a `PriceOffer` and a `StoreInfo`; the
+offer carries `Source`/`Seller`/`Url` and the store carries `Name`
+(`StableId.ForStore(Name)`) and `Website`. The join matches on **normalized store
+name** (offer `Source`/`Seller` vs `StoreInfo.Name`) with a **website-domain**
+fallback (offer `Url` host vs `StoreInfo.Website` host). Misses are expected and
+acceptable — an unmatched store simply contributes no store-reviews to that card
+(the card still shows product/social/brand signals). A shared store id is out of
+scope here; the name/domain join is the pragmatic first cut.
 
 ---
 
@@ -173,7 +195,8 @@ strategy deserialize with an empty/absent one.
 | `SortResolver` (goal→sort) | Map `Goal`/`DefaultSort` to a concrete sort key + heuristic fallback | pure |
 | `FacetBuilder` | From `Strategy.Facets` (incl. planner `Values`) + result `Specs`, produce every named facet with its normalized, de-duplicated union of options | pure |
 | `ProductListings.razor` | Render facets + generic filters, seed sort from strategy, apply facet filtering + `rating` sort | `FacetBuilder`, `SortResolver` |
-| `ReviewSignal.razor` | Compact per-card review signal + expand | `ProductModel`, `StoreReview` lookup |
+| `StoreReviewMatcher` | Match a product's offers to `StoreInfo` by normalized name / website domain; return that card's store reviews | pure |
+| `ReviewSignal.razor` | Compact per-card review signal + expand | `ProductModel`, `StoreReviewMatcher` |
 
 The pure units (`SortResolver`, `FacetBuilder`, planner DTO mapping) are
 unit-tested without a browser or an LLM.
@@ -196,6 +219,8 @@ unit-tested without a browser or an LLM.
   `FacetBuilder` (option derivation as the union of planner `Values` + result
   specs, normalization/de-dup, always-shown facets incl. the empty-options case,
   query-spec pre-selection); `rating` sort ordering (nulls last, tie-break).
+- **Unit:** `StoreReviewMatcher` — name match, domain-fallback match, and a
+  clean miss (unmatched store contributes nothing).
 - **Component:** `ReviewSignal` across present/absent/partial review data;
   `ProductListings` renders facets from a strategy and falls back cleanly when
   the strategy is null/empty.
