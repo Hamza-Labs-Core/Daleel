@@ -89,6 +89,19 @@ public class AgentServiceTests
     }
 
     [Fact]
+    public async Task AskAsync_ProductQuery_CarriesStrategyOnProducts()
+    {
+        // PlannerAndAnalyst answers the planner call with StrategyJson (ProductResearch) and
+        // everything else with plain text — enough for AskAsync to build a Products result.
+        var agent = new AgentService(PlannerAndAnalyst());
+        var answer = await agent.AskAsync("best AC in Jordan", "jordan");
+
+        answer.Products.Should().NotBeNull();
+        answer.Products!.Strategy.Should().NotBeNull();
+        answer.Products.Strategy!.Subject.Should().Be("مكيف"); // from StrategyJson
+    }
+
+    [Fact]
     public async Task AskAsync_ProductQuery_ProjectsStructuredListings()
     {
         // The priced Samsung model is sourced via LLM extraction (Google Shopping is no longer a

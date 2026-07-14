@@ -125,6 +125,9 @@ public sealed partial class AgentService
         {
             products = await BuildProductSearchResultAsync(strategy.Subject is { Length: > 0 } s ? s : question,
                 geo, bundle, summary, cancellationToken).ConfigureAwait(false);
+            // Carry the search object on the result: it serializes inside ResultJson (persistence)
+            // and the grid binds this exact record (delivery) — one write serves both.
+            products = products with { Strategy = strategy };
         }
 
         return new AgentAnswer

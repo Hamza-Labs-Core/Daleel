@@ -598,7 +598,10 @@ public sealed class AggregateResultsActivity : CancellableActivity
             QueryType = state.Strategy?.QueryType ?? QueryType.General,
             Summary = state.Summary,
             Research = bundle,
-            Products = state.Products,
+            // Attach the search object so it persists in ResultJson and reaches the grid. state.Products
+            // is built stepwise (extract → enrich) without the strategy; stamping it here, where the
+            // final answer is assembled, catches every path.
+            Products = state.Products is { } prod ? prod with { Strategy = state.Strategy } : null,
             GeneratedAt = DateTimeOffset.UtcNow
         };
         state.ResultCount = state.Products?.ProductCount

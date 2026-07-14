@@ -70,6 +70,14 @@ public record ProductSearchResult
     /// </summary>
     public ProductSchema Schema { get; init; } = ProductSchema.General;
 
+    /// <summary>
+    /// The search object this result answers — the planner's structured understanding of the query
+    /// (product, stated specs, location, goal, facet dimensions, default sort). Persisted with the
+    /// result (this record serializes inside SearchJob.ResultJson) and read by the grid to drive
+    /// per-type filters and goal-driven sorting. Null on results captured before this existed.
+    /// </summary>
+    public SearchStrategy? Strategy { get; init; }
+
     public DateTimeOffset? GeneratedAt { get; init; }
 
     /// <summary>True when at least one aggregated product model was found.</summary>
