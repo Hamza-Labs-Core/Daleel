@@ -150,6 +150,12 @@ strategy deserialize with an empty/absent one.
   distinct `ProductModel.Specs[Facet.Key]` values present across the results**
   (both normalized, de-duplicated). This is what makes an always-shown facet
   useful even when the results carry sparse or inconsistent specs.
+- **Reuse, not duplication:** the codebase already has an LLM-produced,
+  product-type-aware `ProductSchema` on `Result.Schema` (`SpecField` =
+  Key/Label/Unit, drives the compare table). When the planner emits no `Facets`,
+  `FacetBuilder` falls back to deriving facet dimensions from
+  `Result.Schema.Fields` (`Key` importance first) — so per-type filters appear
+  even for searches whose planner output predates the new fields.
 - Selecting a facet value keeps models whose `Specs[Key]` matches. A value with
   no matching results is still selectable (it yields an empty grid — an honest
   "none in stock here" rather than a missing control). Query `Specs` that
@@ -168,7 +174,8 @@ strategy deserialize with an empty/absent one.
 - It reads data **already collected**:
   - product reviews — `ProductModel.Reviews` (`ItemReview`), `RatedReviews`
     (`ProductReview`), `Rating`, `RatingCount`;
-  - social — `ProductModel.SocialProof` (`Reviews` + `Sentiment`);
+  - social — `ProductModel.BrandReputation.Social` (a `SocialProof` of `UserReview`
+    quotes with `Sentiment`; the aggregate `Result.Social` is derived from these);
   - brand — `ProductModel.BrandReputation`;
   - store — `StoreReview` on `Result.Stores[].Reviews` (`StoreInfo`), associated
     to a card by matching a store to the product's offers.
