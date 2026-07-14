@@ -643,6 +643,12 @@ public sealed partial class AgentService
         [JsonPropertyName("placesQueries")] public List<string>? PlacesQueries { get; set; }
         [JsonPropertyName("urlsToRead")] public List<string>? UrlsToRead { get; set; }
         [JsonPropertyName("reasoning")] public string? Reasoning { get; set; }
+        [JsonPropertyName("product")] public string? Product { get; set; }
+        [JsonPropertyName("specs")] public Dictionary<string, string>? Specs { get; set; }
+        [JsonPropertyName("location")] public string? Location { get; set; }
+        [JsonPropertyName("goal")] public string? Goal { get; set; }
+        [JsonPropertyName("defaultSort")] public string? DefaultSort { get; set; }
+        [JsonPropertyName("facets")] public List<FacetDto>? Facets { get; set; }
 
         public SearchStrategy ToStrategy() => new()
         {
@@ -656,7 +662,31 @@ public sealed partial class AgentService
             SocialQueries = SocialQueries ?? new List<string>(),
             PlacesQueries = PlacesQueries ?? new List<string>(),
             UrlsToRead = UrlsToRead ?? new List<string>(),
-            Reasoning = Reasoning
+            Reasoning = Reasoning,
+            Product = Product ?? string.Empty,
+            Specs = Specs ?? new Dictionary<string, string>(),
+            Location = Location ?? string.Empty,
+            Goal = Goal ?? string.Empty,
+            DefaultSort = DefaultSort ?? string.Empty,
+            Facets = (Facets ?? new List<FacetDto>())
+                .Where(f => !string.IsNullOrWhiteSpace(f.Key))
+                .Select(f => new SearchFacet
+                {
+                    Key = f.Key!.Trim(),
+                    Label = string.IsNullOrWhiteSpace(f.Label) ? f.Key!.Trim() : f.Label!.Trim(),
+                    Unit = string.IsNullOrWhiteSpace(f.Unit) ? null : f.Unit!.Trim(),
+                    Values = f.Values ?? new List<string>()
+                })
+                .ToList()
         };
+    }
+
+    /// <summary>Wire shape for one planner-named facet.</summary>
+    private sealed class FacetDto
+    {
+        [JsonPropertyName("key")] public string? Key { get; set; }
+        [JsonPropertyName("label")] public string? Label { get; set; }
+        [JsonPropertyName("unit")] public string? Unit { get; set; }
+        [JsonPropertyName("values")] public List<string>? Values { get; set; }
     }
 }

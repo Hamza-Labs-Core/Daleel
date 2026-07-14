@@ -684,6 +684,52 @@ public class AgentServiceTests
             "the tail of the grid must reach the LLM — losing it was the whole bug");
         prompts.Should().NotContain(p => p.Contains("[Home](/)"), "chrome is stripped before the LLM ever reads");
     }
+
+    [Fact]
+    public async Task PlanAsync_ParsesSearchObjectFieldsFromLlmJson()
+    {
+        const string json = """
+            {
+              "queryType": "ProductResearch", "intent": "Product", "subject": "diapers",
+              "webQueries": ["diapers Jordan"], "shoppingQueries": [], "socialQueries": [],
+              "placesQueries": [], "urlsToRead": [], "reasoning": "diapers",
+              "product": "diapers",
+              "specs": { "size": "4" },
+              "location": "Amman",
+              "goal": "cheapest",
+              "defaultSort": "price_asc",
+              "facets": [
+                { "key": "size", "label": "Size", "unit": null, "values": ["3", "4", "5", "6"] },
+                { "key": "count", "label": "Pack count" }
+              ]
+            }
+            """;
+        var agent = new AgentService(new FakeLlmClient(_ => json));
+        var s = await agent.PlanAsync("cheapest size 4 diapers in Amman");
+
+        s.Product.Should().Be("diapers");
+        s.Specs.Should().Contain(new KeyValuePair<string, string>("size", "4"));
+        s.Location.Should().Be("Amman");
+        s.Goal.Should().Be("cheapest");
+        s.DefaultSort.Should().Be("price_asc");
+        s.Facets.Should().HaveCount(2);
+        s.Facets[0].Values.Should().Contain("4");
+        s.Facets[1].Values.Should().BeEmpty(); // omitted values default to empty, never null
+    }
+
+    [Fact]
+    public async Task PlanAsync_WithoutSearchObjectFields_LeavesThemEmpty()
+    {
+        // The pre-existing StrategyJson (top of this class) has none of the new fields.
+        var agent = new AgentService(PlannerAndAnalyst());
+        var s = await agent.PlanAsync("plan something");
+
+        s.Product.Should().BeEmpty();
+        s.Specs.Should().BeEmpty();
+        s.Goal.Should().BeEmpty();
+        s.Facets.Should().BeEmpty();
+        s.DefaultSort.Should().BeEmpty();
+    }
 }
 
 /// <summary>Minimal scraper that returns a fixed page, for exercising AgentService.ReadPageAsync.</summary>
