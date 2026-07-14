@@ -77,4 +77,45 @@ public class CrawlNavigationTests
     {
         CrawlNavigation.ResolveEntryPoint(new StoreAssessment(), "AC").Should().BeNull();
     }
+
+    [Fact]
+    public void ResolveEntryPoint_Search_StripsGeoWordsFromTheStoreSearchTerm()
+    {
+        // "diapers Jordan" typed into a store's own search box AND-matches "Jordan" against product
+        // titles → the store answers with its no-results page and a stocked store yields nothing. Only
+        // the product tokens ("diapers") belong in the search term; "Jordan" is market scope.
+        var a = new StoreAssessment
+        {
+            RecommendedApproach = CrawlApproach.Search,
+            SearchUrlTemplate = "https://x.com/search?q={query}"
+        };
+        CrawlNavigation.ResolveEntryPoint(a, "diapers Jordan", "jordan")
+            .Should().Be("https://x.com/search?q=diapers");
+    }
+
+    [Fact]
+    public void ResolveEntryPoint_Search_StripsTheMarketCentreCity()
+    {
+        // The raw geo key drops "jordan" but a query can name the market's city instead ("... in Amman").
+        var a = new StoreAssessment
+        {
+            RecommendedApproach = CrawlApproach.Search,
+            SearchUrlTemplate = "https://x.com/search?q={query}"
+        };
+        CrawlNavigation.ResolveEntryPoint(a, "coffee grinder in Amman", "jordan")
+            .Should().Be("https://x.com/search?q=coffee%20grinder");
+    }
+
+    [Fact]
+    public void ResolveEntryPoint_Search_KeepsRawQueryWhenCleaningEmptiesIt()
+    {
+        // A query that is ALL geo/filler is better searched raw than not at all.
+        var a = new StoreAssessment
+        {
+            RecommendedApproach = CrawlApproach.Search,
+            SearchUrlTemplate = "https://x.com/search?q={query}"
+        };
+        CrawlNavigation.ResolveEntryPoint(a, "Jordan", "jordan")
+            .Should().Be("https://x.com/search?q=Jordan");
+    }
 }

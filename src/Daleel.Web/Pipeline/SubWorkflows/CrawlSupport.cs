@@ -27,11 +27,18 @@ public static class CrawlNavigation
     /// approach and falling back through the other entry points (search → category → api → sitemap) when the
     /// recommended one isn't available. Returns null when the store exposes no reachable catalogue.
     /// </summary>
-    public static string? ResolveEntryPoint(StoreAssessment assessment, string query)
+    /// <remarks>
+    /// <paramref name="geo"/> is the search market: its place names are stripped from the term typed into the
+    /// store's own search box (a store engine AND-matches "diapers Jordan" and answers with its no-results
+    /// page, so a store that stocks the item yields nothing). Category/API/sitemap entry points don't take a
+    /// query, so they're unaffected.
+    /// </remarks>
+    public static string? ResolveEntryPoint(StoreAssessment assessment, string query, string? geo = null)
     {
+        var searchTerm = QueryScope.StoreSearchTerm(query, geo);
         var chosen = assessment.RecommendedApproach switch
         {
-            CrawlApproach.Search => BuildSearchUrl(assessment.SearchUrlTemplate, query),
+            CrawlApproach.Search => BuildSearchUrl(assessment.SearchUrlTemplate, searchTerm),
             CrawlApproach.Category => assessment.ListingUrls.FirstOrDefault(),
             CrawlApproach.Api => assessment.ApiEndpoints.FirstOrDefault(),
             CrawlApproach.Sitemap => assessment.SitemapUrl,
@@ -44,7 +51,7 @@ public static class CrawlNavigation
 
         // Fall back through the remaining entry points in order of usefulness for finding matches: the
         // store's own search (most targeted), then a category page, then a product API, then the sitemap.
-        return BuildSearchUrl(assessment.SearchUrlTemplate, query)
+        return BuildSearchUrl(assessment.SearchUrlTemplate, searchTerm)
             ?? assessment.ListingUrls.FirstOrDefault()
             ?? assessment.ApiEndpoints.FirstOrDefault()
             ?? assessment.SitemapUrl;

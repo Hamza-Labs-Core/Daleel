@@ -1684,43 +1684,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     // convention 404'd nearly every non-Shopify store — SiteSearchCandidates now tries the learned
     // per-domain template first, then the known platform conventions.
 
-    /// <summary>
-    /// Query words that carry no product identity — never enough on their own to call a catalogue
-    /// entry "what the user searched for".
-    /// </summary>
-    private static readonly HashSet<string> QueryStopwords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "in", "the", "a", "an", "for", "of", "and", "or", "best", "price", "prices",
-        "buy", "cheap", "deal", "deals", "near", "me", "shop", "store", "stores", "online"
-    };
-
-    private static List<string> SignificantQueryTokens(string? query, string? geo = null)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            return new List<string>();
-        }
-
-        // Geography words never appear in product names ("best acs in JORDAN") — counting them
-        // toward the two-token requirement effectively demanded geo-in-name and killed every
-        // discovery for short queries. They are market scope, not product identity.
-        var geoTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(geo))
-        {
-            geoTokens.UnionWith(Tokens(geo!));
-            // The market's own place names are market scope too: the raw geo key strips "jordan"
-            // but not "amman", and "coffee grinder AMMAN" typed into a store's search box
-            // AND-matches nothing — the store answers with its no-results page (QA: 61 harvests).
-            var profile = GeoProfiles.ResolveOrDefault(geo);
-            geoTokens.UnionWith(Tokens(profile.Country));
-            geoTokens.UnionWith(Tokens(profile.CenterCity));
-        }
-        // ShortTokens (2+ chars): two-letter categories are real products — "AC", "TV" — and the
-        // stopword list already removes the two-letter noise words ("in", "me").
-        return ShortTokens(query!)
-            .Where(tok => tok.Length >= 2 && !QueryStopwords.Contains(tok) && !geoTokens.Contains(tok))
-            .ToList();
-    }
+    // Geography words never appear in product names ("best acs in JORDAN"), and the market's own place
+    // names ("amman") typed into a store's search box AND-match nothing — the store answers with its
+    // no-results page (QA: 61 harvests). Stripping them down to product tokens now lives in the shared
+    // QueryScope so the enrichment harvest and the LLM site crawl can never drift apart on it.
+    private static List<string> SignificantQueryTokens(string? query, string? geo = null) =>
+        QueryScope.SignificantTokens(query, geo).ToList();
 
     /// <summary>
     /// Singular/plural-tolerant token match, requiring at least TWO query tokens when the query has

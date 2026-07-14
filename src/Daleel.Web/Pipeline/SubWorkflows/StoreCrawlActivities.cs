@@ -66,7 +66,7 @@ public sealed class FindStoreListingsActivity : CancellableActivity
         var state = context.GetRequiredService<StoreCrawlState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
 
-        state.ListingUrl = CrawlNavigation.ResolveEntryPoint(state.Assessment, state.Query);
+        state.ListingUrl = CrawlNavigation.ResolveEntryPoint(state.Assessment, state.Query, state.Geo);
         if (state.ListingUrl is null)
         {
             services.Log($"🛒 {state.SiteUrl}: no reachable catalogue entry point.");
