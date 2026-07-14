@@ -88,14 +88,41 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
     public async Task<JsonElement> ExtractAsync(
         string url, object jsonSchema, CancellationToken cancellationToken = default)
     {
-        var body = new
-        {
-            url,
-            response_format = new { type = "json_schema", json_schema = jsonSchema }
-        };
+        // Cloudflare's /browser-rendering/json validates response_format strictly: a
+        // "json_schema" type with a null/empty json_schema body is rejected with HTTP 422
+        // on every request. Only ask for schema-constrained output when we actually hold a
+        // non-empty schema; otherwise fall back to freeform "json" extraction so the render
+        // still runs instead of hard-failing the whole page.
+        object body = TryAsSchemaElement(jsonSchema, out var schema)
+            ? new { url, response_format = new { type = "json_schema", json_schema = schema } }
+            : new { url, response_format = new { type = "json" } };
 
         var raw = await PostAsync(Endpoint("json"), body, cancellationToken).ConfigureAwait(false);
         return ParseExtraction(raw);
+    }
+
+    /// <summary>
+    /// Serializes the caller's schema and returns it as a <see cref="JsonElement"/> only when it is a
+    /// non-empty JSON object — the shape Cloudflare's json_schema mode requires. A null schema, a
+    /// non-object, or an object with no properties yields <c>false</c> so the caller drops to freeform
+    /// "json" mode rather than sending an empty json_schema body (which CF answers with a 422).
+    /// </summary>
+    private static bool TryAsSchemaElement(object? jsonSchema, out JsonElement schema)
+    {
+        schema = default;
+        if (jsonSchema is null)
+        {
+            return false;
+        }
+
+        var element = JsonSerializer.SerializeToElement(jsonSchema);
+        if (element.ValueKind != JsonValueKind.Object || !element.EnumerateObject().Any())
+        {
+            return false;
+        }
+
+        schema = element;
+        return true;
     }
 
     /// <summary>Renders the page and returns the full HTML.</summary>
