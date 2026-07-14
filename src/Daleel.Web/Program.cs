@@ -532,7 +532,9 @@ builder.Services.AddScoped<Daleel.Web.Pipeline.SearchPipelineServices>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.BrandResearchState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreResearchState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ItemDeepDiveState>();
-builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SiteCrawlState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.StoreCrawlState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.BrandCrawlState>();
+builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.ProductDetailState>();
 builder.Services.AddScoped<Daleel.Web.Pipeline.SubWorkflows.SubWorkflowServices>();
 builder.Services.AddScoped<Daleel.Web.Conversation.ISearchRunner, Daleel.Web.Conversation.WorkflowSearchRunner>();
 // The Workers-AI fleet hosts (classify / extract / filter — doc §3.2–3.4). Signals only: policy

@@ -17,7 +17,7 @@ public sealed class StoreResearchState : SubWorkflowState
     public string Query { get; set; } = string.Empty;
 
     /// <summary>
-    /// True once the LLM site-crawl (<see cref="SiteCrawlWorkflow"/>) has harvested this store's catalogue —
+    /// True once the LLM site-crawl (<see cref="StoreCrawlWorkflow"/>) has harvested this store's catalogue —
     /// the intelligent replacement for the single-page fetch. When set, <see cref="ScrapePricesActivity"/>
     /// skips its now-redundant single-page catalogue call; when the crawl is unavailable it stays false and
     /// the single-page fetch runs as the fallback.

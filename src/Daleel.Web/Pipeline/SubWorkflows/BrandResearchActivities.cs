@@ -204,7 +204,7 @@ public sealed class DownloadBrandImagesActivity : CancellableActivity
 
 /// <summary>
 /// New terminal step — additionally crawl the brand's own website with the LLM-driven
-/// <see cref="SiteCrawlWorkflow"/> to discover + persist its catalogue products. ADDITIVE (unlike the store
+/// <see cref="BrandCrawlWorkflow"/> to discover + persist its catalogue products. ADDITIVE (unlike the store
 /// crawl, which replaces the single-page fetch): the brand's <see cref="ScrapeBrandCatalogActivity"/> output
 /// still feeds the reputation-synthesis + image steps upstream, so this doesn't replace it — it enriches the
 /// durable product store (R2 EntityDocuments + index + prices) with what the intelligent crawl finds.
@@ -219,11 +219,25 @@ public sealed class CrawlBrandSiteActivity : CancellableActivity
         var state = context.GetRequiredService<BrandResearchState>();
         var logger = context.GetRequiredService<ILogger<CrawlBrandSiteActivity>>();
 
+        var siteUrl = state.Result.Url;
+        if (string.IsNullOrWhiteSpace(siteUrl))
+        {
+            return; // no brand website to crawl
+        }
+
         try
         {
-            var crawl = await CrawlDispatch.TryRunAsync(
-                context, state.Result.Url, state.Brand.Name, state.Query,
-                SiteKind.Brand, state, context.CancellationToken);
+            var crawl = await CrawlDispatch.TryRunAsync<BrandCrawlWorkflow, BrandCrawlState>(
+                context,
+                (s, _) =>
+                {
+                    s.Geo = state.Geo;
+                    s.SearchId = state.SearchId;
+                    s.SiteUrl = siteUrl!;
+                    s.BrandName = state.Brand.Name;
+                    s.Category = state.Query;
+                },
+                context.CancellationToken);
             if (crawl is null)
             {
                 return; // crawl unavailable — the brand pipeline already did its work
@@ -233,7 +247,7 @@ public sealed class CrawlBrandSiteActivity : CancellableActivity
                 metadata: new Dictionary<string, object?>
                 {
                     ["brand"] = state.Brand.Name,
-                    ["site"] = state.Result.Url,
+                    ["site"] = siteUrl,
                     ["persisted"] = crawl.Persisted,
                     ["priced"] = crawl.PricesRecorded,
                     ["pages"] = crawl.PagesFetched

@@ -28,7 +28,7 @@ public class CrawlNavigationTests
     [Fact]
     public void ResolveEntryPoint_Search_SubstitutesQuery()
     {
-        var a = new SiteAssessment
+        var a = new StoreAssessment
         {
             RecommendedApproach = CrawlApproach.Search,
             SearchUrlTemplate = "https://x.com/search?q={query}",
@@ -40,7 +40,7 @@ public class CrawlNavigationTests
     [Fact]
     public void ResolveEntryPoint_Category_UsesFirstListing()
     {
-        var a = new SiteAssessment
+        var a = new StoreAssessment
         {
             RecommendedApproach = CrawlApproach.Category,
             ListingUrls = new[] { "https://x.com/cat/ac", "https://x.com/cat/all" }
@@ -51,7 +51,7 @@ public class CrawlNavigationTests
     [Fact]
     public void ResolveEntryPoint_Api_UsesFirstEndpoint()
     {
-        var a = new SiteAssessment
+        var a = new StoreAssessment
         {
             RecommendedApproach = CrawlApproach.Api,
             ApiEndpoints = new[] { "https://x.com/products.json" }
@@ -63,7 +63,7 @@ public class CrawlNavigationTests
     public void ResolveEntryPoint_FallsBackThroughEntryPoints_WhenRecommendedIsEmpty()
     {
         // Recommends search, but there's no search template — fall back to the category listing.
-        var a = new SiteAssessment
+        var a = new StoreAssessment
         {
             RecommendedApproach = CrawlApproach.Search,
             ListingUrls = new[] { "https://x.com/cat/ac" },
@@ -75,6 +75,6 @@ public class CrawlNavigationTests
     [Fact]
     public void ResolveEntryPoint_NullWhenNoEntryPoint()
     {
-        CrawlNavigation.ResolveEntryPoint(new SiteAssessment(), "AC").Should().BeNull();
+        CrawlNavigation.ResolveEntryPoint(new StoreAssessment(), "AC").Should().BeNull();
     }
 }

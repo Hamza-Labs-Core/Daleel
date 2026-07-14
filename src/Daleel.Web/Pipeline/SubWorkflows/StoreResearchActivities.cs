@@ -418,7 +418,7 @@ public sealed class ScrapePricesActivity : CancellableActivity
 }
 
 /// <summary>
-/// Step 5 — crawl the store's own website with the LLM-driven <see cref="SiteCrawlWorkflow"/> to discover
+/// Step 5 — crawl the store's own website with the LLM-driven <see cref="StoreCrawlWorkflow"/> to discover
 /// and persist its products. This is the intelligent REPLACEMENT for the single-page catalogue fetch
 /// (<see cref="ScrapePricesActivity"/>): it renders each page with CF Browser, lets the LLM navigate
 /// (assess → find listings → paginate → deep-dive), and persists the results to R2 + the index + the price
@@ -439,13 +439,27 @@ public sealed class CrawlStoreSiteActivity : CancellableActivity
         var state = context.GetRequiredService<StoreResearchState>();
         var logger = context.GetRequiredService<ILogger<CrawlStoreSiteActivity>>();
 
+        var siteUrl = state.Result.Url;
+        if (string.IsNullOrWhiteSpace(siteUrl))
+        {
+            return; // no store website to crawl — the single-page fallback can't help either
+        }
+
         try
         {
             // Runs only when CF Browser is configured + the crawl is enabled; null ⇒ unavailable, so the
             // next step's single-page fetch runs as the fallback (CrawledSite stays false).
-            var crawl = await CrawlDispatch.TryRunAsync(
-                context, state.Result.Url, state.Store.Name, state.Query,
-                SiteKind.Store, state, context.CancellationToken);
+            var crawl = await CrawlDispatch.TryRunAsync<StoreCrawlWorkflow, StoreCrawlState>(
+                context,
+                (s, _) =>
+                {
+                    s.Geo = state.Geo;
+                    s.SearchId = state.SearchId;
+                    s.SiteUrl = siteUrl!;
+                    s.SiteName = state.Store.Name;
+                    s.Query = state.Query;
+                },
+                context.CancellationToken);
             if (crawl is null)
             {
                 return;

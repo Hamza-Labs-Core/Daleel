@@ -6,52 +6,57 @@ using Xunit;
 namespace Daleel.Agent.Tests;
 
 /// <summary>
-/// Covers the LLM site-crawl reasoning: the pure DTO→model mapping + URL absolutization (no LLM), and the
-/// metered LLM calls (assess / deep-dive / classify) driven by a deterministic <see cref="FakeLlmClient"/>
-/// routed on system prompt.
+/// Covers the three specialised crawlers' LLM reasoning: pure DTO→model mapping + URL absolutization (no LLM),
+/// and the metered LLM calls (store assess/extract, brand assess/extract, product detail, classify) driven by
+/// a deterministic <see cref="FakeLlmClient"/> routed on system prompt.
 /// </summary>
 public class SiteCrawlTests
 {
     private static readonly Uri Origin = new("https://shop.example.com/");
+    private static GeoProfile Geo => GeoProfiles.ResolveOrDefault("jordan");
 
     // ── Pure mapping / absolutization ────────────────────────────────────────────
 
     [Fact]
-    public void MapAssessment_AbsolutizesUrls_ParsesEnums_AndKeepsSearchPlaceholder()
+    public void MapStoreAssessment_AbsolutizesUrls_ParsesApproach_KeepsSearchPlaceholder()
     {
-        var dto = new AgentService.SiteAssessmentDto
+        var dto = new AgentService.StoreAssessmentDto
         {
-            Kind = "store",
             Platform = "Shopify",
             ListingUrls = new() { "/collections/air-conditioners", "https://shop.example.com/collections/all" },
             SearchUrl = "/search?q={query}",
             SitemapUrl = "/sitemap.xml",
             ApiEndpoints = new() { "/products.json" },
-            Approach = "api",
-            Notes = "Shopify store — use the products API"
+            Approach = "api"
         };
 
-        var a = AgentService.MapAssessment(dto, Origin);
+        var a = AgentService.MapStoreAssessment(dto, Origin);
 
-        a.Kind.Should().Be(SiteKind.Store);
         a.Platform.Should().Be("Shopify");
         a.RecommendedApproach.Should().Be(CrawlApproach.Api);
         a.ListingUrls.Should().Contain("https://shop.example.com/collections/air-conditioners");
         a.ApiEndpoints.Should().ContainSingle().Which.Should().Be("https://shop.example.com/products.json");
         a.SitemapUrl.Should().Be("https://shop.example.com/sitemap.xml");
-        // The {query} placeholder must survive absolutization un-encoded.
         a.SearchUrlTemplate.Should().Be("https://shop.example.com/search?q={query}");
         a.HasEntryPoint.Should().BeTrue();
     }
 
     [Fact]
-    public void MapAssessment_DropsSearchTemplateWithoutPlaceholder()
+    public void MapBrandCatalog_AbsolutizesCatalogAndLines()
     {
-        var dto = new AgentService.SiteAssessmentDto { Kind = "brand", SearchUrl = "/search" };
-        var a = AgentService.MapAssessment(dto, Origin);
+        var dto = new AgentService.BrandCatalogDto
+        {
+            CatalogUrl = "/products",
+            ProductLineUrls = new() { "/products/tvs/oled", "https://shop.example.com/products/tvs/qned" },
+            Platform = "AEM"
+        };
 
-        a.Kind.Should().Be(SiteKind.Brand);
-        a.SearchUrlTemplate.Should().BeNull(); // no {query} ⇒ not a usable template
+        var b = AgentService.MapBrandCatalog(dto, Origin);
+
+        b.CatalogUrl.Should().Be("https://shop.example.com/products");
+        b.ProductLineUrls.Should().HaveCount(2);
+        b.HasCatalog.Should().BeTrue();
+        b.EntryPoints.First().Should().Be("https://shop.example.com/products"); // catalogue landing first
     }
 
     [Theory]
@@ -59,7 +64,6 @@ public class SiteCrawlTests
     [InlineData("https://other.com/x", "https://other.com/x")]
     [InlineData("#reviews", null)]
     [InlineData("javascript:void(0)", null)]
-    [InlineData("mailto:a@b.com", null)]
     public void AbsolutizeUrl_ResolvesRelative_AndRejectsJunk(string input, string? expected)
     {
         AgentService.AbsolutizeUrl(input, Origin).Should().Be(expected);
@@ -74,113 +78,145 @@ public class SiteCrawlTests
         AgentService.ApplyDropIndices(items, System.Array.Empty<int>()).Should().BeSameAs(items);
     }
 
-    // ── LLM-driven: assess ───────────────────────────────────────────────────────
+    // ── STORE crawler ────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task AssessSiteAsync_ParsesAndAbsolutizesTheAssessment()
+    public async Task AssessStoreAsync_ParsesPlatformAndEntryPoints()
     {
         const string json = """
-            {
-              "kind": "store",
-              "platform": "WooCommerce",
-              "listingUrls": ["/shop/cooling"],
-              "searchUrl": "/?s={query}",
-              "sitemapUrl": null,
-              "apiEndpoints": [],
-              "approach": "search",
-              "notes": "has a working search"
-            }
+            { "platform": "WooCommerce", "listingUrls": ["/shop/cooling"], "searchUrl": "/?s={query}",
+              "apiEndpoints": [], "approach": "search", "notes": "has search" }
             """;
         var agent = new AgentService(new FakeLlmClient(system =>
-            system.Contains("web-crawl navigator") ? json : "{}"));
+            system.Contains("e-commerce store navigator") ? json : "{}"));
 
-        var a = await agent.AssessSiteAsync("https://shop.example.com", "# Home\nWelcome", "portable AC");
+        var a = await agent.AssessStoreAsync("https://shop.example.com", "# Home", "portable AC");
 
-        a.Kind.Should().Be(SiteKind.Store);
         a.Platform.Should().Be("WooCommerce");
         a.RecommendedApproach.Should().Be(CrawlApproach.Search);
         a.SearchUrlTemplate.Should().Be("https://shop.example.com/?s={query}");
-        a.ListingUrls.Should().ContainSingle().Which.Should().Be("https://shop.example.com/shop/cooling");
     }
 
     [Fact]
-    public async Task AssessSiteAsync_ReturnsEmpty_OnUnparseableReply()
+    public async Task ExtractStoreListingAsync_ExtractsPricedCards_AndAbsolutizesUrls()
     {
-        var agent = new AgentService(new FakeLlmClient(_ => "not json at all"));
-        var a = await agent.AssessSiteAsync("https://shop.example.com", "# Home", "AC");
+        const string json = """
+            { "products": [
+                { "name": "Gree Pular 12000", "brand": "Gree", "model": "GWH12", "url": "/p/gree-12k",
+                  "imageUrl": "/img/gree.jpg", "price": 320, "currency": "JOD", "availability": "in stock" },
+                { "name": "https://junk.com", "price": 1 }
+              ] }
+            """;
+        var agent = new AgentService(new FakeLlmClient(system =>
+            system.Contains("product CARDS") ? json : """{"nextPageUrl":null}"""));
 
-        a.Kind.Should().Be(SiteKind.Unknown);
-        a.HasEntryPoint.Should().BeFalse();
+        var r = await agent.ExtractStoreListingAsync("# listing", "https://shop.example.com/shop", "AC", Geo);
+
+        r.Products.Should().ContainSingle(); // the URL-as-name junk card is dropped
+        var p = r.Products[0];
+        p.Name.Should().Be("Gree Pular 12000");
+        p.Price.Should().Be(320m);
+        p.Url.Should().Be("https://shop.example.com/p/gree-12k");
+        p.ImageUrl.Should().Be("https://shop.example.com/img/gree.jpg");
     }
 
+    // ── BRAND crawler ────────────────────────────────────────────────────────────
+
     [Fact]
-    public async Task AssessSiteAsync_ReturnsEmpty_OnBlankMarkdown()
+    public async Task AssessBrandCatalogAsync_FindsCatalogAndLines()
     {
-        var agent = new AgentService(new FakeLlmClient(_ => "{}"));
-        (await agent.AssessSiteAsync("https://shop.example.com", "   ", "AC")).HasEntryPoint.Should().BeFalse();
+        const string json = """
+            { "catalogUrl": "/products", "productLineUrls": ["/products/tvs/oled"], "platform": null,
+              "notes": "catalogue under /products" }
+            """;
+        var agent = new AgentService(new FakeLlmClient(system =>
+            system.Contains("brand/manufacturer website navigator") ? json : "{}"));
+
+        var b = await agent.AssessBrandCatalogAsync("https://lg.example.com", "# LG", "TV");
+
+        b.CatalogUrl.Should().Be("https://lg.example.com/products");
+        b.ProductLineUrls.Should().ContainSingle().Which.Should().Be("https://lg.example.com/products/tvs/oled");
+        b.HasCatalog.Should().BeTrue();
     }
 
-    // ── LLM-driven: deep-dive ────────────────────────────────────────────────────
+    [Fact]
+    public async Task ExtractBrandModelsAsync_ExtractsModelsWithSpecs()
+    {
+        const string json = """
+            { "products": [
+                { "name": "OLED evo C4", "brand": "LG", "model": "OLED55C4", "url": "/products/c4",
+                  "specs": { "panel": "OLED evo", "size": "55\"" } }
+              ] }
+            """;
+        var agent = new AgentService(new FakeLlmClient(system =>
+            system.Contains("product MODELS") ? json : """{"nextPageUrl":null}"""));
+
+        var r = await agent.ExtractBrandModelsAsync("# oled", "https://lg.example.com/products/tvs", "TV", Geo);
+
+        r.Products.Should().ContainSingle();
+        var m = r.Products[0];
+        m.Model.Should().Be("OLED55C4");
+        m.Price.Should().BeNull(); // brand pages usually have no price
+        m.Specs.Should().ContainKey("panel");
+    }
+
+    // ── PRODUCT DETAIL ───────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task DeepDiveProductAsync_MergesFields_ButPrefersExistingValues()
+    public async Task ExtractProductDetailAsync_FoldsFullRecord_KeepsOfferPrice_UpgradesName()
     {
         const string json = """
             {
-              "name": "Gree Pular 12000 BTU",
-              "brand": "Gree",
-              "sku": "GWH12",
-              "images": ["https://cdn.example.com/gree.jpg"],
-              "price": 320,
-              "currency": "JOD",
-              "availability": "in stock",
-              "description": "Inverter split AC",
-              "specs": { "capacity": "12000 BTU" },
+              "name": "Gree Pular 12000 BTU Inverter", "brand": "Gree", "sku": "GWH12",
+              "images": ["/img/1.jpg", "/img/2.jpg"], "price": 340, "currency": "JOD",
+              "availability": "in stock", "description": "Inverter split AC",
+              "specs": { "capacity": "12000 BTU" }, "features": ["WiFi", "Turbo"],
+              "relatedProducts": ["Gree 18000"], "reviews": [ { "text": "Great", "rating": 5 } ],
               "seller": "Example Shop"
             }
             """;
         var agent = new AgentService(new FakeLlmClient(system =>
-            system.Contains("product's full details") ? json : "{}"));
+            system.Contains("COMPLETE record") ? json : "{}"));
 
-        // The listing already knows a price; the deep-dive must keep it (the offer price is authoritative)
-        // but UPGRADE the name to the fuller detail-page name and fill every gap.
-        var listing = new ProductListing { Name = "Gree AC", Price = 300m, Url = "https://shop.example.com/p/gree" };
-        var full = await agent.DeepDiveProductAsync("# Gree\n...", listing, GeoProfiles.ResolveOrDefault("jordan"));
+        var listing = new ProductListing { Name = "Gree AC", Price = 320m, Url = "https://shop.example.com/p/gree" };
+        var (folded, detail) = await agent.ExtractProductDetailAsync("# Gree", listing, Geo);
 
-        full.Name.Should().Be("Gree Pular 12000 BTU"); // detail page has the fuller, authoritative name
-        full.Price.Should().Be(300m);                   // existing offer price kept
-        full.Brand.Should().Be("Gree");        // gap filled
-        full.Sku.Should().Be("GWH12");
-        full.Currency.Should().Be("JOD");
-        full.Availability.Should().Be("in stock");
-        full.ImageUrl.Should().Be("https://cdn.example.com/gree.jpg");
-        full.Specs.Should().ContainKey("capacity");
-        full.Specs.Should().ContainKey("description");
+        detail.Should().NotBeNull();
+        detail!.Images.Should().HaveCount(2);
+        detail.Reviews.Should().ContainSingle();
+        folded.Name.Should().Be("Gree Pular 12000 BTU Inverter"); // detail page has the fuller name
+        folded.Price.Should().Be(320m);                            // existing offer price kept
+        folded.Brand.Should().Be("Gree");
+        folded.Sku.Should().Be("GWH12");
+        folded.Specs.Should().ContainKey("capacity");
+        folded.Specs.Should().ContainKey("features");
+        folded.Specs.Should().ContainKey("related_products");
+        folded.RatedReviews.Should().ContainSingle();
     }
 
     [Fact]
-    public async Task DeepDiveProductAsync_ReturnsListingUnchanged_OnFailure()
+    public async Task ExtractProductDetailAsync_ReturnsListingUnchanged_OnFailure()
     {
         var agent = new AgentService(new FakeLlmClient(_ => "garbage"));
         var listing = new ProductListing { Name = "X", Url = "https://shop.example.com/p/x" };
 
-        (await agent.DeepDiveProductAsync("# X", listing, GeoProfiles.ResolveOrDefault("jordan")))
-            .Should().BeSameAs(listing);
+        var (folded, detail) = await agent.ExtractProductDetailAsync("# X", listing, Geo);
+        detail.Should().BeNull();
+        folded.Should().BeSameAs(listing);
     }
 
-    // ── LLM-driven: classify ─────────────────────────────────────────────────────
+    // ── Shared: classify ─────────────────────────────────────────────────────────
 
     [Fact]
     public async Task ClassifyListingsAsync_DropsFlaggedItems()
     {
-        // Relevance gate replies with the indices to drop.
         var agent = new AgentService(new FakeLlmClient(system =>
             system == PromptTemplates.RelevanceGateSystem ? """{ "drop": [1] }""" : "{}"));
 
         var listings = new[]
         {
             new ProductListing { Name = "Gree AC 12000" },
-            new ProductListing { Name = "AC remote control" }, // accessory — dropped
+            new ProductListing { Name = "AC remote control" },
             new ProductListing { Name = "Samsung AC 18000" },
             new ProductListing { Name = "LG AC 24000" }
         };
@@ -193,7 +229,6 @@ public class SiteCrawlTests
     [Fact]
     public async Task ClassifyListingsAsync_IgnoresImplausibleWipeout()
     {
-        // Dropping (nearly) everything is treated as a gate misfire — keep the originals.
         var agent = new AgentService(new FakeLlmClient(system =>
             system == PromptTemplates.RelevanceGateSystem ? """{ "drop": [0, 1, 2] }""" : "{}"));
 

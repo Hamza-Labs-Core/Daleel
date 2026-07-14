@@ -1,64 +1,43 @@
 namespace Daleel.Core.Models;
 
 /// <summary>
-/// What kind of site the LLM decided it is looking at. Drives how the crawler navigates: a
-/// <see cref="Store"/> or <see cref="Marketplace"/> is walked for product listings, a <see cref="Brand"/>
-/// site is walked for its own catalogue.
-/// </summary>
-public enum SiteKind
-{
-    Unknown,
-    Store,
-    Brand,
-    Marketplace
-}
-
-/// <summary>
-/// The navigation approach the LLM recommends for reaching this site's product listings. The crawler
-/// picks the concrete next URL from the matching field on <see cref="SiteAssessment"/> (search box,
+/// The navigation approach the LLM recommends for reaching a STORE's product listings. The store crawler
+/// picks the concrete next URL from the matching field on <see cref="StoreAssessment"/> (search box,
 /// category page, structured API, or sitemap).
 /// </summary>
 public enum CrawlApproach
 {
     Unknown,
 
-    /// <summary>Use the site's own search with the query (<see cref="SiteAssessment.SearchUrlTemplate"/>).</summary>
+    /// <summary>Use the store's own search with the query (<see cref="StoreAssessment.SearchUrlTemplate"/>).</summary>
     Search,
 
-    /// <summary>Navigate to a category / collection listing page (<see cref="SiteAssessment.ListingUrls"/>).</summary>
+    /// <summary>Navigate to a category / collection listing page (<see cref="StoreAssessment.ListingUrls"/>).</summary>
     Category,
 
-    /// <summary>Call a structured product endpoint, e.g. Shopify <c>/products.json</c> (<see cref="SiteAssessment.ApiEndpoints"/>).</summary>
+    /// <summary>Call a structured product endpoint, e.g. Shopify <c>/products.json</c> (<see cref="StoreAssessment.ApiEndpoints"/>).</summary>
     Api,
 
-    /// <summary>Walk the sitemap (<see cref="SiteAssessment.SitemapUrl"/>).</summary>
+    /// <summary>Walk the sitemap (<see cref="StoreAssessment.SitemapUrl"/>).</summary>
     Sitemap
 }
 
 /// <summary>
-/// The LLM's read of a site's homepage/landing — its type, platform, and the ways in to its product
-/// catalogue. Produced by <c>AgentService.AssessSiteAsync</c> and carried on the crawl state so the
-/// downstream navigation step can pick the best entry point without re-reading the page.
+/// The store crawler's read of an e-commerce site's homepage — its platform and the ways into its product
+/// catalogue. Produced by <c>AgentService.AssessStoreAsync</c>. Every URL is absolutized against the site
+/// origin; <see cref="SearchUrlTemplate"/> keeps a <c>{query}</c> placeholder the navigation step fills in.
 /// </summary>
-/// <remarks>
-/// Every URL here is absolutized against the site origin at parse time, so consumers can pass them
-/// straight to the scraper. <see cref="SearchUrlTemplate"/> is the one exception: it keeps a
-/// <c>{query}</c> placeholder the navigation step substitutes with the URL-encoded search query.
-/// </remarks>
-public sealed record SiteAssessment
+public sealed record StoreAssessment
 {
-    /// <summary>The site classification (store / brand / marketplace), Unknown when the LLM couldn't tell.</summary>
-    public SiteKind Kind { get; init; } = SiteKind.Unknown;
-
-    /// <summary>Detected e-commerce platform, e.g. "Shopify", "WooCommerce", "custom". Null when unknown.</summary>
+    /// <summary>Detected e-commerce platform, e.g. "Shopify", "WooCommerce", "Magento", "custom". Null when unknown.</summary>
     public string? Platform { get; init; }
 
-    /// <summary>Absolute category/collection/listing URLs the LLM found on the page, most promising first.</summary>
+    /// <summary>Absolute category/collection/listing URLs the LLM found, most promising first.</summary>
     public IReadOnlyList<string> ListingUrls { get; init; } = Array.Empty<string>();
 
     /// <summary>
-    /// The site's search URL with a <c>{query}</c> placeholder (e.g. <c>https://x.com/search?q={query}</c>),
-    /// or null when the site exposes no usable search.
+    /// The store's search URL with a <c>{query}</c> placeholder (e.g. <c>https://x.com/search?q={query}</c>),
+    /// or null when the store exposes no usable search.
     /// </summary>
     public string? SearchUrlTemplate { get; init; }
 
@@ -86,12 +65,47 @@ public sealed record SiteAssessment
 }
 
 /// <summary>
-/// The result of the LLM parsing one listing page: the product cards it found plus the pagination
-/// signals that tell the crawler whether (and where) to fetch the next page.
+/// The brand crawler's read of a MANUFACTURER's site — where its product catalogue lives, as opposed to the
+/// marketing homepage. Produced by <c>AgentService.AssessBrandCatalogAsync</c>. Brand navigation is
+/// fundamentally different from a store's: there is rarely a price-bearing search; instead the models sit
+/// under a "Products"/"Catalog" section organised into product lines/series (e.g. LG "OLED evo" → C4/G4).
+/// </summary>
+public sealed record BrandCatalogAssessment
+{
+    /// <summary>The absolute URL of the product catalogue landing (the "Products"/"Shop"/"Catalog" section), or null.</summary>
+    public string? CatalogUrl { get; init; }
+
+    /// <summary>
+    /// Absolute URLs of product-line / series / category pages under the catalogue that match the wanted
+    /// product category (e.g. the "TVs" or "Air Conditioners" line), most relevant first.
+    /// </summary>
+    public IReadOnlyList<string> ProductLineUrls { get; init; } = Array.Empty<string>();
+
+    /// <summary>Detected site platform/framework when discernible, else null.</summary>
+    public string? Platform { get; init; }
+
+    /// <summary>Free-form one-line rationale from the LLM (logged to the timeline).</summary>
+    public string? Notes { get; init; }
+
+    /// <summary>True when the LLM located a catalogue entry point (a catalogue landing or at least one product line).</summary>
+    public bool HasCatalog => CatalogUrl is { Length: > 0 } || ProductLineUrls.Count > 0;
+
+    /// <summary>The catalogue entry points to walk, catalogue landing first then the matching product lines.</summary>
+    public IReadOnlyList<string> EntryPoints =>
+        (CatalogUrl is { Length: > 0 } c ? new[] { c } : Array.Empty<string>())
+            .Concat(ProductLineUrls)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+}
+
+/// <summary>
+/// The result of the LLM parsing one listing/catalogue page: the product cards it found plus the pagination
+/// signals that tell the crawler whether (and where) to fetch the next page. Shared by the store and brand
+/// crawlers (each feeds it a differently-focused extraction, but the page-walking shape is identical).
 /// </summary>
 public sealed record ListingPageResult
 {
-    /// <summary>The product summaries extracted from this listing page.</summary>
+    /// <summary>The product summaries extracted from this page.</summary>
     public IReadOnlyList<ProductListing> Products { get; init; } = Array.Empty<ProductListing>();
 
     /// <summary>Absolute URL of the next listing page, or null when this is the last page.</summary>
@@ -102,4 +116,44 @@ public sealed record ListingPageResult
 
     /// <summary>Total number of listing pages when the page advertised it (e.g. "Page 1 of 8"), else null.</summary>
     public int? TotalPages { get; init; }
+}
+
+/// <summary>
+/// The full record the LLM extracts from a single product DETAIL page (produced by
+/// <c>AgentService.ExtractProductDetailAsync</c>): everything a product page carries — all images, the full
+/// spec sheet, price, description, features, buyer reviews, related products, and the seller. Folded onto the
+/// product's <see cref="ProductListing"/> and persisted (the schema-less R2 document carries the extras).
+/// </summary>
+public sealed record ProductDetail
+{
+    public string? Name { get; init; }
+    public string? Brand { get; init; }
+    public string? Sku { get; init; }
+
+    /// <summary>All product image URLs on the page (primary first).</summary>
+    public IReadOnlyList<string> Images { get; init; } = Array.Empty<string>();
+
+    public decimal? Price { get; init; }
+    public string? Currency { get; init; }
+
+    /// <summary>Stock status: "in stock" / "out of stock" / "preorder", when shown.</summary>
+    public string? Availability { get; init; }
+
+    /// <summary>The product's full description text.</summary>
+    public string? Description { get; init; }
+
+    /// <summary>The full technical spec sheet as key/value pairs.</summary>
+    public IReadOnlyDictionary<string, string> Specs { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>Bullet-point highlights/features called out on the page.</summary>
+    public IReadOnlyList<string> Features { get; init; } = Array.Empty<string>();
+
+    /// <summary>Names of related/recommended products the page links to.</summary>
+    public IReadOnlyList<string> RelatedProducts { get; init; } = Array.Empty<string>();
+
+    /// <summary>Buyer reviews scraped from the page (rating + text), when present.</summary>
+    public IReadOnlyList<ProductReview> Reviews { get; init; } = Array.Empty<ProductReview>();
+
+    /// <summary>The seller/store name when the page attributes one.</summary>
+    public string? Seller { get; init; }
 }
