@@ -136,9 +136,13 @@ public sealed class BrandCatalogService : IBrandCatalogService
             }
         }
 
-        if (!_providers.HasScraper)
+        // Edge unavailable AND no way to harvest inline: neither a structured scraper (Context.dev) nor
+        // the LLM+render fallback below. When the paid scraper is absent but an LLM is configured we still
+        // press on — CloudflareBrowserProvider renders the brand site and the LLM names its products (the
+        // whole point of a fallback that survives the paid providers being down).
+        if (!_providers.HasScraper && !_factory.HasLlm())
         {
-            return 0; // edge unavailable and no inline scraper either
+            return 0;
         }
 
         // VALIDATE THE SITE BEFORE SENDING IT: a brand domain that does not resolve costs exactly as much
@@ -172,8 +176,13 @@ public sealed class BrandCatalogService : IBrandCatalogService
         // Render the site and let the agent's own LLM listing extractor name them, so a brand whose site no
         // structured provider can parse still harvests models. Unlike the store path this keeps NAME-ONLY
         // products too — a BrandModel needs no price.
-        if (catalogue.Count == 0 && _factory.HasLlm() && GeoProfiles.Resolve(countryCode) is { } market)
+        if (catalogue.Count == 0 && _factory.HasLlm())
         {
+            // ResolveOrDefault (not Resolve): the GLOBAL name-based harvest passes countryCode = null, and
+            // Resolve(null) is null — which silently skipped the fallback on the brand's own site, exactly
+            // the path that matters when Context.dev is 401ing. A null/unknown country means "no local
+            // targeting", so default the market (USA) and let the render+LLM extractor run.
+            var market = GeoProfiles.ResolveOrDefault(countryCode);
             catalogue = await LlmHarvestAsync(brand.Name, siteUrl ?? brand.Website, market, ct)
                 .ConfigureAwait(false);
         }
