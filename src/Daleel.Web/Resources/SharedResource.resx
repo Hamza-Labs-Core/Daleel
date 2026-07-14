@@ -122,6 +122,7 @@
   <data name="Filter.Relevance" xml:space="preserve"><value>Relevance</value></data>
   <data name="Filter.PriceLowHigh" xml:space="preserve"><value>Price: low → high</value></data>
   <data name="Filter.PriceHighLow" xml:space="preserve"><value>Price: high → low</value></data>
+  <data name="Filter.TopRated" xml:space="preserve"><value>Top rated</value></data>
 
   <data name="Plan.Basic" xml:space="preserve"><value>Basic</value></data>
   <data name="Plan.Pro" xml:space="preserve"><value>Pro</value></data>

@@ -122,6 +122,7 @@
   <data name="Filter.Relevance" xml:space="preserve"><value>الصلة</value></data>
   <data name="Filter.PriceLowHigh" xml:space="preserve"><value>السعر: من الأقل إلى الأعلى</value></data>
   <data name="Filter.PriceHighLow" xml:space="preserve"><value>السعر: من الأعلى إلى الأقل</value></data>
+  <data name="Filter.TopRated" xml:space="preserve"><value>الأعلى تقييماً</value></data>
 
   <data name="Plan.Basic" xml:space="preserve"><value>الأساسية</value></data>
   <data name="Plan.Pro" xml:space="preserve"><value>الاحترافية</value></data>

@@ -44,6 +44,7 @@
                 <MudSelectItem T="string" Value="@("price_asc")">@L["Filter.PriceLowHigh"]</MudSelectItem>
                 <MudSelectItem T="string" Value="@("price_desc")">@L["Filter.PriceHighLow"]</MudSelectItem>
                 <MudSelectItem T="string" Value="@("sellers")">@L["ProductFilters.MostSellers"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("rating")">@L["Filter.TopRated"]</MudSelectItem>
             </MudSelect>
         </MudItem>
         <MudItem xs="12" sm="6">
@@ -229,6 +230,10 @@ else
             // A genuinely new result opens on the host-requested page (deep-link ?page=N), else page 1.
             _lastResult = Result;
             _page = InitialPage;
+
+            // A genuinely NEW result seeds the sort from the search object's goal ("cheapest" →
+            // price_asc). Only here — re-renders of the same result must not undo a user's choice.
+            _sort = SortResolver.Resolve(Result.Strategy);
         }
         else if (InitialPage != _lastInitialPage)
         {
@@ -281,6 +286,9 @@ else
             "price_asc" => q.OrderBy(x => x.Model.DisplayPrice ?? decimal.MaxValue),
             "price_desc" => q.OrderByDescending(x => x.Model.DisplayPrice ?? decimal.MinValue),
             "sellers" => q.OrderByDescending(x => x.Model.SellerCount),
+            "rating" => q.OrderByDescending(x => x.Model.Rating.HasValue)
+                         .ThenByDescending(x => x.Model.Rating ?? 0)
+                         .ThenByDescending(x => x.Model.RatingCount ?? 0),
             _ => q
         };
 
