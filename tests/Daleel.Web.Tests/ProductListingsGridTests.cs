@@ -188,10 +188,51 @@ public class ProductListingsGridTests : TestContext
     }
 
     [Fact]
+    public void StreamingPush_SameSearch_KeepsFacetSelection()
+    {
+        // Same identity rule as the sort seed: streamed pushes for the SAME search refresh the
+        // facet OPTIONS but must not reset the applied SELECTIONS; only a new search resets them.
+        var strategy = new SearchStrategy
+        {
+            Specs = new Dictionary<string, string> { ["size"] = "4" },
+            Facets = new[] { new SearchFacet { Key = "size", Label = "Size" } }
+        };
+        var cut = Render(Result(strategy, "q",
+            WithSpec("SizeFour", "Size", "4"),
+            WithSpec("SizeFive", "Size", "5")));
+        cut.Markup.Should().Contain("SizeFour");
+        cut.Markup.Should().NotContain("SizeFive"); // pre-selection applied
+
+        // Streaming push: NEW Result instance, SAME Query/Geo, one more size-4 model landed.
+        // The size=4 selection must survive and apply to the refreshed model set.
+        cut.SetParametersAndRender(p => p.Add(x => x.Result, Result(strategy, "q",
+            WithSpec("SizeFour", "Size", "4"),
+            WithSpec("SizeFive", "Size", "5"),
+            WithSpec("SizeFourB", "size", "4"))));
+        cut.Markup.Should().Contain("SizeFour");
+        cut.Markup.Should().Contain("SizeFourB");
+        cut.Markup.Should().NotContain("SizeFive"); // selection retained across the push
+
+        // A genuinely NEW search (different Query) whose strategy states NO specs resets the
+        // selections back to Any — everything renders again.
+        var noSpecsStrategy = new SearchStrategy
+        {
+            Facets = new[] { new SearchFacet { Key = "size", Label = "Size" } }
+        };
+        cut.SetParametersAndRender(p => p.Add(x => x.Result, Result(noSpecsStrategy, "q2",
+            WithSpec("SizeFour", "Size", "4"),
+            WithSpec("SizeFive", "Size", "5"))));
+        cut.Markup.Should().Contain("SizeFour");
+        cut.Markup.Should().Contain("SizeFive"); // reset to Any on the new search
+    }
+
+    [Fact]
     public void NoStrategy_RendersNoFacetControls_AndAllModels()
     {
         var cut = Render(Result(null, Model("One", 100m), Model("Two", 200m)));
         cut.Markup.Should().Contain("One");
         cut.Markup.Should().Contain("Two");
+        // Exactly the 4 generic selects (Brand/Source/Condition/Sort) — no facet selects appear.
+        cut.FindComponents<MudSelect<string>>().Count.Should().Be(4);
     }
 }

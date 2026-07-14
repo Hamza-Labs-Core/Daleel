@@ -60,10 +60,10 @@ public static class FacetBuilder
     /// <summary>The model's trimmed spec value under the loose-normalized facet key, else null.</summary>
     private static string? SpecValue(ProductModel model, string facetKey)
     {
-        var wanted = Normalize(facetKey);
+        var wanted = NormalizeKey(facetKey);
         foreach (var (k, v) in model.Specs)
         {
-            if (Normalize(k) == wanted && !string.IsNullOrWhiteSpace(v))
+            if (NormalizeKey(k) == wanted && !string.IsNullOrWhiteSpace(v))
             {
                 return v.Trim();
             }
@@ -78,7 +78,9 @@ public static class FacetBuilder
             .Select(f => new SearchFacet { Key = f.Key, Label = f.Label, Unit = f.Unit })
             .ToList();
 
-    /// <summary>Case-fold and strip separators so "Screen Size" ≡ "screen_size" ≡ "screen-size".</summary>
-    private static string Normalize(string key) =>
+    /// <summary>Case-fold and strip separators so "Screen Size" ≡ "screen_size" ≡ "screen-size".
+    /// Internal (not private) because the grid's facet PRE-SELECTION matches the query's stated
+    /// Specs keys against facet keys, and it must use this exact same loose normalization.</summary>
+    internal static string NormalizeKey(string key) =>
         new(key.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
 }

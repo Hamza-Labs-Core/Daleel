@@ -245,10 +245,6 @@ else
         }
     }
 
-    /// <summary>Same loose key normalization FacetBuilder uses (case + separators stripped).</summary>
-    private static string NormalizeKey(string key) =>
-        new(key.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
-
     // The Result last seen by OnParametersSet: page 1 is forced only when a genuinely NEW result
     // arrives (fresh search, or the background enrichment streaming a refreshed result) — a parent
     // re-render passing the SAME Result must not yank the user off the page they're browsing.
@@ -290,7 +286,7 @@ else
                 foreach (var facet in _facets)
                 {
                     var stated = Result.Strategy?.Specs.FirstOrDefault(
-                        kv => NormalizeKey(kv.Key) == NormalizeKey(facet.Key));
+                        kv => FacetBuilder.NormalizeKey(kv.Key) == FacetBuilder.NormalizeKey(facet.Key));
                     _facetSelections[facet.Key] = stated is { Key.Length: > 0 } kv2
                         ? kv2.Value.Trim()
                         : AllValue;
