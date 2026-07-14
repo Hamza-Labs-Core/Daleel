@@ -61,4 +61,29 @@ public class StoreReviewMatcherTests
 
         StoreReviewMatcher.ReviewsFor(model, stores).Should().HaveCount(1);
     }
+
+    [Fact]
+    public void MatchesArabicStoreNames()
+    {
+        // Guards against a future ASCII-only "optimization" of NormalizeName: Arabic letters must
+        // survive normalization, and internal-whitespace differences must not break MENA store matching.
+        var model = WithOffers(new PriceOffer { Source = "مكتبة جرير" });
+        var stores = new[] { Store("مكتبة  جرير", null, "خدمة ممتازة") };
+
+        StoreReviewMatcher.ReviewsFor(model, stores)
+            .Should().ContainSingle(r => r.Text == "خدمة ممتازة");
+    }
+
+    [Fact]
+    public void SubdomainHost_DoesNotMatch_ByDesign()
+    {
+        // Deliberate miss: the domain fallback compares full hosts (only "www." is stripped), so an
+        // offer on a subdomain never matches the apex-domain store. Misses are expected in this
+        // best-effort join, and stripping subdomains would over-match unrelated tenants on shared
+        // platforms. A future "improve match rate" change must trip this test consciously.
+        var model = WithOffers(new PriceOffer { Source = "Offer Src", Url = "https://store.example.com/p/1" });
+        var stores = new[] { Store("Example Shop", "https://example.com", "should not surface") };
+
+        StoreReviewMatcher.ReviewsFor(model, stores).Should().BeEmpty();
+    }
 }
