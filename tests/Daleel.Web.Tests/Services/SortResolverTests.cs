@@ -29,6 +29,10 @@ public class SortResolverTests
     [InlineData("highest quality", "rating")]
     [InlineData("most expensive", "price_desc")]
     [InlineData("premium", "price_desc")]
+    [InlineData("أرخص", "price_asc")]                  // Arabic: cheapest
+    [InlineData("أفضل", "rating")]                     // Arabic: best
+    [InlineData("أغلى", "price_desc")]                 // Arabic: most expensive
+    [InlineData("best cheap option", "price_asc")]     // price keywords outrank quality keywords
     public void GoalKeywordHeuristic_WhenDefaultSortMissing(string goal, string expected) =>
         SortResolver.Resolve(new SearchStrategy { Goal = goal }).Should().Be(expected);
 

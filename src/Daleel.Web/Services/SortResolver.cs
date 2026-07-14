@@ -16,6 +16,7 @@ public static class SortResolver
         "relevance", "price_asc", "price_desc", "rating", "sellers"
     };
 
+    /// <summary>The grid sort key for this search object — never null, always a key the grid understands.</summary>
     public static string Resolve(SearchStrategy? strategy)
     {
         if (strategy is null)
@@ -34,8 +35,7 @@ public static class SortResolver
             return "relevance";
         }
 
-        // Order matters: "best price" should hit the price rule, so price keywords are checked
-        // before the quality words that ride along in phrases like "best cheap option".
+        // Order matters: "best cheap option" must hit the price rule via "cheap" before the quality check sees "best".
         if (ContainsAny(goal, "cheap", "lowest", "أرخص", "affordable", "budget"))
         {
             return "price_asc";
@@ -52,6 +52,8 @@ public static class SortResolver
         return "relevance";
     }
 
+    // Bare substring matching is fine here: Goal is a short adjectival phrase per the planner prompt
+    // (product nouns go to Product), so a Goal like "laptop" containing "top" is not realistic.
     private static bool ContainsAny(string goal, params string[] words) =>
         words.Any(w => goal.Contains(w, StringComparison.Ordinal));
 }
