@@ -76,7 +76,7 @@ public sealed class SystemConfigService : ISystemConfigService
         // The model the actor reason→act loops run on. Kimi K2.7 (262k ctx, multimodal) sustains the
         // multi-turn action protocol at ~10x lower cost than the Sonnet default it replaced.
         // Admin-editable at /admin/settings.
-        new SystemConfig { Key = "actor.model", Value = "moonshotai/kimi-k2.7-code", Type = "string" },
+        new SystemConfig { Key = "actor.model", Value = "moonshotai/kimi-k2.7-code:nitro", Type = "string" },
 
         new SystemConfig { Key = "ratelimit.page_per_minute", Value = "100", Type = "int" },
         new SystemConfig { Key = "ratelimit.api_per_minute", Value = "10", Type = "int" },
@@ -86,8 +86,8 @@ public sealed class SystemConfigService : ISystemConfigService
         // When false, the search pipeline skips the cache check entirely and every search runs fresh.
         new SystemConfig { Key = "cache.search_enabled", Value = "true", Type = "bool" },
         new SystemConfig { Key = "limit.saved_results_free", Value = "10", Type = "int" },
-        new SystemConfig { Key = "model.default_free", Value = "moonshotai/kimi-k2.7-code", Type = "string" },
-        new SystemConfig { Key = "model.default_pro", Value = "moonshotai/kimi-k2.7-code", Type = "string" },
+        new SystemConfig { Key = "model.default_free", Value = "moonshotai/kimi-k2.7-code:nitro", Type = "string" },
+        new SystemConfig { Key = "model.default_pro", Value = "moonshotai/kimi-k2.7-code:nitro", Type = "string" },
 
         // Per-call-site pipeline model overrides (model.<site>). Each pipeline LLM step resolves its own
         // model from these (see Daleel.Core.Llm.LlmCallSites) so an operator can cost-tune every step
@@ -184,7 +184,10 @@ public sealed class SystemConfigService : ISystemConfigService
     /// </summary>
     private static readonly HashSet<string> SupersededModelDefaults = new(StringComparer.Ordinal)
     {
-        "anthropic/claude-sonnet-5", "anthropic/claude-sonnet-4", "openai/gpt-4o-mini", "openai/gpt-4o"
+        "anthropic/claude-sonnet-5", "anthropic/claude-sonnet-4", "openai/gpt-4o-mini", "openai/gpt-4o",
+        // The brief plain-Kimi default: its serving pool proved too slow (a 10-min run died at 41
+        // steps); the :nitro throughput-routed variant replaced it within the same release.
+        "moonshotai/kimi-k2.7-code"
     };
 
     /// <summary>Inserts any missing default rows and removes retired ones (idempotent; called on startup).</summary>

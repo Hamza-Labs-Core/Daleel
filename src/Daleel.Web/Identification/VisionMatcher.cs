@@ -51,7 +51,7 @@ public sealed class NullVisionMatcher : IVisionMatcher
 public sealed class VisionMatcher : IVisionMatcher, IDisposable
 {
     /// <summary>Default vision model — Claude Sonnet 5 (high-resolution vision, current Sonnet tier).</summary>
-    public const string DefaultModel = "moonshotai/kimi-k2.7-code";
+    public const string DefaultModel = "moonshotai/kimi-k2.7-code:nitro";
 
     private const string Endpoint = "https://openrouter.ai/api/v1/chat/completions";
     private const string Referer = "https://github.com/Hamza-Labs-Core/Daleel";
