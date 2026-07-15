@@ -192,6 +192,42 @@ public class ItemEnrichmentServiceTests
         enriched.Offers.Should().ContainSingle().Which.Price.Should().Be(650m);
     }
 
+    [Fact]
+    public async Task AttachScrapedPrices_CarriesTheCrawlsImage_OntoTheNewGridModel()
+    {
+        // Regression: the LLM store-crawl extracts a photo per listing and persists it on the price row,
+        // but the grid is rebuilt from those rows (not from the rich entity docs). Before the ImageUrl was
+        // threaded through ScrapedPrice → BrowserPrice → AppendCatalogDiscoveries, every crawled item
+        // reached the grid imageless and depended on a paid image lookup that could (and on QA did) find
+        // nothing. A row with an image must produce a grid model that already carries it.
+        using var ctx = new PostgresTestContext();
+        const string domain = "coffee.jo";
+        await new ScrapedPriceRepository(ctx.Db).AddRangeAsync(new[]
+        {
+            new ScrapedPrice
+            {
+                ProductName = "Braun Coffee Maker KF520",
+                ProductKey = ProductProfile.KeyFor("Braun", "KF520", "Braun Coffee Maker KF520"),
+                StoreName = domain,
+                Price = 79.9m,
+                Currency = "JOD",
+                SourceUrl = "https://coffee.jo/products/kf520",
+                ImageUrl = "https://coffee.jo/img/kf520.jpg",
+                Provider = "site-crawl",
+                ScrapedAt = Now
+            }
+        });
+
+        var svc = Build(ctx);
+        var (models, _, created) = await svc.AttachScrapedPricesAsync(
+            new List<ProductModel>(), domain, storeName: domain, query: "coffee maker", CancellationToken.None);
+
+        created.Should().ContainSingle();
+        models.Should().NotBeNull();
+        models!.Single(m => m.Name == "Braun Coffee Maker KF520").ImageUrl
+            .Should().Be("https://coffee.jo/img/kf520.jpg", "the crawl's own image must ride the price row onto the grid");
+    }
+
     private static AgentService NoScrapeAgent() =>
         new(new StubLlm(), new AgentOptions(), scraper: new ThrowingScraper());
 

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Daleel.Search.Abstractions;
+using Daleel.Search.Http;
 
 namespace Daleel.Search;
 
@@ -120,6 +121,17 @@ public sealed class ScrapeRouter : IScrapeProvider, IExtractProvider
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
+                // A 422 is a request-shape rejection, not a provider outage — a different extractor
+                // handed the SAME schema can't do better, and the only remaining fallback here is the
+                // (frequently depleted) Context.dev. Bouncing there turns a recoverable schema reject
+                // into a guaranteed harvest failure, so stop the chain and surface the empty result.
+                // The extractor that raised it (CloudflareBrowserProvider) already self-heals a 422 by
+                // retrying schema-less; one escaping means even that failed, so there is nothing to gain.
+                if (ex is ProviderException { StatusCode: 422 })
+                {
+                    return last ?? EmptyObject();
+                }
+
                 reason = ex.Message;
             }
 

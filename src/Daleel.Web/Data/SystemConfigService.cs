@@ -101,6 +101,7 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = LlmCallSites.Synthesis.ConfigKey, Value = LlmCallSites.Synthesis.DefaultModel, Type = "string" },
         new SystemConfig { Key = LlmCallSites.BrandReputation.ConfigKey, Value = LlmCallSites.BrandReputation.DefaultModel, Type = "string" },
         new SystemConfig { Key = LlmCallSites.EnrichModel.ConfigKey, Value = LlmCallSites.EnrichModel.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.Crawl.ConfigKey, Value = LlmCallSites.Crawl.DefaultModel, Type = "string" },
 
         // Per-provider pricing (USD) — drives the CostEstimator; spend is metered + charged to credits,
         // never used to cap/cancel a running job (R1).

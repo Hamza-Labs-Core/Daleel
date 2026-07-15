@@ -88,14 +88,70 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
     public async Task<JsonElement> ExtractAsync(
         string url, object jsonSchema, CancellationToken cancellationToken = default)
     {
-        var body = new
+        // Cloudflare's /browser-rendering/json validates response_format strictly, and its
+        // accepted schema shape has proven brittle: whatever exact json_schema envelope we send,
+        // some store pages still come back 422 (the validator's rules aren't fully documented and
+        // shift). Rather than keep chasing the "correct" schema body — every past attempt only
+        // REDUCED the 422s — we treat a 422 as CF's signal to drop the constraint: retry the SAME
+        // page schema-less (omit response_format, pass a prompt) and let Workers-AI return freeform
+        // JSON we still parse. This keeps the failure INSIDE this provider. It must never escape to
+        // the router, because the router's only fallback is Context.dev, which is depleted whenever
+        // CF is carrying store extraction on its own — bouncing there guarantees a harvest failure.
+        if (TryAsSchemaElement(jsonSchema, out var schema))
         {
-            url,
-            response_format = new { type = "json_schema", json_schema = jsonSchema }
-        };
+            try
+            {
+                var schemaBody = new { url, response_format = new { type = "json_schema", json_schema = schema } };
+                var raw = await PostAsync(Endpoint("json"), schemaBody, cancellationToken).ConfigureAwait(false);
+                return ParseExtraction(raw);
+            }
+            catch (ProviderException ex) when (ex.StatusCode == 422)
+            {
+                // Schema rejected — fall through to the schema-less retry below. Same URL, no
+                // response_format; CF owns its own recovery rather than failing over to a dead provider.
+            }
+        }
 
-        var raw = await PostAsync(Endpoint("json"), body, cancellationToken).ConfigureAwait(false);
-        return ParseExtraction(raw);
+        var freeform = new { url, prompt = FreeformExtractionPrompt };
+        var freeformRaw = await PostAsync(Endpoint("json"), freeform, cancellationToken).ConfigureAwait(false);
+        return ParseExtraction(freeformRaw);
+    }
+
+    /// <summary>
+    /// Instruction used when no schema constrains the extraction — either because the caller supplied
+    /// none, or because a schema-constrained request 422'd and we retried schema-less. It biases the
+    /// freeform output toward the <c>{ "products": [...] }</c> shape the store pipeline expects, so
+    /// <c>ListingExtractor.FromExtractedJson</c> and the router's product check recognise the result.
+    /// </summary>
+    private const string FreeformExtractionPrompt =
+        "Extract every product listing on this page as JSON of the form " +
+        "{\"products\":[{\"name\":...,\"price\":...,\"image\":...,\"url\":...}]}. " +
+        "Include each product's name, price, image URL, and product page URL when present. " +
+        "If the page has no products, extract the main structured data as JSON.";
+
+    /// <summary>
+    /// Serializes the caller's schema and returns it as a <see cref="JsonElement"/> only when it is a
+    /// non-empty JSON object — the shape Cloudflare's json_schema mode requires. A null schema, a
+    /// non-object, or an object with no properties yields <c>false</c> so the caller omits
+    /// response_format and drops to prompt-only extraction rather than sending an empty (or invalidly
+    /// typed) json_schema body, both of which CF answers with a 422.
+    /// </summary>
+    private static bool TryAsSchemaElement(object? jsonSchema, out JsonElement schema)
+    {
+        schema = default;
+        if (jsonSchema is null)
+        {
+            return false;
+        }
+
+        var element = JsonSerializer.SerializeToElement(jsonSchema);
+        if (element.ValueKind != JsonValueKind.Object || !element.EnumerateObject().Any())
+        {
+            return false;
+        }
+
+        schema = element;
+        return true;
     }
 
     /// <summary>Renders the page and returns the full HTML.</summary>

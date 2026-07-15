@@ -31,10 +31,13 @@ public static class LlmCallSites
     public static readonly LlmCallSite BrandReputation = new("brand_reputation", "Brand reputation", DefaultModel);
     public static readonly LlmCallSite EnrichModel = new("enrich_model", "Model enrichment", DefaultModel);
 
+    /// <summary>The LLM-driven site crawler's navigation + deep-dive decisions (assess / paginate / deep-dive).</summary>
+    public static readonly LlmCallSite Crawl = new("crawl", "Site crawl navigation", DefaultModel);
+
     /// <summary>Every registered call-site — drives config seeding and the admin model editor.</summary>
     public static readonly IReadOnlyList<LlmCallSite> All = new[]
     {
-        Planner, Category, Extraction, Relevance, Analyst, Synthesis, BrandReputation, EnrichModel,
+        Planner, Category, Extraction, Relevance, Analyst, Synthesis, BrandReputation, EnrichModel, Crawl,
     };
 
     private static readonly IReadOnlyDictionary<string, LlmCallSite> ByKey =

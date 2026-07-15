@@ -61,6 +61,26 @@ public static class PipelineLimits
     /// </summary>
     public static int EnrichmentConcurrency { get; } = FromEnv("PIPELINE_ENRICH_CONCURRENCY", fallback: 6);
 
+    /// <summary>
+    /// How many listing pages the LLM site crawler will walk per site before stopping — the pagination
+    /// safety ceiling (the crawler also stops the moment the LLM reports no next page). Restrainable via
+    /// <c>PIPELINE_CRAWL_MAX_PAGES</c>.
+    /// </summary>
+    public static int CrawlMaxPages { get; } = FromEnv("PIPELINE_CRAWL_MAX_PAGES", fallback: 10);
+
+    /// <summary>
+    /// How many discovered products the crawler deep-dives (visits the detail page + LLM-extracts full
+    /// details) per site. Each deep-dive is a render + LLM call, so this bounds the crawl's cost/time
+    /// alongside the sub-workflow timeout. Restrainable via <c>PIPELINE_CRAWL_MAX_DEEPDIVE</c>.
+    /// </summary>
+    public static int CrawlMaxDeepDive { get; } = FromEnv("PIPELINE_CRAWL_MAX_DEEPDIVE", fallback: 12);
+
+    /// <summary>
+    /// How many product detail pages the crawler deep-dives at once — a throughput WIDTH bounding this
+    /// box's scrape/LLM pressure. Restrainable via <c>PIPELINE_CRAWL_CONCURRENCY</c>.
+    /// </summary>
+    public static int CrawlConcurrency { get; } = FromEnv("PIPELINE_CRAWL_CONCURRENCY", fallback: 4);
+
     private static int FromEnv(string name, int fallback)
     {
         var raw = Environment.GetEnvironmentVariable(name);

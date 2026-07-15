@@ -60,11 +60,14 @@ public static class SubWorkflowDispatcher
         TimeSpan timeout,
         CancellationToken ct,
         Func<int, TState, Task>? onCompleted = null,
-        Action<Daleel.Web.Events.PipelineEvent>? onAggregateEvent = null)
+        Action<Daleel.Web.Events.PipelineEvent>? onAggregateEvent = null,
+        int? maxConcurrency = null)
         where TWorkflow : IWorkflow, new()
         where TState : SubWorkflowState
     {
-        using var gate = new SemaphoreSlim(MaxConcurrency);
+        // The fan-out WIDTH — defaults to the global sub-workflow concurrency, but a caller can pass a
+        // tighter cap (e.g. the crawl's own CrawlConcurrency) to throttle a specific fan-out's load.
+        using var gate = new SemaphoreSlim(Math.Max(1, maxConcurrency ?? MaxConcurrency));
         var faults = 0;
         var tasks = items.Select(async (item, index) =>
         {

@@ -1,3 +1,4 @@
+using Daleel.Core.Models;
 using Daleel.Search.Providers;
 using Daleel.Web.Data;
 using Daleel.Web.Events;
@@ -201,6 +202,15 @@ public sealed class ScrapePricesActivity : CancellableActivity
     {
         var state = context.GetRequiredService<StoreResearchState>();
         var services = context.GetRequiredService<SubWorkflowServices>();
+
+        // The LLM site-crawl (step 5) is the intelligent replacement for this single-page catalogue fetch —
+        // when it ran it already harvested + persisted this store's products and prices, so this fallback
+        // no-ops. It only runs when the crawl was unavailable (no CF Browser) or disabled.
+        if (state.CrawledSite)
+        {
+            return;
+        }
+
         // ALL provider calls go through the gateway (metered by construction) — never a direct
         // provider construction here. The unmetered inline crawl this activity used to make was
         // exactly the leak the gateway exists to close.
@@ -404,5 +414,85 @@ public sealed class ScrapePricesActivity : CancellableActivity
         }
 
         return u.Host.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? u.Host[4..] : u.Host;
+    }
+}
+
+/// <summary>
+/// Step 5 — crawl the store's own website with the LLM-driven <see cref="StoreCrawlWorkflow"/> to discover
+/// and persist its products. This is the intelligent REPLACEMENT for the single-page catalogue fetch
+/// (<see cref="ScrapePricesActivity"/>): it renders each page with CF Browser, lets the LLM navigate
+/// (assess → find listings → paginate → deep-dive), and persists the results to R2 + the index + the price
+/// series. Dispatched as a child sub-workflow (its own DI scope + <c>DaleelDbContext</c>), bounded by the
+/// store timeout and the 10-minute global deadline.
+/// </summary>
+/// <remarks>
+/// BACKWARD COMPATIBILITY: the crawl only runs when Cloudflare Browser Rendering is configured (so JS-heavy
+/// sites actually render) and the <see cref="EnabledFlag"/> switch is on. Otherwise it no-ops and leaves
+/// <see cref="StoreResearchState.CrawledSite"/> false, so the next step's single-page fetch runs as the
+/// fallback — the pre-crawl behaviour is preserved untouched.
+/// </remarks>
+[Activity("Daleel", "Store", "Crawl the store site with the LLM navigator (falls back to single-page fetch)")]
+public sealed class CrawlStoreSiteActivity : CancellableActivity
+{
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
+    {
+        var state = context.GetRequiredService<StoreResearchState>();
+        var logger = context.GetRequiredService<ILogger<CrawlStoreSiteActivity>>();
+
+        var siteUrl = state.Result.Url;
+        if (string.IsNullOrWhiteSpace(siteUrl))
+        {
+            return; // no store website to crawl — the single-page fallback can't help either
+        }
+
+        try
+        {
+            // Runs only when CF Browser is configured + the crawl is enabled; null ⇒ unavailable, so the
+            // next step's single-page fetch runs as the fallback (CrawledSite stays false).
+            var crawl = await CrawlDispatch.TryRunAsync<StoreCrawlWorkflow, StoreCrawlState>(
+                context,
+                (s, _) =>
+                {
+                    s.Geo = state.Geo;
+                    s.SearchId = state.SearchId;
+                    s.SiteUrl = siteUrl!;
+                    s.SiteName = state.Store.Name;
+                    s.Query = state.Query;
+                },
+                context.CancellationToken);
+            if (crawl is null)
+            {
+                return;
+            }
+
+            // Only claim the store — and let the single-page fetch stand down — when the crawl ACTUALLY
+            // harvested products. A crawl that completed empty (found nothing, or timed out before persisting)
+            // must NOT skip the fallback: the dumb catalogue fetch is the safety net that still yields the
+            // store's prices. This makes the crawl strictly "as good or better", never a silent regression.
+            var yielded = crawl.Persisted > 0 || crawl.PricesRecorded > 0;
+            state.CrawledSite = yielded;
+            if (crawl.PricesRecorded > 0)
+            {
+                state.PricedProducts = crawl.PricesRecorded;
+            }
+            state.RecordEvent(EventCategory.Extract, "store.crawl", "site-crawl",
+                success: yielded,
+                metadata: new Dictionary<string, object?>
+                {
+                    ["store"] = state.Store.Name,
+                    ["site"] = state.Result.Url,
+                    ["persisted"] = crawl.Persisted,
+                    ["priced"] = crawl.PricesRecorded,
+                    ["pages"] = crawl.PagesFetched,
+                    ["fellBack"] = !yielded
+                });
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // A crawl failure must not poison the store — leave CrawledSite false so the single-page fetch
+            // still runs as the fallback, and make the failure visible.
+            logger.LogWarning(ex, "LLM site crawl failed for store {Store} ({Site})", state.Store.Name, state.Result.Url);
+        }
     }
 }
