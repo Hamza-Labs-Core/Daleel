@@ -960,11 +960,13 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
         return UnitOutcome.Ok;
     }
 
-    /// <summary>An offer's page is worth fetching when any of the four facts is still in doubt.</summary>    /// <summary>An offer's page is worth fetching when any of the four facts is still in doubt.</summary>
+    /// <summary>An offer's page is worth fetching when any of the facts is still in doubt: the
+    /// price, a secondhand condition, the details prose — or the PHOTO (the harvest pulls the
+    /// image off the same page, so an image-less card is reason enough to fetch it).</summary>
     private static bool NeedsVerification(ProductModel model, PriceOffer offer) =>
         offer.Price is null
         || IsSecondhand(offer.Condition)
-        || (NeedsDetails(model) && IsFirstUrlOffer(model, offer));
+        || ((NeedsDetails(model) || model.ImageUrl is null) && IsFirstUrlOffer(model, offer));
 
     private static bool IsFirstUrlOffer(ProductModel model, PriceOffer offer) =>
         ReferenceEquals(model.Offers.FirstOrDefault(o => !string.IsNullOrWhiteSpace(o.Url)), offer);
