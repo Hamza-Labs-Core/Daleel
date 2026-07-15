@@ -86,4 +86,29 @@ public class PlansAndConfigTests
         await cfg.SeedDefaultsAsync();
         (await cfg.GetIntAsync("ratelimit.search_per_hour", -1)).Should().Be(20);
     }
+
+    [Fact]
+    public async Task SeedDefaults_UpgradesRowsStillHoldingSupersededModelDefaults()
+    {
+        using var ctx = new PostgresTestContext();
+        var cfg = new SystemConfigService(ctx.Db);
+        await cfg.SeedDefaultsAsync();
+
+        // Simulate a pre-Kimi database: rows exist with the OLD default models (never touched by an
+        // operator) plus one genuine operator override that must survive the upgrade.
+        await cfg.SetAsync("model.planner", "anthropic/claude-sonnet-5", "string");
+        await cfg.SetAsync("model.default_pro", "anthropic/claude-sonnet-4", "string");
+        await cfg.SetAsync("model.default_free", "openai/gpt-4o-mini", "string");
+        await cfg.SetAsync("model.analyst", "google/gemini-2.5-pro", "string"); // deliberate override
+
+        await cfg.SeedDefaultsAsync();
+
+        // Rows still holding a superseded DEFAULT migrate to the current default (this is how prod
+        // picks up the model switch without an admin-settings pass)…
+        (await cfg.GetAsync("model.planner")).Should().Be(Daleel.Core.Llm.LlmCallSites.DefaultModel);
+        (await cfg.GetAsync("model.default_pro")).Should().Be(Daleel.Core.Llm.LlmCallSites.DefaultModel);
+        (await cfg.GetAsync("model.default_free")).Should().Be(Daleel.Core.Llm.LlmCallSites.DefaultModel);
+        // …while a value an operator chose on purpose is never clobbered.
+        (await cfg.GetAsync("model.analyst")).Should().Be("google/gemini-2.5-pro");
+    }
 }

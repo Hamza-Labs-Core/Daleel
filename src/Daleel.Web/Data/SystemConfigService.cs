@@ -175,6 +175,18 @@ public sealed class SystemConfigService : ISystemConfigService
         "cost.monthly_alert",
     };
 
+    /// <summary>
+    /// Model values earlier releases seeded as DEFAULTS. A model.* row still holding one of these was
+    /// (almost certainly) never touched by an operator, so the seed pass upgrades it to the current
+    /// default — this is how an existing deployment (prod) picks up a fleet-wide model switch without
+    /// a manual /admin/settings pass. A row holding anything else is an operator's deliberate choice
+    /// and is never rewritten.
+    /// </summary>
+    private static readonly HashSet<string> SupersededModelDefaults = new(StringComparer.Ordinal)
+    {
+        "anthropic/claude-sonnet-5", "anthropic/claude-sonnet-4", "openai/gpt-4o-mini", "openai/gpt-4o"
+    };
+
     /// <summary>Inserts any missing default rows and removes retired ones (idempotent; called on startup).</summary>
     public async Task SeedDefaultsAsync(CancellationToken ct = default)
     {
@@ -182,6 +194,16 @@ public sealed class SystemConfigService : ISystemConfigService
         if (retired.Count > 0)
         {
             _db.SystemConfig.RemoveRange(retired);
+        }
+
+        // Upgrade model rows stuck on a superseded default (see SupersededModelDefaults).
+        var upgradable = await _db.SystemConfig
+            .Where(c => c.Key.StartsWith("model.") || c.Key == "actor.model")
+            .Where(c => SupersededModelDefaults.Contains(c.Value))
+            .ToListAsync(ct);
+        foreach (var row in upgradable)
+        {
+            row.Value = Daleel.Core.Llm.LlmCallSites.DefaultModel;
         }
 
         var existing = await _db.SystemConfig.Select(c => c.Key).ToListAsync(ct);
@@ -196,9 +218,10 @@ public sealed class SystemConfigService : ISystemConfigService
             _db.SystemConfig.AddRange(missing);
         }
 
-        if (retired.Count > 0 || missing.Count > 0)
+        if (retired.Count > 0 || missing.Count > 0 || upgradable.Count > 0)
         {
             await _db.SaveChangesAsync(ct);
+            _cache?.Remove(CacheKey); // upgraded/added rows must be visible to the next read
         }
     }
 }
