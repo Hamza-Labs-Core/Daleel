@@ -121,6 +121,8 @@ public sealed class ProviderApi : IProviderApi
     private readonly object _gate = new();
     private ContextDevProvider? _contextDev;
     private string? _contextDevKey;
+    private IScrapeProvider? _browser;
+    private readonly IScrapeProvider? _browserOverride;
     private GooglePlacesProvider? _places;
     private string? _placesKey;
     private ApifyPostFetcher? _social;
@@ -131,13 +133,15 @@ public sealed class ProviderApi : IProviderApi
 
     public ProviderApi(
         IAgentFactory factory, ICloudflareWorkerClient? edge = null, ICloudflareFleetClient? fleet = null,
-        CloudflareWorkerOptions? edgeOptions = null, Daleel.Web.Storage.IR2StorageService? r2 = null)
+        CloudflareWorkerOptions? edgeOptions = null, Daleel.Web.Storage.IR2StorageService? r2 = null,
+        IScrapeProvider? browserFallback = null)
     {
         _factory = factory;
         _edge = edge;
         _fleet = fleet;
         _edgeOptions = edgeOptions;
         _r2 = r2;
+        _browserOverride = browserFallback;
     }
 
     public bool HasScraper => _factory.Resolve("CONTEXT_DEV_API_KEY") is not null;
@@ -199,17 +203,42 @@ public sealed class ProviderApi : IProviderApi
             }
         }
 
-        if (ContextDev() is not { } ctx)
+        if (ContextDev() is { } ctx)
+        {
+            var page = await MeterAsync(
+                "Context.dev", $"scrape/{format.ToString().ToLowerInvariant()}", url,
+                () => ctx.ScrapeAsync(url, format, ct),
+                p => p.Content?.Length ?? 0,
+                describe: p => Rendered(p?.Content)).ConfigureAwait(false);
+            if (page.Success)
+            {
+                return page;
+            }
+        }
+
+        // LAST RESORT: Cloudflare Browser Rendering — the same failover the pipeline's ScrapeRouter
+        // has. Without it, this method was Context.dev-only, and a depleted Context.dev account made
+        // every drain-side page fetch return nothing: enrich.verifypage died 100% for a week (QA:
+        // 117 dead units), so no post-crawl price/image ever attached to a card.
+        if (Browser() is not { } browser)
         {
             return null;
         }
 
-        var page = await MeterAsync(
-            "Context.dev", $"scrape/{format.ToString().ToLowerInvariant()}", url,
-            () => ctx.ScrapeAsync(url, format, ct),
-            p => p.Content?.Length ?? 0,
-            describe: p => Rendered(p?.Content)).ConfigureAwait(false);
-        return page.Success ? page : null;
+        try
+        {
+            var rendered = await MeterAsync(
+                "cloudflare-browser", $"scrape/{format.ToString().ToLowerInvariant()}", url,
+                () => browser.ScrapeAsync(url, format, ct),
+                p => p.Content?.Length ?? 0,
+                describe: p => Rendered(p?.Content)).ConfigureAwait(false);
+            return rendered is { Success: true } ? rendered : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return null; // best-effort last resort — the caller's retry/dead ledger owns the outcome
+        }
     }
 
     public async Task<WorkerHandle?> SubmitEdgeCatalogAsync(
@@ -470,6 +499,30 @@ public sealed class ProviderApi : IProviderApi
     }
 
     /// <summary>Cached Context.dev provider (rebuilt only if the resolved key changes).</summary>
+    /// <summary>
+    /// The Cloudflare Browser Rendering scraper, built lazily from the factory-resolved CF keys
+    /// (mirroring <see cref="ContextDev"/>'s caching), or the test-injected override. Null when the
+    /// CF keys aren't configured.
+    /// </summary>
+    private IScrapeProvider? Browser()
+    {
+        if (_browserOverride is not null)
+        {
+            return _browserOverride;
+        }
+
+        if (_factory.Resolve("CLOUDFLARE_ACCOUNT_ID") is not { } id ||
+            _factory.Resolve("CLOUDFLARE_API_TOKEN") is not { } token)
+        {
+            return null;
+        }
+
+        lock (_gate)
+        {
+            return _browser ??= new CloudflareBrowserProvider(id, token);
+        }
+    }
+
     private ContextDevProvider? ContextDev()
     {
         var key = _factory.Resolve("CONTEXT_DEV_API_KEY");
