@@ -25,7 +25,7 @@ namespace Daleel.Web.Moderation;
 public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDisposable
 {
     /// <summary>Default vision model — same default as the product-identification matcher.</summary>
-    public const string DefaultModel = "anthropic/claude-sonnet-5";
+    public const string DefaultModel = "moonshotai/kimi-k2.7-code";
 
     private const string Endpoint = "https://openrouter.ai/api/v1/chat/completions";
     private const string Referer = "https://github.com/Hamza-Labs-Core/Daleel";

@@ -73,10 +73,10 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "actor.itemdive", Value = ActorStepsDefault, Type = "bool" },
         new SystemConfig { Key = "actor.verifypage", Value = ActorStepsDefault, Type = "bool" },
         new SystemConfig { Key = "actor.catalog", Value = "false", Type = "bool" },
-        // The model the actor reason→act loops run on — always a CAPABLE model (Sonnet 5 or better),
-        // NOT the user's free-tier default (gpt-4o-mini can't sustain the multi-turn action protocol).
+        // The model the actor reason→act loops run on. Kimi K2.7 (262k ctx, multimodal) sustains the
+        // multi-turn action protocol at ~10x lower cost than the Sonnet default it replaced.
         // Admin-editable at /admin/settings.
-        new SystemConfig { Key = "actor.model", Value = "anthropic/claude-sonnet-5", Type = "string" },
+        new SystemConfig { Key = "actor.model", Value = "moonshotai/kimi-k2.7-code", Type = "string" },
 
         new SystemConfig { Key = "ratelimit.page_per_minute", Value = "100", Type = "int" },
         new SystemConfig { Key = "ratelimit.api_per_minute", Value = "10", Type = "int" },
@@ -86,8 +86,8 @@ public sealed class SystemConfigService : ISystemConfigService
         // When false, the search pipeline skips the cache check entirely and every search runs fresh.
         new SystemConfig { Key = "cache.search_enabled", Value = "true", Type = "bool" },
         new SystemConfig { Key = "limit.saved_results_free", Value = "10", Type = "int" },
-        new SystemConfig { Key = "model.default_free", Value = "openai/gpt-4o-mini", Type = "string" },
-        new SystemConfig { Key = "model.default_pro", Value = "anthropic/claude-sonnet-4", Type = "string" },
+        new SystemConfig { Key = "model.default_free", Value = "moonshotai/kimi-k2.7-code", Type = "string" },
+        new SystemConfig { Key = "model.default_pro", Value = "moonshotai/kimi-k2.7-code", Type = "string" },
 
         // Per-call-site pipeline model overrides (model.<site>). Each pipeline LLM step resolves its own
         // model from these (see Daleel.Core.Llm.LlmCallSites) so an operator can cost-tune every step
