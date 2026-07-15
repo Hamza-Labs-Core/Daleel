@@ -257,4 +257,26 @@ public class ProductListingsGridTests : TestContext
         System.Text.RegularExpressions.Regex.Matches(cut.Markup, "In stock").Count.Should().Be(1);
         System.Text.RegularExpressions.Regex.Matches(cut.Markup, "Out of stock").Count.Should().Be(1);
     }
+
+    [Fact]
+    public void ImagelessItems_AreHidden_WhenOthersHavePhotos()
+    {
+        var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg" };
+        var bare = Model("Bare", 90m);
+
+        var cut = Render(Result(null, withPhoto, bare));
+
+        cut.Markup.Should().Contain("Photographed");
+        cut.Markup.Should().NotContain(">Bare<", "an imageless card is hidden while photographed ones exist");
+    }
+
+    [Fact]
+    public void ImagelessItems_AllShow_WhenNothingHasAPhoto()
+    {
+        // The empty-grid guard: hiding every result is worse than showing bare cards (streaming
+        // starts imageless — photos drain in minutes later).
+        var cut = Render(Result(null, Model("One", 100m), Model("Two", 90m)));
+        cut.Markup.Should().Contain("One");
+        cut.Markup.Should().Contain("Two");
+    }
 }

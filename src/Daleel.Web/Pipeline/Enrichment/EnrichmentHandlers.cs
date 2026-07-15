@@ -1049,8 +1049,17 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
     /// an app-download promo or a country flag (QA: Mumzworld, Dumyah), and a WRONG photo on the
     /// card misleads where a placeholder merely disappoints.
     /// </summary>
-    internal static string? ExtractImage(string content)
+    internal static string? ExtractImage(string content) => ExtractImages(content).FirstOrDefault();
+
+    /// <summary>
+    /// EVERY qualifying product image on the page, deduped in document order — detail pages carry a
+    /// gallery (angles, colors) and the detail surfaces show all of it; the card takes the first.
+    /// Same evidence rules as always: product-ish PATH segment, chrome/promo blocklist.
+    /// </summary>
+    internal static IReadOnlyList<string> ExtractImages(string content)
     {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var images = new List<string>();
         foreach (System.Text.RegularExpressions.Match m in ImagePattern.Matches(content))
         {
             var url = m.Groups[1].Value.Trim();
@@ -1067,12 +1076,12 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
 
             // Evidence lives in the PATH — hosts routinely contain "cdn"/"images" for everything.
             var path = abs.AbsolutePath.ToLowerInvariant();
-            if (ImagePathEvidence.Any(w => path.Contains(w, StringComparison.Ordinal)))
+            if (ImagePathEvidence.Any(w => path.Contains(w, StringComparison.Ordinal)) && seen.Add(abs.ToString()))
             {
-                return abs.ToString();
+                images.Add(abs.ToString());
             }
         }
-        return null;
+        return images;
     }
 
     private static readonly string[] ImageBlocklist =
@@ -1338,7 +1347,8 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
         // deterministically for BOTH judgment paths (the actor judges relatedness/price; imagery
         // and stock don't need an LLM). This is what fills the imageless/stockless cards for
         // stores whose LISTING pages carry only name + link.
-        var pageImage = OfferVerificationHandler.ExtractImage(content);
+        var pageImages = OfferVerificationHandler.ExtractImages(content);
+        var pageImage = pageImages.Count > 0 ? pageImages[0] : null;
         var pageAvailability = OfferVerificationHandler.ExtractAvailability(content);
 
         await ctx.Results.PatchAsync(item, answer =>
@@ -1415,6 +1425,12 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
                 if (related.Contains(m.Name) && result.ImageUrl is null && pageImage is not null)
                 {
                     result = result with { ImageUrl = pageImage };
+                    modelChanged = true;
+                }
+
+                if (related.Contains(m.Name) && result.Images.Count == 0 && pageImages.Count > 0)
+                {
+                    result = result with { Images = pageImages };
                     modelChanged = true;
                 }
 

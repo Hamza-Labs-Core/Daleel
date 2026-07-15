@@ -269,6 +269,24 @@ public class OfferVerificationTests
     }
 
     [Fact]
+    public void ExtractImages_ReturnsEveryProductImage_DedupedInOrder()
+    {
+        // A detail page carries a gallery — one photo per angle/color. Harvest ALL of them (the
+        // detail surfaces show a gallery; the card uses the first), deduped, document order.
+        const string page = """
+            ![logo](https://store.jo/assets/logo.svg)
+            ![front](https://store.jo/cdn/products/fan-front.jpg)
+            ![side](https://store.jo/cdn/products/fan-side.jpg)
+            ![front again](https://store.jo/cdn/products/fan-front.jpg)
+            ![white variant](https://store.jo/cdn/products/fan-white.jpg)
+            """;
+        OfferVerificationHandler.ExtractImages(page).Should().Equal(
+            "https://store.jo/cdn/products/fan-front.jpg",
+            "https://store.jo/cdn/products/fan-side.jpg",
+            "https://store.jo/cdn/products/fan-white.jpg");
+    }
+
+    [Fact]
     public void ExtractImage_PromoOnProductPath_StillSkippedByKeyword()
     {
         OfferVerificationHandler.ExtractImage(
