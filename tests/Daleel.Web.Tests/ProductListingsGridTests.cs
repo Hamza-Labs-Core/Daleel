@@ -235,4 +235,26 @@ public class ProductListingsGridTests : TestContext
         // Exactly the 4 generic selects (Brand/Source/Condition/Sort) — no facet selects appear.
         cut.FindComponents<MudSelect<string>>().Count.Should().Be(4);
     }
+
+    [Fact]
+    public void StockChip_RendersFromOfferAvailability_AndOnlyWhenKnown()
+    {
+        var inStock = Model("StockedFan", 100m) with
+        {
+            Offers = new[] { new PriceOffer { Source = "s", Price = 100m, Currency = "JOD", Availability = "متوفر" } }
+        };
+        var soldOut = Model("GoneFan", 120m) with
+        {
+            Offers = new[] { new PriceOffer { Source = "s", Price = 120m, Currency = "JOD", Availability = "sold out" } }
+        };
+        var silent = Model("QuietFan", 90m); // no availability anywhere → no chip
+
+        var cut = Render(Result(null, inStock, soldOut, silent));
+
+        cut.Markup.Should().Contain("In stock");
+        cut.Markup.Should().Contain("Out of stock");
+        // Exactly one of each chip: the silent card must not render a guessed state.
+        System.Text.RegularExpressions.Regex.Matches(cut.Markup, "In stock").Count.Should().Be(1);
+        System.Text.RegularExpressions.Regex.Matches(cut.Markup, "Out of stock").Count.Should().Be(1);
+    }
 }

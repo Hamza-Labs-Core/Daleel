@@ -369,6 +369,7 @@ internal static class CrawlPersistence
                 // Carry the crawl's extracted photo onto the price row: the grid is rebuilt from these
                 // rows by CatalogAttach, so without it every crawled item lands imageless.
                 ImageUrl = p.ImageUrl,
+                Availability = p.Availability,
                 Provider = "site-crawl",
                 ScrapedAt = now
             })

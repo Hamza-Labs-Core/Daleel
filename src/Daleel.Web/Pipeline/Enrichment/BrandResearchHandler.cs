@@ -425,12 +425,12 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
     /// Reads the brand's harvested <see cref="BrandModel"/> rows and maps them to catalogue entries for
     /// the grid append. Best-effort: a DB blip yields no entries, never faults the brand unit.
     /// </summary>
-    private static async Task<IReadOnlyList<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)>>
+    private static async Task<IReadOnlyList<(string Name, decimal? Price, string? Currency, string? Url, string? Image, string? Availability, bool Indicative)>>
         LoadBrandCatalogEntriesAsync(EnrichmentUnitContext ctx, int brandId, CancellationToken ct)
     {
         if (brandId <= 0)
         {
-            return Array.Empty<(string, decimal?, string?, string?, string?, bool)>();
+            return Array.Empty<(string, decimal?, string?, string?, string?, string?, bool)>();
         }
 
         try
@@ -441,7 +441,7 @@ public class BrandResearchHandler : IEnrichmentUnitHandler
         catch (OperationCanceledException) { throw; }
         catch
         {
-            return Array.Empty<(string, decimal?, string?, string?, string?, bool)>();
+            return Array.Empty<(string, decimal?, string?, string?, string?, string?, bool)>();
         }
     }
 

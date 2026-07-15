@@ -1349,7 +1349,7 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
                     var (withSiblings, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
                         updated,
                         lines.Select(l => (Name: l.Line, (decimal?)l.Price, (string?)l.Currency,
-                            (string?)payload.Url, (string?)null, Indicative: true)),
+                            (string?)payload.Url, (string?)null, (string?)null, Indicative: true)),
                         storeName: AgentService.HostLabel(payload.Url),
                         query: ctx.Job.Query, geo: ctx.Job.Geo);
                     if (created.Count > 0)

@@ -39,7 +39,7 @@ public class VariantNumberTrimReproTests
         var (models, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
             existing,
             new[] { ("Ariston water heater 100", (decimal?)120m, (string?)"JOD",
-                     (string?)"https://store.example/wh100", (string?)null, true) },
+                     (string?)"https://store.example/wh100", (string?)null, (string?)null, true) },
             storeName: "Store", query: "water heaters in Jordan");
 
         created.Should().ContainSingle(n => n.Contains("100"),

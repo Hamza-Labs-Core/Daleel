@@ -511,13 +511,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         //   models via AttachPoolToModels above.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated,
-            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false)),
+            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, (string?)null, Indicative: false)),
             storeName, query, geo);
         var (withHarvested, harvestedCreated) = AppendCatalogDiscoveries(
             withNew,
             llmSeed
                 .Where(l => !string.IsNullOrWhiteSpace(l.Name))
-                .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, Indicative: l.Price is null)),
+                .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, l.Availability, Indicative: l.Price is null)),
             storeName, query, geo, fromQueryScopedPage: true);
         withNew = withHarvested;
         created = created.Concat(harvestedCreated).ToList();
@@ -593,6 +593,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                         (r.Price is not null || !string.IsNullOrWhiteSpace(r.ImageUrl)))
             .Select(r => (Name: r.ProductName, r.Price, r.Currency, Url: r.SourceUrl,
                           ImageUrl: string.IsNullOrWhiteSpace(r.ImageUrl) ? null : r.ImageUrl,
+                          r.Availability,
                           Indicative: true))
             .ToList();
         if (pool.Count == 0 && discoveries.Count == 0)
@@ -1820,7 +1821,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// gains the brand's coffee machines. The price is the brand-site LOCAL price, marked indicative
     /// (a lead to verify at a store, like every non-store-offer price), never a live local offer.
     /// </summary>
-    public static IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)>
+    public static IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, string? Availability, bool Indicative)>
         BrandCatalogEntries(IEnumerable<BrandModel> models) =>
         models
             .Where(m => !string.IsNullOrWhiteSpace(m.ModelName))
@@ -1830,11 +1831,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 Currency: m.Currency,
                 Url: m.SourceUrl,
                 Image: m.ImageUrl,
+                Availability: (string?)null, // brand catalogues list models, not store stock
                 Indicative: true));
 
     public static (List<ProductModel> Models, List<string> Created) AppendCatalogDiscoveries(
         List<ProductModel> models,
-        IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)> entries,
+        IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, string? Availability, bool Indicative)> entries,
         string? storeName, string? query, string? geo = null, bool fromQueryScopedPage = false)
     {
         var queryTokens = SignificantQueryTokens(query, geo);
@@ -1892,6 +1894,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                         Price = e.Price,
                         Currency = e.Currency,
                         Url = e.Url,
+                        Availability = e.Availability,
                         IsLocal = true,
                         IsIndicative = e.Indicative
                     }

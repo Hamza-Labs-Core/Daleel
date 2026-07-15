@@ -43,6 +43,10 @@ public sealed class ScrapedPrice
     /// </summary>
     public string? ImageUrl { get; set; }
 
+    /// <summary>The store's stock wording as extracted ("in stock", "متوفر", "sold out"), when shown.
+    /// Classified for display by <c>StockStatus</c>; free-form here so nothing is lost in transit.</summary>
+    public string? Availability { get; set; }
+
     /// <summary>Which scraper produced this observation ("context.dev" or "cloudflare-browser").</summary>
     public string Provider { get; set; } = string.Empty;
 

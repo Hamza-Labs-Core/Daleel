@@ -245,6 +245,7 @@ public class ItemEnrichmentServiceTests
                 ProductKey = ProductProfile.KeyFor("KDK", null, "KDK Ceiling Fan Ultra Quiet 14W"),
                 StoreName = domain,
                 Price = null,                                        // the store page showed no price
+                Availability = "متوفر",                              // …but it did show stock
                 SourceUrl = "https://fans.jo/products/kdk-14w",
                 ImageUrl = "https://fans.jo/img/kdk-14w.jpg",
                 Provider = "site-crawl",
@@ -262,6 +263,7 @@ public class ItemEnrichmentServiceTests
         model.ImageUrl.Should().Be("https://fans.jo/img/kdk-14w.jpg");
         model.Offers.Should().ContainSingle(o => o.Url == "https://fans.jo/products/kdk-14w",
             "the click-through to the store page must survive");
+        model.Offers.Single().Availability.Should().Be("متوفر", "the store's stock wording must ride the row");
     }
 
     [Fact]

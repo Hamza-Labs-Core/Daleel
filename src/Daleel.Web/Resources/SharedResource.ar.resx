@@ -728,4 +728,7 @@
   <data name="Monitor.RunUnavailable" xml:space="preserve"><value>المراقبة غير متاحة مؤقتًا.</value></data>
   <data name="Stores.NoStores" xml:space="preserve"><value>لم يتم العثور على متاجر لهذا البحث.</value></data>
   <data name="Admin.Nav.Providers" xml:space="preserve"><value>المزوّدون</value></data>
+  <data name="Stock.InStock" xml:space="preserve"><value>متوفر</value></data>
+  <data name="Stock.OutOfStock" xml:space="preserve"><value>غير متوفر</value></data>
+  <data name="Stock.Preorder" xml:space="preserve"><value>طلب مسبق</value></data>
 </root>

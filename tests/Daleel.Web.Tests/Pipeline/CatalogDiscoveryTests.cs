@@ -13,9 +13,9 @@ namespace Daleel.Web.Tests.Pipeline;
 /// </summary>
 public class CatalogDiscoveryTests
 {
-    private static (string, decimal?, string?, string?, string?, bool) Entry(
+    private static (string, decimal?, string?, string?, string?, string?, bool) Entry(
         string name, decimal? price = 99m, string? url = "https://jo-cell.com/products/x") =>
-        (name, price, "JOD", url, null, true);
+        (name, price, "JOD", url, null, null, true);
 
     private static List<ProductModel> Existing(params string[] names) =>
         names.Select(n => new ProductModel { Name = n }).ToList();
