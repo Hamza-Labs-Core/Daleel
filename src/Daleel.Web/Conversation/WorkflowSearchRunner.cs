@@ -367,7 +367,8 @@ public sealed class WorkflowSearchRunner : ISearchRunner
             QueryType = state.Strategy?.QueryType ?? Daleel.Core.Models.QueryType.General,
             Summary = state.Summary,
             Research = includeResearch ? state.Bundle ?? new ResearchBundle() : new ResearchBundle(),
-            Products = state.Products,
+            // The salvage/partial-push fallback must carry the search object too (a salvaged run persists this ResultJson).
+            Products = state.Products.WithStrategy(state.Strategy),
             GeneratedAt = DateTimeOffset.UtcNow
         };
 

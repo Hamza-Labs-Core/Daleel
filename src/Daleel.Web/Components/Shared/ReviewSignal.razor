@@ -1,0 +1,102 @@
+@* Compact per-card review signal: rating + review count + sentiment, with source icons for the
+   review kinds present (buyer/social/store), expanding to the actual reviews. Renders NOTHING
+   when the card has no review data of any kind — no empty shells on sparse results.
+   Uses plain title="" attributes rather than MudTooltip: a tooltip needs a MudPopoverProvider
+   in the host layout, and the card grid doesn't render one for every hover hint (see the same
+   choice on the rating row this component replaces, and the price-on-site text below it). *@
+@inject IStringLocalizer<SharedResource> L
+
+@if (HasAny)
+{
+    <div class="mt-1">
+        <div class="d-flex align-center gap-1" style="cursor:pointer;" @onclick="() => _open = !_open"
+             title="@L["Reviews.Signal"]">
+            @if (Model.Rating is { } rating)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Star" Size="Size.Small" Color="Color.Warning" />
+                <MudText Typo="Typo.caption">@rating.ToString("0.0")@(Model.RatingCount is { } rc ? $" ({rc:n0})" : "")</MudText>
+            }
+            @if (TotalReviews > 0)
+            {
+                <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="@SentimentColor">
+                    @string.Format(L["Reviews.NReviews"], TotalReviews)
+                </MudChip>
+            }
+            @if (BuyerReviews.Count > 0)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.RateReview" Size="Size.Small" title="@L["Reviews.FromBuyers"].ToString()" />
+            }
+            @if (SocialReviews.Count > 0)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Forum" Size="Size.Small" title="@L["Reviews.FromSocial"].ToString()" />
+            }
+            @if (StoreReviews.Count > 0)
+            {
+                <MudIcon Icon="@Icons.Material.Filled.Storefront" Size="Size.Small" title="@L["Reviews.FromStores"].ToString()" />
+            }
+        </div>
+
+        <MudCollapse Expanded="_open">
+            <div class="pa-2">
+                @foreach (var r in BuyerReviews.Take(3))
+                {
+                    <MudText Typo="Typo.caption" Class="d-block mb-1" dir="@Catalog.Dir(r.Text)">
+                        "@r.Text"@(r.Rating is { } br ? $" — {br:0.#}★" : "")@(r.Author is { Length: > 0 } a ? $" — {a}" : "")
+                    </MudText>
+                }
+                @foreach (var r in SocialReviews.Take(3))
+                {
+                    <MudText Typo="Typo.caption" Class="d-block mb-1" dir="@Catalog.Dir(r.Quote)">
+                        "@r.Quote"@(r.Source is { Length: > 0 } src ? $" — {src}" : "")
+                    </MudText>
+                }
+                @foreach (var r in StoreReviews.Take(2))
+                {
+                    <MudText Typo="Typo.caption" Class="d-block mb-1" dir="@Catalog.Dir(r.Text)">
+                        "@r.Text" — @L["Reviews.StoreReview"]
+                    </MudText>
+                }
+            </div>
+        </MudCollapse>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public ProductModel Model { get; set; } = default!;
+
+    /// <summary>Reviews of the stores selling this model (resolved by the host via StoreReviewMatcher).</summary>
+    [Parameter] public IReadOnlyList<StoreReview> StoreReviews { get; set; } = Array.Empty<StoreReview>();
+
+    private bool _open;
+
+    private IReadOnlyList<ProductReview> BuyerReviews => Model.RatedReviews;
+    private IReadOnlyList<UserReview> SocialReviews =>
+        Model.BrandReputation?.Social?.Reviews ?? Array.Empty<UserReview>();
+
+    private int TotalReviews => BuyerReviews.Count + SocialReviews.Count + StoreReviews.Count;
+
+    private bool HasAny => Model.Rating is not null || TotalReviews > 0;
+
+    /// <summary>
+    /// Positive-majority sentiment tints the chip green; negative-majority warns red; a tie (or no
+    /// polarity at all) stays default. Honesty rule: the tally covers every PRODUCT opinion the chip
+    /// counts — social quotes by their labelled sentiment PLUS buyer reviews by their star rating
+    /// (4–5 = positive, 1–2 = negative, 3/unrated = neutral) — so ten 1-star buyer reviews can't
+    /// hide behind one glowing social quote. Store reviews are deliberately EXCLUDED from the tint:
+    /// they rate the selling venue, not this product.
+    /// </summary>
+    private Color SentimentColor
+    {
+        get
+        {
+            var social = Model.BrandReputation?.Social;
+            var positive = (social?.Positive ?? 0) + BuyerReviews.Count(r => r.Rating is >= 4);
+            var negative = (social?.Negative ?? 0) + BuyerReviews.Count(r => r.Rating is <= 2);
+            if (positive > negative)
+            {
+                return Color.Success;
+            }
+            return negative > positive ? Color.Error : Color.Default;
+        }
+    }
+}

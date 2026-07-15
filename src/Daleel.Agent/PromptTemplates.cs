@@ -78,8 +78,20 @@ public static class PromptTemplates
           "socialQueries": ["social platform keywords"],
           "placesQueries": ["store-finder queries, e.g. 'AC stores', 'متاجر مكيفات'"],
           "urlsToRead": ["specific URLs worth deep-reading, may be empty"],
-          "reasoning": "one sentence on the plan"
+          "reasoning": "one sentence on the plan",
+          "product": "the bare product/thing wanted, e.g. 'diapers' — no geo words, no qualifiers",
+          "specs": { "key": "value" },
+          "location": "the city/place the user named, or '' if none",
+          "goal": "the user's goal in their words: 'cheapest', 'best', 'most reliable', or '' if none",
+          "defaultSort": "one of: relevance | price_asc | price_desc | rating | sellers — pick from the goal ('cheapest'→price_asc, 'best'/quality→rating); use 'relevance' when unsure",
+          "facets": [ { "key": "the spec dimension shoppers filter THIS product type by, e.g. 'size' for diapers, 'screen size' for TVs", "label": "display label", "unit": "unit or null", "values": ["typical options a store would offer, e.g. sizes 1-6 for diapers"] } ]
         }
+        Fill "specs" with the constraints stated IN the query — the key is the constraint dimension
+        (e.g. "size", "color", "capacity") and the value is what the user asked for; use {} when none.
+        Give 2-4 facets for a product query (the dimensions a shopper actually narrows by), each with
+        its typical values in this market. Do NOT include brand, condition, or price as facets — the
+        results page already has those filters built in; name the PRODUCT-SPECIFIC dimensions instead.
+        For non-product queries use [] and leave product/goal empty.
         Generate queries in BOTH the market's primary language and English. No prose outside the JSON.
 
         Set "intent" to what KIND of thing the user wants (independent of queryType):
@@ -359,7 +371,9 @@ public static class PromptTemplates
         }
 
         sb.AppendLine("For each numbered item, decide: is the item ITSELF one of these? Accessories, consumables, " +
-            "parts, and different product types are NOT. Also drop any item that is haram/immodest content.");
+            "parts, and different product types are NOT — including sibling products from the same aisle " +
+            "(a clothes DRYER is not a washing machine; a soundbar is not a TV). " +
+            "Also drop any item that is haram/immodest content.");
         sb.AppendLine("Items:");
         for (var i = 0; i < items.Count; i++)
         {

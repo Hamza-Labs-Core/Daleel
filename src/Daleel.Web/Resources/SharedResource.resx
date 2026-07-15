@@ -122,6 +122,7 @@
   <data name="Filter.Relevance" xml:space="preserve"><value>Relevance</value></data>
   <data name="Filter.PriceLowHigh" xml:space="preserve"><value>Price: low → high</value></data>
   <data name="Filter.PriceHighLow" xml:space="preserve"><value>Price: high → low</value></data>
+  <data name="Filter.TopRated" xml:space="preserve"><value>Top rated</value></data>
 
   <data name="Plan.Basic" xml:space="preserve"><value>Basic</value></data>
   <data name="Plan.Pro" xml:space="preserve"><value>Pro</value></data>
@@ -380,6 +381,13 @@
   <data name="ModelCard.BrandSite" xml:space="preserve"><value>Brand site</value></data>
   <data name="ModelCard.Reviews" xml:space="preserve"><value>Reviews</value></data>
   <data name="ModelCard.MentionedIn" xml:space="preserve"><value>Mentioned in</value></data>
+
+  <data name="Reviews.Signal" xml:space="preserve"><value>Ratings and reviews</value></data>
+  <data name="Reviews.NReviews" xml:space="preserve"><value>{0} reviews</value></data>
+  <data name="Reviews.FromBuyers" xml:space="preserve"><value>Buyer reviews</value></data>
+  <data name="Reviews.FromSocial" xml:space="preserve"><value>Social media</value></data>
+  <data name="Reviews.FromStores" xml:space="preserve"><value>Store reviews</value></data>
+  <data name="Reviews.StoreReview" xml:space="preserve"><value>store review</value></data>
 
   <data name="History.Title" xml:space="preserve"><value>Search History</value></data>
   <data name="History.Subtitle" xml:space="preserve"><value>Every query you run is saved here automatically. Re-run it or open a saved copy.</value></data>

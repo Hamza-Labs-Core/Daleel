@@ -89,6 +89,19 @@ public class AgentServiceTests
     }
 
     [Fact]
+    public async Task AskAsync_ProductQuery_CarriesStrategyOnProducts()
+    {
+        // PlannerAndAnalyst answers the planner call with StrategyJson (ProductResearch) and
+        // everything else with plain text — enough for AskAsync to build a Products result.
+        var agent = new AgentService(PlannerAndAnalyst());
+        var answer = await agent.AskAsync("best AC in Jordan", "jordan");
+
+        answer.Products.Should().NotBeNull();
+        answer.Products!.Strategy.Should().NotBeNull();
+        answer.Products.Strategy!.Subject.Should().Be("مكيف"); // from StrategyJson
+    }
+
+    [Fact]
     public async Task AskAsync_ProductQuery_ProjectsStructuredListings()
     {
         // The priced Samsung model is sourced via LLM extraction (Google Shopping is no longer a
@@ -683,6 +696,84 @@ public class AgentServiceTests
         prompts.Should().Contain(p => p.Contains("Kettle model K1500"),
             "the tail of the grid must reach the LLM — losing it was the whole bug");
         prompts.Should().NotContain(p => p.Contains("[Home](/)"), "chrome is stripped before the LLM ever reads");
+    }
+
+    [Fact]
+    public async Task PlanAsync_ParsesSearchObjectFieldsFromLlmJson()
+    {
+        const string json = """
+            {
+              "queryType": "ProductResearch", "intent": "Product", "subject": "diapers",
+              "webQueries": ["diapers Jordan"], "shoppingQueries": [], "socialQueries": [],
+              "placesQueries": [], "urlsToRead": [], "reasoning": "diapers",
+              "product": "diapers",
+              "specs": { "size": "4" },
+              "location": "Amman",
+              "goal": "cheapest",
+              "defaultSort": "price_asc",
+              "facets": [
+                { "key": "size", "label": "Size", "unit": null, "values": ["3", "4", "5", "6"] },
+                { "key": "count", "label": "Pack count" }
+              ]
+            }
+            """;
+        var agent = new AgentService(new FakeLlmClient(_ => json));
+        var s = await agent.PlanAsync("cheapest size 4 diapers in Amman");
+
+        s.Product.Should().Be("diapers");
+        s.Specs.Should().Contain(new KeyValuePair<string, string>("size", "4"));
+        s.Location.Should().Be("Amman");
+        s.Goal.Should().Be("cheapest");
+        s.DefaultSort.Should().Be("price_asc");
+        s.Facets.Should().HaveCount(2);
+        s.Facets[0].Values.Should().Contain("4");
+        s.Facets[1].Values.Should().BeEmpty(); // omitted values default to empty, never null
+    }
+
+    [Fact]
+    public async Task PlanAsync_WithoutSearchObjectFields_LeavesThemEmpty()
+    {
+        // The pre-existing StrategyJson (top of this class) has none of the new fields.
+        var agent = new AgentService(PlannerAndAnalyst());
+        var s = await agent.PlanAsync("plan something");
+
+        s.Product.Should().BeEmpty();
+        s.Specs.Should().BeEmpty();
+        s.Goal.Should().BeEmpty();
+        s.Facets.Should().BeEmpty();
+        s.DefaultSort.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PlanAsync_ToleratesMessySearchObjectJson()
+    {
+        // LLMs emit spec values as numbers/bools, blank facet keys, and label-less facets.
+        // None of that may nuke the strategy (a strict Dictionary<string,string> threw on
+        // the numeric value, and LlmJson.Deserialize turned that into a DEAD empty plan).
+        const string json = """
+            {
+              "queryType": "ProductResearch", "subject": "kettles",
+              "webQueries": ["kettles Jordan"], "shoppingQueries": [], "socialQueries": [],
+              "placesQueries": [], "urlsToRead": [], "reasoning": "kettles",
+              "product": "kettle",
+              "specs": { "capacity": 5, "size": "4", " size ": "9", "cordless": true, "note": null },
+              "facets": [
+                { "key": "   ", "label": "Dropped" },
+                { "key": "capacity", "values": ["1.5L", "1.7L"] }
+              ]
+            }
+            """;
+        var agent = new AgentService(new FakeLlmClient(_ => json));
+        var s = await agent.PlanAsync("5L kettle");
+
+        s.WebQueries.Should().NotBeEmpty("a messy specs object must never discard the whole plan");
+        s.Specs["capacity"].Should().Be("5", "numeric spec values are coerced to strings");
+        s.Specs["size"].Should().Be("9", "keys colliding after trim resolve last-wins instead of throwing");
+        s.Specs["cordless"].Should().Be("true");
+        s.Specs.Should().NotContainKey("note", "null spec values are dropped");
+        s.Facets.Should().ContainSingle("a facet with a blank key is dropped");
+        s.Facets[0].Key.Should().Be("capacity");
+        s.Facets[0].Label.Should().Be("capacity", "an absent label falls back to the key");
     }
 }
 

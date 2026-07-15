@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using Daleel.Core.Analysis;
@@ -124,6 +125,9 @@ public sealed partial class AgentService
         {
             products = await BuildProductSearchResultAsync(strategy.Subject is { Length: > 0 } s ? s : question,
                 geo, bundle, summary, cancellationToken).ConfigureAwait(false);
+            // Carry the search object on the result: it serializes inside ResultJson (persistence)
+            // and the grid binds this exact record (delivery) — one write serves both.
+            products = products with { Strategy = strategy };
         }
 
         return new AgentAnswer
@@ -643,6 +647,15 @@ public sealed partial class AgentService
         [JsonPropertyName("placesQueries")] public List<string>? PlacesQueries { get; set; }
         [JsonPropertyName("urlsToRead")] public List<string>? UrlsToRead { get; set; }
         [JsonPropertyName("reasoning")] public string? Reasoning { get; set; }
+        [JsonPropertyName("product")] public string? Product { get; set; }
+
+        // Tolerant of mixed value types: LLMs emit spec values as strings, numbers or bools, and a
+        // strict Dictionary<string, string> would throw — discarding the ENTIRE strategy.
+        [JsonPropertyName("specs")] public Dictionary<string, JsonElement>? Specs { get; set; }
+        [JsonPropertyName("location")] public string? Location { get; set; }
+        [JsonPropertyName("goal")] public string? Goal { get; set; }
+        [JsonPropertyName("defaultSort")] public string? DefaultSort { get; set; }
+        [JsonPropertyName("facets")] public List<FacetDto>? Facets { get; set; }
 
         public SearchStrategy ToStrategy() => new()
         {
@@ -656,7 +669,50 @@ public sealed partial class AgentService
             SocialQueries = SocialQueries ?? new List<string>(),
             PlacesQueries = PlacesQueries ?? new List<string>(),
             UrlsToRead = UrlsToRead ?? new List<string>(),
-            Reasoning = Reasoning
+            Reasoning = Reasoning,
+            Product = Product ?? string.Empty,
+            Specs = CoerceSpecs(Specs),
+            Location = Location ?? string.Empty,
+            Goal = Goal ?? string.Empty,
+            DefaultSort = DefaultSort ?? string.Empty,
+            Facets = (Facets ?? new List<FacetDto>())
+                .Where(f => !string.IsNullOrWhiteSpace(f.Key))
+                .Select(f => new SearchFacet
+                {
+                    Key = f.Key!.Trim(),
+                    Label = string.IsNullOrWhiteSpace(f.Label) ? f.Key!.Trim() : f.Label!.Trim(),
+                    Unit = string.IsNullOrWhiteSpace(f.Unit) ? null : f.Unit!.Trim(),
+                    Values = f.Values ?? new List<string>()
+                })
+                .ToList()
         };
+
+        // Manual loop + indexer assignment (same pattern as the product-extraction path): keys that
+        // collide after trimming ("size" + "size ") must resolve last-wins, never throw — a thrown
+        // ArgumentException here escapes LlmJson's catch and faults the whole plan.
+        private static Dictionary<string, string> CoerceSpecs(Dictionary<string, JsonElement>? raw)
+        {
+            var specs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            if (raw is { Count: > 0 })
+            {
+                foreach (var (key, value) in raw)
+                {
+                    if (!string.IsNullOrWhiteSpace(key) && SpecValue(value) is { Length: > 0 } sv)
+                    {
+                        specs[key.Trim()] = sv;
+                    }
+                }
+            }
+            return specs;
+        }
+    }
+
+    /// <summary>Wire shape for one planner-named facet.</summary>
+    private sealed class FacetDto
+    {
+        [JsonPropertyName("key")] public string? Key { get; set; }
+        [JsonPropertyName("label")] public string? Label { get; set; }
+        [JsonPropertyName("unit")] public string? Unit { get; set; }
+        [JsonPropertyName("values")] public List<string>? Values { get; set; }
     }
 }

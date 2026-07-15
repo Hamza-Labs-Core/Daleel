@@ -65,4 +65,47 @@ public record SearchStrategy
 
     /// <summary>The LLM's short rationale for this plan (for transparency/logging).</summary>
     public string? Reasoning { get; init; }
+
+    // ── Structured query metadata (the "search object" fields) ─────────────────
+    // All optional with empty defaults: a planner that omits them leaves the grid on its generic
+    // behavior, and old persisted ResultJson (which lacks them) deserializes unchanged.
+
+    /// <summary>The actual product the user wants ("diapers"), distinct from the free-text Subject.</summary>
+    public string Product { get; init; } = string.Empty;
+
+    /// <summary>Constraints stated IN the query ("size"→"4", "color"→"white") — not per-result specs.</summary>
+    public IReadOnlyDictionary<string, string> Specs { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>The place/market scope the user named ("Amman"), when any.</summary>
+    public string Location { get; init; } = string.Empty;
+
+    /// <summary>The user's goal as free text ("cheapest", "best for newborns"). Guides ranking.</summary>
+    public string Goal { get; init; } = string.Empty;
+
+    /// <summary>Filter dimensions relevant to this product type, named by the planner.</summary>
+    public IReadOnlyList<SearchFacet> Facets { get; init; } = Array.Empty<SearchFacet>();
+
+    /// <summary>The goal-driven default sort key ("price_asc", "rating", …); empty ⇒ resolver heuristics.</summary>
+    public string DefaultSort { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// One product-type-specific filter dimension for the result grid, named by the planner
+/// ("Screen Size" for TVs, "Size" for diapers). <see cref="Key"/> binds to a
+/// <c>ProductModel.Specs</c> key; <see cref="Values"/> are optional candidate options that keep
+/// the facet useful when results carry sparse specs (options = union of these + result values).
+/// </summary>
+public record SearchFacet
+{
+    /// <summary>The spec key this facet filters on — binds to a <c>ProductModel.Specs</c> key.</summary>
+    public string Key { get; init; } = string.Empty;
+
+    /// <summary>Human-readable display label for the facet ("Screen Size").</summary>
+    public string Label { get; init; } = string.Empty;
+
+    /// <summary>Optional unit hint for the dimension ("inch", "kg"); null when unitless.</summary>
+    public string? Unit { get; init; }
+
+    /// <summary>Planner-supplied candidate options; the grid merges these with values seen in results.</summary>
+    public IReadOnlyList<string> Values { get; init; } = Array.Empty<string>();
 }

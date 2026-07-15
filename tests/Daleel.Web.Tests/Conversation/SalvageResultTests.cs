@@ -58,6 +58,28 @@ public class SalvageResultTests
     }
 
     [Fact]
+    public void SalvagedAnswer_CarriesSearchStrategy_OnProducts()
+    {
+        // The salvage fallback fires when the aggregate step never stamped the strategy (state.Answer
+        // is null) — a faulted run persists this JSON, so it must carry the search object too, or the
+        // grid permanently loses the facets/sort for that search.
+        var state = new SearchPipelineState
+        {
+            Query = "iphone 15",
+            Geo = "jordan",
+            Products = OneProduct(),
+            Strategy = new SearchStrategy { QueryType = QueryType.ProductResearch, Subject = "iphone 15" }
+        };
+
+        var json = WorkflowSearchRunner.SalvageResultJson(state);
+
+        json.Should().NotBeNullOrEmpty();
+        var answer = ResultSerialization.Deserialize<AgentAnswer>(json!);
+        answer!.Products!.Strategy.Should().NotBeNull();
+        answer.Products!.Strategy!.Subject.Should().Be("iphone 15");
+    }
+
+    [Fact]
     public void ReturnsNull_WhenNothingWasExtracted()
     {
         // A genuinely empty run (fault before any products) has nothing worth surfacing — caller then

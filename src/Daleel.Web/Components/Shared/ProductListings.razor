@@ -44,8 +44,25 @@
                 <MudSelectItem T="string" Value="@("price_asc")">@L["Filter.PriceLowHigh"]</MudSelectItem>
                 <MudSelectItem T="string" Value="@("price_desc")">@L["Filter.PriceHighLow"]</MudSelectItem>
                 <MudSelectItem T="string" Value="@("sellers")">@L["ProductFilters.MostSellers"]</MudSelectItem>
+                <MudSelectItem T="string" Value="@("rating")">@L["Filter.TopRated"]</MudSelectItem>
             </MudSelect>
         </MudItem>
+        @foreach (var facet in _facets)
+        {
+            <MudItem xs="6" sm="3" @key="facet.Key">
+                <MudSelect T="string"
+                           Value="@_facetSelections.GetValueOrDefault(facet.Key, AllValue)"
+                           ValueChanged="@(v => SetFacet(facet.Key, v))"
+                           Label="@(facet.Unit is { Length: > 0 } u ? $"{facet.Label} ({u})" : facet.Label)"
+                           Dense="true" Margin="Margin.Dense" Disabled="@(facet.Options.Count == 0)">
+                    <MudSelectItem T="string" Value="@AllValue">@L["ProductFilters.Any"]</MudSelectItem>
+                    @foreach (var opt in facet.Options)
+                    {
+                        <MudSelectItem T="string" Value="@opt">@opt</MudSelectItem>
+                    }
+                </MudSelect>
+            </MudItem>
+        }
         <MudItem xs="12" sm="6">
             <div class="d-flex align-center gap-2">
                 <MudNumericField T="decimal?" @bind-Value="MinPrice" Label="@L["Filter.MinPrice"]" Variant="Variant.Text"
@@ -83,6 +100,7 @@ else
         {
             <MudItem xs="12" sm="6" md="4" @key="model">
                 <ModelCard Model="model"
+                           StoreReviews="@StoreReviewsFor(model)"
                            Query="@Result.Query"
                            Geo="@Result.Geo"
                            Target="@FlagTarget"
@@ -183,6 +201,12 @@ else
     private decimal? _maxPrice;
     private readonly HashSet<int> _selected = new();
 
+    // Facet filters (the search object's product-type dimensions). _facets rebuilds on every new
+    // Result (streamed results refresh the options); _facetSelections resets only on a new SEARCH
+    // (same identity rule as the sort seed — a mid-run facet choice must survive streaming pushes).
+    private IReadOnlyList<FacetView> _facets = Array.Empty<FacetView>();
+    private readonly Dictionary<string, string> _facetSelections = new(StringComparer.OrdinalIgnoreCase);
+
     private List<string> _brands = new();
     private List<(int Index, ProductModel Model)> _indexed = new();
 
@@ -213,6 +237,27 @@ else
         Recompute();
     }
 
+    private void SetFacet(string key, string value)
+    {
+        if (_facetSelections.GetValueOrDefault(key, AllValue) != value)
+        {
+            _facetSelections[key] = value;
+            OnFilterChanged();
+        }
+    }
+
+    // Memoized store-review join per card. StoreReviewMatcher.ReviewsFor is a fuzzy O(offers×stores)
+    // scan, and calling it inline from the grid markup would re-run it for every card on EVERY render
+    // (against this file's Recompute()-caches discipline). Keyed by model reference — a new Result
+    // carries new model instances, so the cache is cleared in the new-Result branch below.
+    private readonly Dictionary<ProductModel, IReadOnlyList<StoreReview>> _storeReviewCache = new();
+
+    /// <summary>The (cached) reviews of the stores selling this model, for the card's review signal.</summary>
+    private IReadOnlyList<StoreReview> StoreReviewsFor(ProductModel m) =>
+        _storeReviewCache.TryGetValue(m, out var r)
+            ? r
+            : _storeReviewCache[m] = StoreReviewMatcher.ReviewsFor(m, Result.Stores);
+
     // The Result last seen by OnParametersSet: page 1 is forced only when a genuinely NEW result
     // arrives (fresh search, or the background enrichment streaming a refreshed result) — a parent
     // re-render passing the SAME Result must not yank the user off the page they're browsing.
@@ -222,6 +267,10 @@ else
     // off the page they flipped to internally — only a genuine URL/page change re-syncs.
     private int _lastInitialPage = 1;
 
+    // The SEARCH (not result) the sort was last seeded for. Streaming pushes a new Result
+    // reference per update for the same search, so reference identity alone can't gate the seed.
+    private (string Query, string Geo)? _lastSeedIdentity;
+
     protected override void OnParametersSet()
     {
         if (!ReferenceEquals(_lastResult, Result))
@@ -229,6 +278,36 @@ else
             // A genuinely new result opens on the host-requested page (deep-link ?page=N), else page 1.
             _lastResult = Result;
             _page = InitialPage;
+
+            // New Result = new model instances (reference-keyed cache would only grow stale entries).
+            _storeReviewCache.Clear();
+
+            // Rebuild the facet OPTIONS on every new Result reference — streamed results widen the
+            // option union as more products arrive.
+            _facets = FacetBuilder.Build(Result.Strategy, Result.Schema, Result.Models);
+
+            // Seed the sort/facet SELECTIONS from the search object ONLY when a genuinely new SEARCH
+            // arrives. Streaming pushes a NEW Result reference every ~800ms for the SAME search
+            // (Query+Geo unchanged), and reseeding on each push would clobber the user's mid-run
+            // sort/facet choices.
+            var identity = (Result.Query, Result.Geo);
+            if (_lastSeedIdentity != identity)
+            {
+                _lastSeedIdentity = identity;
+                _sort = SortResolver.Resolve(Result.Strategy);
+
+                // New search: reset facet selections, pre-selecting the constraints the user put IN
+                // the query ("size 4 diapers" opens with size=4 already applied).
+                _facetSelections.Clear();
+                foreach (var facet in _facets)
+                {
+                    var stated = Result.Strategy?.Specs.FirstOrDefault(
+                        kv => FacetBuilder.NormalizeKey(kv.Key) == FacetBuilder.NormalizeKey(facet.Key));
+                    _facetSelections[facet.Key] = stated is { Key.Length: > 0 } kv2
+                        ? kv2.Value.Trim()
+                        : AllValue;
+                }
+            }
         }
         else if (InitialPage != _lastInitialPage)
         {
@@ -267,6 +346,16 @@ else
         if (_condition != AllValue)
             q = q.Where(x => x.Model.Offers.Any(o => string.Equals(o.Condition, _condition, StringComparison.OrdinalIgnoreCase)));
 
+        foreach (var (facetKey, selected) in _facetSelections)
+        {
+            if (selected != AllValue)
+            {
+                // Pass the facet's declared unit so "9" matches a "9 Kg" spec (unit-tolerant equality).
+                var unit = _facets.FirstOrDefault(f => string.Equals(f.Key, facetKey, StringComparison.OrdinalIgnoreCase))?.Unit;
+                q = q.Where(x => FacetBuilder.Matches(x.Model, facetKey, selected, unit));
+            }
+        }
+
         // Sort/filter by the DISPLAYED price (LowestOffer's — exact preferred over indicative), so
         // the grid order always matches the figures on the cards. Keying off LowestPrice (min over
         // ALL offers incl. loosely-parsed ones) would order a "From 500" card above a "From 490" one.
@@ -281,6 +370,9 @@ else
             "price_asc" => q.OrderBy(x => x.Model.DisplayPrice ?? decimal.MaxValue),
             "price_desc" => q.OrderByDescending(x => x.Model.DisplayPrice ?? decimal.MinValue),
             "sellers" => q.OrderByDescending(x => x.Model.SellerCount),
+            "rating" => q.OrderByDescending(x => x.Model.Rating.HasValue)
+                         .ThenByDescending(x => x.Model.Rating ?? 0)
+                         .ThenByDescending(x => x.Model.RatingCount ?? 0),
             _ => q
         };
 
