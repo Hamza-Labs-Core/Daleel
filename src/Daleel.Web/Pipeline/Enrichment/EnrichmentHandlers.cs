@@ -1041,9 +1041,11 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
         pageMarker ?? (IsSecondhand(current) ? null : current);
 
     /// <summary>
-    /// The page's primary product photo: the first markdown image whose URL doesn't look like
-    /// chrome (logo/icon/sprite/banner/placeholder). The rendered markdown keeps product imagery
-    /// as ![alt](url), so the first non-chrome image on a DETAIL page is almost always the product.
+    /// The page's primary product photo: the first markdown image with PRODUCT EVIDENCE — a
+    /// product-ish PATH segment (products/item/upload/catalog/media/goods) — and none of the
+    /// chrome/promo markers. Requiring evidence matters: the first image on a store page is often
+    /// an app-download promo or a country flag (QA: Mumzworld, Dumyah), and a WRONG photo on the
+    /// card misleads where a placeholder merely disappoints.
     /// </summary>
     internal static string? ExtractImage(string content)
     {
@@ -1051,19 +1053,35 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
         {
             var url = m.Groups[1].Value.Trim();
             var lower = url.ToLowerInvariant();
-            if (lower.Contains("logo") || lower.Contains("icon") || lower.Contains("sprite") ||
-                lower.Contains("banner") || lower.Contains("placeholder") || lower.EndsWith(".svg"))
+            if (ImageBlocklist.Any(w => lower.Contains(w, StringComparison.Ordinal)) || lower.EndsWith(".svg"))
             {
                 continue;
             }
-            if (Uri.TryCreate(url, UriKind.Absolute, out var abs) &&
-                (abs.Scheme == Uri.UriSchemeHttp || abs.Scheme == Uri.UriSchemeHttps))
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var abs) ||
+                (abs.Scheme != Uri.UriSchemeHttp && abs.Scheme != Uri.UriSchemeHttps))
+            {
+                continue;
+            }
+
+            // Evidence lives in the PATH — hosts routinely contain "cdn"/"images" for everything.
+            var path = abs.AbsolutePath.ToLowerInvariant();
+            if (ImagePathEvidence.Any(w => path.Contains(w, StringComparison.Ordinal)))
             {
                 return abs.ToString();
             }
         }
         return null;
     }
+
+    private static readonly string[] ImageBlocklist =
+    {
+        "logo", "icon", "sprite", "banner", "placeholder", "popup", "promo", "flag", "advert"
+    };
+
+    private static readonly string[] ImagePathEvidence =
+    {
+        "/product", "/item", "/upload", "/catalog", "/media", "/goods", "/cdn/"
+    };
 
     private static readonly System.Text.RegularExpressions.Regex ImagePattern = new(
         @"!\[[^\]]*\]\((https?://[^)\s]+)\)",

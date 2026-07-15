@@ -252,6 +252,31 @@ public class OfferVerificationTests
     }
 
     [Fact]
+    public void ExtractImage_SkipsPromosAndFlags_WithoutProductEvidence()
+    {
+        // QA: the first page image on Mumzworld is a "Download our app, 20% off" promo and on
+        // Dumyah a country flag — a WRONG photo on the card is worse than a placeholder. An image
+        // only qualifies with product evidence: a product-ish URL path segment (product/item/
+        // upload/cdn/media) — promos and site chrome live elsewhere.
+        const string page = """
+            ![Download Our App Get 20% OFF](https://cdn-images.prom.mumzworld.com/app-popup/new20.png)
+            ![jo flag](https://dumyah.com/image/flags/jo.png)
+            # O2COOL Deluxe Misting Fan
+            ![O2COOL fan](https://dumyah.com/image/cache/catalog/products/o2cool-mist-500x500.jpg)
+            """;
+        OfferVerificationHandler.ExtractImage(page)
+            .Should().Be("https://dumyah.com/image/cache/catalog/products/o2cool-mist-500x500.jpg");
+    }
+
+    [Fact]
+    public void ExtractImage_PromoOnProductPath_StillSkippedByKeyword()
+    {
+        OfferVerificationHandler.ExtractImage(
+                "![sale](https://store.jo/cdn/products/app-popup-banner.png) no real photo here")
+            .Should().BeNull("promo keywords disqualify even product-path images");
+    }
+
+    [Fact]
     public void ExtractAvailability_FindsStockWording_EnglishAndArabic()
     {
         OfferVerificationHandler.ExtractAvailability("Availability: In Stock — ships today")
