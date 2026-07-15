@@ -225,4 +225,49 @@ public class OfferVerificationTests
                 "Its thermoblock heats in forty seconds, and the frother steams milk for cappuccino at home.")
             .Should().BeFalse();
     }
+
+    // ── Detail-page image + availability extraction (verifypage backfill) ─────────
+    // The drain already fetches every card's detail page (direct link); the photo and stock
+    // wording are ON that page, so the fetch must harvest them too — this is what fills the
+    // imageless/stockless cards for stores whose LISTING pages carry only name+link.
+
+    [Fact]
+    public void ExtractImage_ReturnsTheFirstProductLookingImage()
+    {
+        const string page = """
+            [Home](/) ![logo](https://store.jo/assets/logo.svg)
+            # Geepas 8" Rechargeable Fan
+            ![Geepas fan](https://store.jo/cdn/products/gf21233-main.jpg)
+            Price on request.
+            """;
+        OfferVerificationHandler.ExtractImage(page)
+            .Should().Be("https://store.jo/cdn/products/gf21233-main.jpg", "logos/sprites are skipped");
+    }
+
+    [Fact]
+    public void ExtractImage_NothingProductLike_ReturnsNull()
+    {
+        OfferVerificationHandler.ExtractImage("![icon](https://store.jo/i/icon.svg) plain text, no photos")
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void ExtractAvailability_FindsStockWording_EnglishAndArabic()
+    {
+        OfferVerificationHandler.ExtractAvailability("Availability: In Stock — ships today")
+            .Should().NotBeNull();
+        Daleel.Web.Services.StockStatus.Classify(
+                OfferVerificationHandler.ExtractAvailability("Availability: In Stock — ships today"))
+            .Should().Be(Daleel.Web.Services.Stock.InStock);
+        Daleel.Web.Services.StockStatus.Classify(
+                OfferVerificationHandler.ExtractAvailability("هذا المنتج غير متوفر حالياً"))
+            .Should().Be(Daleel.Web.Services.Stock.OutOfStock);
+    }
+
+    [Fact]
+    public void ExtractAvailability_NoStockWording_ReturnsNull()
+    {
+        OfferVerificationHandler.ExtractAvailability("A lovely fan with 3 speeds and a remote.")
+            .Should().BeNull();
+    }
 }

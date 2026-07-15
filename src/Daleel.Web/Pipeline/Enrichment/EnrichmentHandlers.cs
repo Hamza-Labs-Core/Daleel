@@ -1041,6 +1041,61 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
         pageMarker ?? (IsSecondhand(current) ? null : current);
 
     /// <summary>
+    /// The page's primary product photo: the first markdown image whose URL doesn't look like
+    /// chrome (logo/icon/sprite/banner/placeholder). The rendered markdown keeps product imagery
+    /// as ![alt](url), so the first non-chrome image on a DETAIL page is almost always the product.
+    /// </summary>
+    internal static string? ExtractImage(string content)
+    {
+        foreach (System.Text.RegularExpressions.Match m in ImagePattern.Matches(content))
+        {
+            var url = m.Groups[1].Value.Trim();
+            var lower = url.ToLowerInvariant();
+            if (lower.Contains("logo") || lower.Contains("icon") || lower.Contains("sprite") ||
+                lower.Contains("banner") || lower.Contains("placeholder") || lower.EndsWith(".svg"))
+            {
+                continue;
+            }
+            if (Uri.TryCreate(url, UriKind.Absolute, out var abs) &&
+                (abs.Scheme == Uri.UriSchemeHttp || abs.Scheme == Uri.UriSchemeHttps))
+            {
+                return abs.ToString();
+            }
+        }
+        return null;
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex ImagePattern = new(
+        @"!\[[^\]]*\]\((https?://[^)\s]+)\)",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>
+    /// The page's stock wording, when it declares one — returned RAW (the store's own phrase) so
+    /// <c>StockStatus.Classify</c> owns the interpretation. Negative phrasings are matched first
+    /// because they contain the positive words ("out of stock", "غير متوفر").
+    /// </summary>
+    internal static string? ExtractAvailability(string content)
+    {
+        var lower = content.ToLowerInvariant();
+        foreach (var phrase in AvailabilityPhrases)
+        {
+            if (lower.Contains(phrase, StringComparison.Ordinal))
+            {
+                return phrase;
+            }
+        }
+        return null;
+    }
+
+    private static readonly string[] AvailabilityPhrases =
+    {
+        // Negatives first — they contain the positive words.
+        "out of stock", "sold out", "غير متوفر", "نفذ من المخزون", "غير متاح",
+        "pre-order", "preorder", "الطلب المسبق",
+        "in stock", "متوفر",
+    };
+
+    /// <summary>
     /// The page's own product description: the first contiguous run of ≥2 kept-prose lines totaling
     /// ≥120 characters, joined and capped at 2000. Blank lines don't break a run (paragraph
     /// spacing); dropped navigation lines do — a menu between two lines means different blocks.
@@ -1259,6 +1314,13 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
             description = OfferVerificationHandler.ExtractDescription(content);
         }
 
+        // The photo and stock wording live on this same page we already fetched — harvest them
+        // deterministically for BOTH judgment paths (the actor judges relatedness/price; imagery
+        // and stock don't need an LLM). This is what fills the imageless/stockless cards for
+        // stores whose LISTING pages carry only name + link.
+        var pageImage = OfferVerificationHandler.ExtractImage(content);
+        var pageAvailability = OfferVerificationHandler.ExtractAvailability(content);
+
         await ctx.Results.PatchAsync(item, answer =>
         {
             if (answer.Products is not { } p)
@@ -1319,11 +1381,22 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
                         next = next with { Condition = evidenced };
                     }
 
+                    if (next.Availability is null && pageAvailability is not null)
+                    {
+                        next = next with { Availability = pageAvailability };
+                    }
+
                     modelChanged |= !ReferenceEquals(next, o);
                     offers.Add(next);
                 }
 
                 var result = modelChanged ? m with { Offers = offers } : m;
+
+                if (related.Contains(m.Name) && result.ImageUrl is null && pageImage is not null)
+                {
+                    result = result with { ImageUrl = pageImage };
+                    modelChanged = true;
+                }
 
                 if (related.Contains(m.Name) && description is { } prose &&
                     OfferVerificationHandler.NeedsDetails(result))
