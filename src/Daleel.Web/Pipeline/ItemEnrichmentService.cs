@@ -573,15 +573,15 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             rows.AddRange(await _scrapedPrices.ListRecentByStoreAsync(storeName!, since, ct));
         }
 
-        // The exact shape the shared matcher consumes: name/price/currency/sourceUrl — no image, so
-        // this path can only contribute offers, like the browser fallback it rides through. That
-        // branch also marks the offer indicative, which is right here too: an up-to-an-hour-old
+        // The shape the shared matcher consumes: name/price/currency/sourceUrl (+ the crawl's image when
+        // it stored one). This branch marks the offer indicative, which is right here: an up-to-an-hour-old
         // observation is a lead to verify at the store, not a live quote.
         var pool = rows
             .Where(r => r.Price is not null && !string.IsNullOrWhiteSpace(r.ProductName))
             .Select(r => new BrowserPrice(
                 r.Price!.Value, r.Currency ?? string.Empty, r.ProductName,
-                string.IsNullOrWhiteSpace(r.StoreName) ? domain : r.StoreName, r.SourceUrl ?? string.Empty))
+                string.IsNullOrWhiteSpace(r.StoreName) ? domain : r.StoreName, r.SourceUrl ?? string.Empty,
+                string.IsNullOrWhiteSpace(r.ImageUrl) ? null : r.ImageUrl))
             .ToList();
         if (pool.Count == 0)
         {
@@ -592,10 +592,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // and persisting them again would duplicate the append-only series.
         var (updated, priced, _, _, _) = AttachPoolToModels(models, new List<CatalogProduct>(), pool, storeName);
 
-        // Drained edge catalogues create models too — indicative offers, like every drained price.
+        // Drained edge catalogues create models too — indicative offers, like every drained price. When
+        // the crawl stored a photo on the row, the new model carries it (the site-crawl's own image),
+        // instead of landing imageless and needing a paid image lookup that may find nothing.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated ?? models,
-            pool.Select(b => (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, (string?)null, Indicative: true)),
+            pool.Select(b => (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, b.ImageUrl, Indicative: true)),
             storeName, query);
         return priced > 0 || created.Count > 0
             ? (withNew, priced, created)
@@ -861,6 +863,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 };
                 item = item with { Offers = item.Offers.Append(offer).ToList() };
                 priced++;
+
+                // The scraped-price path (unlike a live rendered line) may carry the crawl's own photo —
+                // fill it when this model has none, so an imageless web-discovered item gets the store's image.
+                if (string.IsNullOrWhiteSpace(item.ImageUrl) && bp.ImageUrl is { Length: > 0 } bpImg)
+                {
+                    item = item with { ImageUrl = bpImg };
+                    images++;
+                }
                 observations.Add(new ScrapedPrice
                 {
                     ProductName = m.Name,
@@ -1674,43 +1684,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     // convention 404'd nearly every non-Shopify store — SiteSearchCandidates now tries the learned
     // per-domain template first, then the known platform conventions.
 
-    /// <summary>
-    /// Query words that carry no product identity — never enough on their own to call a catalogue
-    /// entry "what the user searched for".
-    /// </summary>
-    private static readonly HashSet<string> QueryStopwords = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "in", "the", "a", "an", "for", "of", "and", "or", "best", "price", "prices",
-        "buy", "cheap", "deal", "deals", "near", "me", "shop", "store", "stores", "online"
-    };
-
-    private static List<string> SignificantQueryTokens(string? query, string? geo = null)
-    {
-        if (string.IsNullOrWhiteSpace(query))
-        {
-            return new List<string>();
-        }
-
-        // Geography words never appear in product names ("best acs in JORDAN") — counting them
-        // toward the two-token requirement effectively demanded geo-in-name and killed every
-        // discovery for short queries. They are market scope, not product identity.
-        var geoTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(geo))
-        {
-            geoTokens.UnionWith(Tokens(geo!));
-            // The market's own place names are market scope too: the raw geo key strips "jordan"
-            // but not "amman", and "coffee grinder AMMAN" typed into a store's search box
-            // AND-matches nothing — the store answers with its no-results page (QA: 61 harvests).
-            var profile = GeoProfiles.ResolveOrDefault(geo);
-            geoTokens.UnionWith(Tokens(profile.Country));
-            geoTokens.UnionWith(Tokens(profile.CenterCity));
-        }
-        // ShortTokens (2+ chars): two-letter categories are real products — "AC", "TV" — and the
-        // stopword list already removes the two-letter noise words ("in", "me").
-        return ShortTokens(query!)
-            .Where(tok => tok.Length >= 2 && !QueryStopwords.Contains(tok) && !geoTokens.Contains(tok))
-            .ToList();
-    }
+    // Geography words never appear in product names ("best acs in JORDAN"), and the market's own place
+    // names ("amman") typed into a store's search box AND-match nothing — the store answers with its
+    // no-results page (QA: 61 harvests). Stripping them down to product tokens now lives in the shared
+    // QueryScope so the enrichment harvest and the LLM site crawl can never drift apart on it.
+    private static List<string> SignificantQueryTokens(string? query, string? geo = null) =>
+        QueryScope.SignificantTokens(query, geo).ToList();
 
     /// <summary>
     /// Singular/plural-tolerant token match, requiring at least TWO query tokens when the query has
@@ -1977,8 +1956,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         }
     }
 
-    /// <summary>A price scraped off a rendered store page, with the source line for token matching.</summary>
-    private readonly record struct BrowserPrice(decimal Price, string Currency, string Line, string Store, string Url);
+    /// <summary>
+    /// A price scraped off a rendered store page, with the source line for token matching. <see cref="ImageUrl"/>
+    /// is carried only by the persisted-price path (<see cref="AttachScrapedPricesAsync"/>), where the LLM
+    /// site-crawl stored a photo on the row; the live browser-harvest sources leave it null (a rendered price
+    /// line has no image), which the image-fill below treats as "nothing to attach".
+    /// </summary>
+    private readonly record struct BrowserPrice(
+        decimal Price, string Currency, string Line, string Store, string Url, string? ImageUrl = null);
 
     private static bool HasPrice(ProductModel m) => m.Offers.Any(o => o.Price is not null);
 

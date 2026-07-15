@@ -21,7 +21,8 @@ public sealed class BrandResearchWorkflow : WorkflowBase
                 new ScrapeBrandCatalogActivity(),    // 2. scrape models/specs/images via Context.dev
                 new SynthesizeBrandProfileActivity(),// 3. LLM reputation profile → UI shape
                 new SaveBrandProfileActivity(),      // 4. persist for reuse
-                new DownloadBrandImagesActivity()    // 5. images → object storage (when configured)
+                new DownloadBrandImagesActivity(),   // 5. images → object storage (when configured)
+                new CrawlBrandSiteActivity()         // 6. LLM-crawl the brand site (additive product discovery)
             }
         };
     }

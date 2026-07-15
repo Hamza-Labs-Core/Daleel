@@ -218,10 +218,43 @@ public sealed partial class AgentService
             return null;
         }
 
+        var page = await ScrapePageAsync(url, cancellationToken).ConfigureAwait(false);
+        return page is { Success: true } && page.Content.Length > 0 ? page : null;
+    }
+
+    /// <summary>
+    /// Hard per-site cap on a single page scrape. A slow or redirect-looping site (a real "action.jo"
+    /// 301 chain rode <see cref="HttpClient"/>'s ~100s-per-attempt default across retries and hung the
+    /// crawl for ~5 minutes) must never burn the whole search's time budget, so each read is abandoned
+    /// after this. Overridable via <c>CRAWL_PAGE_READ_TIMEOUT_SECONDS</c>; clamped to a sane range.
+    /// </summary>
+    private static readonly TimeSpan PageReadTimeout = ResolvePageReadTimeout();
+
+    private static TimeSpan ResolvePageReadTimeout()
+    {
+        var raw = Environment.GetEnvironmentVariable("CRAWL_PAGE_READ_TIMEOUT_SECONDS");
+        var seconds = int.TryParse(raw, out var parsed) && parsed > 0 ? parsed : 30;
+        return TimeSpan.FromSeconds(Math.Clamp(seconds, 5, 120));
+    }
+
+    /// <summary>
+    /// Scrapes one page to markdown under a per-site <see cref="PageReadTimeout"/>: a timed-out or failed
+    /// read yields null (the caller moves on) while a genuine outer cancellation — cost cap, user cancel,
+    /// workflow deadline — still propagates. Shared by the single-page (crawl / deep-dive) and multi-URL
+    /// read paths so both are bounded identically.
+    /// </summary>
+    private async Task<ScrapedPage?> ScrapePageAsync(string url, CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(PageReadTimeout);
         try
         {
-            var page = await _scraper.ScrapeAsync(url, ScrapeFormat.Markdown, cancellationToken).ConfigureAwait(false);
-            return page.Success && page.Content.Length > 0 ? page : null;
+            return await _scraper!.ScrapeAsync(url, ScrapeFormat.Markdown, timeoutCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+        {
+            Log($"page scrape timed out after {PageReadTimeout.TotalSeconds:0}s for '{url}'");
+            return null;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -277,15 +310,8 @@ public sealed partial class AgentService
                 return new ScrapedPage { Url = url, Success = false, Error = "blocked: unsafe url" };
             }
 
-            try
-            {
-                return await _scraper.ScrapeAsync(url, ScrapeFormat.Markdown, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                Log($"scrape failed for '{url}': {ex.Message}");
-                return new ScrapedPage { Url = url, Success = false, Error = ex.Message };
-            }
+            var page = await ScrapePageAsync(url, cancellationToken).ConfigureAwait(false);
+            return page ?? new ScrapedPage { Url = url, Success = false, Error = "scrape failed or timed out" };
         });
 
         var pages = await Task.WhenAll(tasks).ConfigureAwait(false);

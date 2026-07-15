@@ -557,6 +557,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                     svc.Progress = progress;
                     s.Geo = job.Geo;
                     s.SearchId = job.Id.ToString();
+                    s.Query = products.Query;
                     s.Brand = brand;
                     s.Result = brand;
                 },
@@ -603,6 +604,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
                     svc.Progress = progress;
                     s.Geo = job.Geo;
                     s.SearchId = job.Id.ToString();
+                    s.Query = products.Query;
                     s.Store = store;
                     s.Result = store;
                 },

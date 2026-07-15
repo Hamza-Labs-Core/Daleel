@@ -482,6 +482,7 @@ public sealed class DispatchEnrichmentWorkflowsActivity : CancellableActivity
                     svc.Progress = services.Progress;
                     s.Geo = state.Geo;
                     s.SearchId = state.SearchId;
+                    s.Query = state.Query;
                     s.Brand = brand;
                     s.Result = brand;
                 },
@@ -508,6 +509,7 @@ public sealed class DispatchEnrichmentWorkflowsActivity : CancellableActivity
                     svc.Progress = services.Progress;
                     s.Geo = state.Geo;
                     s.SearchId = state.SearchId;
+                    s.Query = state.Query;
                     s.Store = store;
                     s.Result = store;
                 },

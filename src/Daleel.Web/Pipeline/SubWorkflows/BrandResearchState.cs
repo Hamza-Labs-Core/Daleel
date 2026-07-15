@@ -13,6 +13,9 @@ public sealed class BrandResearchState : SubWorkflowState
     /// <summary>The brand as extracted from the search (input).</summary>
     public BrandInfo Brand { get; set; } = default!;
 
+    /// <summary>The shopper's original search query — threaded down so the LLM site-crawl can navigate toward it.</summary>
+    public string Query { get; set; } = string.Empty;
+
     /// <summary>The enriched brand (output). Starts equal to <see cref="Brand"/>; folds in the saved profile.</summary>
     public BrandInfo Result { get; set; } = default!;
 

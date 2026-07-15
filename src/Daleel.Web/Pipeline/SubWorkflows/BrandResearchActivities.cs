@@ -6,6 +6,7 @@ using Daleel.Web.Storage;
 using Elsa.Extensions;
 using Elsa.Workflows;
 using Elsa.Workflows.Attributes;
+using Microsoft.Extensions.Logging;
 
 namespace Daleel.Web.Pipeline.SubWorkflows;
 
@@ -199,4 +200,64 @@ public sealed class DownloadBrandImagesActivity : CancellableActivity
                 ["stored"] = false,
                 ["reason"] = "source-url-direct"
             });
+}
+
+/// <summary>
+/// New terminal step — additionally crawl the brand's own website with the LLM-driven
+/// <see cref="BrandCrawlWorkflow"/> to discover + persist its catalogue products. ADDITIVE (unlike the store
+/// crawl, which replaces the single-page fetch): the brand's <see cref="ScrapeBrandCatalogActivity"/> output
+/// still feeds the reputation-synthesis + image steps upstream, so this doesn't replace it — it enriches the
+/// durable product store (R2 EntityDocuments + index + prices) with what the intelligent crawl finds.
+/// Best-effort and gated on Cloudflare Browser Rendering + the crawl flag, so it no-ops when the renderer
+/// isn't configured — leaving the brand pipeline exactly as it was.
+/// </summary>
+[Activity("Daleel", "Brand", "Crawl the brand site with the LLM navigator (additive product discovery)")]
+public sealed class CrawlBrandSiteActivity : CancellableActivity
+{
+    protected override async ValueTask DoExecuteAsync(ActivityExecutionContext context)
+    {
+        var state = context.GetRequiredService<BrandResearchState>();
+        var logger = context.GetRequiredService<ILogger<CrawlBrandSiteActivity>>();
+
+        var siteUrl = state.Result.Url;
+        if (string.IsNullOrWhiteSpace(siteUrl))
+        {
+            return; // no brand website to crawl
+        }
+
+        try
+        {
+            var crawl = await CrawlDispatch.TryRunAsync<BrandCrawlWorkflow, BrandCrawlState>(
+                context,
+                (s, _) =>
+                {
+                    s.Geo = state.Geo;
+                    s.SearchId = state.SearchId;
+                    s.SiteUrl = siteUrl!;
+                    s.BrandName = state.Brand.Name;
+                    s.Category = state.Query;
+                },
+                context.CancellationToken);
+            if (crawl is null)
+            {
+                return; // crawl unavailable — the brand pipeline already did its work
+            }
+
+            state.RecordEvent(EventCategory.Extract, "brand.crawl", "site-crawl",
+                metadata: new Dictionary<string, object?>
+                {
+                    ["brand"] = state.Brand.Name,
+                    ["site"] = siteUrl,
+                    ["persisted"] = crawl.Persisted,
+                    ["priced"] = crawl.PricesRecorded,
+                    ["pages"] = crawl.PagesFetched
+                });
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            // Additive + best-effort: a crawl failure must never fault brand research.
+            logger.LogWarning(ex, "LLM site crawl failed for brand {Brand} ({Site})", state.Brand.Name, state.Result.Url);
+        }
+    }
 }
