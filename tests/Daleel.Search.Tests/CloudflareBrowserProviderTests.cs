@@ -109,4 +109,37 @@ public class CloudflareBrowserProviderTests
         result.GetProperty("products").GetArrayLength().Should()
             .Be(1, "the schema-less retry recovered the listing CF rejected under a schema");
     }
+
+    // ── Navigation timeout ─────────────────────────────────────────────────────
+    // Cloudflare's default navigation timeout is 30s; heavy Jordanian storefronts regularly blow it
+    // (QA: code 6002 "Navigation timeout of 30000 ms exceeded" killed the drain's verifypage fetches,
+    // so crawled cards kept "See price on store site" with no image). Every render request must carry
+    // an explicit, longer gotoOptions.timeout. The PIPELINE stays fast regardless — its own 30s
+    // PageReadTimeout CTS bounds those reads; only deadline-free callers (the enrichment drain) get
+    // to use the full window.
+
+    [Fact]
+    public async Task Scrape_sends_a_longer_navigation_timeout()
+    {
+        var (handler, body) = CapturingHandler("""{"success":true,"result":"# page"}""");
+
+        await Build(handler).ScrapeAsync("https://slow-store.example/p/1");
+
+        using var doc = JsonDocument.Parse(body()!);
+        doc.RootElement.GetProperty("gotoOptions").GetProperty("timeout").GetInt32()
+            .Should().Be(CloudflareBrowserProvider.NavigationTimeoutMs)
+            .And.BeGreaterThan(30_000, "CF's 30s default is exactly what times out on heavy storefronts");
+    }
+
+    [Fact]
+    public async Task Extract_sends_the_same_navigation_timeout()
+    {
+        var (handler, body) = CapturingHandler("""{"success":true,"result":{"products":[]}}""");
+
+        await Build(handler).ExtractAsync("https://store.example/x", ListingSchema);
+
+        using var doc = JsonDocument.Parse(body()!);
+        doc.RootElement.GetProperty("gotoOptions").GetProperty("timeout").GetInt32()
+            .Should().Be(CloudflareBrowserProvider.NavigationTimeoutMs);
+    }
 }
