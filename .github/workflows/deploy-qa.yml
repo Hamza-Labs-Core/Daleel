@@ -374,6 +374,7 @@ jobs:
             PIPELINE_MAX_STORES=${{ vars.QA_PIPELINE_MAX_STORES }}
             PIPELINE_MAX_ITEMS=${{ vars.QA_PIPELINE_MAX_ITEMS }}
             PIPELINE_MAX_CONCURRENT_JOBS=${{ vars.QA_PIPELINE_MAX_CONCURRENT_JOBS }}
+            PIPELINE_ENRICH_CONCURRENCY=${{ vars.QA_PIPELINE_ENRICH_CONCURRENCY || '24' }}
             # QA-only: enables the public /diagnostics provider testbench (never set in production).
             DIAGNOSTICS_ENABLED=true
             # QA hostname for Caddy/TLS. Point DNS for this name at the QA server IP,

@@ -57,9 +57,13 @@ public static class PipelineLimits
     /// Enrichment work items executed concurrently by one app instance. A throughput WIDTH like
     /// <see cref="SubWorkflowConcurrency"/> — nothing is dropped, units just wait for a claim slot;
     /// the default bounds this box's own scrape/DB pressure while the queue drains at its own pace.
-    /// Restrainable/widen-able via <c>PIPELINE_ENRICH_CONCURRENCY</c>.
+    /// Restrainable/widen-able via <c>PIPELINE_ENRICH_CONCURRENCY</c>. Units are independent by
+    /// design (direct URLs, per-unit retry ledger, patches compose under the job row lock), so the
+    /// width is limited by external courtesy, not correctness: 16 drains a 30-unit verifypage tail
+    /// (~60s each) in ~2 min instead of ~5, without bursting any single vendor unreasonably —
+    /// CF Browser does the fetching, and units within a run spread across different store domains.
     /// </summary>
-    public static int EnrichmentConcurrency { get; } = FromEnv("PIPELINE_ENRICH_CONCURRENCY", fallback: 6);
+    public static int EnrichmentConcurrency { get; } = FromEnv("PIPELINE_ENRICH_CONCURRENCY", fallback: 16);
 
     /// <summary>
     /// How many listing pages the LLM site crawler will walk per site before stopping — the pagination
