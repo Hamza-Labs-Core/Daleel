@@ -350,7 +350,9 @@ else
         {
             if (selected != AllValue)
             {
-                q = q.Where(x => FacetBuilder.Matches(x.Model, facetKey, selected));
+                // Pass the facet's declared unit so "9" matches a "9 Kg" spec (unit-tolerant equality).
+                var unit = _facets.FirstOrDefault(f => string.Equals(f.Key, facetKey, StringComparison.OrdinalIgnoreCase))?.Unit;
+                q = q.Where(x => FacetBuilder.Matches(x.Model, facetKey, selected, unit));
             }
         }
 

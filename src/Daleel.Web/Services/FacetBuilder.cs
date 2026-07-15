@@ -18,13 +18,24 @@ public sealed record FacetView(string Key, string Label, string? Unit, IReadOnly
 /// </summary>
 public static class FacetBuilder
 {
+    /// <summary>
+    /// Filter dimensions the grid ALWAYS renders as its generic controls (Brand/Source/Condition
+    /// selects, the price fields, the sort). A planner-named facet on one of these would put the
+    /// same control on screen twice (QA: a "Brand" and a "Condition" facet rendered beside the
+    /// built-in Brand and Condition filters), so they are dropped here. Keys compare loosely.
+    /// </summary>
+    private static readonly HashSet<string> BuiltInFilterKeys = new(StringComparer.Ordinal)
+    {
+        "brand", "condition", "source", "price", "sort", "sortby", "minprice", "maxprice"
+    };
+
     /// <summary>The renderable facets for this search: every named dimension with its option union.</summary>
     public static IReadOnlyList<FacetView> Build(
         SearchStrategy? strategy, ProductSchema schema, IReadOnlyList<ProductModel> models)
     {
-        var dimensions = strategy?.Facets is { Count: > 0 } named
-            ? named
-            : SchemaFallback(schema);
+        var dimensions = (strategy?.Facets is { Count: > 0 } named ? named : SchemaFallback(schema))
+            .Where(f => !DuplicatesBuiltInFilter(f.Key))
+            .ToList();
         if (dimensions.Count == 0)
         {
             return Array.Empty<FacetView>();
@@ -36,7 +47,7 @@ public static class FacetBuilder
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var v in f.Values)
             {
-                var t = v.Trim();
+                var t = CanonicalValue(v, f.Unit);
                 if (t.Length > 0 && seen.Add(t))
                 {
                     options.Add(t);
@@ -44,18 +55,56 @@ public static class FacetBuilder
             }
             foreach (var m in models)
             {
-                if (SpecValue(m, f.Key) is { } v && seen.Add(v))
+                if (SpecValue(m, f.Key) is { } v &&
+                    CanonicalValue(v, f.Unit) is { Length: > 0 } cv && seen.Add(cv))
                 {
-                    options.Add(v);
+                    options.Add(cv);
                 }
             }
             return new FacetView(f.Key, f.Label, f.Unit, options);
         }).ToList();
     }
 
-    /// <summary>True when the model's spec for the facet key (loose match) equals the selected value.</summary>
-    public static bool Matches(ProductModel model, string facetKey, string value) =>
-        SpecValue(model, facetKey) is { } v && string.Equals(v, value.Trim(), StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// True when the model's spec for the facet key (loose match) equals the selected value.
+    /// When the facet declares a <paramref name="unit"/>, both sides are canonicalized first, so a
+    /// spec of "9 Kg" matches the option "9" on a facet whose unit is "kg".
+    /// </summary>
+    public static bool Matches(ProductModel model, string facetKey, string value, string? unit = null) =>
+        SpecValue(model, facetKey) is { } v &&
+        string.Equals(CanonicalValue(v, unit), CanonicalValue(value, unit), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Strips the facet's declared unit off the end of a value ("9 Kg" → "9", "9KG" → "9" for unit
+    /// "kg") so planner candidates and per-store spec values collapse to one option instead of the
+    /// fragmented pair QA showed. Values in OTHER notations (e.g. an Arabic unit word) simply keep
+    /// their own spelling — fragmentation there is accepted rather than guessed at.
+    /// </summary>
+    private static string CanonicalValue(string value, string? unit)
+    {
+        var t = value.Trim();
+        if (unit is { Length: > 0 } && t.Length > unit.Length &&
+            t.EndsWith(unit, StringComparison.OrdinalIgnoreCase))
+        {
+            t = t[..^unit.Length].TrimEnd();
+        }
+        return t;
+    }
+
+    /// <summary>Loosely compares a facet key against the grid's built-in filter dimensions.</summary>
+    private static bool DuplicatesBuiltInFilter(string facetKey)
+    {
+        var key = NormalizeKey(facetKey);
+        if (BuiltInFilterKeys.Contains(key))
+        {
+            return true;
+        }
+
+        // "Price (JOD)" normalizes to "pricejod" — a bare price facet with a short currency/unit
+        // suffix still duplicates the built-in price fields. A real derived metric like
+        // "price per diaper" keeps a long remainder and stays a legitimate facet.
+        return key.StartsWith("price", StringComparison.Ordinal) && key.Length - "price".Length <= 5;
+    }
 
     /// <summary>The model's trimmed spec value under the loose-normalized facet key, else null.</summary>
     private static string? SpecValue(ProductModel model, string facetKey)

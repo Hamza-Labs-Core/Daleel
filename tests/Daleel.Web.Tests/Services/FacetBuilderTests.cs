@@ -94,4 +94,53 @@ public class FacetBuilderTests
         FacetBuilder.Matches(model, "size", "5").Should().BeFalse();
         FacetBuilder.Matches(model, "missing", "4").Should().BeFalse();
     }
+
+    [Fact]
+    public void Build_SkipsPlannerFacetsDuplicatingBuiltInFilters()
+    {
+        // The grid always renders Brand/Source/Condition selects and price fields; a planner-named
+        // "Brand" or "Condition" facet would show the same control twice (QA: washing-machines run).
+        var strategy = new SearchStrategy
+        {
+            Facets = new[]
+            {
+                new SearchFacet { Key = "Brand", Label = "Brand" },
+                new SearchFacet { Key = "condition", Label = "Condition" },
+                new SearchFacet { Key = "Price (JOD)", Label = "Price" },
+                new SearchFacet { Key = "capacity", Label = "Capacity", Unit = "kg" }
+            }
+        };
+
+        var facets = FacetBuilder.Build(strategy, ProductSchema.General, Array.Empty<ProductModel>());
+
+        facets.Should().ContainSingle();
+        facets[0].Key.Should().Be("capacity");
+    }
+
+    [Fact]
+    public void Options_DedupeUnitSuffixedValues()
+    {
+        // QA: the Capacity (kg) facet offered both "9" (planner) and "9 Kg" (result spec) as
+        // separate options. With the facet's declared unit, they canonicalize to one option.
+        var strategy = new SearchStrategy
+        {
+            Facets = new[] { new SearchFacet { Key = "capacity", Label = "Capacity", Unit = "kg", Values = new[] { "9" } } }
+        };
+        var models = new[] { WithSpecs(("Capacity", "9 Kg")), WithSpecs(("capacity", "9KG")) };
+
+        var facets = FacetBuilder.Build(strategy, ProductSchema.General, models);
+
+        facets[0].Options.Should().BeEquivalentTo(new[] { "9" });
+    }
+
+    [Fact]
+    public void Matches_IsUnitTolerant_WhenFacetDeclaresAUnit()
+    {
+        var model = WithSpecs(("Capacity", "9 Kg"));
+        FacetBuilder.Matches(model, "capacity", "9", unit: "kg").Should().BeTrue();
+        FacetBuilder.Matches(model, "capacity", "9 kg", unit: "kg").Should().BeTrue(); // both sides canonicalized
+        FacetBuilder.Matches(model, "capacity", "10", unit: "kg").Should().BeFalse();
+        // No unit declared → exact behavior unchanged ("9 Kg" ≠ "9").
+        FacetBuilder.Matches(model, "capacity", "9").Should().BeFalse();
+    }
 }
