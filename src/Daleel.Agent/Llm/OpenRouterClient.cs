@@ -23,7 +23,7 @@ public sealed class OpenRouterClient : HttpProviderBase, ILlmClient
     /// Default model: a strong, broadly-available model with good Arabic competence. Override
     /// per call (e.g. <c>google/gemini-2.5-flash</c> for cheaper/faster runs) via the CLI.
     /// </summary>
-    public const string DefaultModel = "anthropic/claude-sonnet-4";
+    public const string DefaultModel = "moonshotai/kimi-k2.7-code:nitro";
 
     private const string DefaultReferer = "https://github.com/Hamza-Labs-Core/Daleel";
     private const string DefaultTitle = "Daleel";

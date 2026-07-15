@@ -54,6 +54,12 @@ public record ProviderPricing
             ["google/gemini-2.5-pro"] = new(1.25m, 10m),
             ["meta-llama/llama-3.3-70b-instruct"] = new(0.12m, 0.3m),
             ["deepseek/deepseek-chat"] = new(0.14m, 0.28m),
+            // Kimi K2.7 (OpenRouter list price). The :nitro variant is a routing preference, not a
+            // different price sheet — but the lookup is exact-match on the model id, so both forms
+            // need rows or the estimate silently falls back to the (3, 15) default and inflates
+            // every run's cost ~5x (QA: a $1.2 run reported as $6.16).
+            ["moonshotai/kimi-k2.7-code"] = new(0.72m, 3.49m),
+            ["moonshotai/kimi-k2.7-code:nitro"] = new(0.72m, 3.49m),
         };
 }
 

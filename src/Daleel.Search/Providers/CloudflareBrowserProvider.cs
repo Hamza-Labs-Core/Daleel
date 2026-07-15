@@ -19,6 +19,19 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
 {
     public const string DefaultBaseUrl = "https://api.cloudflare.com";
 
+    /// <summary>
+    /// Explicit navigation timeout sent with every render (<c>gotoOptions.timeout</c>). Cloudflare's
+    /// default is 30s, and heavy storefronts regularly blow exactly that (code 6002 "Navigation
+    /// timeout of 30000 ms exceeded") — which killed the enrichment drain's verifypage fetches and
+    /// left crawled cards priceless/imageless. Deadline-bound callers stay fast regardless: the
+    /// pipeline's own 30s PageReadTimeout CTS still cancels those reads; only deadline-free callers
+    /// (the drain) actually use the full window.
+    /// </summary>
+    public const int NavigationTimeoutMs = 60_000;
+
+    /// <summary>The gotoOptions body every render request carries (see <see cref="NavigationTimeoutMs"/>).</summary>
+    private static readonly object GotoOptions = new { timeout = NavigationTimeoutMs };
+
     private readonly string _accountId;
     private readonly string _apiToken;
     public string Name => "cloudflare-browser";
@@ -59,7 +72,7 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
 
         try
         {
-            var raw = await PostAsync(Endpoint(action), new { url }, cancellationToken).ConfigureAwait(false);
+            var raw = await PostAsync(Endpoint(action), new { url, gotoOptions = GotoOptions }, cancellationToken).ConfigureAwait(false);
             var content = UnwrapResult(raw);
 
             return new ScrapedPage
@@ -101,7 +114,7 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
         {
             try
             {
-                var schemaBody = new { url, response_format = new { type = "json_schema", json_schema = schema } };
+                var schemaBody = new { url, gotoOptions = GotoOptions, response_format = new { type = "json_schema", json_schema = schema } };
                 var raw = await PostAsync(Endpoint("json"), schemaBody, cancellationToken).ConfigureAwait(false);
                 return ParseExtraction(raw);
             }
@@ -112,7 +125,7 @@ public sealed class CloudflareBrowserProvider : HttpProviderBase, IScrapeProvide
             }
         }
 
-        var freeform = new { url, prompt = FreeformExtractionPrompt };
+        var freeform = new { url, gotoOptions = GotoOptions, prompt = FreeformExtractionPrompt };
         var freeformRaw = await PostAsync(Endpoint("json"), freeform, cancellationToken).ConfigureAwait(false);
         return ParseExtraction(freeformRaw);
     }

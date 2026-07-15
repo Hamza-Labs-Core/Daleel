@@ -46,6 +46,7 @@ public static class Catalog
     /// </summary>
     public static readonly IReadOnlyList<ModelOption> Models = new[]
     {
+        new ModelOption("moonshotai/kimi-k2.7-code:nitro", "Kimi K2.7 (nitro)", "Default · throughput-routed · 262k ctx"),
         new ModelOption("anthropic/claude-sonnet-4", "Claude Sonnet 4", "Balanced · strong Arabic"),
         new ModelOption("anthropic/claude-opus-4.1", "Claude Opus 4.1", "Highest quality"),
         new ModelOption("openai/gpt-4o", "GPT-4o", "Fast, capable"),
@@ -57,7 +58,7 @@ public static class Catalog
     };
 
     /// <summary>The default model id (mirrors <c>OpenRouterClient.DefaultModel</c>).</summary>
-    public const string DefaultModel = "anthropic/claude-sonnet-4";
+    public const string DefaultModel = "moonshotai/kimi-k2.7-code:nitro";
 
     /// <summary>Resolves a geo option by key, falling back to the first entry (Jordan).</summary>
     public static GeoOption ResolveGeo(string? key) =>

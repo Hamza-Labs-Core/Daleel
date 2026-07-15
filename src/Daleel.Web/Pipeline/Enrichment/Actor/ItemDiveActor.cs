@@ -22,7 +22,7 @@ public static class ActorFlags
     public const string Model = "actor.model";
 
     /// <summary>Fallback actor model when the config row is absent/empty — a strong model (Sonnet 5 or better).</summary>
-    public const string DefaultModel = "anthropic/claude-sonnet-5";
+    public const string DefaultModel = "moonshotai/kimi-k2.7-code:nitro";
 
     /// <summary>
     /// Resolves the capable actor agent: reads <see cref="Model"/> from config (default

@@ -20,7 +20,7 @@ public static class LlmCallSites
 {
     /// <summary>A capable default for every step — the model the enrichment actors already standardised on.
     /// Per-site config overrides let an operator downgrade cheap steps or upgrade hard ones without a redeploy.</summary>
-    public const string DefaultModel = "anthropic/claude-sonnet-5";
+    public const string DefaultModel = "moonshotai/kimi-k2.7-code:nitro";
 
     public static readonly LlmCallSite Planner = new("planner", "Query planner", DefaultModel);
     public static readonly LlmCallSite Category = new("category", "Category analysis", DefaultModel);

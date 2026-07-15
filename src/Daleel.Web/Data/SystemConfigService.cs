@@ -73,10 +73,10 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "actor.itemdive", Value = ActorStepsDefault, Type = "bool" },
         new SystemConfig { Key = "actor.verifypage", Value = ActorStepsDefault, Type = "bool" },
         new SystemConfig { Key = "actor.catalog", Value = "false", Type = "bool" },
-        // The model the actor reason→act loops run on — always a CAPABLE model (Sonnet 5 or better),
-        // NOT the user's free-tier default (gpt-4o-mini can't sustain the multi-turn action protocol).
+        // The model the actor reason→act loops run on. Kimi K2.7 (262k ctx, multimodal) sustains the
+        // multi-turn action protocol at ~10x lower cost than the Sonnet default it replaced.
         // Admin-editable at /admin/settings.
-        new SystemConfig { Key = "actor.model", Value = "anthropic/claude-sonnet-5", Type = "string" },
+        new SystemConfig { Key = "actor.model", Value = "moonshotai/kimi-k2.7-code:nitro", Type = "string" },
 
         new SystemConfig { Key = "ratelimit.page_per_minute", Value = "100", Type = "int" },
         new SystemConfig { Key = "ratelimit.api_per_minute", Value = "10", Type = "int" },
@@ -86,8 +86,8 @@ public sealed class SystemConfigService : ISystemConfigService
         // When false, the search pipeline skips the cache check entirely and every search runs fresh.
         new SystemConfig { Key = "cache.search_enabled", Value = "true", Type = "bool" },
         new SystemConfig { Key = "limit.saved_results_free", Value = "10", Type = "int" },
-        new SystemConfig { Key = "model.default_free", Value = "openai/gpt-4o-mini", Type = "string" },
-        new SystemConfig { Key = "model.default_pro", Value = "anthropic/claude-sonnet-4", Type = "string" },
+        new SystemConfig { Key = "model.default_free", Value = "moonshotai/kimi-k2.7-code:nitro", Type = "string" },
+        new SystemConfig { Key = "model.default_pro", Value = "moonshotai/kimi-k2.7-code:nitro", Type = "string" },
 
         // Per-call-site pipeline model overrides (model.<site>). Each pipeline LLM step resolves its own
         // model from these (see Daleel.Core.Llm.LlmCallSites) so an operator can cost-tune every step
@@ -175,6 +175,21 @@ public sealed class SystemConfigService : ISystemConfigService
         "cost.monthly_alert",
     };
 
+    /// <summary>
+    /// Model values earlier releases seeded as DEFAULTS. A model.* row still holding one of these was
+    /// (almost certainly) never touched by an operator, so the seed pass upgrades it to the current
+    /// default — this is how an existing deployment (prod) picks up a fleet-wide model switch without
+    /// a manual /admin/settings pass. A row holding anything else is an operator's deliberate choice
+    /// and is never rewritten.
+    /// </summary>
+    private static readonly HashSet<string> SupersededModelDefaults = new(StringComparer.Ordinal)
+    {
+        "anthropic/claude-sonnet-5", "anthropic/claude-sonnet-4", "openai/gpt-4o-mini", "openai/gpt-4o",
+        // The brief plain-Kimi default: its serving pool proved too slow (a 10-min run died at 41
+        // steps); the :nitro throughput-routed variant replaced it within the same release.
+        "moonshotai/kimi-k2.7-code"
+    };
+
     /// <summary>Inserts any missing default rows and removes retired ones (idempotent; called on startup).</summary>
     public async Task SeedDefaultsAsync(CancellationToken ct = default)
     {
@@ -182,6 +197,16 @@ public sealed class SystemConfigService : ISystemConfigService
         if (retired.Count > 0)
         {
             _db.SystemConfig.RemoveRange(retired);
+        }
+
+        // Upgrade model rows stuck on a superseded default (see SupersededModelDefaults).
+        var upgradable = await _db.SystemConfig
+            .Where(c => c.Key.StartsWith("model.") || c.Key == "actor.model")
+            .Where(c => SupersededModelDefaults.Contains(c.Value))
+            .ToListAsync(ct);
+        foreach (var row in upgradable)
+        {
+            row.Value = Daleel.Core.Llm.LlmCallSites.DefaultModel;
         }
 
         var existing = await _db.SystemConfig.Select(c => c.Key).ToListAsync(ct);
@@ -196,9 +221,10 @@ public sealed class SystemConfigService : ISystemConfigService
             _db.SystemConfig.AddRange(missing);
         }
 
-        if (retired.Count > 0 || missing.Count > 0)
+        if (retired.Count > 0 || missing.Count > 0 || upgradable.Count > 0)
         {
             await _db.SaveChangesAsync(ct);
+            _cache?.Remove(CacheKey); // upgraded/added rows must be visible to the next read
         }
     }
 }
