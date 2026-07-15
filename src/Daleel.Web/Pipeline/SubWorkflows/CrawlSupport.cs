@@ -344,13 +344,20 @@ internal static class CrawlPersistence
         return wrote;
     }
 
-    /// <summary>Writes one ScrapedPrice row per priced product, keyed by the shared normalized product key.</summary>
+    /// <summary>
+    /// Writes one ScrapedPrice row per priced product — and per UNPRICED product that carries an
+    /// image, because these rows are how the grid rebuild (CatalogAttach) receives the crawl's data:
+    /// a store page with no visible price still yields a named, photographed card ("See price on
+    /// store site" beats a grey placeholder — QA: every fan/diaper card). The RETURN counts only
+    /// PRICED rows, so crawl-yield gates keep their meaning.
+    /// </summary>
     private static async Task<int> PersistPricesAsync(
         ActivityExecutionContext context, IReadOnlyList<ProductListing> products,
         string siteName, DateTimeOffset now, ILogger logger, CancellationToken ct)
     {
         var rows = products
-            .Where(p => p.Price is not null && !string.IsNullOrWhiteSpace(p.Name))
+            .Where(p => !string.IsNullOrWhiteSpace(p.Name) &&
+                        (p.Price is not null || !string.IsNullOrWhiteSpace(p.ImageUrl)))
             .Select(p => new ScrapedPrice
             {
                 ProductName = p.Name,
@@ -374,7 +381,7 @@ internal static class CrawlPersistence
         try
         {
             await repo.AddRangeAsync(rows, ct);
-            return rows.Count;
+            return rows.Count(r => r.Price is not null);
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)

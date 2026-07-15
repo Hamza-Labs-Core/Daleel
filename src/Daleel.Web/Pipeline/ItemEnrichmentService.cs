@@ -583,7 +583,19 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 string.IsNullOrWhiteSpace(r.StoreName) ? domain : r.StoreName, r.SourceUrl ?? string.Empty,
                 string.IsNullOrWhiteSpace(r.ImageUrl) ? null : r.ImageUrl))
             .ToList();
-        if (pool.Count == 0)
+
+        // Discoveries are broader than the priced pool: a store page that shows no price still yields
+        // a NAMED, PHOTOGRAPHED item ("See price on store site" is a fine card; a grey placeholder is
+        // not — QA: every fan/diaper card). An unpriced row rides along when it carries an image; an
+        // unpriced, imageless row adds nothing over the live seed path and stays out.
+        var discoveries = rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.ProductName) &&
+                        (r.Price is not null || !string.IsNullOrWhiteSpace(r.ImageUrl)))
+            .Select(r => (Name: r.ProductName, r.Price, r.Currency, Url: r.SourceUrl,
+                          ImageUrl: string.IsNullOrWhiteSpace(r.ImageUrl) ? null : r.ImageUrl,
+                          Indicative: true))
+            .ToList();
+        if (pool.Count == 0 && discoveries.Count == 0)
         {
             return (null, 0, Array.Empty<string>());
         }
@@ -597,7 +609,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // instead of landing imageless and needing a paid image lookup that may find nothing.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated ?? models,
-            pool.Select(b => (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, b.ImageUrl, Indicative: true)),
+            discoveries,
             storeName, query);
         return priced > 0 || created.Count > 0
             ? (withNew, priced, created)

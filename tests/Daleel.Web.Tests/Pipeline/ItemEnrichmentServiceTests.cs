@@ -228,6 +228,72 @@ public class ItemEnrichmentServiceTests
             .Should().Be("https://coffee.jo/img/kf520.jpg", "the crawl's own image must ride the price row onto the grid");
     }
 
+    [Fact]
+    public async Task AttachScrapedPrices_UnpricedItemWithImage_StillReachesTheGridWithItsPhoto()
+    {
+        // QA (fans/diapers): many store listings show no price ("See price on store site") but the
+        // crawl DID extract a photo. The persist and attach sides both filtered on Price != null, so
+        // the unpriced item's image was dropped and the card rendered a placeholder. An unpriced row
+        // that carries an image must still create the grid model — indicative, with its photo.
+        using var ctx = new PostgresTestContext();
+        const string domain = "fans.jo";
+        await new ScrapedPriceRepository(ctx.Db).AddRangeAsync(new[]
+        {
+            new ScrapedPrice
+            {
+                ProductName = "KDK Ceiling Fan Ultra Quiet 14W",
+                ProductKey = ProductProfile.KeyFor("KDK", null, "KDK Ceiling Fan Ultra Quiet 14W"),
+                StoreName = domain,
+                Price = null,                                        // the store page showed no price
+                SourceUrl = "https://fans.jo/products/kdk-14w",
+                ImageUrl = "https://fans.jo/img/kdk-14w.jpg",
+                Provider = "site-crawl",
+                ScrapedAt = Now
+            }
+        });
+
+        var svc = Build(ctx);
+        var (models, priced, created) = await svc.AttachScrapedPricesAsync(
+            new List<ProductModel>(), domain, storeName: domain, query: "ceiling fan", CancellationToken.None);
+
+        priced.Should().Be(0, "there is no price to attach");
+        created.Should().ContainSingle("the unpriced-but-photographed item must still reach the grid");
+        var model = models!.Single(m => m.Name == "KDK Ceiling Fan Ultra Quiet 14W");
+        model.ImageUrl.Should().Be("https://fans.jo/img/kdk-14w.jpg");
+        model.Offers.Should().ContainSingle(o => o.Url == "https://fans.jo/products/kdk-14w",
+            "the click-through to the store page must survive");
+    }
+
+    [Fact]
+    public async Task AttachScrapedPrices_UnpricedImagelessRow_CreatesNothing()
+    {
+        // An unpriced row with NO image adds nothing over the seed path — it must not create a
+        // bare name-only grid model from the drain.
+        using var ctx = new PostgresTestContext();
+        const string domain = "fans.jo";
+        await new ScrapedPriceRepository(ctx.Db).AddRangeAsync(new[]
+        {
+            new ScrapedPrice
+            {
+                ProductName = "Mystery Fan",
+                ProductKey = ProductProfile.KeyFor(null, null, "Mystery Fan"),
+                StoreName = domain,
+                Price = null,
+                ImageUrl = null,
+                Provider = "site-crawl",
+                ScrapedAt = Now
+            }
+        });
+
+        var svc = Build(ctx);
+        var (models, priced, created) = await svc.AttachScrapedPricesAsync(
+            new List<ProductModel>(), domain, storeName: domain, query: "ceiling fan", CancellationToken.None);
+
+        priced.Should().Be(0);
+        created.Should().BeEmpty();
+        models.Should().BeNull("nothing usable came out of the rows");
+    }
+
     private static AgentService NoScrapeAgent() =>
         new(new StubLlm(), new AgentOptions(), scraper: new ThrowingScraper());
 
