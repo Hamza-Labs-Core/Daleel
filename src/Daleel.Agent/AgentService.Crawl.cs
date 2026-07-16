@@ -663,7 +663,7 @@ public sealed partial class AgentService
               "model": "<model number or null>",
               "sku": "<GTIN/UPC/EAN/MPN if shown, else null>",
               "url": "<link to the product's detail page>",
-              "imageUrl": "<the product's own clean photo — NOT a promo banner, lifestyle/room scene, or logo; null if none>",
+              "imageUrl": "<a photo that shows the product — NOT a logo, promo banner, or text/graphic image; null if none>",
               "price": <price as a number, or null>,
               "currency": "<ISO currency code, e.g. {{geo.Currency}}, or null>",
               "availability": "<in stock / out of stock / preorder, or null>"
@@ -724,7 +724,7 @@ public sealed partial class AgentService
               "brand": "<brand/manufacturer>",
               "model": "<model number/code, e.g. OLED55C4>",
               "url": "<link to the model's detail page>",
-              "imageUrl": "<the model's own clean photo — NOT a promo banner, lifestyle/room scene, or logo; null if none>",
+              "imageUrl": "<a photo that shows the model — NOT a logo, promo banner, or text/graphic image; null if none>",
               "specs": { "<attribute>": "<value>" },
               "price": <number if a price is explicitly shown, else null>,
               "currency": "<ISO code if a price is shown, else null>"
@@ -754,7 +754,7 @@ public sealed partial class AgentService
           "name": "<full product name>",
           "brand": "<brand/manufacturer or null>",
           "sku": "<GTIN/UPC/EAN/MPN if shown, else null>",
-          "images": ["<product photo URLs — put the CLEAN product shot (the product by itself on a plain/white background) FIRST; EXCLUDE promotional banners/ads, lifestyle or room scenes, logos, and text graphics>"],
+          "images": ["<URLs of photos that SHOW THE PRODUCT (a studio, in-room, or lifestyle photo is all fine), primary first; EXCLUDE only images that don't show the product: logos, promotional banners/ads, and pure text/graphic images>"],
           "price": <price as a number, or null>,
           "currency": "<ISO currency code, e.g. {{geo.Currency}}, or null>",
           "availability": "<in stock / out of stock / preorder, or null>",

@@ -48,17 +48,20 @@ public sealed class OpenRouterProductImageScreen : IProductImageScreen, IDisposa
     private const int BatchSize = 8;
     private static readonly TimeSpan CallTimeout = TimeSpan.FromSeconds(90);
     private static readonly TimeSpan CacheTtl = TimeSpan.FromDays(30);
-    private const string CacheKeyPrefix = "product-shot:v1:";
+    // Bump the version when the screening CRITERIA change so stale verdicts don't pin an image to an old
+    // decision (v1 rejected in-room/lifestyle product shots; v2 keeps them and rejects only logos/graphics).
+    private const string CacheKeyPrefix = "product-shot:v2:";
 
     internal const string SystemPrompt =
-        "You screen e-commerce images. For EACH numbered image, decide whether it is a CLEAN PRODUCT SHOT: " +
-        "a photo that clearly shows the retail PRODUCT itself — the product isolated on a plain/white/neutral " +
-        "studio background, or a straightforward photo unmistakably OF the product. It is NOT a clean product " +
-        "shot when it is: a lifestyle or room scene (the product placed in a furnished room/setting), a " +
-        "promotional banner or advertisement, a logo or brand/marketplace card, a collage of many products, a " +
-        "coupon, or a pure text/graphic image. Reply with ONLY this JSON object, no prose: " +
-        "{\"reject\":[<indices (0-based) of images that are NOT a clean product shot>]}. When you are unsure, " +
-        "do NOT reject (leave the image out of the list).";
+        "You screen e-commerce images. For EACH numbered image, decide whether it actually DEPICTS THE " +
+        "PRODUCT being sold. KEEP (do NOT reject) any photo in which the product itself is clearly visible — " +
+        "whether it is on a plain/white studio background OR styled in a room, in use, or in a marketing/" +
+        "lifestyle setting; a real photo of the product is fine regardless of styling. REJECT ONLY images " +
+        "that do NOT show the product: a logo or brand/marketplace card, a promotional banner or advert that " +
+        "is mostly text/graphics, a coupon, a pure text or graphic image, a generic 'no image' placeholder, " +
+        "or a collage of many different products. Reply with ONLY this JSON object, no prose: " +
+        "{\"reject\":[<indices (0-based) of images that do NOT show the product>]}. When you are unsure " +
+        "whether the product is visible, do NOT reject (leave the image out of the list).";
 
     private readonly string _apiKey;
     private readonly string _model;

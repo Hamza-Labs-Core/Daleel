@@ -42,20 +42,21 @@ public class ProductImageScreenTests
     }
 
     [Fact]
-    public async Task RejectNonProductShots_FlagsTheScene_KeepsTheProductShot()
+    public async Task RejectNonProductShots_FlagsTheLogo_KeepsProductAndLifestylePhotos()
     {
-        // index 1 (the room scene) is rejected; the clean product shot and the third stay.
+        // index 1 (a marketplace logo, no product) is rejected; the studio shot AND the in-room lifestyle
+        // shot both stay — a styled photo that shows the product is fine.
         var handler = new StubHandler(_ => Wrap("""{"reject": [1]}"""));
         using var screen = Build(handler);
 
         var reject = await screen.RejectNonProductShotsAsync(new[]
         {
             "https://store.jo/product/ac-white.jpg",
+            "https://opensooq.jo/opensooq_logo.png",
             "https://store.jo/product/ac-in-living-room.jpg",
-            "https://store.jo/product/ac-side.jpg",
         });
 
-        reject.Should().BeEquivalentTo(new[] { "https://store.jo/product/ac-in-living-room.jpg" });
+        reject.Should().BeEquivalentTo(new[] { "https://opensooq.jo/opensooq_logo.png" });
     }
 
     [Fact]
