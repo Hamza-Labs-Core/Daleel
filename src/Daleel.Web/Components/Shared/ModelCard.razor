@@ -90,6 +90,24 @@
             {
                 <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Filled">@L["ModelCard.Sale"]</MudChip>
             }
+
+            @* Stock, when any seller page declared it (LLM-extracted free-form wording, classified
+               by StockStatus). Unknown renders nothing — no guessed availability. *@
+            @switch (CardStock)
+            {
+                case Stock.InStock:
+                    <MudChip T="string" Size="Size.Small" Color="Color.Success" Variant="Variant.Text"
+                             Icon="@Icons.Material.Filled.CheckCircle">@L["Stock.InStock"]</MudChip>
+                    break;
+                case Stock.OutOfStock:
+                    <MudChip T="string" Size="Size.Small" Color="Color.Error" Variant="Variant.Text"
+                             Icon="@Icons.Material.Filled.RemoveShoppingCart">@L["Stock.OutOfStock"]</MudChip>
+                    break;
+                case Stock.Preorder:
+                    <MudChip T="string" Size="Size.Small" Color="Color.Info" Variant="Variant.Text"
+                             Icon="@Icons.Material.Filled.Schedule">@L["Stock.Preorder"]</MudChip>
+                    break;
+            }
         </div>
 
         @* Deliberately nothing more here: reviews, mentions, brand links, pros/cons and the review
@@ -122,6 +140,23 @@
 </MudCard>
 
 @code {
+    /// <summary>The card's stock state: InStock if ANY seller has it, else the strongest signal any
+    /// offer declared. A shopper cares whether they can buy it somewhere, not that one seller ran out.</summary>
+    private Stock CardStock
+    {
+        get
+        {
+            var states = Model.Offers
+                .Select(o => StockStatus.Classify(o.Availability))
+                .Where(st => st != Stock.Unknown)
+                .ToList();
+            if (states.Count == 0) return Stock.Unknown;
+            if (states.Contains(Stock.InStock)) return Stock.InStock;
+            if (states.Contains(Stock.Preorder)) return Stock.Preorder;
+            return Stock.OutOfStock;
+        }
+    }
+
     [Parameter, EditorRequired] public ProductModel Model { get; set; } = default!;
 
     /// <summary>Reviews of the stores selling this model, for the per-card review signal.</summary>

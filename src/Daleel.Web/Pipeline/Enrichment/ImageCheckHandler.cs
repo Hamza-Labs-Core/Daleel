@@ -87,11 +87,35 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
             unscreened = new HashSet<string>(screen.Unscreened, StringComparer.OrdinalIgnoreCase);
         }
 
-        // VERIFIED (promotable) = we actually screened it AND it was neither flagged nor left unscreened.
-        // Everything else stays HIDDEN (fail-closed): flagged, could-not-screen, and any image beyond the
-        // cap or non-http (never in `attempted`).
+        // PRODUCT-SHOT screen: of the images that would display (passed the halal screen), drop the ones
+        // that are not a clean product photo — lifestyle/room scenes, promo banners, logos, collages. This
+        // is FAIL-OPEN (unlike the halal screen): a screen outage rejects nothing, so it only ever removes
+        // a bad photo, never hides a good one it couldn't judge, and never requeues the unit.
+        IReadOnlySet<string> notProductShot = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var productScreen = ctx.Services.GetService<Daleel.Web.Moderation.IProductImageScreen>();
+        if (productScreen is { IsConfigured: true })
+        {
+            var wouldShow = urls.Where(u => !flagged.Contains(u) && !unscreened.Contains(u)).ToList();
+            if (wouldShow.Count > 0)
+            {
+                try
+                {
+                    notProductShot = await productScreen.RejectNonProductShotsAsync(wouldShow, ct);
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Product-image screen failed for job {JobId}; keeping images", item.SearchJobId);
+                }
+            }
+        }
+
+        // VERIFIED (promotable) = we actually screened it AND it was neither flagged nor left unscreened,
+        // AND it is a clean product shot. Everything else stays HIDDEN (fail-closed for halal): flagged,
+        // could-not-screen, non-product-shot, and any image beyond the cap or non-http (never `attempted`).
         bool Verified(string? url) =>
-            url is { Length: > 0 } u && attempted.Contains(u) && !flagged.Contains(u) && !unscreened.Contains(u);
+            url is { Length: > 0 } u && attempted.Contains(u) && !flagged.Contains(u)
+            && !unscreened.Contains(u) && !notProductShot.Contains(u);
 
         // Promote the clean photos of each item's gallery, un-promote the rest. Never nulls the raw
         // candidates — hiding is entirely via VerifiedImages, so a whitelist/retry can un-hide. Idempotent.

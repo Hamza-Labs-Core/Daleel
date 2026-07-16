@@ -703,13 +703,14 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
 }
 
 /// <summary>
-/// Paid image lookups for whatever is STILL imageless after the free sources ran. Each execution
-/// spends a bounded batch; when more imageless items remain it enqueues its own continuation —
-/// coverage is unbounded through the queue, while any single attempt stays small and retryable.
+/// Scrapes each STILL-imageless item's own store/brand page for its photo (og:image) — the last
+/// image source after the crawl, brand sites, and product DB. Each execution takes a bounded batch;
+/// when more imageless items remain it enqueues its own continuation — coverage is unbounded through
+/// the queue, while any single attempt stays small and retryable.
 /// </summary>
 public sealed class ImageLookupHandler : IEnrichmentUnitHandler
 {
-    /// <summary>Paid lookups per execution (~one grid page); the continuation covers the rest.</summary>
+    /// <summary>Page scrapes per execution (~one grid page); the continuation covers the rest.</summary>
     private const int BatchSize = 12;
 
     public string Kind => EnrichmentUnit.ImageLookup;
@@ -723,14 +724,14 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
 
         var svc = ctx.Services.GetRequiredService<IItemEnrichmentService>();
 
-        // Names attempted by prior passes in this chain — skip them so we NEVER re-pay for an item
-        // whose lookup already failed. Without this the chain re-attempts the same first 12 imageless
-        // items forever (a grid of obscure items never resolves), burning paid SerpAPI lookups.
+        // Names attempted by prior passes in this chain — skip them so we NEVER re-scrape an item
+        // whose page-fetch already found no photo. Without this the chain re-attempts the same first 12
+        // imageless items forever (a grid of obscure items never resolves), burning page fetches.
         var attemptedBefore = EnrichmentWorkQueue.ReadPayload<ImageLookupPayload>(item.Payload)?.Attempted is { } a
             ? new HashSet<string>(a, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var found = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var attemptedNow = new List<string>();
         var remaining = false;
         foreach (var model in models)
@@ -747,9 +748,10 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
             }
 
             attemptedNow.Add(model.Name);
-            if (await svc.FindImageForItemAsync(ctx.Agent(), model, ct) is { } image)
+            var gallery = await svc.FindImageForItemAsync(ctx.Agent(), model, ct);
+            if (gallery.Count > 0)
             {
-                found[model.Name] = image;
+                found[model.Name] = gallery;
             }
         }
 
@@ -767,9 +769,15 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
                 for (var i = 0; i < current.Count; i++)
                 {
                     if (string.IsNullOrWhiteSpace(current[i].ImageUrl) &&
-                        found.TryGetValue(current[i].Name, out var image))
+                        found.TryGetValue(current[i].Name, out var gallery))
                     {
-                        current[i] = current[i] with { ImageUrl = image };
+                        // Primary onto the card, the rest of the gallery onto the detail panel; deduped,
+                        // order preserved. The ImageCheck enqueued below screens every added image.
+                        var merged = gallery.Concat(current[i].Images)
+                            .Where(u => !string.IsNullOrWhiteSpace(u))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                        current[i] = current[i] with { ImageUrl = merged[0], Images = merged.Skip(1).ToList() };
                         changed = true;
                     }
                 }
@@ -960,11 +968,13 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
         return UnitOutcome.Ok;
     }
 
-    /// <summary>An offer's page is worth fetching when any of the four facts is still in doubt.</summary>    /// <summary>An offer's page is worth fetching when any of the four facts is still in doubt.</summary>
+    /// <summary>An offer's page is worth fetching when any of the facts is still in doubt: the
+    /// price, a secondhand condition, the details prose — or the PHOTO (the harvest pulls the
+    /// image off the same page, so an image-less card is reason enough to fetch it).</summary>
     private static bool NeedsVerification(ProductModel model, PriceOffer offer) =>
         offer.Price is null
         || IsSecondhand(offer.Condition)
-        || (NeedsDetails(model) && IsFirstUrlOffer(model, offer));
+        || ((NeedsDetails(model) || model.ImageUrl is null) && IsFirstUrlOffer(model, offer));
 
     private static bool IsFirstUrlOffer(ProductModel model, PriceOffer offer) =>
         ReferenceEquals(model.Offers.FirstOrDefault(o => !string.IsNullOrWhiteSpace(o.Url)), offer);
@@ -1039,6 +1049,180 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
     /// </summary>
     internal static string? ApplyConditionEvidence(string? current, string? pageMarker) =>
         pageMarker ?? (IsSecondhand(current) ? null : current);
+
+    /// <summary>
+    /// The page's primary product photo: the first markdown image with PRODUCT EVIDENCE — a
+    /// product-ish PATH segment (products/item/upload/catalog/media/goods) — and none of the
+    /// chrome/promo markers. Requiring evidence matters: the first image on a store page is often
+    /// an app-download promo or a country flag (QA: Mumzworld, Dumyah), and a WRONG photo on the
+    /// card misleads where a placeholder merely disappoints.
+    /// </summary>
+    internal static string? ExtractImage(string content) => ExtractImages(content).FirstOrDefault();
+
+    /// <summary>
+    /// The page's OWN declared canonical product photo: the Open Graph <c>og:image</c> (or
+    /// <c>twitter:image</c>) meta tag. Present on essentially every commerce product page for
+    /// social/SEO previews, it is an absolute URL that is immune to lazy-loading and never lost to a
+    /// JS gallery — so it is the single most reliable image the store scrape yields. Because the page
+    /// declares it as ITS product image we trust it without the product-path evidence gate (only the
+    /// chrome/promo blocklist still applies). Requires the raw HTML: markdown conversion drops
+    /// <c>&lt;head&gt;</c> meta, so this returns null on markdown content and callers fall back to the
+    /// in-body image scan below.
+    /// </summary>
+    internal static string? ExtractOgImage(string content)
+    {
+        foreach (System.Text.RegularExpressions.Match m in OgImagePattern.Matches(content))
+        {
+            var url = System.Net.WebUtility.HtmlDecode(MatchedUrl(m).Trim());
+            if (IsUsableProductImage(url, requirePathEvidence: false, out var normalized))
+            {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// EVERY qualifying product image on the page, deduped in document order — detail pages carry a
+    /// gallery (angles, colors) and the detail surfaces show all of it; the card takes the first.
+    /// Format-agnostic: matches markdown <c>![](url)</c>, HTML <c>&lt;img src&gt;</c>, and the
+    /// lazy-load attributes (<c>data-src</c>/<c>data-original</c>/<c>srcset</c>) real stores use, so it
+    /// works on both the markdown we feed the LLM and the raw HTML we fetch for images. The page's own
+    /// <c>og:image</c> leads (canonical, no path gate); in-body images then follow the usual evidence
+    /// rules: product-ish PATH segment, chrome/promo blocklist.
+    /// </summary>
+    internal static IReadOnlyList<string> ExtractImages(string content)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var images = new List<string>();
+
+        // The store's declared canonical photo first — trusted without the path-evidence gate.
+        if (ExtractOgImage(content) is { } og && seen.Add(og))
+        {
+            images.Add(og);
+        }
+
+        foreach (System.Text.RegularExpressions.Match m in ImagePattern.Matches(content))
+        {
+            var url = System.Net.WebUtility.HtmlDecode(MatchedUrl(m).Trim());
+            if (IsUsableProductImage(url, requirePathEvidence: true, out var normalized) && seen.Add(normalized))
+            {
+                images.Add(normalized);
+            }
+        }
+        return images;
+    }
+
+    /// <summary>The first non-empty capturing group of a match — the multi-alternative image/meta
+    /// patterns land the URL in different groups depending on which branch (markdown/img/srcset,
+    /// content-first/property-first) fired.</summary>
+    private static string MatchedUrl(System.Text.RegularExpressions.Match m)
+    {
+        for (var i = 1; i < m.Groups.Count; i++)
+        {
+            if (m.Groups[i].Success && m.Groups[i].Value.Length > 0)
+            {
+                return m.Groups[i].Value;
+            }
+        }
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Gate + normalize one candidate URL: reject non-http(s), SVGs, and chrome/promo names; when
+    /// <paramref name="requirePathEvidence"/> is set, additionally demand a product-ish PATH segment
+    /// (hosts routinely contain "cdn"/"images" for everything — the evidence must live in the path).
+    /// </summary>
+    /// <summary>
+    /// Chrome/social/OG-generic reject for an ALREADY-CHOSEN image URL (no product-path gate). Screens
+    /// LLM-picked gallery images (<c>ExtractProductDetailAsync</c>'s <c>Images</c>), which don't pass
+    /// through the in-body evidence scan and so would otherwise let a marketplace's generic og:image
+    /// (e.g. <c>opensooq_fb_square.png</c>) land on a card as a wrong photo.
+    /// </summary>
+    public static bool IsProductImageCandidate(string? url) =>
+        !string.IsNullOrWhiteSpace(url) && IsUsableProductImage(url, requirePathEvidence: false, out _);
+
+    private static bool IsUsableProductImage(string url, bool requirePathEvidence, out string normalized)
+    {
+        normalized = string.Empty;
+        var lower = url.ToLowerInvariant();
+        if (ImageBlocklist.Any(w => lower.Contains(w, StringComparison.Ordinal)) || lower.EndsWith(".svg"))
+        {
+            return false;
+        }
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var abs) ||
+            (abs.Scheme != Uri.UriSchemeHttp && abs.Scheme != Uri.UriSchemeHttps))
+        {
+            return false;
+        }
+        if (requirePathEvidence)
+        {
+            var path = abs.AbsolutePath.ToLowerInvariant();
+            if (!ImagePathEvidence.Any(w => path.Contains(w, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+        }
+        normalized = abs.ToString();
+        return true;
+    }
+
+    private static readonly string[] ImageBlocklist =
+    {
+        "logo", "icon", "sprite", "banner", "placeholder", "popup", "promo", "flag", "advert",
+        // Generic social-share / Open-Graph fallback images: marketplaces (OpenSooq, classifieds) set a
+        // site-wide og:image that is a Facebook/Twitter share card, not the product — a wrong photo.
+        "fb_square", "fbshare", "opengraph", "og-image", "og_image", "ogimage", "og-default",
+        "og_default", "social-share", "facebook", "twitter", "whatsapp", "no-image", "noimage",
+        "default-image",
+    };
+
+    private static readonly string[] ImagePathEvidence =
+    {
+        "/product", "/item", "/upload", "/catalog", "/media", "/goods", "/cdn/",
+        "/image", "/photo", "/thumb", "/files", "/wp-content", "/pub/",
+    };
+
+    // Markdown image, HTML <img src>/data-src/data-original/data-lazy, and the first URL in a srcset.
+    private static readonly System.Text.RegularExpressions.Regex ImagePattern = new(
+        @"!\[[^\]]*\]\((https?://[^)\s]+)\)" +
+        @"|<img[^>]+?(?:data-src|data-original|data-lazy|src)\s*=\s*[""'](https?://[^""']+)[""']" +
+        @"|srcset\s*=\s*[""']\s*(https?://[^""'\s,]+)",
+        System.Text.RegularExpressions.RegexOptions.Compiled |
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    // og:image / twitter:image, tolerant of attribute order (content before or after property/name).
+    private static readonly System.Text.RegularExpressions.Regex OgImagePattern = new(
+        @"<meta[^>]+?(?:property|name)\s*=\s*[""'](?:og:image|twitter:image)[""'][^>]+?content\s*=\s*[""'](https?://[^""']+)[""']" +
+        @"|<meta[^>]+?content\s*=\s*[""'](https?://[^""']+)[""'][^>]+?(?:property|name)\s*=\s*[""'](?:og:image|twitter:image)[""']",
+        System.Text.RegularExpressions.RegexOptions.Compiled |
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// The page's stock wording, when it declares one — returned RAW (the store's own phrase) so
+    /// <c>StockStatus.Classify</c> owns the interpretation. Negative phrasings are matched first
+    /// because they contain the positive words ("out of stock", "غير متوفر").
+    /// </summary>
+    internal static string? ExtractAvailability(string content)
+    {
+        var lower = content.ToLowerInvariant();
+        foreach (var phrase in AvailabilityPhrases)
+        {
+            if (lower.Contains(phrase, StringComparison.Ordinal))
+            {
+                return phrase;
+            }
+        }
+        return null;
+    }
+
+    private static readonly string[] AvailabilityPhrases =
+    {
+        // Negatives first — they contain the positive words.
+        "out of stock", "sold out", "غير متوفر", "نفذ من المخزون", "غير متاح",
+        "pre-order", "preorder", "الطلب المسبق",
+        "in stock", "متوفر",
+    };
 
     /// <summary>
     /// The page's own product description: the first contiguous run of ≥2 kept-prose lines totaling
@@ -1259,6 +1443,14 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
             description = OfferVerificationHandler.ExtractDescription(content);
         }
 
+        // The photo and stock wording live on this same page we already fetched — harvest them
+        // deterministically for BOTH judgment paths (the actor judges relatedness/price; imagery
+        // and stock don't need an LLM). This is what fills the imageless/stockless cards for
+        // stores whose LISTING pages carry only name + link.
+        var pageImages = OfferVerificationHandler.ExtractImages(content);
+        var pageImage = pageImages.Count > 0 ? pageImages[0] : null;
+        var pageAvailability = OfferVerificationHandler.ExtractAvailability(content);
+
         await ctx.Results.PatchAsync(item, answer =>
         {
             if (answer.Products is not { } p)
@@ -1319,11 +1511,28 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
                         next = next with { Condition = evidenced };
                     }
 
+                    if (next.Availability is null && pageAvailability is not null)
+                    {
+                        next = next with { Availability = pageAvailability };
+                    }
+
                     modelChanged |= !ReferenceEquals(next, o);
                     offers.Add(next);
                 }
 
                 var result = modelChanged ? m with { Offers = offers } : m;
+
+                if (related.Contains(m.Name) && result.ImageUrl is null && pageImage is not null)
+                {
+                    result = result with { ImageUrl = pageImage };
+                    modelChanged = true;
+                }
+
+                if (related.Contains(m.Name) && result.Images.Count == 0 && pageImages.Count > 0)
+                {
+                    result = result with { Images = pageImages };
+                    modelChanged = true;
+                }
 
                 if (related.Contains(m.Name) && description is { } prose &&
                     OfferVerificationHandler.NeedsDetails(result))
@@ -1349,7 +1558,7 @@ public sealed class VerifyPageHandler : IEnrichmentUnitHandler
                     var (withSiblings, created) = ItemEnrichmentService.AppendCatalogDiscoveries(
                         updated,
                         lines.Select(l => (Name: l.Line, (decimal?)l.Price, (string?)l.Currency,
-                            (string?)payload.Url, (string?)null, Indicative: true)),
+                            (string?)payload.Url, (string?)null, (string?)null, Indicative: true)),
                         storeName: AgentService.HostLabel(payload.Url),
                         query: ctx.Job.Query, geo: ctx.Job.Geo);
                     if (created.Count > 0)

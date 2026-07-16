@@ -40,6 +40,14 @@ extracts and enriches product data from local stores. Arabic + English throughou
 
 ## Pipeline invariants
 
+- **NO RESULT CAPS — ever.** Every fan-out (brands, stores, items, brand catalogues, deep-dives) is
+  UNCAPPED by default: dropping discovered work on the floor is forbidden. The legitimate bounds are
+  the ones designed for the job — the workflow deadline + salvage, per-unit lease + retry budgets,
+  freshness gates — all of which keep partial results instead of silently truncating them. Numeric
+  env knobs (`PIPELINE_MAX_*`) exist as optional operator RESTRAINTS, never as defaults. The two
+  acceptable numeric kinds: throughput WIDTHS (concurrency — nothing dropped, work queues for a
+  slot) and loop-safety ceilings (e.g. pagination). When you meet a `.Take(N)` on discovered
+  entities, it is a bug (`CrawlMaxDeepDive=12` silently dropped products 13+ of every store).
 - **Best-effort everywhere:** an enrichment/crawl/LLM failure must degrade, never fault the search.
   Hot-path DB reads (e.g. cancel checks) must be non-fatal. An empty grid is the worst outcome —
   the relevance gate deliberately distrusts drop-everything verdicts on small sets.
@@ -67,6 +75,23 @@ extracts and enriches product data from local stores. Arabic + English throughou
 - Every new `L["Key"]` needs the key in BOTH `SharedResource.resx` AND `SharedResource.ar.resx` (parity).
 - Normalization helpers must stay Unicode-aware (`char.IsLetterOrDigit` keeps Arabic; never "optimize"
   to ASCII). RTL text direction via `Catalog.Dir(text)`.
+
+## Development process
+
+1. **Spec → plan → TDD.** Non-trivial features get a written spec (`docs/superpowers/specs/`) and a
+   task-by-task plan; every change lands test-first. Ground specs in the actual code (verify the
+   load-bearing claims — persistence paths, join keys — by reading it) before implementing.
+2. **One qa-labeled branch at a time** (see Branching above). Push → auto-deploy → **verify the
+   feature live on QA** (run a real search; screenshots are evidence) → merge. "Local tests green"
+   is not done.
+3. **Fleet-wide model/config switches** go through code defaults + the `SeedDefaultsAsync`
+   superseded-values upgrade (existing DB rows holding an OLD default migrate on startup; operator
+   overrides are never touched) — no manual admin-settings passes per environment.
+4. **Card-data timing model** (what "missing prices/images" usually means): listing-page data lands
+   with the card during the run; the enrichment drain fills price/image/stock from each card's
+   detail link minutes after "Ready" (width `PIPELINE_ENRICH_CONCURRENCY`); a store that hides data
+   from the renderer stays honestly bare — never invent a number or guess a photo (a wrong image
+   misleads; a placeholder merely disappoints).
 
 ## Debugging QA
 

@@ -47,8 +47,9 @@ public interface IItemEnrichmentService
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
     Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
 
-    /// <summary>Phase 6 for ONE item: paid image lookup. Null = none found.</summary>
-    Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
+    /// <summary>Phase 6 for ONE item: LLM-extract its photos from its own store/brand page (primary
+    /// first). Empty = none found.</summary>
+    Task<IReadOnlyList<string>> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
     /// <summary>Phase 7 as a unit: condition backfill over the whole list. Null = unchanged.</summary>
     Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct);
@@ -293,13 +294,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             progress($"Filled {brandImages + brandPrices + brandSpecs} detail(s) from brand catalogues.");
         }
 
-        // Phase 6 — LAST-RESORT image search for whatever the store catalogues, brand sites, and
-        // product database all failed to cover (common in markets where Google Shopping doesn't
-        // operate). Capped paid lookups; a failed lookup just leaves the placeholder.
+        // Phase 6 — LAST-RESORT image scrape for whatever the store catalogues, brand sites, and
+        // product database all failed to carry a photo for: fetch the item's OWN offer page and read
+        // its og:image. A failed scrape just leaves the placeholder — never a guessed thumbnail.
         var imagesFound = 0;
         var imageAttempts = 0;
-        // The cap bounds paid ATTEMPTS, not successes — on a large grid of imageless obscure items,
-        // counting only hits would keep paying for lookup after failed lookup with no ceiling.
+        // The bound caps per-pass scrape ATTEMPTS, not successes — on a large grid of imageless items,
+        // counting only hits would keep fetching after failed lookup with no ceiling. Items past the
+        // bound stay imageless this pass and are re-attempted when the drain re-runs.
         for (var i = 0; i < pricedModels.Count && imageAttempts < MaxImageLookups; i++)
         {
             var m = pricedModels[i];
@@ -310,15 +312,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
             imageAttempts++;
 
-            if (await FindImageForItemAsync(agent, m, ct) is not { } img)
+            var gallery = await FindImageForItemAsync(agent, m, ct);
+            if (gallery.Count == 0)
             {
                 continue;
             }
 
-            pricedModels[i] = m with { ImageUrl = img };
+            var (primary, others) = SplitGallery(gallery, m.Images);
+            pricedModels[i] = m with { ImageUrl = primary, Images = others };
             imagesFound++;
-            Record(EventCategory.Extract, "item.image", "serpapi",
-                new Dictionary<string, object?> { ["item"] = m.Name });
+            Record(EventCategory.Extract, "item.image", "scrape",
+                new Dictionary<string, object?> { ["item"] = m.Name, ["images"] = gallery.Count });
         }
 
         if (imagesFound > 0)
@@ -511,13 +515,13 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         //   models via AttachPoolToModels above.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated,
-            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, Indicative: false)),
+            pool.Select(c => (c.Name, c.Price, c.Currency, c.Url, c.ImageUrl, (string?)null, Indicative: false)),
             storeName, query, geo);
         var (withHarvested, harvestedCreated) = AppendCatalogDiscoveries(
             withNew,
             llmSeed
                 .Where(l => !string.IsNullOrWhiteSpace(l.Name))
-                .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, Indicative: l.Price is null)),
+                .Select(l => (l.Name, l.Price, l.Currency, l.Url, l.ImageUrl, l.Availability, Indicative: l.Price is null)),
             storeName, query, geo, fromQueryScopedPage: true);
         withNew = withHarvested;
         created = created.Concat(harvestedCreated).ToList();
@@ -583,7 +587,20 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 string.IsNullOrWhiteSpace(r.StoreName) ? domain : r.StoreName, r.SourceUrl ?? string.Empty,
                 string.IsNullOrWhiteSpace(r.ImageUrl) ? null : r.ImageUrl))
             .ToList();
-        if (pool.Count == 0)
+
+        // Discoveries are broader than the priced pool: a store page that shows no price still yields
+        // a NAMED, PHOTOGRAPHED item ("See price on store site" is a fine card; a grey placeholder is
+        // not — QA: every fan/diaper card). An unpriced row rides along when it carries an image; an
+        // unpriced, imageless row adds nothing over the live seed path and stays out.
+        var discoveries = rows
+            .Where(r => !string.IsNullOrWhiteSpace(r.ProductName) &&
+                        (r.Price is not null || !string.IsNullOrWhiteSpace(r.ImageUrl)))
+            .Select(r => (Name: r.ProductName, r.Price, r.Currency, Url: r.SourceUrl,
+                          ImageUrl: string.IsNullOrWhiteSpace(r.ImageUrl) ? null : r.ImageUrl,
+                          r.Availability,
+                          Indicative: true))
+            .ToList();
+        if (pool.Count == 0 && discoveries.Count == 0)
         {
             return (null, 0, Array.Empty<string>());
         }
@@ -594,18 +611,95 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         // Drained edge catalogues create models too — indicative offers, like every drained price. When
         // the crawl stored a photo on the row, the new model carries it (the site-crawl's own image),
-        // instead of landing imageless and needing a paid image lookup that may find nothing.
+        // instead of landing imageless and needing a fallback page-scrape that may find nothing.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated ?? models,
-            pool.Select(b => (Name: b.Line, (decimal?)b.Price, (string?)b.Currency, (string?)b.Url, b.ImageUrl, Indicative: true)),
+            discoveries,
             storeName, query);
         return priced > 0 || created.Count > 0
             ? (withNew, priced, created)
             : (null, 0, Array.Empty<string>());
     }
 
-    public async Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
-        await agent.FindProductImageAsync(BrandModelQuery(item), ct);
+    /// <summary>
+    /// The item's photos come from the SAME LLM detail-extraction the product-detail crawl uses — not a
+    /// paid image search, and not brittle regex as the primary source. Fetch the item's own offer/brand
+    /// page and let <see cref="AgentService.ExtractProductDetailAsync"/> read the whole record and pick
+    /// the product images (primary first): it ignores logos/promos, resolves galleries, and understands
+    /// the page far better than pattern-matching. Returned primary-first — the card takes the first, the
+    /// detail panel shows the gallery. Only when the LLM finds nothing (the photo lived solely in the
+    /// HTML head as <c>og:image</c>, or in a lazy-load attribute the markdown render drops) do we fall
+    /// back to reading the raw HTML for the store's declared image(s). No offer URL, no scraper, or
+    /// nothing found → empty: an honest placeholder, never a guessed thumbnail.
+    /// </summary>
+    public async Task<IReadOnlyList<string>> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct)
+    {
+        if (ImageSourceUrl(item) is not { } url || !_providers.HasScraper)
+        {
+            return Array.Empty<string>();
+        }
+
+        // Best-effort: the page fetch runs through the Context.dev branch, which RE-THROWS on a bad URL
+        // (404/DNS/TLS). One dead offer link must never fault the image unit — that would discard the
+        // whole batch's found images and, after retries, kill image lookups for the rest of the grid.
+        // Degrade to "no image for this item" instead (mirrors VerifyPageHandler's guarded fetch).
+        try
+        {
+            // Same steps as ProductDetailActivities: render the page, then LLM-extract the full record
+            // and take its product images. The LLM reads the markdown the way it reads every detail page.
+            var page = await _providers.ScrapePageAsync(url, ct: ct).ConfigureAwait(false);
+            if (page is not null && !string.IsNullOrWhiteSpace(page.Content))
+            {
+                var listing = new ProductListing { Url = url, Name = item.Name, Brand = item.Brand, Model = item.Model };
+                var (_, detail) = await agent.ExtractProductDetailAsync(
+                    page.Content, listing, GeoProfiles.ResolveOrDefault(null), ct).ConfigureAwait(false);
+                if (detail is { Images.Count: > 0 })
+                {
+                    // Screen the LLM's picks for chrome/social/OG-generic images (a marketplace's
+                    // og:image is often a Facebook share card, not the product). A wrong photo is worse
+                    // than a placeholder — if none survive, fall through to the HTML backstop.
+                    var usable = detail.Images.Where(OfferVerificationHandler.IsProductImageCandidate).ToList();
+                    if (usable.Count > 0)
+                    {
+                        return usable;
+                    }
+                }
+            }
+
+            // Backstop: the photo may live only in the HTML head (og:image) or a lazy-load attribute the
+            // markdown drops — read the raw HTML for the store's declared canonical image(s).
+            var html = await _providers.ScrapePageAsync(url, ScrapeFormat.Html, ct).ConfigureAwait(false);
+            return html is not null && !string.IsNullOrWhiteSpace(html.Content)
+                ? OfferVerificationHandler.ExtractImages(html.Content)
+                : Array.Empty<string>();
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // genuine cancellation (workflow deadline / cost cap) must propagate
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Image scrape failed for {Url}", url);
+            return Array.Empty<string>();
+        }
+    }
+
+    /// <summary>Merge a freshly-found gallery with the item's existing images: primary first, deduped,
+    /// order preserved.</summary>
+    private static (string Primary, List<string> Others) SplitGallery(IReadOnlyList<string> gallery, IReadOnlyList<string> existing)
+    {
+        var merged = gallery.Concat(existing)
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return (merged[0], merged.Skip(1).ToList());
+    }
+
+    /// <summary>The page to scrape for this item's photo: its first offer URL (the store's product
+    /// page), else the brand site — the same pages the crawl already trusts.</summary>
+    private static string? ImageSourceUrl(ProductModel m) =>
+        m.Offers.Select(o => o.Url).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u))
+        ?? (string.IsNullOrWhiteSpace(m.BrandSiteUrl) ? m.BrandRegionalUrl : m.BrandSiteUrl);
 
     public async Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct)
     {
@@ -1808,7 +1902,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// gains the brand's coffee machines. The price is the brand-site LOCAL price, marked indicative
     /// (a lead to verify at a store, like every non-store-offer price), never a live local offer.
     /// </summary>
-    public static IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)>
+    public static IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, string? Availability, bool Indicative)>
         BrandCatalogEntries(IEnumerable<BrandModel> models) =>
         models
             .Where(m => !string.IsNullOrWhiteSpace(m.ModelName))
@@ -1818,11 +1912,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                 Currency: m.Currency,
                 Url: m.SourceUrl,
                 Image: m.ImageUrl,
+                Availability: (string?)null, // brand catalogues list models, not store stock
                 Indicative: true));
 
     public static (List<ProductModel> Models, List<string> Created) AppendCatalogDiscoveries(
         List<ProductModel> models,
-        IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, bool Indicative)> entries,
+        IEnumerable<(string Name, decimal? Price, string? Currency, string? Url, string? Image, string? Availability, bool Indicative)> entries,
         string? storeName, string? query, string? geo = null, bool fromQueryScopedPage = false)
     {
         var queryTokens = SignificantQueryTokens(query, geo);
@@ -1880,6 +1975,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                         Price = e.Price,
                         Currency = e.Currency,
                         Url = e.Url,
+                        Availability = e.Availability,
                         IsLocal = true,
                         IsIndicative = e.Indicative
                     }

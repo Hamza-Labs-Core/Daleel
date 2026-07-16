@@ -727,4 +727,7 @@
   <data name="Monitor.RunUnavailable" xml:space="preserve"><value>Monitoring is temporarily unavailable.</value></data>
   <data name="Stores.NoStores" xml:space="preserve"><value>No stores found for this search.</value></data>
   <data name="Admin.Nav.Providers" xml:space="preserve"><value>Providers</value></data>
+  <data name="Stock.InStock" xml:space="preserve"><value>In stock</value></data>
+  <data name="Stock.OutOfStock" xml:space="preserve"><value>Out of stock</value></data>
+  <data name="Stock.Preorder" xml:space="preserve"><value>Pre-order</value></data>
 </root>

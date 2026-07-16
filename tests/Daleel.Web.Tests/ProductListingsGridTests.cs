@@ -26,6 +26,7 @@ public class ProductListingsGridTests : TestContext
         Services.AddSingleton<ITranslationService>(new NoTranslation());
         Services.AddSingleton<IRelevanceFeedbackService>(new NoRelevanceFeedback());
         Services.AddSingleton<ICurrentUser>(new AnonymousUser());
+        Services.AddScoped<BrowserStore>(); // SafeImage (rendered when a card has a verified photo)
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 
@@ -234,5 +235,61 @@ public class ProductListingsGridTests : TestContext
         cut.Markup.Should().Contain("Two");
         // Exactly the 4 generic selects (Brand/Source/Condition/Sort) — no facet selects appear.
         cut.FindComponents<MudSelect<string>>().Count.Should().Be(4);
+    }
+
+    [Fact]
+    public void StockChip_RendersFromOfferAvailability_AndOnlyWhenKnown()
+    {
+        var inStock = Model("StockedFan", 100m) with
+        {
+            Offers = new[] { new PriceOffer { Source = "s", Price = 100m, Currency = "JOD", Availability = "متوفر" } }
+        };
+        var soldOut = Model("GoneFan", 120m) with
+        {
+            Offers = new[] { new PriceOffer { Source = "s", Price = 120m, Currency = "JOD", Availability = "sold out" } }
+        };
+        var silent = Model("QuietFan", 90m); // no availability anywhere → no chip
+
+        var cut = Render(Result(null, inStock, soldOut, silent));
+
+        cut.Markup.Should().Contain("In stock");
+        cut.Markup.Should().Contain("Out of stock");
+        // Exactly one of each chip: the silent card must not render a guessed state.
+        System.Text.RegularExpressions.Regex.Matches(cut.Markup, "In stock").Count.Should().Be(1);
+        System.Text.RegularExpressions.Regex.Matches(cut.Markup, "Out of stock").Count.Should().Be(1);
+    }
+
+    [Fact]
+    public void ImagelessItems_AreHidden_WhenPhotographedOnesAreTheMajority()
+    {
+        var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg", VerifiedImages = new[] { "https://s.jo/p.jpg" } };
+        var bare = Model("Bare", 90m);
+
+        var cut = Render(Result(null, withPhoto, bare)); // 1 of 2 = exactly half → filter applies
+
+        cut.Markup.Should().Contain("Photographed");
+        cut.Markup.Should().NotContain(">Bare<", "an imageless card is hidden when photos are the norm");
+    }
+
+    [Fact]
+    public void ImagelessItems_Show_WhenPhotographedOnesAreAMinority()
+    {
+        // QA: one photographed card must not cull the rest of the grid ("1 of 6 shown").
+        var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg", VerifiedImages = new[] { "https://s.jo/p.jpg" } };
+        var cut = Render(Result(null, withPhoto, Model("BareA", 90m), Model("BareB", 80m)));
+
+        cut.Markup.Should().Contain("Photographed");
+        cut.Markup.Should().Contain("BareA");
+        cut.Markup.Should().Contain("BareB");
+    }
+
+    [Fact]
+    public void ImagelessItems_AllShow_WhenNothingHasAPhoto()
+    {
+        // The empty-grid guard: hiding every result is worse than showing bare cards (streaming
+        // starts imageless — photos drain in minutes later).
+        var cut = Render(Result(null, Model("One", 100m), Model("Two", 90m)));
+        cut.Markup.Should().Contain("One");
+        cut.Markup.Should().Contain("Two");
     }
 }

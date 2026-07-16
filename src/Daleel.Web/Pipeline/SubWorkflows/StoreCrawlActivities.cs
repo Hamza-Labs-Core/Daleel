@@ -213,29 +213,28 @@ public sealed class StoreCatalogProductsActivity : CancellableActivity
             return;
         }
 
-        // Products with a real detail URL are worth a full deep-dive (bounded); the rest keep listing data.
+        // PERSIST FIRST, ENRICH SECOND. The listing-level batch is one fast write; deep-dives are
+        // many renders + LLM calls and — uncapped — can outlive the store sub-workflow's budget. In
+        // the old order (dives, then remainder persist) a timeout mid-dive cost the store its ENTIRE
+        // listing yield (QA: a deadline run salvaged 4 items where its twin got 17). Persisting
+        // everything up front makes time pressure mean "less enriched", never "lost": a successful
+        // dive overwrites its listing-level entity (same StableId) with the rich record.
+        var (entities, prices) = await CrawlPersistence.PersistListingsAsync(
+            context, state.Discovered, geo, state.Query, state.SiteName, state.SearchId, logger, context.CancellationToken);
+
         var deepDiveTargets = state.Discovered
             .Where(p => !string.IsNullOrWhiteSpace(p.Url) && !ListingExtractor.IsListingPageUrl(p.Url))
             .Take(PipelineLimits.CrawlMaxDeepDive)
             .ToList();
 
         var deepStates = await DeepDiveAsync(context, state, services, deepDiveTargets);
+        var deepDived = deepStates.Count(s => s.Persisted);
 
-        // Only products the deep-dive ACTUALLY persisted are removed from the remainder — a target whose
-        // ProductDetailWorkflow timed out/faulted (RunChildAsync returns it un-persisted) falls back to the
-        // listing-level persist below, so no discovered product is silently dropped.
-        var persistedKeys = new HashSet<string>(
-            deepStates.Where(s => s.Persisted).Select(s => KeyOf(s.Result)), StringComparer.OrdinalIgnoreCase);
-        var deepDived = persistedKeys.Count;
-        var remainder = state.Discovered.Where(p => !persistedKeys.Contains(KeyOf(p))).ToList();
-        var (entities, prices) = await CrawlPersistence.PersistListingsAsync(
-            context, remainder, geo, state.Query, state.SiteName, state.SearchId, logger, context.CancellationToken);
-
-        state.Persisted = deepDived + entities;
-        // Count only prices that were actually written: the remainder's (PersistListingsAsync) plus the
-        // successfully deep-dived priced products. Counting un-persisted targets would falsely mark the crawl
-        // as "yielded" and wrongly skip the store's single-page fallback.
-        state.PricesRecorded = prices + deepStates.Count(s => s.Persisted && s.Result.Price is not null);
+        state.Persisted = entities;
+        // Listing-level prices were all written above; a dive only ADDS a price when the listing had
+        // none (its row would otherwise duplicate the listing's). Counting is for the yield gate.
+        state.PricesRecorded = prices + deepStates.Count(
+            s => s.Persisted && s.Result.Price is not null && s.Listing.Price is null);
         services.Log($"🛒 {state.SiteName}: stored {state.Persisted} product(s) ({deepDived} deep-dived).");
         state.RecordEvent(EventCategory.Extract, "crawl.store.store", "r2",
             metadata: new Dictionary<string, object?>

@@ -426,6 +426,8 @@ jobs:
             # as a deliberate RESTRAINT for this environment; the real backstops are the per-job cost
             # cap and the workflow deadline + salvage.
             PIPELINE_SUBWORKFLOW_CONCURRENCY=${{ vars.PIPELINE_SUBWORKFLOW_CONCURRENCY }}
+            PIPELINE_ENRICH_CONCURRENCY=${{ vars.PIPELINE_ENRICH_CONCURRENCY || '16' }}
+            SEARCH_WORKFLOW_TIMEOUT_MINUTES=${{ vars.SEARCH_WORKFLOW_TIMEOUT_MINUTES || '15' }}
             PIPELINE_MAX_BRANDS=${{ vars.PIPELINE_MAX_BRANDS }}
             PIPELINE_MAX_STORES=${{ vars.PIPELINE_MAX_STORES }}
             PIPELINE_MAX_ITEMS=${{ vars.PIPELINE_MAX_ITEMS }}

@@ -225,4 +225,181 @@ public class OfferVerificationTests
                 "Its thermoblock heats in forty seconds, and the frother steams milk for cappuccino at home.")
             .Should().BeFalse();
     }
+
+    // ── Detail-page image + availability extraction (verifypage backfill) ─────────
+    // The drain already fetches every card's detail page (direct link); the photo and stock
+    // wording are ON that page, so the fetch must harvest them too — this is what fills the
+    // imageless/stockless cards for stores whose LISTING pages carry only name+link.
+
+    [Fact]
+    public void ExtractImage_ReturnsTheFirstProductLookingImage()
+    {
+        const string page = """
+            [Home](/) ![logo](https://store.jo/assets/logo.svg)
+            # Geepas 8" Rechargeable Fan
+            ![Geepas fan](https://store.jo/cdn/products/gf21233-main.jpg)
+            Price on request.
+            """;
+        OfferVerificationHandler.ExtractImage(page)
+            .Should().Be("https://store.jo/cdn/products/gf21233-main.jpg", "logos/sprites are skipped");
+    }
+
+    [Fact]
+    public void ExtractImage_NothingProductLike_ReturnsNull()
+    {
+        OfferVerificationHandler.ExtractImage("![icon](https://store.jo/i/icon.svg) plain text, no photos")
+            .Should().BeNull();
+    }
+
+    [Fact]
+    public void ExtractImage_SkipsPromosAndFlags_WithoutProductEvidence()
+    {
+        // QA: the first page image on Mumzworld is a "Download our app, 20% off" promo and on
+        // Dumyah a country flag — a WRONG photo on the card is worse than a placeholder. An image
+        // only qualifies with product evidence: a product-ish URL path segment (product/item/
+        // upload/cdn/media) — promos and site chrome live elsewhere.
+        const string page = """
+            ![Download Our App Get 20% OFF](https://cdn-images.prom.mumzworld.com/app-popup/new20.png)
+            ![jo flag](https://dumyah.com/image/flags/jo.png)
+            # O2COOL Deluxe Misting Fan
+            ![O2COOL fan](https://dumyah.com/image/cache/catalog/products/o2cool-mist-500x500.jpg)
+            """;
+        OfferVerificationHandler.ExtractImage(page)
+            .Should().Be("https://dumyah.com/image/cache/catalog/products/o2cool-mist-500x500.jpg");
+    }
+
+    [Fact]
+    public void ExtractImages_ReturnsEveryProductImage_DedupedInOrder()
+    {
+        // A detail page carries a gallery — one photo per angle/color. Harvest ALL of them (the
+        // detail surfaces show a gallery; the card uses the first), deduped, document order.
+        const string page = """
+            ![logo](https://store.jo/assets/logo.svg)
+            ![front](https://store.jo/cdn/products/fan-front.jpg)
+            ![side](https://store.jo/cdn/products/fan-side.jpg)
+            ![front again](https://store.jo/cdn/products/fan-front.jpg)
+            ![white variant](https://store.jo/cdn/products/fan-white.jpg)
+            """;
+        OfferVerificationHandler.ExtractImages(page).Should().Equal(
+            "https://store.jo/cdn/products/fan-front.jpg",
+            "https://store.jo/cdn/products/fan-side.jpg",
+            "https://store.jo/cdn/products/fan-white.jpg");
+    }
+
+    [Fact]
+    public void ExtractImage_PromoOnProductPath_StillSkippedByKeyword()
+    {
+        OfferVerificationHandler.ExtractImage(
+                "![sale](https://store.jo/cdn/products/app-popup-banner.png) no real photo here")
+            .Should().BeNull("promo keywords disqualify even product-path images");
+    }
+
+    [Fact]
+    public void ExtractOgImage_ReturnsCanonicalPhoto_WithoutPathEvidence()
+    {
+        // og:image is the store's OWN declared product photo — trusted even when its URL path carries
+        // no product-ish segment (many stores serve the OG photo off a bare content host).
+        const string html = """
+            <head>
+              <meta property="og:title" content="Gree Split A/C">
+              <meta property="og:image" content="https://cdn.gree.jo/x9f2a1.jpg">
+            </head>
+            """;
+        OfferVerificationHandler.ExtractOgImage(html)
+            .Should().Be("https://cdn.gree.jo/x9f2a1.jpg");
+        // and it LEADS ExtractImages, ahead of any in-body image.
+        OfferVerificationHandler.ExtractImages(html + "\n![body](https://cdn.gree.jo/media/inbody.jpg)")
+            .Should().Equal(
+                "https://cdn.gree.jo/x9f2a1.jpg",
+                "https://cdn.gree.jo/media/inbody.jpg");
+    }
+
+    [Fact]
+    public void ExtractOgImage_ToleratesContentBeforeProperty_AndDecodesEntities()
+    {
+        const string html =
+            """<meta content="https://store.jo/media/p.jpg?w=800&amp;h=800" name="twitter:image"/>""";
+        OfferVerificationHandler.ExtractOgImage(html)
+            .Should().Be("https://store.jo/media/p.jpg?w=800&h=800");
+    }
+
+    [Fact]
+    public void ExtractOgImage_SkipsPromoOgImage_ByBlocklist()
+    {
+        OfferVerificationHandler.ExtractOgImage(
+                """<meta property="og:image" content="https://store.jo/uploads/app-popup.jpg">""")
+            .Should().BeNull("a promo og:image is still chrome, not the product");
+    }
+
+    [Fact]
+    public void ExtractOgImage_SkipsMarketplaceSocialShareCard()
+    {
+        // QA: OpenSooq's og:image is a generic Facebook square card, not the product — a wrong photo
+        // on a "Sharp Inverter Air Conditioner" card. Must be rejected.
+        OfferVerificationHandler.ExtractOgImage(
+                """<meta property="og:image" content="https://opensooqui2.os-cdn.com/opensooq_fb_square.png">""")
+            .Should().BeNull("a marketplace social-share card is not the product");
+    }
+
+    [Fact]
+    public void IsProductImageCandidate_ScreensGenericImages_KeepsRealPhotos()
+    {
+        // Screens LLM-picked images that skip the in-body evidence scan.
+        OfferVerificationHandler.IsProductImageCandidate(
+            "https://opensooqui2.os-cdn.com/opensooq_fb_square.png").Should().BeFalse();
+        OfferVerificationHandler.IsProductImageCandidate(
+            "https://store.jo/assets/og-default.jpg").Should().BeFalse();
+        OfferVerificationHandler.IsProductImageCandidate(
+            "https://darcomjo.com/cdn/shop/files/lg-air-conditioner_533x.png").Should().BeTrue();
+        OfferVerificationHandler.IsProductImageCandidate(null).Should().BeFalse();
+    }
+
+    [Fact]
+    public void ExtractImages_ReadsHtmlImgAndLazyLoadAttributes()
+    {
+        // Real stores lazy-load: the product photo lives in data-src/srcset, not a rendered src.
+        const string html = """
+            <img src="https://store.jo/assets/logo.png" alt="logo">
+            <img data-src="https://store.jo/media/products/fan-front.jpg" class="lazy">
+            <img srcset="https://store.jo/media/products/fan-2x.jpg 2x, https://store.jo/media/products/fan-1x.jpg 1x">
+            """;
+        OfferVerificationHandler.ExtractImages(html).Should().Equal(
+            "https://store.jo/media/products/fan-front.jpg",
+            "https://store.jo/media/products/fan-2x.jpg");
+    }
+
+    [Fact]
+    public void ExtractImages_AcceptsCommonCdnPaths()
+    {
+        // Broadened evidence: Shopify /files, WordPress /wp-content, generic /images all carry photos.
+        const string page = """
+            ![shopify](https://cdn.shopify.com/s/files/1/0/fan.jpg)
+            ![wp](https://store.jo/wp-content/uploads/2026/fan.jpg)
+            ![img](https://store.jo/images/fan-white.jpg)
+            """;
+        OfferVerificationHandler.ExtractImages(page).Should().Equal(
+            "https://cdn.shopify.com/s/files/1/0/fan.jpg",
+            "https://store.jo/wp-content/uploads/2026/fan.jpg",
+            "https://store.jo/images/fan-white.jpg");
+    }
+
+    [Fact]
+    public void ExtractAvailability_FindsStockWording_EnglishAndArabic()
+    {
+        OfferVerificationHandler.ExtractAvailability("Availability: In Stock — ships today")
+            .Should().NotBeNull();
+        Daleel.Web.Services.StockStatus.Classify(
+                OfferVerificationHandler.ExtractAvailability("Availability: In Stock — ships today"))
+            .Should().Be(Daleel.Web.Services.Stock.InStock);
+        Daleel.Web.Services.StockStatus.Classify(
+                OfferVerificationHandler.ExtractAvailability("هذا المنتج غير متوفر حالياً"))
+            .Should().Be(Daleel.Web.Services.Stock.OutOfStock);
+    }
+
+    [Fact]
+    public void ExtractAvailability_NoStockWording_ReturnsNull()
+    {
+        OfferVerificationHandler.ExtractAvailability("A lovely fan with 3 speeds and a remote.")
+            .Should().BeNull();
+    }
 }

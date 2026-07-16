@@ -299,6 +299,23 @@ builder.Services.AddSingleton<Daleel.Core.Moderation.IHalalImageClassifier>(sp =
         sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>(),
         scopeFactory: sp.GetRequiredService<IServiceScopeFactory>());
 });
+
+// Product-shot vision screen: keeps only clean product photos on cards (rejects lifestyle/room scenes,
+// promo banners, logos). OpenRouter-only, cached per image URL, fail-open; inert without a key.
+builder.Services.AddSingleton<Daleel.Web.Moderation.IProductImageScreen>(sp =>
+{
+    var key = Environment.GetEnvironmentVariable("OPENROUTER_API_KEY");
+    if (string.IsNullOrWhiteSpace(key))
+    {
+        return new Daleel.Web.Moderation.NullProductImageScreen();
+    }
+
+    return new Daleel.Web.Moderation.OpenRouterProductImageScreen(
+        key.Trim(),
+        Environment.GetEnvironmentVariable("DALEEL_MODERATION_VISION_MODEL"),
+        sp.GetRequiredService<ILogger<Daleel.Web.Moderation.OpenRouterProductImageScreen>>(),
+        sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>());
+});
 builder.Services.AddHttpContextAccessor();
 
 // Persistent brand/store profiles: researched once via Context.dev + the LLM, saved to Postgres, and

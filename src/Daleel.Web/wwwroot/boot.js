@@ -40,8 +40,22 @@
                 }
             }
 
-            // Exhausted every retry: only now do we surface an error to the user.
-            if (!cancelled) showModal();
+            // Exhausted every quick retry: surface the error card — but keep watching. A QA/prod
+            // DEPLOY takes the server away for longer than the quick window (~16s); when it comes
+            // back the circuit is gone for good, so the moment /health answers we reload and the
+            // tab heals itself instead of sitting on a dead overlay.
+            if (cancelled) return;
+            showModal();
+            while (!cancelled) {
+                await delay(3000);
+                if (cancelled) return;
+                try {
+                    const health = await fetch('/health', { cache: 'no-store' });
+                    if (health.ok) { location.reload(); return; }
+                } catch {
+                    // Still down; keep waiting.
+                }
+            }
         })();
 
         return {

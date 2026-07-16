@@ -1,3 +1,4 @@
+using System.Net.Http;
 using Daleel.Agent;
 using Daleel.Core.Intelligence;
 using Daleel.Core.Llm;
@@ -54,6 +55,36 @@ public class ItemEnrichmentServiceTests
         var result = await svc.EnrichAsync(NoScrapeAgent(), new ProductSearchResult(), _ => { }, "sid", default);
 
         result.Products.Should().BeNull("nothing to enrich");
+    }
+
+    [Fact]
+    public async Task FindImageForItemAsync_WhenScrapeThrows_DegradesToEmpty_NeverFaults()
+    {
+        // A dead offer link makes the Context.dev page fetch THROW (that branch re-throws). The image
+        // lookup must degrade to "no image for this item" — one bad URL must never fault the unit and
+        // take image lookups down for the rest of the grid (best-effort pipeline invariant).
+        using var ctx = new PostgresTestContext();
+        var svc = new ItemEnrichmentService(
+            new ProductProfileRepository(ctx.Db),
+            new ProfileOptions { Now = () => Now, Ttl = TimeSpan.FromDays(30) },
+            new StubAgentFactory(),
+            new ScrapedPriceRepository(ctx.Db),
+            new StubBrandCatalog(),
+            new BrandRepository(ctx.Db),
+            new BrandModelRepository(ctx.Db),
+            new NoneIdentifier(),
+            NullLogger<ItemEnrichmentService>.Instance,
+            providers: new ScraperThrowsProviderApi());
+
+        var item = new ProductModel
+        {
+            Name = "Gree Split A/C",
+            Offers = new[] { new PriceOffer { Url = "https://dead.example/404" } }
+        };
+
+        var act = async () => await svc.FindImageForItemAsync(NoScrapeAgent(), item, default);
+
+        (await act.Should().NotThrowAsync()).Which.Should().BeEmpty();
     }
 
     [Fact]
@@ -228,6 +259,74 @@ public class ItemEnrichmentServiceTests
             .Should().Be("https://coffee.jo/img/kf520.jpg", "the crawl's own image must ride the price row onto the grid");
     }
 
+    [Fact]
+    public async Task AttachScrapedPrices_UnpricedItemWithImage_StillReachesTheGridWithItsPhoto()
+    {
+        // QA (fans/diapers): many store listings show no price ("See price on store site") but the
+        // crawl DID extract a photo. The persist and attach sides both filtered on Price != null, so
+        // the unpriced item's image was dropped and the card rendered a placeholder. An unpriced row
+        // that carries an image must still create the grid model — indicative, with its photo.
+        using var ctx = new PostgresTestContext();
+        const string domain = "fans.jo";
+        await new ScrapedPriceRepository(ctx.Db).AddRangeAsync(new[]
+        {
+            new ScrapedPrice
+            {
+                ProductName = "KDK Ceiling Fan Ultra Quiet 14W",
+                ProductKey = ProductProfile.KeyFor("KDK", null, "KDK Ceiling Fan Ultra Quiet 14W"),
+                StoreName = domain,
+                Price = null,                                        // the store page showed no price
+                Availability = "متوفر",                              // …but it did show stock
+                SourceUrl = "https://fans.jo/products/kdk-14w",
+                ImageUrl = "https://fans.jo/img/kdk-14w.jpg",
+                Provider = "site-crawl",
+                ScrapedAt = Now
+            }
+        });
+
+        var svc = Build(ctx);
+        var (models, priced, created) = await svc.AttachScrapedPricesAsync(
+            new List<ProductModel>(), domain, storeName: domain, query: "ceiling fan", CancellationToken.None);
+
+        priced.Should().Be(0, "there is no price to attach");
+        created.Should().ContainSingle("the unpriced-but-photographed item must still reach the grid");
+        var model = models!.Single(m => m.Name == "KDK Ceiling Fan Ultra Quiet 14W");
+        model.ImageUrl.Should().Be("https://fans.jo/img/kdk-14w.jpg");
+        model.Offers.Should().ContainSingle(o => o.Url == "https://fans.jo/products/kdk-14w",
+            "the click-through to the store page must survive");
+        model.Offers.Single().Availability.Should().Be("متوفر", "the store's stock wording must ride the row");
+    }
+
+    [Fact]
+    public async Task AttachScrapedPrices_UnpricedImagelessRow_CreatesNothing()
+    {
+        // An unpriced row with NO image adds nothing over the seed path — it must not create a
+        // bare name-only grid model from the drain.
+        using var ctx = new PostgresTestContext();
+        const string domain = "fans.jo";
+        await new ScrapedPriceRepository(ctx.Db).AddRangeAsync(new[]
+        {
+            new ScrapedPrice
+            {
+                ProductName = "Mystery Fan",
+                ProductKey = ProductProfile.KeyFor(null, null, "Mystery Fan"),
+                StoreName = domain,
+                Price = null,
+                ImageUrl = null,
+                Provider = "site-crawl",
+                ScrapedAt = Now
+            }
+        });
+
+        var svc = Build(ctx);
+        var (models, priced, created) = await svc.AttachScrapedPricesAsync(
+            new List<ProductModel>(), domain, storeName: domain, query: "ceiling fan", CancellationToken.None);
+
+        priced.Should().Be(0);
+        created.Should().BeEmpty();
+        models.Should().BeNull("nothing usable came out of the rows");
+    }
+
     private static AgentService NoScrapeAgent() =>
         new(new StubLlm(), new AgentOptions(), scraper: new ThrowingScraper());
 
@@ -255,6 +354,58 @@ public class ItemEnrichmentServiceTests
         public string Name => "throwing-scraper";
         public Task<ScrapedPage> ScrapeAsync(string url, ScrapeFormat format = ScrapeFormat.Markdown, CancellationToken ct = default) =>
             throw new InvalidOperationException("scraper must not be called on the reuse path");
+    }
+
+    /// <summary>Scraper is configured (HasScraper) but every page fetch throws — the Context.dev branch
+    /// re-throws on a dead URL, so this reproduces the "one bad offer link faults the unit" hazard.</summary>
+    private sealed class ScraperThrowsProviderApi : IProviderApi
+    {
+        public bool HasEdge => false;
+        public bool EdgeDrainReady => false;
+        public bool HasScraper => true;
+        public bool HasPlaces => false;
+        public bool HasSocial => false;
+        public bool HasEdgeExtract => false;
+        public bool HasEdgeClassify => false;
+        public bool HasEdgeFilter => false;
+
+        public Task<Daleel.Search.Abstractions.ScrapedPage?> ScrapePageAsync(
+            string url, Daleel.Search.Abstractions.ScrapeFormat format = Daleel.Search.Abstractions.ScrapeFormat.Markdown,
+            CancellationToken ct = default) =>
+            throw new HttpRequestException("dead offer link (404)");
+
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitEdgeCatalogAsync(
+            string domain, string? store, string? searchJobId, int maxProducts = 0, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(null);
+        public Task<Daleel.Web.Cloudflare.WorkerHandle?> SubmitEdgeBrandAsync(
+            string domain, string brandName, string? searchJobId, bool refresh = false, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Web.Cloudflare.WorkerHandle?>(null);
+        public Task<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>> ExtractCatalogAsync(
+            string domain, int maxProducts = 0, int timeoutMs = 45_000, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>>(Array.Empty<Daleel.Search.Providers.CatalogProduct>());
+        public Task<Daleel.Search.Providers.BrandProfile?> GetBrandAsync(string domain, CancellationToken ct = default) =>
+            Task.FromResult<Daleel.Search.Providers.BrandProfile?>(null);
+        public Task<IReadOnlyList<StoreLocation>> SearchPlacesAsync(
+            string query, Daleel.Core.Geo.GeoPoint? near = null, double radiusMeters = 5000,
+            string? languageCode = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<StoreLocation>>(Array.Empty<StoreLocation>());
+        public Task<StoreLocation?> GetPlaceDetailsAsync(string placeId, CancellationToken ct = default) =>
+            Task.FromResult<StoreLocation?>(null);
+        public Task<IReadOnlyList<SocialPost>> FetchSocialPostsAsync(
+            Source source, string? keyword = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SocialPost>>(Array.Empty<SocialPost>());
+        public Task<IReadOnlyList<Daleel.Web.Cloudflare.ClassifyVerdict>> ClassifyTextAsync(
+            IReadOnlyList<(string Id, string Text)> items, IReadOnlyList<string> labels, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Web.Cloudflare.ClassifyVerdict>>(Array.Empty<Daleel.Web.Cloudflare.ClassifyVerdict>());
+        public Task<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>> ExtractProductsFromContentAsync(
+            string content, string? market = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Search.Providers.CatalogProduct>>(Array.Empty<Daleel.Search.Providers.CatalogProduct>());
+        public Task<IReadOnlyList<Daleel.Web.Cloudflare.FilterFindingDto>> FilterTextFindingsAsync(
+            IReadOnlyList<(string Id, string Text, string? SourceUrl)> items, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Web.Cloudflare.FilterFindingDto>>(Array.Empty<Daleel.Web.Cloudflare.FilterFindingDto>());
+        public Task<IReadOnlyList<Daleel.Web.Cloudflare.FilterFindingDto>> FilterImageFindingsAsync(
+            IReadOnlyList<string> urls, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Daleel.Web.Cloudflare.FilterFindingDto>>(Array.Empty<Daleel.Web.Cloudflare.FilterFindingDto>());
     }
 
     // Resolve returns null so the Context.dev catalogue/harvest phases no-op without a key.

@@ -1,6 +1,7 @@
 using System.Text;
 using Daleel.Core.Geo;
 using Daleel.Core.Intelligence;
+using Daleel.Core.Llm;
 using Daleel.Core.Models;
 
 namespace Daleel.Agent;
@@ -356,16 +357,18 @@ public static class PromptTemplates
     public static string RelevanceGate(
         string target, IReadOnlyList<string> items, IReadOnlyList<RelevanceNegative> negatives)
     {
+        // target/items/negatives are DERIVED from untrusted scraped pages (and user input) — neutralize
+        // each so a poisoned product name can't smuggle instructions into the gate's judgment.
         var sb = new StringBuilder();
-        sb.Append("The shopper is looking for: ").AppendLine(target);
+        sb.Append("The shopper is looking for: ").AppendLine(PromptSanitizer.Neutralize(target));
         if (negatives.Count > 0)
         {
             sb.AppendLine("Shoppers previously flagged these as NOT what they wanted for this search — use them to " +
                 "CALIBRATE, but judge each item on its OWN merits (do NOT drop an item merely because it resembles one):");
             foreach (var n in negatives.Take(20))
             {
-                sb.Append("- ").Append(n.Label);
-                if (!string.IsNullOrWhiteSpace(n.Reason)) sb.Append(" (").Append(n.Reason).Append(')');
+                sb.Append("- ").Append(PromptSanitizer.Neutralize(n.Label));
+                if (!string.IsNullOrWhiteSpace(n.Reason)) sb.Append(" (").Append(PromptSanitizer.Neutralize(n.Reason)).Append(')');
                 sb.AppendLine();
             }
         }
@@ -377,7 +380,7 @@ public static class PromptTemplates
         sb.AppendLine("Items:");
         for (var i = 0; i < items.Count; i++)
         {
-            sb.Append(i).Append(". ").AppendLine(items[i]);
+            sb.Append(i).Append(". ").AppendLine(PromptSanitizer.Neutralize(items[i]));
         }
         sb.AppendLine("""
             Reply with exactly this JSON object:

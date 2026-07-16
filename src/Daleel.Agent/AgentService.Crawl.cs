@@ -617,7 +617,7 @@ public sealed partial class AgentService
     private const string StoreAssessSystem =
         "You are an e-commerce store navigator. You are given an online store's landing page as markdown. " +
         "Figure out the store platform and the best ways to reach its product catalogue. " +
-        "Respond with ONLY a JSON object, no prose.";
+        "Respond with ONLY a JSON object, no prose. " + PromptSanitizer.FramingInstruction;
 
     private static string StoreAssessPrompt(string url, string query, string content) =>
         $$"""
@@ -641,13 +641,14 @@ public sealed partial class AgentService
         - URLs may be relative; keep them as they appear. Only include a searchUrl if you can see the real search path.
 
         Store landing page markdown:
-        {{content}}
+        {{PromptSanitizer.Fence(content)}}
         """;
 
     private const string StoreListingSystem =
         "You extract product CARDS from an e-commerce store listing/search/category page. Focus on what a " +
         "shopper needs to buy: price, currency, stock, and the link to each product. " +
-        "Respond with ONLY a JSON object, no prose. Use null for anything not shown — never invent a price.";
+        "Respond with ONLY a JSON object, no prose. Use null for anything not shown — never invent a price. " +
+        PromptSanitizer.FramingInstruction;
 
     private static string StoreListingPrompt(string query, GeoProfile geo, string content) =>
         $$"""
@@ -662,7 +663,7 @@ public sealed partial class AgentService
               "model": "<model number or null>",
               "sku": "<GTIN/UPC/EAN/MPN if shown, else null>",
               "url": "<link to the product's detail page>",
-              "imageUrl": "<product image URL or null>",
+              "imageUrl": "<a photo that shows the product — NOT a logo, promo banner, or text/graphic image; null if none>",
               "price": <price as a number, or null>,
               "currency": "<ISO currency code, e.g. {{geo.Currency}}, or null>",
               "availability": "<in stock / out of stock / preorder, or null>"
@@ -671,7 +672,7 @@ public sealed partial class AgentService
         }
 
         Store listing page markdown:
-        {{content}}
+        {{PromptSanitizer.Fence(content)}}
         """;
 
     // ══ Prompts — BRAND ══════════════════════════════════════════════════════════
@@ -679,7 +680,8 @@ public sealed partial class AgentService
     private const string BrandAssessSystem =
         "You are a brand/manufacturer website navigator. The marketing homepage is NOT the product catalogue. " +
         "Your job is to find the PRODUCTS/CATALOG section and the specific product-line/series pages for the " +
-        "wanted product category. Respond with ONLY a JSON object, no prose.";
+        "wanted product category. Respond with ONLY a JSON object, no prose. " +
+        PromptSanitizer.FramingInstruction;
 
     private static string BrandAssessPrompt(string url, string category, string content) =>
         $$"""
@@ -701,13 +703,14 @@ public sealed partial class AgentService
         - URLs may be relative; keep them as they appear.
 
         Brand landing page markdown:
-        {{content}}
+        {{PromptSanitizer.Fence(content)}}
         """;
 
     private const string BrandModelsSystem =
         "You extract product MODELS from a brand/manufacturer catalogue or product-line page. Focus on the " +
         "product itself: model name/number, key specs, and features. Brand sites usually DON'T show prices — " +
-        "omit price unless it is explicitly shown. Respond with ONLY a JSON object, no prose; never invent values.";
+        "omit price unless it is explicitly shown. Respond with ONLY a JSON object, no prose; never invent values. " +
+        PromptSanitizer.FramingInstruction;
 
     private static string BrandModelsPrompt(string category, string content) =>
         $$"""
@@ -721,7 +724,7 @@ public sealed partial class AgentService
               "brand": "<brand/manufacturer>",
               "model": "<model number/code, e.g. OLED55C4>",
               "url": "<link to the model's detail page>",
-              "imageUrl": "<model image URL or null>",
+              "imageUrl": "<a photo that shows the model — NOT a logo, promo banner, or text/graphic image; null if none>",
               "specs": { "<attribute>": "<value>" },
               "price": <number if a price is explicitly shown, else null>,
               "currency": "<ISO code if a price is shown, else null>"
@@ -730,7 +733,7 @@ public sealed partial class AgentService
         }
 
         Brand catalogue page markdown:
-        {{content}}
+        {{PromptSanitizer.Fence(content)}}
         """;
 
     // ══ Prompts — PRODUCT DETAIL ═════════════════════════════════════════════════
@@ -738,7 +741,8 @@ public sealed partial class AgentService
     private const string ProductDetailSystem =
         "You extract a single product's COMPLETE record from its product detail page — every image, the full " +
         "spec sheet, price, description, features, buyer reviews, related products, and the seller. " +
-        "Respond with ONLY a JSON object, no prose. Use null / empty arrays for anything not present — never invent.";
+        "Respond with ONLY a JSON object, no prose. Use null / empty arrays for anything not present — never invent. " +
+        PromptSanitizer.FramingInstruction;
 
     private static string ProductDetailPrompt(ProductListing listing, GeoProfile geo, string content) =>
         $$"""
@@ -750,7 +754,7 @@ public sealed partial class AgentService
           "name": "<full product name>",
           "brand": "<brand/manufacturer or null>",
           "sku": "<GTIN/UPC/EAN/MPN if shown, else null>",
-          "images": ["<every product image URL on the page, primary first>"],
+          "images": ["<URLs of photos that SHOW THE PRODUCT (a studio, in-room, or lifestyle photo is all fine), primary first; EXCLUDE only images that don't show the product: logos, promotional banners/ads, and pure text/graphic images>"],
           "price": <price as a number, or null>,
           "currency": "<ISO currency code, e.g. {{geo.Currency}}, or null>",
           "availability": "<in stock / out of stock / preorder, or null>",
@@ -763,11 +767,12 @@ public sealed partial class AgentService
         }
 
         Product detail page markdown:
-        {{content}}
+        {{PromptSanitizer.Fence(content)}}
         """;
 
     private const string PaginationSystem =
-        "You detect pagination on a product listing/catalogue page. Respond with ONLY a JSON object, no prose.";
+        "You detect pagination on a product listing/catalogue page. Respond with ONLY a JSON object, no prose. " +
+        PromptSanitizer.FramingInstruction;
 
     private static string PaginationPrompt(string url, string content) =>
         $$"""
@@ -786,6 +791,6 @@ public sealed partial class AgentService
         - Return null nextPageUrl if there is genuinely no further page.
 
         Listing page markdown:
-        {{content}}
+        {{PromptSanitizer.Fence(content)}}
         """;
 }

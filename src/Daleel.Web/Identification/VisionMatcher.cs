@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Daleel.Core.Llm;
+using Daleel.Core.Observability;
 using Daleel.Search.Http;
 
 namespace Daleel.Web.Identification;
@@ -100,24 +101,26 @@ public sealed class VisionMatcher : IVisionMatcher, IDisposable
             ? $"The second image is believed to be \"{hint}\". Is the first image the same product?"
             : "Is the first image the same product as the second image?";
 
-        var payload = new
+        var messages = new object[]
         {
-            model = _model,
-            messages = new object[]
+            new { role = "system", content = SystemPrompt },
+            new
             {
-                new { role = "system", content = SystemPrompt },
-                new
+                role = "user",
+                content = new object[]
                 {
-                    role = "user",
-                    content = new object[]
-                    {
-                        new { type = "text", text = userText },
-                        new { type = "image_url", image_url = new { url = storeImageUrl } },
-                        new { type = "image_url", image_url = new { url = brandImageUrl } }
-                    }
+                    new { type = "text", text = userText },
+                    new { type = "image_url", image_url = new { url = storeImageUrl } },
+                    new { type = "image_url", image_url = new { url = brandImageUrl } }
                 }
             }
         };
+        // Group this vision call under the owning search's OpenRouter `session_id` (sticky routing +
+        // observability), the same as every text call — vision ID runs inside the drain's
+        // AmbientLlmSession scope.
+        var payload = AmbientLlmSession.SessionId is { Length: > 0 } session
+            ? (object)new { model = _model, messages, session_id = session }
+            : new { model = _model, messages };
 
         // Bound the call deterministically: linked CTS that auto-cancels after CallTimeout but still
         // honours a genuine outer cancellation.

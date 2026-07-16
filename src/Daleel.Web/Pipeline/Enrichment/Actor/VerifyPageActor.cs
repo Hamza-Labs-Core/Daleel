@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Daleel.Agent;
+using Daleel.Core.Llm;
 using Daleel.Core.Models;
 
 namespace Daleel.Web.Pipeline.Enrichment.Actor;
@@ -42,12 +43,15 @@ public sealed class VerifyPageActor
             "OUTPUT (done result): {\"models\":[{\"name\":\"<exact name from the list>\",\"related\":true|false," +
             "\"price\":{\"value\":<number>,\"currency\":\"<ISO or symbol>\",\"exact\":true|false}|null}], " +
             "\"condition\":\"new|used|refurbished\"|null, \"description\":\"<product prose>\"|null}. " +
-            "'exact' is true for a firm listed price, false for an approximate/indicative figure.";
+            "'exact' is true for a firm listed price, false for an approximate/indicative figure.\n" +
+            PromptSanitizer.FramingInstruction;
 
         var context = new StringBuilder();
         context.Append("MODELS TO CHECK:\n");
-        foreach (var n in names) context.Append("- ").Append(n).Append('\n');
-        context.Append("\nPAGE CONTENT:\n").Append(Clip(pageContent, MaxPageChars));
+        // Names are DERIVED from earlier scraped pages — neutralize them so a poisoned name can't inject
+        // a second time here. The PAGE CONTENT is raw untrusted markdown — fence + frame it.
+        foreach (var n in names) context.Append("- ").Append(PromptSanitizer.Neutralize(n)).Append('\n');
+        context.Append("\nPAGE CONTENT:\n").Append(PromptSanitizer.Fence(Clip(pageContent, MaxPageChars)));
 
         var res = await _loop.RunAsync(
             agent, system, context.ToString(), Array.Empty<ActorTool>(), NoTools, Bounds, ct);
