@@ -482,7 +482,11 @@ public sealed partial class AgentService
             sb.AppendLine(line);
         }
 
-        return sb.ToString();
+        // Prompt-injection hardening: this cleaned page text is UNTRUSTED and goes straight into every
+        // crawl/edge extraction prompt. Strip the structural tokens an attacker uses to break out of the
+        // frame (chat control tokens, role-line forgery, fence spoofs). Language-neutral — real product
+        // text is untouched. The crawl prompts additionally FENCE + frame it (see PromptSanitizer.Fence).
+        return PromptSanitizer.Neutralize(sb.ToString());
     }
 
     /// <summary>
