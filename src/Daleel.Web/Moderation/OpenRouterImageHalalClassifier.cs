@@ -180,10 +180,11 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             new { role = "system", content = systemPrompt },
             new { role = "user", content }
         };
-        // Group this vision call under the owning search's session id (OpenRouter `user` field), the
-        // same as every text call — the image screen runs inside the drain's AmbientLlmSession scope.
+        // Group this vision call under the owning search's OpenRouter `session_id` (sticky routing +
+        // observability), the same as every text call — the image screen runs inside the drain's
+        // AmbientLlmSession scope.
         var payload = AmbientLlmSession.SessionId is { Length: > 0 } session
-            ? (object)new { model = _model, messages, user = session }
+            ? (object)new { model = _model, messages, session_id = session }
             : new { model = _model, messages };
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);

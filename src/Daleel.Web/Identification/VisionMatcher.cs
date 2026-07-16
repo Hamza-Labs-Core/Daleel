@@ -115,10 +115,11 @@ public sealed class VisionMatcher : IVisionMatcher, IDisposable
                 }
             }
         };
-        // Group this vision call under the owning search's session id (OpenRouter `user` field), the
-        // same as every text call — vision ID runs inside the drain's AmbientLlmSession scope.
+        // Group this vision call under the owning search's OpenRouter `session_id` (sticky routing +
+        // observability), the same as every text call — vision ID runs inside the drain's
+        // AmbientLlmSession scope.
         var payload = AmbientLlmSession.SessionId is { Length: > 0 } session
-            ? (object)new { model = _model, messages, user = session }
+            ? (object)new { model = _model, messages, session_id = session }
             : new { model = _model, messages };
 
         // Bound the call deterministically: linked CTS that auto-cancels after CallTimeout but still
