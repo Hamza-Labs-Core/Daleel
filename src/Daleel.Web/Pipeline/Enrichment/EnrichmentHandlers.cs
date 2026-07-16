@@ -731,7 +731,7 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
             ? new HashSet<string>(a, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var found = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var found = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var attemptedNow = new List<string>();
         var remaining = false;
         foreach (var model in models)
@@ -748,9 +748,10 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
             }
 
             attemptedNow.Add(model.Name);
-            if (await svc.FindImageForItemAsync(ctx.Agent(), model, ct) is { } image)
+            var gallery = await svc.FindImageForItemAsync(ctx.Agent(), model, ct);
+            if (gallery.Count > 0)
             {
-                found[model.Name] = image;
+                found[model.Name] = gallery;
             }
         }
 
@@ -768,9 +769,15 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
                 for (var i = 0; i < current.Count; i++)
                 {
                     if (string.IsNullOrWhiteSpace(current[i].ImageUrl) &&
-                        found.TryGetValue(current[i].Name, out var image))
+                        found.TryGetValue(current[i].Name, out var gallery))
                     {
-                        current[i] = current[i] with { ImageUrl = image };
+                        // Primary onto the card, the rest of the gallery onto the detail panel; deduped,
+                        // order preserved. The ImageCheck enqueued below screens every added image.
+                        var merged = gallery.Concat(current[i].Images)
+                            .Where(u => !string.IsNullOrWhiteSpace(u))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                        current[i] = current[i] with { ImageUrl = merged[0], Images = merged.Skip(1).ToList() };
                         changed = true;
                     }
                 }

@@ -47,8 +47,9 @@ public interface IItemEnrichmentService
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
     Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
 
-    /// <summary>Phase 6 for ONE item: scrape its store/brand page for a photo. Null = none found.</summary>
-    Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
+    /// <summary>Phase 6 for ONE item: LLM-extract its photos from its own store/brand page (primary
+    /// first). Empty = none found.</summary>
+    Task<IReadOnlyList<string>> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
     /// <summary>Phase 7 as a unit: condition backfill over the whole list. Null = unchanged.</summary>
     Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct);
@@ -311,15 +312,17 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
             imageAttempts++;
 
-            if (await FindImageForItemAsync(agent, m, ct) is not { } img)
+            var gallery = await FindImageForItemAsync(agent, m, ct);
+            if (gallery.Count == 0)
             {
                 continue;
             }
 
-            pricedModels[i] = m with { ImageUrl = img };
+            var (primary, others) = SplitGallery(gallery, m.Images);
+            pricedModels[i] = m with { ImageUrl = primary, Images = others };
             imagesFound++;
             Record(EventCategory.Extract, "item.image", "scrape",
-                new Dictionary<string, object?> { ["item"] = m.Name });
+                new Dictionary<string, object?> { ["item"] = m.Name, ["images"] = gallery.Count });
         }
 
         if (imagesFound > 0)
@@ -619,27 +622,54 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     }
 
     /// <summary>
-    /// The item's photo comes from SCRAPING its own store/brand page — never a paid image search.
-    /// Fetch the offer page as raw HTML (through the full provider fallback chain) and read the store's
-    /// declared canonical photo (<c>og:image</c>), falling back to the first product-path image in the
-    /// body. No offer URL, no scraper, or no photo on the page → null: an honest placeholder, never a
-    /// guessed thumbnail. <paramref name="agent"/> is unused (kept for the interface).
+    /// The item's photos come from the SAME LLM detail-extraction the product-detail crawl uses — not a
+    /// paid image search, and not brittle regex as the primary source. Fetch the item's own offer/brand
+    /// page and let <see cref="AgentService.ExtractProductDetailAsync"/> read the whole record and pick
+    /// the product images (primary first): it ignores logos/promos, resolves galleries, and understands
+    /// the page far better than pattern-matching. Returned primary-first — the card takes the first, the
+    /// detail panel shows the gallery. Only when the LLM finds nothing (the photo lived solely in the
+    /// HTML head as <c>og:image</c>, or in a lazy-load attribute the markdown render drops) do we fall
+    /// back to reading the raw HTML for the store's declared image(s). No offer URL, no scraper, or
+    /// nothing found → empty: an honest placeholder, never a guessed thumbnail.
     /// </summary>
-    public async Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct)
+    public async Task<IReadOnlyList<string>> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct)
     {
         if (ImageSourceUrl(item) is not { } url || !_providers.HasScraper)
         {
-            return null;
+            return Array.Empty<string>();
         }
 
-        var page = await _providers.ScrapePageAsync(url, ScrapeFormat.Html, ct).ConfigureAwait(false);
-        if (page is null || string.IsNullOrWhiteSpace(page.Content))
+        // Same steps as ProductDetailActivities: render the page, then LLM-extract the full record and
+        // take its product images. The LLM reads the markdown the way it reads every detail page.
+        var page = await _providers.ScrapePageAsync(url, ct: ct).ConfigureAwait(false);
+        if (page is not null && !string.IsNullOrWhiteSpace(page.Content))
         {
-            return null;
+            var listing = new ProductListing { Url = url, Name = item.Name, Brand = item.Brand, Model = item.Model };
+            var (_, detail) = await agent.ExtractProductDetailAsync(
+                page.Content, listing, GeoProfiles.ResolveOrDefault(null), ct).ConfigureAwait(false);
+            if (detail is { Images.Count: > 0 })
+            {
+                return detail.Images;
+            }
         }
 
-        return OfferVerificationHandler.ExtractOgImage(page.Content)
-            ?? OfferVerificationHandler.ExtractImages(page.Content).FirstOrDefault();
+        // Backstop: the photo may live only in the HTML head (og:image) or a lazy-load attribute the
+        // markdown drops — read the raw HTML for the store's declared canonical image(s).
+        var html = await _providers.ScrapePageAsync(url, ScrapeFormat.Html, ct).ConfigureAwait(false);
+        return html is not null && !string.IsNullOrWhiteSpace(html.Content)
+            ? OfferVerificationHandler.ExtractImages(html.Content)
+            : Array.Empty<string>();
+    }
+
+    /// <summary>Merge a freshly-found gallery with the item's existing images: primary first, deduped,
+    /// order preserved.</summary>
+    private static (string Primary, List<string> Others) SplitGallery(IReadOnlyList<string> gallery, IReadOnlyList<string> existing)
+    {
+        var merged = gallery.Concat(existing)
+            .Where(u => !string.IsNullOrWhiteSpace(u))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        return (merged[0], merged.Skip(1).ToList());
     }
 
     /// <summary>The page to scrape for this item's photo: its first offer URL (the store's product

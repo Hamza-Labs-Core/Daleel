@@ -98,8 +98,8 @@ public class BrandResearchTests
         public Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(
             List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct) =>
             Task.FromResult<(List<ProductModel>?, int, IReadOnlyList<string>)>((null, 0, Array.Empty<string>()));
-        public Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
-            Task.FromResult<string?>(null);
+        public Task<IReadOnlyList<string>> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
         public Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct) =>
             Task.FromResult<List<ProductModel>?>(null);
         public IReadOnlyList<(string Domain, string? StoreName, string? EntryUrl)> SelectCatalogDomains(ProductSearchResult products) =>
