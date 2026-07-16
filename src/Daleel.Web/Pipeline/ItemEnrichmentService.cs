@@ -47,7 +47,7 @@ public interface IItemEnrichmentService
     /// <summary>Match ALREADY-PERSISTED ScrapedPrice rows for a domain/store (e.g. drained edge results) into the models — no network, no vendor spend. Models null = unchanged.</summary>
     Task<(List<ProductModel>? Models, int Priced, IReadOnlyList<string> Created)> AttachScrapedPricesAsync(List<ProductModel> models, string domain, string? storeName, string? query, CancellationToken ct);
 
-    /// <summary>Phase 6 for ONE item: paid image lookup. Null = none found.</summary>
+    /// <summary>Phase 6 for ONE item: scrape its store/brand page for a photo. Null = none found.</summary>
     Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct);
 
     /// <summary>Phase 7 as a unit: condition backfill over the whole list. Null = unchanged.</summary>
@@ -293,13 +293,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             progress($"Filled {brandImages + brandPrices + brandSpecs} detail(s) from brand catalogues.");
         }
 
-        // Phase 6 — LAST-RESORT image search for whatever the store catalogues, brand sites, and
-        // product database all failed to cover (common in markets where Google Shopping doesn't
-        // operate). Capped paid lookups; a failed lookup just leaves the placeholder.
+        // Phase 6 — LAST-RESORT image scrape for whatever the store catalogues, brand sites, and
+        // product database all failed to carry a photo for: fetch the item's OWN offer page and read
+        // its og:image. A failed scrape just leaves the placeholder — never a guessed thumbnail.
         var imagesFound = 0;
         var imageAttempts = 0;
-        // The cap bounds paid ATTEMPTS, not successes — on a large grid of imageless obscure items,
-        // counting only hits would keep paying for lookup after failed lookup with no ceiling.
+        // The bound caps per-pass scrape ATTEMPTS, not successes — on a large grid of imageless items,
+        // counting only hits would keep fetching after failed lookup with no ceiling. Items past the
+        // bound stay imageless this pass and are re-attempted when the drain re-runs.
         for (var i = 0; i < pricedModels.Count && imageAttempts < MaxImageLookups; i++)
         {
             var m = pricedModels[i];
@@ -317,7 +318,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
             pricedModels[i] = m with { ImageUrl = img };
             imagesFound++;
-            Record(EventCategory.Extract, "item.image", "serpapi",
+            Record(EventCategory.Extract, "item.image", "scrape",
                 new Dictionary<string, object?> { ["item"] = m.Name });
         }
 
@@ -607,7 +608,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
 
         // Drained edge catalogues create models too — indicative offers, like every drained price. When
         // the crawl stored a photo on the row, the new model carries it (the site-crawl's own image),
-        // instead of landing imageless and needing a paid image lookup that may find nothing.
+        // instead of landing imageless and needing a fallback page-scrape that may find nothing.
         var (withNew, created) = AppendCatalogDiscoveries(
             updated ?? models,
             discoveries,
@@ -617,8 +618,35 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             : (null, 0, Array.Empty<string>());
     }
 
-    public async Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct) =>
-        await agent.FindProductImageAsync(BrandModelQuery(item), ct);
+    /// <summary>
+    /// The item's photo comes from SCRAPING its own store/brand page — never a paid image search.
+    /// Fetch the offer page as raw HTML (through the full provider fallback chain) and read the store's
+    /// declared canonical photo (<c>og:image</c>), falling back to the first product-path image in the
+    /// body. No offer URL, no scraper, or no photo on the page → null: an honest placeholder, never a
+    /// guessed thumbnail. <paramref name="agent"/> is unused (kept for the interface).
+    /// </summary>
+    public async Task<string?> FindImageForItemAsync(AgentService agent, ProductModel item, CancellationToken ct)
+    {
+        if (ImageSourceUrl(item) is not { } url || !_providers.HasScraper)
+        {
+            return null;
+        }
+
+        var page = await _providers.ScrapePageAsync(url, ScrapeFormat.Html, ct).ConfigureAwait(false);
+        if (page is null || string.IsNullOrWhiteSpace(page.Content))
+        {
+            return null;
+        }
+
+        return OfferVerificationHandler.ExtractOgImage(page.Content)
+            ?? OfferVerificationHandler.ExtractImages(page.Content).FirstOrDefault();
+    }
+
+    /// <summary>The page to scrape for this item's photo: its first offer URL (the store's product
+    /// page), else the brand site — the same pages the crawl already trusts.</summary>
+    private static string? ImageSourceUrl(ProductModel m) =>
+        m.Offers.Select(o => o.Url).FirstOrDefault(u => !string.IsNullOrWhiteSpace(u))
+        ?? (string.IsNullOrWhiteSpace(m.BrandSiteUrl) ? m.BrandRegionalUrl : m.BrandSiteUrl);
 
     public async Task<List<ProductModel>?> BackfillConditionsUnitAsync(List<ProductModel> models, CancellationToken ct)
     {

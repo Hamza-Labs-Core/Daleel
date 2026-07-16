@@ -295,6 +295,72 @@ public class OfferVerificationTests
     }
 
     [Fact]
+    public void ExtractOgImage_ReturnsCanonicalPhoto_WithoutPathEvidence()
+    {
+        // og:image is the store's OWN declared product photo — trusted even when its URL path carries
+        // no product-ish segment (many stores serve the OG photo off a bare content host).
+        const string html = """
+            <head>
+              <meta property="og:title" content="Gree Split A/C">
+              <meta property="og:image" content="https://cdn.gree.jo/x9f2a1.jpg">
+            </head>
+            """;
+        OfferVerificationHandler.ExtractOgImage(html)
+            .Should().Be("https://cdn.gree.jo/x9f2a1.jpg");
+        // and it LEADS ExtractImages, ahead of any in-body image.
+        OfferVerificationHandler.ExtractImages(html + "\n![body](https://cdn.gree.jo/media/inbody.jpg)")
+            .Should().Equal(
+                "https://cdn.gree.jo/x9f2a1.jpg",
+                "https://cdn.gree.jo/media/inbody.jpg");
+    }
+
+    [Fact]
+    public void ExtractOgImage_ToleratesContentBeforeProperty_AndDecodesEntities()
+    {
+        const string html =
+            """<meta content="https://store.jo/media/p.jpg?w=800&amp;h=800" name="twitter:image"/>""";
+        OfferVerificationHandler.ExtractOgImage(html)
+            .Should().Be("https://store.jo/media/p.jpg?w=800&h=800");
+    }
+
+    [Fact]
+    public void ExtractOgImage_SkipsPromoOgImage_ByBlocklist()
+    {
+        OfferVerificationHandler.ExtractOgImage(
+                """<meta property="og:image" content="https://store.jo/uploads/app-popup.jpg">""")
+            .Should().BeNull("a promo og:image is still chrome, not the product");
+    }
+
+    [Fact]
+    public void ExtractImages_ReadsHtmlImgAndLazyLoadAttributes()
+    {
+        // Real stores lazy-load: the product photo lives in data-src/srcset, not a rendered src.
+        const string html = """
+            <img src="https://store.jo/assets/logo.png" alt="logo">
+            <img data-src="https://store.jo/media/products/fan-front.jpg" class="lazy">
+            <img srcset="https://store.jo/media/products/fan-2x.jpg 2x, https://store.jo/media/products/fan-1x.jpg 1x">
+            """;
+        OfferVerificationHandler.ExtractImages(html).Should().Equal(
+            "https://store.jo/media/products/fan-front.jpg",
+            "https://store.jo/media/products/fan-2x.jpg");
+    }
+
+    [Fact]
+    public void ExtractImages_AcceptsCommonCdnPaths()
+    {
+        // Broadened evidence: Shopify /files, WordPress /wp-content, generic /images all carry photos.
+        const string page = """
+            ![shopify](https://cdn.shopify.com/s/files/1/0/fan.jpg)
+            ![wp](https://store.jo/wp-content/uploads/2026/fan.jpg)
+            ![img](https://store.jo/images/fan-white.jpg)
+            """;
+        OfferVerificationHandler.ExtractImages(page).Should().Equal(
+            "https://cdn.shopify.com/s/files/1/0/fan.jpg",
+            "https://store.jo/wp-content/uploads/2026/fan.jpg",
+            "https://store.jo/images/fan-white.jpg");
+    }
+
+    [Fact]
     public void ExtractAvailability_FindsStockWording_EnglishAndArabic()
     {
         OfferVerificationHandler.ExtractAvailability("Availability: In Stock — ships today")

@@ -703,13 +703,14 @@ public sealed class CatalogAttachHandler : IEnrichmentUnitHandler
 }
 
 /// <summary>
-/// Paid image lookups for whatever is STILL imageless after the free sources ran. Each execution
-/// spends a bounded batch; when more imageless items remain it enqueues its own continuation —
-/// coverage is unbounded through the queue, while any single attempt stays small and retryable.
+/// Scrapes each STILL-imageless item's own store/brand page for its photo (og:image) — the last
+/// image source after the crawl, brand sites, and product DB. Each execution takes a bounded batch;
+/// when more imageless items remain it enqueues its own continuation — coverage is unbounded through
+/// the queue, while any single attempt stays small and retryable.
 /// </summary>
 public sealed class ImageLookupHandler : IEnrichmentUnitHandler
 {
-    /// <summary>Paid lookups per execution (~one grid page); the continuation covers the rest.</summary>
+    /// <summary>Page scrapes per execution (~one grid page); the continuation covers the rest.</summary>
     private const int BatchSize = 12;
 
     public string Kind => EnrichmentUnit.ImageLookup;
@@ -723,9 +724,9 @@ public sealed class ImageLookupHandler : IEnrichmentUnitHandler
 
         var svc = ctx.Services.GetRequiredService<IItemEnrichmentService>();
 
-        // Names attempted by prior passes in this chain — skip them so we NEVER re-pay for an item
-        // whose lookup already failed. Without this the chain re-attempts the same first 12 imageless
-        // items forever (a grid of obscure items never resolves), burning paid SerpAPI lookups.
+        // Names attempted by prior passes in this chain — skip them so we NEVER re-scrape an item
+        // whose page-fetch already found no photo. Without this the chain re-attempts the same first 12
+        // imageless items forever (a grid of obscure items never resolves), burning page fetches.
         var attemptedBefore = EnrichmentWorkQueue.ReadPayload<ImageLookupPayload>(item.Payload)?.Attempted is { } a
             ? new HashSet<string>(a, StringComparer.OrdinalIgnoreCase)
             : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -1052,36 +1053,102 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
     internal static string? ExtractImage(string content) => ExtractImages(content).FirstOrDefault();
 
     /// <summary>
+    /// The page's OWN declared canonical product photo: the Open Graph <c>og:image</c> (or
+    /// <c>twitter:image</c>) meta tag. Present on essentially every commerce product page for
+    /// social/SEO previews, it is an absolute URL that is immune to lazy-loading and never lost to a
+    /// JS gallery — so it is the single most reliable image the store scrape yields. Because the page
+    /// declares it as ITS product image we trust it without the product-path evidence gate (only the
+    /// chrome/promo blocklist still applies). Requires the raw HTML: markdown conversion drops
+    /// <c>&lt;head&gt;</c> meta, so this returns null on markdown content and callers fall back to the
+    /// in-body image scan below.
+    /// </summary>
+    internal static string? ExtractOgImage(string content)
+    {
+        foreach (System.Text.RegularExpressions.Match m in OgImagePattern.Matches(content))
+        {
+            var url = System.Net.WebUtility.HtmlDecode(MatchedUrl(m).Trim());
+            if (IsUsableProductImage(url, requirePathEvidence: false, out var normalized))
+            {
+                return normalized;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// EVERY qualifying product image on the page, deduped in document order — detail pages carry a
     /// gallery (angles, colors) and the detail surfaces show all of it; the card takes the first.
-    /// Same evidence rules as always: product-ish PATH segment, chrome/promo blocklist.
+    /// Format-agnostic: matches markdown <c>![](url)</c>, HTML <c>&lt;img src&gt;</c>, and the
+    /// lazy-load attributes (<c>data-src</c>/<c>data-original</c>/<c>srcset</c>) real stores use, so it
+    /// works on both the markdown we feed the LLM and the raw HTML we fetch for images. The page's own
+    /// <c>og:image</c> leads (canonical, no path gate); in-body images then follow the usual evidence
+    /// rules: product-ish PATH segment, chrome/promo blocklist.
     /// </summary>
     internal static IReadOnlyList<string> ExtractImages(string content)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var images = new List<string>();
+
+        // The store's declared canonical photo first — trusted without the path-evidence gate.
+        if (ExtractOgImage(content) is { } og && seen.Add(og))
+        {
+            images.Add(og);
+        }
+
         foreach (System.Text.RegularExpressions.Match m in ImagePattern.Matches(content))
         {
-            var url = m.Groups[1].Value.Trim();
-            var lower = url.ToLowerInvariant();
-            if (ImageBlocklist.Any(w => lower.Contains(w, StringComparison.Ordinal)) || lower.EndsWith(".svg"))
+            var url = System.Net.WebUtility.HtmlDecode(MatchedUrl(m).Trim());
+            if (IsUsableProductImage(url, requirePathEvidence: true, out var normalized) && seen.Add(normalized))
             {
-                continue;
-            }
-            if (!Uri.TryCreate(url, UriKind.Absolute, out var abs) ||
-                (abs.Scheme != Uri.UriSchemeHttp && abs.Scheme != Uri.UriSchemeHttps))
-            {
-                continue;
-            }
-
-            // Evidence lives in the PATH — hosts routinely contain "cdn"/"images" for everything.
-            var path = abs.AbsolutePath.ToLowerInvariant();
-            if (ImagePathEvidence.Any(w => path.Contains(w, StringComparison.Ordinal)) && seen.Add(abs.ToString()))
-            {
-                images.Add(abs.ToString());
+                images.Add(normalized);
             }
         }
         return images;
+    }
+
+    /// <summary>The first non-empty capturing group of a match — the multi-alternative image/meta
+    /// patterns land the URL in different groups depending on which branch (markdown/img/srcset,
+    /// content-first/property-first) fired.</summary>
+    private static string MatchedUrl(System.Text.RegularExpressions.Match m)
+    {
+        for (var i = 1; i < m.Groups.Count; i++)
+        {
+            if (m.Groups[i].Success && m.Groups[i].Value.Length > 0)
+            {
+                return m.Groups[i].Value;
+            }
+        }
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Gate + normalize one candidate URL: reject non-http(s), SVGs, and chrome/promo names; when
+    /// <paramref name="requirePathEvidence"/> is set, additionally demand a product-ish PATH segment
+    /// (hosts routinely contain "cdn"/"images" for everything — the evidence must live in the path).
+    /// </summary>
+    private static bool IsUsableProductImage(string url, bool requirePathEvidence, out string normalized)
+    {
+        normalized = string.Empty;
+        var lower = url.ToLowerInvariant();
+        if (ImageBlocklist.Any(w => lower.Contains(w, StringComparison.Ordinal)) || lower.EndsWith(".svg"))
+        {
+            return false;
+        }
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var abs) ||
+            (abs.Scheme != Uri.UriSchemeHttp && abs.Scheme != Uri.UriSchemeHttps))
+        {
+            return false;
+        }
+        if (requirePathEvidence)
+        {
+            var path = abs.AbsolutePath.ToLowerInvariant();
+            if (!ImagePathEvidence.Any(w => path.Contains(w, StringComparison.Ordinal)))
+            {
+                return false;
+            }
+        }
+        normalized = abs.ToString();
+        return true;
     }
 
     private static readonly string[] ImageBlocklist =
@@ -1091,12 +1158,24 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
 
     private static readonly string[] ImagePathEvidence =
     {
-        "/product", "/item", "/upload", "/catalog", "/media", "/goods", "/cdn/"
+        "/product", "/item", "/upload", "/catalog", "/media", "/goods", "/cdn/",
+        "/image", "/photo", "/thumb", "/files", "/wp-content", "/pub/",
     };
 
+    // Markdown image, HTML <img src>/data-src/data-original/data-lazy, and the first URL in a srcset.
     private static readonly System.Text.RegularExpressions.Regex ImagePattern = new(
-        @"!\[[^\]]*\]\((https?://[^)\s]+)\)",
-        System.Text.RegularExpressions.RegexOptions.Compiled);
+        @"!\[[^\]]*\]\((https?://[^)\s]+)\)" +
+        @"|<img[^>]+?(?:data-src|data-original|data-lazy|src)\s*=\s*[""'](https?://[^""']+)[""']" +
+        @"|srcset\s*=\s*[""']\s*(https?://[^""'\s,]+)",
+        System.Text.RegularExpressions.RegexOptions.Compiled |
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    // og:image / twitter:image, tolerant of attribute order (content before or after property/name).
+    private static readonly System.Text.RegularExpressions.Regex OgImagePattern = new(
+        @"<meta[^>]+?(?:property|name)\s*=\s*[""'](?:og:image|twitter:image)[""'][^>]+?content\s*=\s*[""'](https?://[^""']+)[""']" +
+        @"|<meta[^>]+?content\s*=\s*[""'](https?://[^""']+)[""'][^>]+?(?:property|name)\s*=\s*[""'](?:og:image|twitter:image)[""']",
+        System.Text.RegularExpressions.RegexOptions.Compiled |
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>
     /// The page's stock wording, when it declares one — returned RAW (the store's own phrase) so
