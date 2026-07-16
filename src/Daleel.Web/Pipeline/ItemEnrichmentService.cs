@@ -639,26 +639,42 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             return Array.Empty<string>();
         }
 
-        // Same steps as ProductDetailActivities: render the page, then LLM-extract the full record and
-        // take its product images. The LLM reads the markdown the way it reads every detail page.
-        var page = await _providers.ScrapePageAsync(url, ct: ct).ConfigureAwait(false);
-        if (page is not null && !string.IsNullOrWhiteSpace(page.Content))
+        // Best-effort: the page fetch runs through the Context.dev branch, which RE-THROWS on a bad URL
+        // (404/DNS/TLS). One dead offer link must never fault the image unit — that would discard the
+        // whole batch's found images and, after retries, kill image lookups for the rest of the grid.
+        // Degrade to "no image for this item" instead (mirrors VerifyPageHandler's guarded fetch).
+        try
         {
-            var listing = new ProductListing { Url = url, Name = item.Name, Brand = item.Brand, Model = item.Model };
-            var (_, detail) = await agent.ExtractProductDetailAsync(
-                page.Content, listing, GeoProfiles.ResolveOrDefault(null), ct).ConfigureAwait(false);
-            if (detail is { Images.Count: > 0 })
+            // Same steps as ProductDetailActivities: render the page, then LLM-extract the full record
+            // and take its product images. The LLM reads the markdown the way it reads every detail page.
+            var page = await _providers.ScrapePageAsync(url, ct: ct).ConfigureAwait(false);
+            if (page is not null && !string.IsNullOrWhiteSpace(page.Content))
             {
-                return detail.Images;
+                var listing = new ProductListing { Url = url, Name = item.Name, Brand = item.Brand, Model = item.Model };
+                var (_, detail) = await agent.ExtractProductDetailAsync(
+                    page.Content, listing, GeoProfiles.ResolveOrDefault(null), ct).ConfigureAwait(false);
+                if (detail is { Images.Count: > 0 })
+                {
+                    return detail.Images;
+                }
             }
-        }
 
-        // Backstop: the photo may live only in the HTML head (og:image) or a lazy-load attribute the
-        // markdown drops — read the raw HTML for the store's declared canonical image(s).
-        var html = await _providers.ScrapePageAsync(url, ScrapeFormat.Html, ct).ConfigureAwait(false);
-        return html is not null && !string.IsNullOrWhiteSpace(html.Content)
-            ? OfferVerificationHandler.ExtractImages(html.Content)
-            : Array.Empty<string>();
+            // Backstop: the photo may live only in the HTML head (og:image) or a lazy-load attribute the
+            // markdown drops — read the raw HTML for the store's declared canonical image(s).
+            var html = await _providers.ScrapePageAsync(url, ScrapeFormat.Html, ct).ConfigureAwait(false);
+            return html is not null && !string.IsNullOrWhiteSpace(html.Content)
+                ? OfferVerificationHandler.ExtractImages(html.Content)
+                : Array.Empty<string>();
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // genuine cancellation (workflow deadline / cost cap) must propagate
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Image scrape failed for {Url}", url);
+            return Array.Empty<string>();
+        }
     }
 
     /// <summary>Merge a freshly-found gallery with the item's existing images: primary first, deduped,
