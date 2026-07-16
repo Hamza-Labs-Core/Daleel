@@ -1,0 +1,58 @@
+@import 'tailwindcss';
+@plugin "@tailwindcss/typography";
+
+/* Typography is loaded via <link> in index.html (Space Grotesk + JetBrains Mono — matches marketing site). */
+
+/* Design tokens — shared with Midnight Ocean marketing site */
+:root {
+  --ink-bg: #0f1729;           /* page background */
+  --ink-surface: #111c36;      /* sidebar / elevated surface */
+  --ink-surface-2: #0b1324;    /* nested panels */
+  --ink-border: rgba(56, 189, 248, 0.10);
+  --ink-border-2: rgba(56, 189, 248, 0.18);
+  --ink-text: #e2e8f0;
+  --ink-text-dim: #94a3b8;
+  --ink-text-dimmer: #64748b;
+  --ink-accent: #38bdf8;       /* sky-blue — primary link */
+  --ink-accent-warm: #fb923c;  /* orange — tags / callouts */
+  --ink-accent-purple: #8b5cf6;
+}
+
+html, body {
+  font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+}
+
+code, pre, kbd, samp {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* Prose overrides for markdown content — aligned with Midnight Ocean tokens */
+/* Remove default backtick quotes around inline code (plugin adds `::before`/`::after`
+   with content '`'). They collide with our custom code pill styling. */
+.prose :where(code):not(:where([class~="not-prose"] *))::before,
+.prose :where(code):not(:where([class~="not-prose"] *))::after {
+  content: none;
+}
+
+.prose {
+  --tw-prose-body: #d4d4d8;
+  --tw-prose-headings: #f4f4f5;
+  --tw-prose-links: #38bdf8;          /* sky-blue — matches marketing */
+  --tw-prose-bold: #f4f4f5;
+  --tw-prose-code: #fbbf24;
+  --tw-prose-pre-bg: #0b1324;         /* matches --ink-surface-2 */
+  --tw-prose-pre-code: #d4d4d8;
+  --tw-prose-quotes: #94a3b8;
+  --tw-prose-quote-borders: rgba(56, 189, 248, 0.18);
+  --tw-prose-counters: #94a3b8;
+  --tw-prose-bullets: #475569;
+  --tw-prose-hr: rgba(56, 189, 248, 0.10);
+  --tw-prose-th-borders: rgba(56, 189, 248, 0.18);
+  --tw-prose-td-borders: rgba(56, 189, 248, 0.10);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(56, 189, 248, 0.20); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.35); }

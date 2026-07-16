@@ -1,0 +1,39 @@
+{
+  "name": "@daleel/wiki-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Daleel developer documentation & wiki — Vite React SPA on Cloudflare Workers",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "pnpm build && wrangler deploy --config wrangler.jsonc"
+  },
+  "keywords": ["daleel", "documentation", "wiki", "cloudflare-workers"],
+  "author": "Daleel Project",
+  "license": "SEE LICENSE IN ../../LICENSE",
+  "devDependencies": {
+    "@tailwindcss/typography": "^0.5.19",
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.2.4",
+    "typescript": "^5.6.3",
+    "vite": "^8.0.10",
+    "wrangler": "^4.85.0"
+  },
+  "engines": { "node": ">=20.0.0" },
+  "dependencies": {
+    "mermaid": "^11.15.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-markdown": "^10.1.0",
+    "react-router": "^7.14.2",
+    "rehype-raw": "^7.0.0",
+    "remark-gfm": "^4.0.0"
+  }
+}
