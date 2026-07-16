@@ -259,15 +259,27 @@ public class ProductListingsGridTests : TestContext
     }
 
     [Fact]
-    public void ImagelessItems_AreHidden_WhenOthersHavePhotos()
+    public void ImagelessItems_AreHidden_WhenPhotographedOnesAreTheMajority()
     {
         var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg" };
         var bare = Model("Bare", 90m);
 
-        var cut = Render(Result(null, withPhoto, bare));
+        var cut = Render(Result(null, withPhoto, bare)); // 1 of 2 = exactly half → filter applies
 
         cut.Markup.Should().Contain("Photographed");
-        cut.Markup.Should().NotContain(">Bare<", "an imageless card is hidden while photographed ones exist");
+        cut.Markup.Should().NotContain(">Bare<", "an imageless card is hidden when photos are the norm");
+    }
+
+    [Fact]
+    public void ImagelessItems_Show_WhenPhotographedOnesAreAMinority()
+    {
+        // QA: one photographed card must not cull the rest of the grid ("1 of 6 shown").
+        var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg" };
+        var cut = Render(Result(null, withPhoto, Model("BareA", 90m), Model("BareB", 80m)));
+
+        cut.Markup.Should().Contain("Photographed");
+        cut.Markup.Should().Contain("BareA");
+        cut.Markup.Should().Contain("BareB");
     }
 
     [Fact]

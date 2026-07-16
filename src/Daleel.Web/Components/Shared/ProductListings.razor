@@ -337,10 +337,12 @@ else
     {
         IEnumerable<(int Index, ProductModel Model)> q = _indexed;
 
-        // Photo-less cards are hidden while photographed ones exist — a grid of grey placeholders
-        // sells nothing. Guarded by the empty-grid doctrine: when NOTHING has a photo yet (streaming
-        // starts bare; images drain in minutes later), everything shows rather than nothing.
-        if (_indexed.Any(x => !string.IsNullOrWhiteSpace(x.Model.ImageUrl)))
+        // Photo-less cards are hidden when photographed ones are the MAJORITY — a grid of grey
+        // placeholders sells nothing, but culling most of the results because ONE card has a photo
+        // is worse (QA: "1 of 6 shown", and the survivor was the least relevant item). Streaming
+        // starts bare and images drain in minutes, so early renders naturally show everything.
+        var photographed = _indexed.Count(x => !string.IsNullOrWhiteSpace(x.Model.ImageUrl));
+        if (photographed * 2 >= _indexed.Count && photographed > 0)
         {
             q = q.Where(x => !string.IsNullOrWhiteSpace(x.Model.ImageUrl));
         }
