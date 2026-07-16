@@ -46,6 +46,14 @@ public record GeoProfile
     /// <summary>Name of that city center, e.g. "Amman".</summary>
     public required string CenterCity { get; init; }
 
+    /// <summary>
+    /// Native-language (e.g. Arabic) names for this market's country and centre city — the forms a
+    /// shopper actually types ("الأردن", "عمان"). Used by <c>QueryScope</c> to strip market scope from
+    /// an Arabic query so it isn't AND-matched into a store's search box. English-name markets leave
+    /// this empty. Include common spelling variants (alef with/without hamza).
+    /// </summary>
+    public IReadOnlyList<string> NativeAliases { get; init; } = Array.Empty<string>();
+
     /// <summary>The primary language code (first entry of <see cref="Languages"/>).</summary>
     public string PrimaryLanguage => Languages.Count > 0 ? Languages[0] : "en";
 
@@ -83,6 +91,7 @@ public static class GeoProfiles
         ApifyActors = new[] { "apify/facebook-groups-scraper", "scrapeforge/facebook-search-posts" },
         Center = new GeoPoint(31.9539, 35.9106),
         CenterCity = "Amman",
+        NativeAliases = new[] { "الأردن", "الاردن", "عمان", "عمّان" },
         // Two boxes: the main body east of the Jordan River (min-lng 35.60 keeps Jerusalem / the
         // West Bank out) plus the south-western Aqaba corner.
         Bounds = new[] { new GeoBounds(30.5, 33.40, 35.60, 39.30), new GeoBounds(29.18, 30.5, 34.88, 38.00) }
@@ -100,6 +109,7 @@ public static class GeoProfiles
         ApifyActors = new[] { "apidojo/twitter-scraper", "apify/instagram-scraper" },
         Center = new GeoPoint(24.7136, 46.6753),
         CenterCity = "Riyadh",
+        NativeAliases = new[] { "السعودية", "المملكة", "الرياض" },
         // Two boxes: the main body (south of lat 29.6, including the Red Sea coast and NEOM strip)
         // and the northern region east of lng 36.5 (Al Qurayyat/Turaif/Arar) — a single rectangle
         // would sweep over Israel/Palestine/Lebanon at its north-western corner. Qatar/Kuwait/Bahrain
@@ -119,6 +129,7 @@ public static class GeoProfiles
         ApifyActors = new[] { "apify/instagram-scraper", "apidojo/twitter-scraper" },
         Center = new GeoPoint(25.2048, 55.2708),
         CenterCity = "Dubai",
+        NativeAliases = new[] { "الإمارات", "الامارات", "دبي", "أبوظبي", "ابوظبي" },
         // Min-lng 51.58 (the UAE's western tip) keeps the Qatar peninsula out.
         Bounds = new[] { new GeoBounds(22.63, 26.10, 51.58, 56.40) }
     };
@@ -135,6 +146,7 @@ public static class GeoProfiles
         ApifyActors = new[] { "apify/facebook-groups-scraper", "scrapeforge/facebook-search-posts" },
         Center = new GeoPoint(30.0444, 31.2357),
         CenterCity = "Cairo",
+        NativeAliases = new[] { "مصر", "القاهرة" },
         Bounds = new[] { new GeoBounds(21.99, 31.68, 24.70, 36.90) }
     };
 
