@@ -31,11 +31,23 @@ public sealed class WorkflowSearchRunner : ISearchRunner
     private static readonly TimeSpan CacheTtl = TimeSpan.FromDays(30);
 
     /// <summary>
-    /// Hard wall-clock ceiling on a single search run. The per-LLM-call (60s) and per-entity sub-workflow
-    /// (30s) timeouts bound the individual awaits; this is the last-resort backstop that auto-cancels a run
-    /// which is wedged for any other reason, so a stuck pipeline can never hang indefinitely.
+    /// Hard wall-clock ceiling on a single search run's SYNCHRONOUS phase (discover → scrape →
+    /// extract → aggregate). The per-LLM-call (60s) and per-entity sub-workflow (30s) timeouts bound
+    /// the individual awaits; this is the last-resort backstop that auto-cancels a run wedged for any
+    /// other reason. NOT a result cap and NOT the whole story: enrichment (prices/images/stock/deep
+    /// dives) continues AFTER this on the independent enrichment queue, which has no job deadline —
+    /// so a tripped deadline salvages the products already extracted and the drain keeps filling
+    /// them in. Raised from 10→15m (Kimi + wide uncapped fan-out legitimately need more headroom
+    /// before the guillotine); tunable via <c>SEARCH_WORKFLOW_TIMEOUT_MINUTES</c>.
     /// </summary>
-    private static readonly TimeSpan WorkflowTimeout = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan WorkflowTimeout = ResolveWorkflowTimeout();
+
+    private static TimeSpan ResolveWorkflowTimeout()
+    {
+        var raw = Environment.GetEnvironmentVariable("SEARCH_WORKFLOW_TIMEOUT_MINUTES");
+        var minutes = int.TryParse(raw, out var parsed) && parsed > 0 ? parsed : 15;
+        return TimeSpan.FromMinutes(Math.Clamp(minutes, 2, 60));
+    }
 
     private readonly IAgentFactory _agents;
     private readonly ISystemConfigService _config;
@@ -100,6 +112,9 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // same collector (usage dashboard, per-job estimate, cost cap) as everything else. Flows
         // through awaits and sub-workflow scopes; restored on dispose.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
+
+        // Group every LLM call this search makes under one OpenRouter session id (`user` field).
+        using var llmSession = AmbientLlmSession.Begin($"search-{job.Id}");
 
         // Live per-search event sink: pipeline steps emit semantic timeline events through the ambient
         // carrier (same AsyncLocal reach as the metering observer) so this search's events appear live.
@@ -434,6 +449,7 @@ public sealed class WorkflowSearchRunner : ISearchRunner
         // Ambient metering (see RunAsync): routes the vision/catalogue spend made on DI-resolved
         // components' own HTTP clients into this re-enrichment's collector.
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
+        using var llmSession = AmbientLlmSession.Begin($"search-{job.Id}");
 
         var reEnrichSink = _sinkFactory.For(job.Id.ToString(), Anonymizer.HashUserId(job.UserId));
         using var eventScope = AmbientSearchEvents.Begin(reEnrichSink);

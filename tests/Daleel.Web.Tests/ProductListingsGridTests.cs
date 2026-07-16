@@ -26,6 +26,7 @@ public class ProductListingsGridTests : TestContext
         Services.AddSingleton<ITranslationService>(new NoTranslation());
         Services.AddSingleton<IRelevanceFeedbackService>(new NoRelevanceFeedback());
         Services.AddSingleton<ICurrentUser>(new AnonymousUser());
+        Services.AddScoped<BrowserStore>(); // SafeImage (rendered when a card has a verified photo)
         JSInterop.Mode = JSRuntimeMode.Loose;
     }
 
@@ -261,7 +262,7 @@ public class ProductListingsGridTests : TestContext
     [Fact]
     public void ImagelessItems_AreHidden_WhenPhotographedOnesAreTheMajority()
     {
-        var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg" };
+        var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg", VerifiedImages = new[] { "https://s.jo/p.jpg" } };
         var bare = Model("Bare", 90m);
 
         var cut = Render(Result(null, withPhoto, bare)); // 1 of 2 = exactly half → filter applies
@@ -274,7 +275,7 @@ public class ProductListingsGridTests : TestContext
     public void ImagelessItems_Show_WhenPhotographedOnesAreAMinority()
     {
         // QA: one photographed card must not cull the rest of the grid ("1 of 6 shown").
-        var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg" };
+        var withPhoto = Model("Photographed", 100m) with { ImageUrl = "https://s.jo/p.jpg", VerifiedImages = new[] { "https://s.jo/p.jpg" } };
         var cut = Render(Result(null, withPhoto, Model("BareA", 90m), Model("BareB", 80m)));
 
         cut.Markup.Should().Contain("Photographed");

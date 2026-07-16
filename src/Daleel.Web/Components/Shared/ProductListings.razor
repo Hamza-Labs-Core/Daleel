@@ -6,7 +6,7 @@
 <MudPaper Class="pa-3 mb-3" Outlined="true" Elevation="0">
     <div class="d-flex align-center mb-2">
         <MudIcon Icon="@Icons.Material.Filled.ShoppingBag" Color="Color.Primary" Class="mr-2" />
-        <MudText Typo="Typo.h6">@Result.Models.Count @L["Results.ModelsLabel"]</MudText>
+        <MudText Typo="Typo.h6">@_filtered.Count @L["Results.ModelsLabel"]</MudText>
         <MudSpacer />
         <MudChip T="string" Size="Size.Small" Variant="Variant.Text" Color="Color.Success"
                  Icon="@Icons.Material.Filled.Place">@string.Format(L["Results.AllLocalTo"], Result.Country)</MudChip>
@@ -72,7 +72,7 @@
             </div>
         </MudItem>
         <MudItem xs="12" sm="6" Class="d-flex align-center justify-end">
-            <MudText Typo="Typo.caption" Color="Color.Secondary">@string.Format(L["Results.NofMShown"], _filtered.Count, Result.Models.Count)</MudText>
+            <MudText Typo="Typo.caption" Color="Color.Secondary">@string.Format(L["Results.NofMShown"], _filtered.Count, _displayable)</MudText>
         </MudItem>
     </MudGrid>
 </MudPaper>
@@ -215,6 +215,10 @@ else
     // markup is then O(1), so unrelated re-renders (e.g. toggling a compare checkbox) stay cheap. PERF-2.
     private List<(int Index, ProductModel Model)> _filtered = new();
 
+    // The count the grid's "N of M shown" is out of: the imaged population when the photo cull is
+    // active (so it never reads "4 of 6" after hiding 2 placeholders), else the full result set.
+    private int _displayable;
+
     // Current page (1-based) over _filtered, and the cached slice the grid renders. A filter change
     // resets to page 1 (the old page may no longer exist); a page flip just re-slices.
     private int _page = 1;
@@ -337,15 +341,18 @@ else
     {
         IEnumerable<(int Index, ProductModel Model)> q = _indexed;
 
-        // Photo-less cards are hidden when photographed ones are the MAJORITY — a grid of grey
-        // placeholders sells nothing, but culling most of the results because ONE card has a photo
-        // is worse (QA: "1 of 6 shown", and the survivor was the least relevant item). Streaming
-        // starts bare and images drain in minutes, so early renders naturally show everything.
-        var photographed = _indexed.Count(x => !string.IsNullOrWhiteSpace(x.Model.ImageUrl));
-        if (photographed * 2 >= _indexed.Count && photographed > 0)
+        // Show ONLY cards whose photo actually renders (DisplayImageUrl = the halal-verified image
+        // the card draws — NOT the raw ImageUrl, which may be unverified and paint a placeholder).
+        // Guarded by the empty-grid doctrine: while the images are still draining (a MINORITY have a
+        // rendered photo — streaming starts bare), show everything so the grid isn't empty; once
+        // photos are the norm, the imageless remainder is hidden and stops being counted.
+        var photographed = _indexed.Count(x => !string.IsNullOrWhiteSpace(x.Model.DisplayImageUrl));
+        var cullImageless = photographed * 2 >= _indexed.Count && photographed > 0;
+        if (cullImageless)
         {
-            q = q.Where(x => !string.IsNullOrWhiteSpace(x.Model.ImageUrl));
+            q = q.Where(x => !string.IsNullOrWhiteSpace(x.Model.DisplayImageUrl));
         }
+        _displayable = cullImageless ? photographed : _indexed.Count;
 
         if (_brand != AllValue)
             q = q.Where(x => string.Equals(x.Model.Brand, _brand, StringComparison.OrdinalIgnoreCase));

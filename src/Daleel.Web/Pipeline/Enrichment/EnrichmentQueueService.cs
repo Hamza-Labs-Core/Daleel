@@ -185,6 +185,7 @@ public sealed class EnrichmentQueueService : BackgroundService
                 "Enrich unit {ItemId} ({Kind}, job {JobId}) API call · {Detail}",
                 item.Id, item.Kind, item.SearchJobId, line)); // meter only — cost never trips an ongoing unit
         using var ambient = AmbientApiObserver.Begin(collector, estimator);
+        using var llmSession = AmbientLlmSession.Begin($"search-{item.SearchJobId}");
 
         // Live event sink for this enrichment unit — so scrape.fallback / item.reviews / catalog.page
         // events from the enrichment path reach the per-search timeline the same way base-run events do.

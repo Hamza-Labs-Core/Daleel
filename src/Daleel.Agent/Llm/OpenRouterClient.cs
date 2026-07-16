@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Daleel.Core.Llm;
+using Daleel.Core.Observability;
 using Daleel.Search.Http;
 
 namespace Daleel.Agent.Llm;
@@ -83,7 +84,12 @@ public sealed class OpenRouterClient : HttpProviderBase, ILlmClient
         var apiMessages = new List<object> { new { role = "system", content = systemPrompt } };
         apiMessages.AddRange(messages.Select(m => (object)new { role = m.Role, content = m.Content }));
 
-        var payload = new { model = _model, messages = apiMessages };
+        // The ambient search session id becomes OpenRouter's `user` field so every call a search
+        // makes groups under one identifier in the provider dashboard/abuse tooling. Omitted when no
+        // search owns this flow (off-search callers) so we never attribute stray calls to a session.
+        var payload = AmbientLlmSession.SessionId is { Length: > 0 } session
+            ? (object)new { model = _model, messages = apiMessages, user = session }
+            : new { model = _model, messages = apiMessages };
 
         using var doc = await SendJsonAsync(
             () =>
