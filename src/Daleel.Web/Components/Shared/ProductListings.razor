@@ -301,15 +301,20 @@ else
                 _sort = SortResolver.Resolve(Result.Strategy);
 
                 // New search: reset facet selections, pre-selecting the constraints the user put IN
-                // the query ("size 4 diapers" opens with size=4 already applied).
+                // the query ("size 4 diapers" opens with size=4 already applied) — but ONLY when some
+                // product actually carries that value. A stated spec the extracted products don't have
+                // as a normalized attribute (e.g. "age group: infants" for a crib query) must NOT open
+                // pre-applied, or it filters the whole grid to empty ("showing 0 of 11"). The facet
+                // stays available for the user to apply; it just doesn't hide everything by default.
                 _facetSelections.Clear();
                 foreach (var facet in _facets)
                 {
                     var stated = Result.Strategy?.Specs.FirstOrDefault(
                         kv => FacetBuilder.NormalizeKey(kv.Key) == FacetBuilder.NormalizeKey(facet.Key));
-                    _facetSelections[facet.Key] = stated is { Key.Length: > 0 } kv2
-                        ? kv2.Value.Trim()
-                        : AllValue;
+                    var value = stated is { Key.Length: > 0 } kv2 ? kv2.Value.Trim() : null;
+                    var applicable = !string.IsNullOrEmpty(value) &&
+                        Result.Models.Any(m => FacetBuilder.Matches(m, facet.Key, value!, facet.Unit));
+                    _facetSelections[facet.Key] = applicable ? value! : AllValue;
                 }
             }
         }

@@ -189,6 +189,29 @@ public class ProductListingsGridTests : TestContext
     }
 
     [Fact]
+    public void FacetPreselection_WhenNoProductCarriesTheStatedValue_DoesNotEmptyTheGrid()
+    {
+        // "سرير هزاز للرضع" → the planner states age-group = infants, but the extracted cribs carry no
+        // normalized "age group" spec. Pre-selecting it as a hard filter would hide EVERY product
+        // ("showing 0 of 11"). The pre-selection must apply ONLY when some product actually matches;
+        // otherwise the facet opens on "All" and the found products still render.
+        var strategy = new SearchStrategy
+        {
+            Specs = new Dictionary<string, string> { ["age group"] = "infants" },
+            Facets = new[]
+            {
+                new SearchFacet { Key = "age group", Label = "Age Group", Values = new[] { "infants", "toddler" } }
+            }
+        };
+        var cut = Render(Result(strategy,
+            Model("CribOne", 100m),                    // no age-group spec at all
+            WithSpec("CribTwo", "Material", "wood")));  // has a spec, just not age group
+
+        cut.Markup.Should().Contain("CribOne");
+        cut.Markup.Should().Contain("CribTwo"); // NOT hidden by an unmatched pre-selection
+    }
+
+    [Fact]
     public void StreamingPush_SameSearch_KeepsFacetSelection()
     {
         // Same identity rule as the sort seed: streamed pushes for the SAME search refresh the
