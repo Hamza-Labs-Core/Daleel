@@ -655,7 +655,14 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                     page.Content, listing, GeoProfiles.ResolveOrDefault(null), ct).ConfigureAwait(false);
                 if (detail is { Images.Count: > 0 })
                 {
-                    return detail.Images;
+                    // Screen the LLM's picks for chrome/social/OG-generic images (a marketplace's
+                    // og:image is often a Facebook share card, not the product). A wrong photo is worse
+                    // than a placeholder — if none survive, fall through to the HTML backstop.
+                    var usable = detail.Images.Where(OfferVerificationHandler.IsProductImageCandidate).ToList();
+                    if (usable.Count > 0)
+                    {
+                        return usable;
+                    }
                 }
             }
 

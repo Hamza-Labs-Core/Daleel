@@ -1133,6 +1133,15 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
     /// <paramref name="requirePathEvidence"/> is set, additionally demand a product-ish PATH segment
     /// (hosts routinely contain "cdn"/"images" for everything — the evidence must live in the path).
     /// </summary>
+    /// <summary>
+    /// Chrome/social/OG-generic reject for an ALREADY-CHOSEN image URL (no product-path gate). Screens
+    /// LLM-picked gallery images (<c>ExtractProductDetailAsync</c>'s <c>Images</c>), which don't pass
+    /// through the in-body evidence scan and so would otherwise let a marketplace's generic og:image
+    /// (e.g. <c>opensooq_fb_square.png</c>) land on a card as a wrong photo.
+    /// </summary>
+    public static bool IsProductImageCandidate(string? url) =>
+        !string.IsNullOrWhiteSpace(url) && IsUsableProductImage(url, requirePathEvidence: false, out _);
+
     private static bool IsUsableProductImage(string url, bool requirePathEvidence, out string normalized)
     {
         normalized = string.Empty;
@@ -1160,7 +1169,12 @@ public sealed partial class OfferVerificationHandler : IEnrichmentUnitHandler
 
     private static readonly string[] ImageBlocklist =
     {
-        "logo", "icon", "sprite", "banner", "placeholder", "popup", "promo", "flag", "advert"
+        "logo", "icon", "sprite", "banner", "placeholder", "popup", "promo", "flag", "advert",
+        // Generic social-share / Open-Graph fallback images: marketplaces (OpenSooq, classifieds) set a
+        // site-wide og:image that is a Facebook/Twitter share card, not the product — a wrong photo.
+        "fb_square", "fbshare", "opengraph", "og-image", "og_image", "ogimage", "og-default",
+        "og_default", "social-share", "facebook", "twitter", "whatsapp", "no-image", "noimage",
+        "default-image",
     };
 
     private static readonly string[] ImagePathEvidence =

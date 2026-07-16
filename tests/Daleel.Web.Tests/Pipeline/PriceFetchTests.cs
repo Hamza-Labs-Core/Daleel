@@ -332,6 +332,29 @@ public class OfferVerificationTests
     }
 
     [Fact]
+    public void ExtractOgImage_SkipsMarketplaceSocialShareCard()
+    {
+        // QA: OpenSooq's og:image is a generic Facebook square card, not the product — a wrong photo
+        // on a "Sharp Inverter Air Conditioner" card. Must be rejected.
+        OfferVerificationHandler.ExtractOgImage(
+                """<meta property="og:image" content="https://opensooqui2.os-cdn.com/opensooq_fb_square.png">""")
+            .Should().BeNull("a marketplace social-share card is not the product");
+    }
+
+    [Fact]
+    public void IsProductImageCandidate_ScreensGenericImages_KeepsRealPhotos()
+    {
+        // Screens LLM-picked images that skip the in-body evidence scan.
+        OfferVerificationHandler.IsProductImageCandidate(
+            "https://opensooqui2.os-cdn.com/opensooq_fb_square.png").Should().BeFalse();
+        OfferVerificationHandler.IsProductImageCandidate(
+            "https://store.jo/assets/og-default.jpg").Should().BeFalse();
+        OfferVerificationHandler.IsProductImageCandidate(
+            "https://darcomjo.com/cdn/shop/files/lg-air-conditioner_533x.png").Should().BeTrue();
+        OfferVerificationHandler.IsProductImageCandidate(null).Should().BeFalse();
+    }
+
+    [Fact]
     public void ExtractImages_ReadsHtmlImgAndLazyLoadAttributes()
     {
         // Real stores lazy-load: the product photo lives in data-src/srcset, not a rendered src.
