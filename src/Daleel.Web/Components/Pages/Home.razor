@@ -241,6 +241,21 @@
     // Drives the "we'll email you" banner so it never promises an email that won't be sent.
     private bool _emailNotice;
 
+    // The viewer's culture, captured on the interactive circuit (see ApplyCulture). Init to the
+    // ambient culture as a fallback; the real value is captured on first render.
+    private System.Globalization.CultureInfo _culture = System.Globalization.CultureInfo.CurrentCulture;
+    private System.Globalization.CultureInfo _uiCulture = System.Globalization.CultureInfo.CurrentUICulture;
+
+    // The progress/result callbacks are raised from the pipeline's OWN background thread (default "en"
+    // culture), and CurrentUICulture flows with the caller's execution context into the InvokeAsync
+    // re-render — so the live stepper would localize to English while the rest of the page (rendered on
+    // the circuit) stays Arabic. Re-apply the circuit's captured culture before each background render.
+    private void ApplyCulture()
+    {
+        System.Globalization.CultureInfo.CurrentCulture = _culture;
+        System.Globalization.CultureInfo.CurrentUICulture = _uiCulture;
+    }
+
     protected override void OnInitialized()
     {
         Notifier.Progress += OnProgress;
@@ -252,6 +267,11 @@
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
+
+        // Capture the viewer's culture from the interactive circuit (the first render already localized
+        // the static page to it) so background callbacks can restore it before re-rendering the stepper.
+        _culture = System.Globalization.CultureInfo.CurrentCulture;
+        _uiCulture = System.Globalization.CultureInfo.CurrentUICulture;
 
         _userId = await CurrentUser.GetUserIdAsync();
         if (!string.IsNullOrWhiteSpace(Q)) _input = Q!;
@@ -470,6 +490,7 @@
         if (userId != _userId || jobId != _jobId) return;
         InvokeAsync(() =>
         {
+            ApplyCulture(); // localize the streamed stepper in the viewer's language, not the worker's
             // Never resurrect "running" once the job has completed/errored — a late or background
             // (enrichment) progress message must not hide the result that's already on screen.
             if (_status is "completed" or "error" or "cancelled") return;
@@ -485,6 +506,7 @@
         if (userId != _userId || jobId != _jobId) return;
         InvokeAsync(async () =>
         {
+            ApplyCulture();
             // Map the broadcast status to a UI state. "cancelled" is distinct from a hard error so a tab
             // that didn't initiate the cancel (a second device, or a sweep-forced cancel) shows the
             // cancelled notice rather than the generic "no results" error panel.
@@ -521,6 +543,7 @@
         if (userId != _userId || jobId != _jobId) return;
         InvokeAsync(() =>
         {
+            ApplyCulture();
             _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson) ?? _answer;
             // A unit just landed — re-check the open count right away (then back to the 5s cadence)
             // so the hint disappears the moment the last unit finishes, not up to 5s later.
@@ -537,6 +560,7 @@
         if (userId != _userId || jobId != _jobId) return;
         InvokeAsync(() =>
         {
+            ApplyCulture();
             if (_status != "running") return;
             _answer = ResultSerialization.Deserialize<AgentAnswer>(resultJson) ?? _answer;
             StateHasChanged();
@@ -564,6 +588,7 @@
 
     private async Task CheckEnrichmentAsync(int jobId)
     {
+        ApplyCulture(); // Timer fires on a background thread — localize the "still enriching" hint in the viewer's culture
         // Stale tick: the screen moved on (new search, cancel, history view) — stop watching.
         if (_enrichTimer is null || _jobId != jobId || _status != "completed")
         {
