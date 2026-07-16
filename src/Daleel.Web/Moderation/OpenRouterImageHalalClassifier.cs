@@ -5,6 +5,7 @@ using System.Text.Json.Serialization;
 using Daleel.Core.Caching;
 using Daleel.Core.Llm;
 using Daleel.Core.Moderation;
+using Daleel.Core.Observability;
 using Daleel.Search.Http;
 using Daleel.Web.Data;
 using Microsoft.Extensions.DependencyInjection;
@@ -174,15 +175,16 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
         };
         content.AddRange(batch.Select(url => (object)new { type = "image_url", image_url = new { url } }));
 
-        var payload = new
+        var messages = new object[]
         {
-            model = _model,
-            messages = new object[]
-            {
-                new { role = "system", content = systemPrompt },
-                new { role = "user", content }
-            }
+            new { role = "system", content = systemPrompt },
+            new { role = "user", content }
         };
+        // Group this vision call under the owning search's session id (OpenRouter `user` field), the
+        // same as every text call — the image screen runs inside the drain's AmbientLlmSession scope.
+        var payload = AmbientLlmSession.SessionId is { Length: > 0 } session
+            ? (object)new { model = _model, messages, user = session }
+            : new { model = _model, messages };
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(CallTimeout);
