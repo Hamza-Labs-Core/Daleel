@@ -1,0 +1,15 @@
+{
+  // Daleel Developer Wiki — Vite React SPA on Cloudflare Workers
+  "name": "daleel-wiki-site",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-01-01",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS"
+  },
+  // Add a custom domain route here when provisioned, e.g.:
+  // "routes": [{ "pattern": "wiki.daleel.hamzalabs.dev", "custom_domain": true }],
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": { "enabled": true }
+}

@@ -1,0 +1,21 @@
+[
+  { "path": "/overview", "title": "Overview & Architecture", "section": "Getting Started" },
+
+  { "path": "/search-pipeline", "title": "Search Pipeline", "section": "Pipeline" },
+  { "path": "/enrichment-queue", "title": "Enrichment Work Queue", "section": "Pipeline" },
+
+  { "path": "/providers-scraping", "title": "Providers & Scraping", "section": "Data & LLM" },
+  { "path": "/llm-agents", "title": "LLM & Agents", "section": "Data & LLM" },
+  { "path": "/images", "title": "Product Images", "section": "Data & LLM" },
+
+  { "path": "/moderation-halal", "title": "Halal Moderation", "section": "Trust & Safety" },
+  { "path": "/security", "title": "Security", "section": "Trust & Safety" },
+
+  { "path": "/architecture", "title": "Architecture & Infrastructure", "section": "Platform" },
+  { "path": "/data-storage", "title": "Data & Storage", "section": "Platform" },
+  { "path": "/cloudflare-workers", "title": "Cloudflare Workers", "section": "Platform" },
+  { "path": "/frontend-ui", "title": "Frontend & UI", "section": "Platform" },
+
+  { "path": "/deployment-qa", "title": "Deployment & QA", "section": "Operations" },
+  { "path": "/observability-admin", "title": "Observability & Admin", "section": "Operations" }
+]
