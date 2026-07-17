@@ -196,8 +196,9 @@ public sealed partial class AgentService
 
     /// <summary>
     /// Runs the shared relevance gate over crawl-discovered listings — "is this item itself a &lt;query&gt;?"
-    /// — dropping the ones that aren't, with the same sanity guard as the grid's gate: an implausible
-    /// drop-(nearly)-everything verdict is ignored so the crawl can prune noise but never empty its results.
+    /// — dropping the ones that aren't, with the same sanity guard as the grid's gate
+    /// (<see cref="IsImplausibleWipeout"/>): a drop-EVERYTHING verdict on a small set is ignored, so the
+    /// crawl can prune noise — however much of it — but never empties a small result set.
     /// </summary>
     public async Task<IReadOnlyList<ProductListing>> ClassifyListingsAsync(
         string query, IReadOnlyList<ProductListing> listings, CancellationToken cancellationToken = default)
@@ -235,11 +236,11 @@ public sealed partial class AgentService
                 return listings;
             }
 
-            // Same guard as FilterRelevantModelsAsync: a verdict that wipes (nearly) the whole set is far
-            // more likely a gate misfire (or a prompt-injected product name) than genuine noise — distrust it.
-            if (kept.Count < Math.Max(1, listings.Count / 5))
+            // Same guard as FilterRelevantModelsAsync — and this is the site that most needs it scoped to
+            // a total wipeout: a brand/store catalogue crawl is EXPECTED to drop most of its listings.
+            if (IsImplausibleWipeout(kept.Count, listings.Count))
             {
-                Log($"crawl relevance gate flagged {listings.Count - kept.Count}/{listings.Count} — implausible, ignoring");
+                Log($"crawl relevance gate dropped all {listings.Count} listing(s) of a small set — implausible, ignoring");
                 return listings;
             }
 

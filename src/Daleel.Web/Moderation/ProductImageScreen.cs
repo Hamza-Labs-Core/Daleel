@@ -64,18 +64,20 @@ public sealed class OpenRouterProductImageScreen : IProductImageScreen, IDisposa
         "whether the product is visible, do NOT reject (leave the image out of the list).";
 
     private readonly string _apiKey;
-    private readonly string _model;
+    private readonly IVisionModelResolver _modelResolver;
     private readonly ILogger<OpenRouterProductImageScreen> _logger;
     private readonly ICacheStore? _cache;
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
 
     public OpenRouterProductImageScreen(
-        string apiKey, string? model, ILogger<OpenRouterProductImageScreen> logger,
+        string apiKey, IVisionModelResolver? modelResolver, ILogger<OpenRouterProductImageScreen> logger,
         ICacheStore? cache = null, HttpClient? http = null)
     {
         _apiKey = apiKey;
-        _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model;
+        // Resolved per call, never captured: this is a singleton, so a model read here would pin the
+        // screen to whatever was configured at startup (see VisionModelResolver).
+        _modelResolver = modelResolver ?? new VisionModelResolver();
         _logger = logger;
         _cache = cache;
         _ownsHttp = http is null;
@@ -147,10 +149,11 @@ public sealed class OpenRouterProductImageScreen : IProductImageScreen, IDisposa
             new { role = "system", content = SystemPrompt },
             new { role = "user", content }
         };
+        var model = await _modelResolver.ResolveAsync(DefaultModel, ct).ConfigureAwait(false);
         // Same OpenRouter session_id as every other call this search makes (sticky routing + observability).
         var payload = AmbientLlmSession.SessionId is { Length: > 0 } session
-            ? (object)new { model = _model, messages, session_id = session }
-            : new { model = _model, messages };
+            ? (object)new { model, messages, session_id = session }
+            : new { model, messages };
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(CallTimeout);

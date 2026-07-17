@@ -420,6 +420,9 @@ public class SynthesisTests
             return Task.FromResult(_open);
         }
 
+        public Task<bool> AnyOfKindAsync(int searchJobId, string kind, CancellationToken ct = default) =>
+            Task.FromResult(false);
+
         public Task EnqueueAsync(IReadOnlyList<EnrichmentWorkItem> items, CancellationToken ct = default) => Task.CompletedTask;
         public Task<bool> EnqueueFanOutAsync(int j, string k, IReadOnlyList<EnrichmentWorkItem> c, CancellationToken ct = default) => Task.FromResult(false);
         public Task<IReadOnlyList<EnrichmentWorkItem>> ClaimAsync(int max, TimeSpan lease, CancellationToken ct = default) =>

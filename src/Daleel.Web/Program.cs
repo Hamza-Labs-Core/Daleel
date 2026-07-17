@@ -282,6 +282,13 @@ builder.Services.AddSingleton<Daleel.Web.Moderation.IModerationPolicyProvider,
 // Zero-cost haram-consumable query pre-screen (blocks "beer" etc. at submission before any spend).
 builder.Services.AddSingleton<Daleel.Web.Moderation.IQueryPreScreen, Daleel.Web.Moderation.QueryPreScreen>();
 
+// The model BOTH vision screens below run on, resolved per call: the admin's model.vision row at
+// /admin/settings → DALEEL_MODERATION_VISION_MODEL (the pre-setting bootstrap) → each screen's own
+// default. The screens are singletons, so this indirection is what lets an admin switch the vision
+// model without a redeploy.
+builder.Services.AddSingleton<Daleel.Web.Moderation.IVisionModelResolver>(sp =>
+    new Daleel.Web.Moderation.VisionModelResolver(sp.GetRequiredService<IServiceScopeFactory>()));
+
 // Vision screening of individual result images (halal moderation). OpenRouter-only, like the
 // product-identification matcher; inert when no key is configured.
 builder.Services.AddSingleton<Daleel.Core.Moderation.IHalalImageClassifier>(sp =>
@@ -294,7 +301,7 @@ builder.Services.AddSingleton<Daleel.Core.Moderation.IHalalImageClassifier>(sp =
 
     return new Daleel.Web.Moderation.OpenRouterImageHalalClassifier(
         key.Trim(),
-        Environment.GetEnvironmentVariable("DALEEL_MODERATION_VISION_MODEL"),
+        sp.GetRequiredService<Daleel.Web.Moderation.IVisionModelResolver>(),
         sp.GetRequiredService<ILogger<Daleel.Web.Moderation.OpenRouterImageHalalClassifier>>(),
         sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>(),
         scopeFactory: sp.GetRequiredService<IServiceScopeFactory>());
@@ -312,7 +319,7 @@ builder.Services.AddSingleton<Daleel.Web.Moderation.IProductImageScreen>(sp =>
 
     return new Daleel.Web.Moderation.OpenRouterProductImageScreen(
         key.Trim(),
-        Environment.GetEnvironmentVariable("DALEEL_MODERATION_VISION_MODEL"),
+        sp.GetRequiredService<Daleel.Web.Moderation.IVisionModelResolver>(),
         sp.GetRequiredService<ILogger<Daleel.Web.Moderation.OpenRouterProductImageScreen>>(),
         sp.GetRequiredService<Daleel.Core.Caching.ICacheStore>());
 });
@@ -637,6 +644,9 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
     Daleel.Web.Pipeline.Enrichment.SynthesisHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.ImageCheckHandler>();
+// Re-reads the detail page of an item the product-shot screen left imageless (ImageCheck enqueues it).
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Enrichment.CleanShotHandler>();
 builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
 // Read-side of /admin/queues (scoped: one DbContext per dashboard refresh tick).
 builder.Services.AddScoped<Daleel.Web.Pipeline.Enrichment.IQueueDashboardService,

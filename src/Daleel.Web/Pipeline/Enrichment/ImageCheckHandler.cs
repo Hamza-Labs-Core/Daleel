@@ -155,6 +155,8 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
         // (shown/hidden/unscreened) and, when hidden, the category/score/reason. Best-effort.
         await RecordAuditAsync(ctx, item, products, attempted, flaggedVerdicts, unscreened, configured, ct);
 
+        await RequestCleanShotsAsync(ctx, item, products, Verified, notProductShot, ct);
+
         // FAIL-CLOSED / STAY-QUEUED: if the screen could not run for some images (billing/infra), they
         // stay hidden and the unit REQUEUES (no attempt consumed) so it re-screens once the outage clears.
         if (unscreened.Count > 0)
@@ -170,6 +172,69 @@ public sealed class ImageCheckHandler : IEnrichmentUnitHandler
             "Image check job {JobId}: {Clean} image(s) verified, {Flagged} hidden as haram.",
             item.SearchJobId, urls.Count - flagged.Count, flagged.Count);
         return UnitOutcome.Ok;
+    }
+
+    /// <summary>
+    /// Enqueues the CLEAN-SHOT re-scrape for items this screen just left with nothing to render because
+    /// their photos aren't product shots (a banner, a logo, a collage) — see <see cref="CleanShotHandler"/>.
+    /// </summary>
+    /// <remarks>
+    /// Scoped deliberately to product-shot rejections. An item hidden by the HALAL screen is not a
+    /// re-scrape candidate: that verdict is about the product's imagery, and hunting for another photo of
+    /// it would be a moderation decision this unit has no business making. An item held as
+    /// <c>unscreened</c> isn't one either — the screen never ran, so nothing was rejected and this unit
+    /// requeues to try again.
+    /// <para>
+    /// Latched once per job: this runs on every screen, and the re-scrape enqueues a fresh screen when
+    /// its photos land, so an unlatched trigger would loop on an item whose new photos are also rejected.
+    /// Best-effort — the grid is already correct without it.
+    /// </para>
+    /// </remarks>
+    private async Task RequestCleanShotsAsync(
+        EnrichmentUnitContext ctx, EnrichmentWorkItem item, ProductSearchResult products,
+        Func<string?, bool> verified, IReadOnlySet<string> notProductShot, CancellationToken ct)
+    {
+        if (notProductShot.Count == 0)
+        {
+            return;
+        }
+
+        var names = products.Models
+            .Where(m => m.CandidateImages.Count > 0)
+            .Where(m => !m.CandidateImages.Any(u => verified(u)))       // nothing left to render …
+            .Where(m => m.CandidateImages.Any(notProductShot.Contains)) // … and an unclean shot is why
+            .Select(m => m.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (names.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await ctx.Queue.AnyOfKindAsync(item.SearchJobId, EnrichmentUnit.CleanShot, ct))
+            {
+                return;
+            }
+
+            await ctx.Queue.EnqueueAsync(new[]
+            {
+                HandlerHelpers.Child(item, EnrichmentUnit.CleanShot,
+                    EnrichmentWorkQueue.Payload(new CleanShotPayload(names)),
+                    notBefore: TimeSpan.FromSeconds(10))
+            }, ct);
+
+            _logger.LogInformation(
+                "Image check job {JobId}: {Count} item(s) left imageless by the product-shot screen — " +
+                "queued a clean-shot re-scrape of their detail pages.", item.SearchJobId, names.Count);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Clean-shot enqueue failed for job {JobId}", item.SearchJobId);
+        }
     }
 
     /// <summary>

@@ -102,6 +102,10 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = LlmCallSites.BrandReputation.ConfigKey, Value = LlmCallSites.BrandReputation.DefaultModel, Type = "string" },
         new SystemConfig { Key = LlmCallSites.EnrichModel.ConfigKey, Value = LlmCallSites.EnrichModel.DefaultModel, Type = "string" },
         new SystemConfig { Key = LlmCallSites.Crawl.ConfigKey, Value = LlmCallSites.Crawl.DefaultModel, Type = "string" },
+        // The vision screens (halal + product-shot) read this at CALL time, so switching it here takes
+        // effect on the next screen — no redeploy. It was previously env-only
+        // (DALEEL_MODERATION_VISION_MODEL), which still works as the fallback when this row is blank.
+        new SystemConfig { Key = LlmCallSites.Vision.ConfigKey, Value = LlmCallSites.Vision.DefaultModel, Type = "string" },
 
         // Per-provider pricing (USD) — drives the CostEstimator; spend is metered + charged to credits,
         // never used to cap/cancel a running job (R1).

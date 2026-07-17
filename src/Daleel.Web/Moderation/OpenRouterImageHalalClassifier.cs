@@ -48,7 +48,7 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
     public static readonly string DefaultSystemPrompt = VisionPolicy.Compose(VisionPolicy.DefaultRules);
 
     private readonly string _apiKey;
-    private readonly string _model;
+    private readonly IVisionModelResolver _modelResolver;
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
     private readonly ICacheStore? _cache;
@@ -58,11 +58,12 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
     public bool IsConfigured => true;
 
     public OpenRouterImageHalalClassifier(
-        string apiKey, string? model, ILogger<OpenRouterImageHalalClassifier> logger,
+        string apiKey, IVisionModelResolver? modelResolver, ILogger<OpenRouterImageHalalClassifier> logger,
         ICacheStore? cache = null, HttpClient? http = null, IServiceScopeFactory? scopeFactory = null)
     {
         _apiKey = apiKey;
-        _model = string.IsNullOrWhiteSpace(model) ? DefaultModel : model;
+        // Resolved per call, never captured — this is a singleton (see VisionModelResolver).
+        _modelResolver = modelResolver ?? new VisionModelResolver(scopeFactory);
         _logger = logger;
         _cache = cache;
         _scopeFactory = scopeFactory;
@@ -180,12 +181,13 @@ public sealed class OpenRouterImageHalalClassifier : IHalalImageClassifier, IDis
             new { role = "system", content = systemPrompt },
             new { role = "user", content }
         };
+        var model = await _modelResolver.ResolveAsync(DefaultModel, ct).ConfigureAwait(false);
         // Group this vision call under the owning search's OpenRouter `session_id` (sticky routing +
         // observability), the same as every text call — the image screen runs inside the drain's
         // AmbientLlmSession scope.
         var payload = AmbientLlmSession.SessionId is { Length: > 0 } session
-            ? (object)new { model = _model, messages, session_id = session }
-            : new { model = _model, messages };
+            ? (object)new { model, messages, session_id = session }
+            : new { model, messages };
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(CallTimeout);

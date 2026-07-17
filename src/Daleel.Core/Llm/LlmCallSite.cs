@@ -34,10 +34,20 @@ public static class LlmCallSites
     /// <summary>The LLM-driven site crawler's navigation + deep-dive decisions (assess / paginate / deep-dive).</summary>
     public static readonly LlmCallSite Crawl = new("crawl", "Site crawl navigation", DefaultModel);
 
+    /// <summary>
+    /// The MULTIMODAL screens over result images: the halal image classifier and the product-shot
+    /// screen. Unlike every other site here it is not routed through <c>RoutingLlmClient</c> — those
+    /// classifiers call OpenRouter directly — but it is registered so it seeds and renders in the
+    /// admin model editor like the rest, instead of being reachable only via a redeploy. The model
+    /// must be vision-capable: a text-only model makes every screen fail (halal = hidden images).
+    /// </summary>
+    public static readonly LlmCallSite Vision = new("vision", "Image moderation (vision)", DefaultModel);
+
     /// <summary>Every registered call-site — drives config seeding and the admin model editor.</summary>
     public static readonly IReadOnlyList<LlmCallSite> All = new[]
     {
         Planner, Category, Extraction, Relevance, Analyst, Synthesis, BrandReputation, EnrichModel, Crawl,
+        Vision,
     };
 
     private static readonly IReadOnlyDictionary<string, LlmCallSite> ByKey =
