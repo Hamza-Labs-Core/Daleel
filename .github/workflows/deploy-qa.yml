@@ -1,11 +1,20 @@
 name: Deploy QA
 
-# Deploys a pull request to the QA server when it carries the `qa` label.
-# Mirrors deploy.yml (production) but: targets QA_SSH_HOST instead of DEPLOY_SSH_HOST,
-# publishes a PR-scoped image tag (never the production `latest`), and deploys to the
-# `qa` environment. All other secrets (LLM/provider keys, SSH user + key) are shared
-# with production.
+# Deploys to the QA server. The PRIMARY path is main: every merge to `main` redeploys
+# QA so it ALWAYS carries the latest fixes (no stale, isolated branch can be shipped by
+# mistake). `workflow_dispatch` gives a manual re-run button off main. The legacy `qa`
+# label still works as an opt-in per-PR preview, but it is no longer how QA normally
+# updates. Mirrors deploy.yml (production) but: targets QA_SSH_HOST instead of
+# DEPLOY_SSH_HOST, publishes a non-production tag (`qa` for main, `qa-pr-<n>` for a
+# labelled preview — never the production `latest`), and deploys to the `qa` environment.
+# All other secrets (LLM/provider keys, SSH user + key) are shared with production.
 on:
+  # Primary: QA tracks main. Any merge/push to main redeploys QA from main's HEAD.
+  push:
+    branches: [main]
+  # Manual re-run of the current main against QA (e.g. after a secret/var change).
+  workflow_dispatch:
+  # Opt-in preview only: label a PR `qa` to deploy that PR to QA on demand.
   pull_request:
     # `labeled`  → deploy as soon as the `qa` label is applied.
     # `synchronize`/`reopened` → re-deploy on new commits while the PR stays labelled.
@@ -18,24 +27,28 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/hamza-labs-core/daleel
-  # PR-scoped tag keeps QA isolated from production's `latest` and from other PRs.
-  QA_TAG: qa-pr-${{ github.event.pull_request.number }}
+  # Stable `qa` tag for the main-tracking path; `qa-pr-<n>` only for an opt-in PR preview.
+  # Either way it is NOT production's `latest`.
+  QA_TAG: ${{ github.event_name == 'pull_request' && format('qa-pr-{0}', github.event.pull_request.number) || 'qa' }}
 
 concurrency:
-  # One in-flight QA deploy per PR; a newer push supersedes an older one.
-  group: deploy-qa-${{ github.event.pull_request.number }}
+  # One in-flight QA deploy per source: all main pushes share one group (newer supersedes
+  # older); each PR preview gets its own. Prevents a merge and a manual dispatch from racing.
+  group: deploy-qa-${{ github.event_name == 'pull_request' && github.event.pull_request.number || 'main' }}
   cancel-in-progress: true
 
 jobs:
   build-test:
     name: Build & Test
     runs-on: ubuntu-latest
-    # Only PRs that (a) carry the `qa` label and (b) come from a branch in THIS repo
-    # (not a fork — fork PRs don't get secrets, and we must never run a secret-bearing
-    # deploy for untrusted code). Dependent jobs inherit the skip via `needs`.
+    # push(main)/workflow_dispatch always run (trusted, in-repo). For the opt-in PR
+    # preview path, still require (a) the `qa` label and (b) a branch in THIS repo — never
+    # a fork (fork PRs don't get secrets, and we must never run a secret-bearing deploy for
+    # untrusted code). Dependent jobs inherit the skip via `needs`.
     if: >-
-      contains(github.event.pull_request.labels.*.name, 'qa') &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name != 'pull_request' ||
+      (contains(github.event.pull_request.labels.*.name, 'qa') &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     steps:
       - uses: actions/checkout@v4
 
@@ -415,7 +428,8 @@ jobs:
             DALEEL_TAG="$DALEEL_TAG" ./deploy.sh "$DALEEL_TAG"
 
       - name: Comment the QA URL on the PR
-        if: success()
+        # Only the opt-in PR-preview path has a PR to comment on; push(main)/dispatch don't.
+        if: success() && github.event_name == 'pull_request'
         uses: actions/github-script@v7
         # Pass values through env (not interpolated into the JS source) per the
         # GitHub Actions injection guidance — the script reads them from process.env.
