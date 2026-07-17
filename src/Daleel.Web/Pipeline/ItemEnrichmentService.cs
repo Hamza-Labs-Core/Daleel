@@ -1023,7 +1023,6 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         // brand-DB price only when its currency IS the search market's currency; images and specs
         // are market-agnostic and flow regardless.
         var market = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo);
-        var marketCurrency = market.Currency;
 
         // One lookup per distinct brand; the brand's rows are reused across all its items.
         var rowsByBrand = new Dictionary<string, IReadOnlyList<BrandModel>>(StringComparer.OrdinalIgnoreCase);
@@ -1081,12 +1080,12 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             var localMatch = localRows.Count > 0 ? BestBrandModelMatch(m, localRows) : null;
             if (localMatch is not null)
             {
-                (updated, filledImage, filledPrice, filledSpecs) = FillFromRow(updated, localMatch, marketCurrency, now);
+                (updated, filledImage, filledPrice, filledSpecs) = FillFromRow(updated, localMatch, market, now);
             }
 
             if (BestBrandModelMatch(m, rows) is { } match && !ReferenceEquals(match, localMatch))
             {
-                var (anyFilled, img, price, specs) = FillFromRow(updated, match, marketCurrency, now);
+                var (anyFilled, img, price, specs) = FillFromRow(updated, match, market, now);
                 updated = anyFilled;
                 filledImage |= img;
                 filledPrice |= price;
@@ -1117,7 +1116,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
         List<ProductModel> models, string? geo, Action<string>? progress,
         Action<string, string, string, IReadOnlyDictionary<string, object?>?>? record, CancellationToken ct)
     {
-        var marketCurrency = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo).Currency;
+        var market = Daleel.Core.Geo.GeoProfiles.ResolveOrDefault(geo);
         var now = _options.Now();
         var attempts = 0;
         var fills = 0;
@@ -1171,7 +1170,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
                     continue;
                 }
 
-                var (filled, img, price, specs) = FillFromRow(m, row, marketCurrency, now);
+                var (filled, img, price, specs) = FillFromRow(m, row, market, now);
 
                 // The canonical model name unlocks correct dedup/compare downstream; only fill a blank.
                 if (string.IsNullOrWhiteSpace(filled.Model) && !string.IsNullOrWhiteSpace(id.CanonicalModelName))
@@ -1222,7 +1221,7 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
     /// Shared by the text-match read-through and the vision-identification path.
     /// </summary>
     private (ProductModel Item, bool Image, bool Price, bool Specs) FillFromRow(
-        ProductModel m, BrandModel match, string marketCurrency, DateTimeOffset now)
+        ProductModel m, BrandModel match, Daleel.Core.Geo.GeoProfile market, DateTimeOffset now)
     {
         var updated = m;
         var filledImage = false;
@@ -1236,10 +1235,22 @@ public sealed class ItemEnrichmentService : IItemEnrichmentService
             filledImage = true;
         }
 
-        // A fresh harvested brand-site price becomes an offer for a still-priceless item — but
-        // ONLY in the market it was harvested for (currency must match the search market's).
+        // A row harvested AS this market's local site is trusted local by provenance — even on a bare
+        // .com storefront the URL heuristic can't confirm (a real Jordan seller like al-kharouf.com).
+        // Any other level (global/regional/legacy-null) is only local if its URL actually says so.
+        var trustedLocal =
+            string.Equals(match.SiteLevel, BrandSiteLevel.Local, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(match.SiteCountry, market.CountryCode, StringComparison.OrdinalIgnoreCase);
+
+        // A fresh harvested brand-site price becomes an offer for a still-priceless item — but ONLY when
+        // it is both (a) in the search market's currency AND (b) from a site LOCAL to that market. A
+        // global brand site (hugoboss.com on a Jordan search) is not a store a shopper here can buy
+        // from; surfacing it as one is the "store outside the market" bug. Its image/specs, being
+        // market-agnostic, still fill gaps above — only the purchasable offer is gated.
         if (!HasPrice(updated) && match.LocalPrice is not null && !match.IsStale(now, _options.Ttl) &&
-            string.Equals(match.Currency, marketCurrency, StringComparison.OrdinalIgnoreCase))
+            string.Equals(match.Currency, market.Currency, StringComparison.OrdinalIgnoreCase) &&
+            (trustedLocal || Daleel.Core.Intelligence.LocalityClassifier.IsLocal(
+                match.SourceUrl, market.CountryCode, market.Country)))
         {
             updated = updated with
             {
