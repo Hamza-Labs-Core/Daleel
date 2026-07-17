@@ -56,6 +56,14 @@ public interface IEnrichmentWorkQueue
     Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default);
 
     /// <summary>
+    /// Whether this job has EVER had a unit of <paramref name="kind"/> — any status, dead and done
+    /// included. A once-per-job latch for a unit that a re-running handler would otherwise re-enqueue
+    /// forever: the clean-shot re-scrape is triggered BY the image screen and enqueues a fresh screen
+    /// when it lands, so without this the two would ping-pong on an item whose photos stay unclean.
+    /// </summary>
+    Task<bool> AnyOfKindAsync(int searchJobId, string kind, CancellationToken ct = default);
+
+    /// <summary>
     /// Deads running rows whose lease expired AND whose attempts are exhausted — units that crashed
     /// the container before they could write an outcome. Returns how many were reaped. The claim
     /// query already refuses to re-run them; this makes them VISIBLE (dead, with a reason) rather
@@ -250,6 +258,14 @@ public sealed class EnrichmentWorkQueue : IEnrichmentWorkQueue
         return await db.EnrichmentWorkItems
             .CountAsync(i => i.SearchJobId == searchJobId &&
                 (i.Status == WorkItemStatus.Pending || i.Status == WorkItemStatus.Running), ct);
+    }
+
+    public async Task<bool> AnyOfKindAsync(int searchJobId, string kind, CancellationToken ct = default)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+        return await db.EnrichmentWorkItems
+            .AnyAsync(i => i.SearchJobId == searchJobId && i.Kind == kind, ct);
     }
 
     public async Task<int> ReapExhaustedAsync(CancellationToken ct = default)

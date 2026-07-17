@@ -241,4 +241,42 @@ public class SiteCrawlTests
 
         (await agent.ClassifyListingsAsync("air conditioner", listings)).Should().HaveCount(3);
     }
+
+    [Fact]
+    public async Task ClassifyListingsAsync_TrustsLopsidedDrop_OnACatalogueCrawl()
+    {
+        // A brand-catalogue crawl for "air conditioner" lands on a page that really is mostly fridges.
+        // Dropping 11 of 12 is the gate WORKING. The old ratio guard (kept < 12/5) called that
+        // implausible and put every fridge back on the grid — the "LG fridge in an AC search" leak.
+        var drop = string.Join(", ", Enumerable.Range(1, 11));
+        var agent = new AgentService(new FakeLlmClient(system =>
+            system == PromptTemplates.RelevanceGateSystem ? $$"""{ "drop": [{{drop}}] }""" : "{}"));
+
+        var listings = new[] { "LG AC 24000" }
+            .Concat(Enumerable.Range(1, 11).Select(i => $"LG Refrigerator {i}00L"))
+            .Select(n => new ProductListing { Name = n })
+            .ToList();
+
+        var kept = await agent.ClassifyListingsAsync("air conditioner", listings);
+
+        kept.Select(l => l.Name).Should().Equal(new[] { "LG AC 24000" },
+            "a verdict that keeps something cannot empty the grid, so it must be trusted however lopsided");
+    }
+
+    [Fact]
+    public async Task ClassifyListingsAsync_TrustsTotalWipeout_OnALargeSet()
+    {
+        // Nine straight fridges for an AC query is a real answer ("this catalogue has no ACs"), not a
+        // misfire. Only a SMALL set gets the benefit of the doubt — the other stores still fill the grid.
+        var agent = new AgentService(new FakeLlmClient(system =>
+            system == PromptTemplates.RelevanceGateSystem
+                ? """{ "drop": [0, 1, 2, 3, 4, 5, 6, 7, 8] }"""
+                : "{}"));
+
+        var listings = Enumerable.Range(1, 9)
+            .Select(i => new ProductListing { Name = $"LG Refrigerator {i}00L" })
+            .ToList();
+
+        (await agent.ClassifyListingsAsync("air conditioner", listings)).Should().BeEmpty();
+    }
 }

@@ -1312,6 +1312,37 @@ public sealed partial class AgentService
     /// unparseable reply, or an implausible drop-everything verdict keeps the original list, so this
     /// gate can reduce noise but can never empty a result or fault a search.
     /// </summary>
+    /// <summary>
+    /// A drop-everything verdict on a set no larger than this is treated as a gate misfire. Small
+    /// enough that a catalogue page never qualifies; large enough to cover the handful-of-results grid
+    /// the guard exists for.
+    /// </summary>
+    internal const int RelevanceWipeoutGuardMaxItems = 8;
+
+    /// <summary>
+    /// Whether a relevance verdict is implausible enough to throw away and keep the originals.
+    /// </summary>
+    /// <remarks>
+    /// The guard exists for ONE failure: a gate misfire (or a prompt-injected product name) emptying
+    /// the grid. So it only ever needs to fire on a TOTAL wipeout — a verdict that keeps anything at
+    /// all cannot produce the empty grid it protects against.
+    /// <para>
+    /// It must NOT fire on a partial drop, however lopsided. A catalogue crawl legitimately drops most
+    /// of what it sees: walking lg.com for "air conditioner" yields a page that really is mostly
+    /// fridges, and dropping 45 of 50 is the gate working, not misfiring. The previous ratio guard
+    /// (<c>kept &lt; total/5</c>) discarded exactly that verdict and put the fridges back on the grid —
+    /// it was anti-correlated with correctness, disarming itself precisely when the crawl was most
+    /// off-target.
+    /// </para>
+    /// <para>
+    /// On a SMALL set a wipeout stays implausible (and unrecoverable — nothing else fills the grid),
+    /// so the distrust is scoped there, which is what the invariant always meant by distrusting
+    /// drop-everything verdicts "on small sets".
+    /// </para>
+    /// </remarks>
+    internal static bool IsImplausibleWipeout(int keptCount, int totalCount) =>
+        keptCount == 0 && totalCount <= RelevanceWipeoutGuardMaxItems;
+
     private async Task<IReadOnlyList<ProductModel>> FilterRelevantModelsAsync(
         string target, IReadOnlyList<ProductModel> models, CancellationToken cancellationToken)
     {
@@ -1343,12 +1374,9 @@ public sealed partial class AgentService
                 return models;
             }
 
-            // Sanity guard: a verdict that wipes (nearly) the whole grid is far more likely a gate
-            // misfire — or a prompt-injected product name — than 80%+ genuine noise. Distrust it and
-            // keep the originals; a noisy grid beats the empty-results failure class.
-            if (kept.Count < Math.Max(1, models.Count / 5))
+            if (IsImplausibleWipeout(kept.Count, models.Count))
             {
-                Log($"relevance gate flagged {models.Count - kept.Count}/{models.Count} items — implausible, ignoring the verdict");
+                Log($"relevance gate dropped all {models.Count} item(s) of a small set — implausible, ignoring the verdict");
                 return models;
             }
 

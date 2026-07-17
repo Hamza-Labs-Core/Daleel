@@ -71,7 +71,7 @@ public class ProductImageScreenTests
     }
 
     private static OpenRouterProductImageScreen Build(StubHandler handler) =>
-        new("key", model: "m",
+        new("key", VisionModelResolver.Pinned("m"),
             NullLogger<OpenRouterProductImageScreen>.Instance,
             cache: null,
             http: new HttpClient(handler));

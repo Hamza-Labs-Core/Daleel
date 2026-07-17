@@ -32,6 +32,16 @@ public static class EnrichmentUnit
     /// <summary>Job-level: paid image lookups for whatever is still imageless (deliberately late).</summary>
     public const string ImageLookup = "enrich.images";
 
+    /// <summary>
+    /// CLEAN-SHOT RE-SCRAPE: items the product-shot screen left with nothing to render (their only
+    /// photos were a promo banner / logo / collage) get their own detail page re-read for a real
+    /// gallery photo. Triggered by <see cref="ImageCheck"/>, which is the only step that knows an image
+    /// was rejected — <see cref="ImageLookup"/> can't see it, since those items DO have an
+    /// <c>ImageUrl</c> and it skips on that. Latched to once per job (the screen it enqueues would
+    /// otherwise re-trigger it).
+    /// </summary>
+    public const string CleanShot = "enrich.cleanshot";
+
     /// <summary>Job-level: classify-worker condition backfill (deliberately last).</summary>
     public const string Conditions = "enrich.conditions";
 
@@ -90,6 +100,13 @@ public sealed record VerifyPagePayload(string Url, List<string> ModelNames, bool
 
 /// <summary>Names already attempted by prior image-lookup passes — so the chain advances, never loops.</summary>
 public sealed record ImageLookupPayload(List<string> Attempted);
+
+/// <summary>
+/// Item names whose photos the product-shot screen rejected, to re-read from their own detail pages.
+/// A batch takes the first few and passes the rest to its continuation, so coverage stays unbounded
+/// while any single execution stays small.
+/// </summary>
+public sealed record CleanShotPayload(List<string> Names);
 
 /// <summary>What a handler execution decided. Exactly one of these per attempt.</summary>
 public abstract record UnitOutcome

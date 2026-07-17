@@ -259,6 +259,9 @@ public class BrandSiteHierarchyTests
         public Task RequeueAsync(long id, string reason, TimeSpan? delay = null, CancellationToken ct = default) => Task.CompletedTask;
         public Task KillAsync(long id, string reason, CancellationToken ct = default) => Task.CompletedTask;
         public Task<int> OpenCountAsync(int searchJobId, CancellationToken ct = default) => Task.FromResult(0);
+
+        public Task<bool> AnyOfKindAsync(int searchJobId, string kind, CancellationToken ct = default) =>
+            Task.FromResult(false);
         public Task<int> ReapExhaustedAsync(CancellationToken ct = default) => Task.FromResult(0);
     }
 
