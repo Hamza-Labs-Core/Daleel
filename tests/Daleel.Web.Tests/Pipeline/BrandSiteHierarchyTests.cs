@@ -125,6 +125,69 @@ public class BrandSiteHierarchyTests
         us.Offers.Single().Currency.Should().Be("USD");
     }
 
+    [Fact]
+    public async Task Global_brand_site_price_is_dropped_for_a_local_market_when_the_site_is_not_local()
+    {
+        using var ctx = new PostgresTestContext();
+        var brand = await new BrandRepository(ctx.Db).UpsertAsync(new Brand { Name = "Hugo Boss", LastRefreshed = Now });
+        var models = new BrandModelRepository(ctx.Db);
+
+        // The ONLY row is a GLOBAL one, harvested from the brand's international .com site. It happens
+        // to carry a JOD price, so the currency gate alone would let it through — but hugoboss.com is
+        // NOT a store a Jordan shopper buys from locally. Presenting it as an offer is the "store
+        // outside Jordan" bug; it must be dropped. The PHOTO, being market-agnostic, still fills the gap.
+        await models.UpsertAsync(new BrandModel
+        {
+            BrandId = brand.Id, ModelName = "BOSS ONE trousers",
+            SiteLevel = BrandSiteLevel.Global, SiteCountry = null,
+            LocalPrice = 120m, Currency = "JOD",
+            ImageUrl = "https://images.hugoboss.com/one.jpg",
+            IsAvailable = true, SourceUrl = "https://www.hugoboss.com/one", DiscoveredAt = Now, LastRefreshed = Now
+        });
+
+        var svc = BuildEnrichment(ctx);
+        var item = new ProductModel
+        {
+            Name = "BOSS ONE trousers", Brand = "Hugo Boss", Offers = Array.Empty<PriceOffer>()
+        };
+
+        var jo = (await svc.FillFromBrandDatabaseUnitAsync(new List<ProductModel> { item }, "jordan", default))!.Single();
+
+        jo.Offers.Should().BeEmpty("a global brand site (hugoboss.com) is not a Jordan store — its offer must be dropped");
+        jo.ImageUrl.Should().Be("https://images.hugoboss.com/one.jpg", "the product photo is market-agnostic and still fills the gap");
+    }
+
+    [Fact]
+    public async Task Local_row_on_a_bare_com_storefront_is_trusted_and_kept()
+    {
+        using var ctx = new PostgresTestContext();
+        var brand = await new BrandRepository(ctx.Db).UpsertAsync(new Brand { Name = "Kharouf", LastRefreshed = Now });
+        var models = new BrandModelRepository(ctx.Db);
+
+        // A real Jordanian storefront on a bare .com (al-kharouf.com has no ccTLD signal) — but it was
+        // explicitly harvested as the LOCAL site for jo. The trusted-local level must win over the URL
+        // heuristic, or the locality gate would wrongly drop genuine local sellers (precision must not
+        // cost us real Jordan stores).
+        await models.UpsertAsync(new BrandModel
+        {
+            BrandId = brand.Id, ModelName = "Shawl Lapel Tuxedo",
+            SiteLevel = BrandSiteLevel.Local, SiteCountry = "jo",
+            LocalPrice = 180m, Currency = "JOD",
+            IsAvailable = true, SourceUrl = "https://al-kharouf.com/tuxedo", DiscoveredAt = Now, LastRefreshed = Now
+        });
+
+        var svc = BuildEnrichment(ctx);
+        var item = new ProductModel
+        {
+            Name = "Shawl Lapel Tuxedo", Brand = "Kharouf", Offers = Array.Empty<PriceOffer>()
+        };
+
+        var jo = (await svc.FillFromBrandDatabaseUnitAsync(new List<ProductModel> { item }, "jordan", default))!.Single();
+
+        jo.Offers.Should().ContainSingle("a trusted local-site row is kept even on a bare .com");
+        jo.Offers.Single().Price.Should().Be(180m);
+    }
+
     private static ItemEnrichmentService BuildEnrichment(PostgresTestContext ctx) =>
         new(
             new ProductProfileRepository(ctx.Db),
