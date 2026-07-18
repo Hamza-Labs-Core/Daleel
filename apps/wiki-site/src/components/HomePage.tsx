@@ -4,6 +4,7 @@ const CARDS: Array<{ to: string; title: string; blurb: string; tag: string }> = 
   { to: '/overview', title: 'Overview & Architecture', tag: 'Start here', blurb: 'The projects, the stack, hosting, and how a query becomes a grid of products.' },
   { to: '/search-pipeline', title: 'Search Pipeline', tag: 'Pipeline', blurb: 'The Elsa workflow: discover → scrape → extract → enrich, and the search object.' },
   { to: '/enrichment-queue', title: 'Enrichment Work Queue', tag: 'Pipeline', blurb: 'The per-unit lease/retry/dead-ledger drain that fills price, image, and stock.' },
+  { to: '/elsa-workflows', title: 'Elsa Workflows', tag: 'Pipeline', blurb: 'The 11-step SearchWorkflow and the six per-entity sub-workflows that fan out from it.' },
   { to: '/providers-scraping', title: 'Providers & Scraping', tag: 'Data', blurb: 'SerpAPI, Context.dev, and the Cloudflare Browser fallback chain.' },
   { to: '/llm-agents', title: 'LLM & Agents', tag: 'Data', blurb: 'OpenRouter/Kimi, session_id sticky routing, the crawlers, prompt sanitization.' },
   { to: '/images', title: 'Product Images', tag: 'Data', blurb: 'Sourcing from scraped pages, galleries, and the two vision screens that gate display.' },
