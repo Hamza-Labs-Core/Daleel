@@ -493,5 +493,8 @@ public class SynthesisTests
         public Task<IReadOnlyList<Brand>> ListStaleAsync(DateTimeOffset olderThan, int max, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(0);
+
+        public Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
     }
 }

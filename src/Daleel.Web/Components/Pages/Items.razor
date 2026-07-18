@@ -1,0 +1,83 @@
+@page "/items"
+@inject IEntityRecordRepository Entities
+@inject IStringLocalizer<SharedResource> L
+
+<PageTitle>دليل · @L["Products.Items"]</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">@L["Products.Items"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Browse.ItemsSubtitle"]</MudText>
+
+<MudTextField T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true" Clearable="true"
+              DebounceInterval="300" Placeholder="@L["Browse.SearchPlaceholder"]" Variant="Variant.Outlined"
+              Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+              Class="mb-4" Style="max-width:420px;" />
+
+@if (_loaded && _items.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">@L["Browse.NoMatches"]</MudAlert>
+}
+<MudGrid Spacing="2">
+    @foreach (var r in _items)
+    {
+        <MudItem xs="12" sm="6" md="4">
+            <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                <MudCardContent>
+                    <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(r.Name)">@r.Name</MudText>
+                    <div class="d-flex gap-2 mt-1">
+                        @if (!string.IsNullOrWhiteSpace(r.Geo))
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@r.Geo</MudChip>
+                        }
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="align-self-center">
+                            @r.LastRefreshed.LocalDateTime.ToString("d")
+                        </MudText>
+                    </div>
+                </MudCardContent>
+                <MudCardActions>
+                    <MudButton Size="Size.Small" Href="@($"/product/{r.Id}?name={Uri.EscapeDataString(r.Name)}")"
+                               StartIcon="@Icons.Material.Filled.Visibility">@L["Browse.View"]</MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+@if (_mayHaveMore)
+{
+    <div class="d-flex justify-center mt-4">
+        <MudButton Variant="Variant.Outlined" OnClick="LoadMoreAsync" Disabled="_loading">@L["Browse.LoadMore"]</MudButton>
+    </div>
+}
+
+@code {
+    private const int PageSize = 24;
+
+    private readonly List<EntityRecord> _items = new();
+    private string? _query;
+    private bool _loaded;
+    private bool _loading;
+    private bool _mayHaveMore;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task OnQueryChanged(string? value)
+    {
+        _query = value;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _items.Clear();
+        await LoadMoreAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        _loading = true;
+        var page = await Entities.SearchAsync(_query, "Product", _items.Count, PageSize);
+        _items.AddRange(page);
+        _mayHaveMore = page.Count == PageSize;
+        _loading = false;
+    }
+}

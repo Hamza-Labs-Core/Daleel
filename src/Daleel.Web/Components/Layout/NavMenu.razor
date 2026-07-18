@@ -17,6 +17,10 @@
             @* Deals/Compare/Stores/Monitor are intentionally NOT linked here — they're reachable by URL
                but kept out of the drawer to keep it focused (re-hidden per feedback; see commit 60dad39). *@
             <MudNavLink Href="/brand" Match="NavLinkMatch.Prefix" Icon="@Icons.Material.Filled.Verified">@L["Nav.Brand"]</MudNavLink>
+            @* The browse directories over everything Daleel has accumulated (entity index / profiles). *@
+            <MudNavLink Href="/items" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.ShoppingBag">@L["Products.Items"]</MudNavLink>
+            <MudNavLink Href="/stores/all" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Store">@L["Products.Stores"]</MudNavLink>
+            <MudNavLink Href="/brands" Match="NavLinkMatch.All" Icon="@Icons.Material.Filled.Loyalty">@L["Products.Brands"]</MudNavLink>
             <MudDivider Class="my-2" />
 
             @* Recent searches live here, in a collapsible submenu, instead of taking up a column on the

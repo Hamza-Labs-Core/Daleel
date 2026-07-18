@@ -14,6 +14,9 @@ public interface IStoreRepository
     Task<IReadOnlyList<Store>> ListAsync(CancellationToken ct = default);
     Task<IReadOnlyList<Store>> ListStaleAsync(DateTimeOffset olderThan, int max, CancellationToken ct = default);
     Task<int> CountAsync(CancellationToken ct = default);
+
+    /// <summary>Name/location-searched page of store profiles, alphabetical (the public /stores/all directory).</summary>
+    Task<IReadOnlyList<Store>> SearchAsync(string? query, int skip, int take, CancellationToken ct = default);
 }
 
 public sealed class StoreRepository : IStoreRepository
@@ -102,4 +105,18 @@ public sealed class StoreRepository : IStoreRepository
             .ToListAsync(ct);
 
     public Task<int> CountAsync(CancellationToken ct = default) => _db.Stores.CountAsync(ct);
+
+    public async Task<IReadOnlyList<Store>> SearchAsync(
+        string? query, int skip, int take, CancellationToken ct = default)
+    {
+        IQueryable<Store> q = _db.Stores.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var needle = $"%{query.Trim()}%";
+            q = q.Where(s => EF.Functions.ILike(s.Name, needle) ||
+                             (s.Location != null && EF.Functions.ILike(s.Location, needle)));
+        }
+
+        return await q.OrderBy(s => s.Name).Skip(skip).Take(take).ToListAsync(ct);
+    }
 }

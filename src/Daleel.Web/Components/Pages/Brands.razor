@@ -1,0 +1,90 @@
+@page "/brands"
+@inject IBrandRepository BrandsRepo
+@inject IStringLocalizer<SharedResource> L
+
+<PageTitle>دليل · @L["Products.Brands"]</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">@L["Products.Brands"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Browse.BrandsSubtitle"]</MudText>
+
+<MudTextField T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true" Clearable="true"
+              DebounceInterval="300" Placeholder="@L["Browse.SearchPlaceholder"]" Variant="Variant.Outlined"
+              Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+              Class="mb-4" Style="max-width:420px;" />
+
+@if (_loaded && _items.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">@L["Browse.NoMatches"]</MudAlert>
+}
+<MudGrid Spacing="2">
+    @foreach (var b in _items)
+    {
+        <MudItem xs="12" sm="6" md="4">
+            <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                <MudCardContent>
+                    <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(b.Name)">@b.Name</MudText>
+                    <div class="d-flex gap-2 mt-1 flex-wrap">
+                        @if (b.ReputationScore is { } score)
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">★ @score.ToString("0.0")/10</MudChip>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(b.CountryOfOrigin))
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@b.CountryOfOrigin</MudChip>
+                        }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(b.Description))
+                    {
+                        <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mt-1"
+                                 Style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;"
+                                 dir="@Catalog.Dir(b.Description)">@b.Description</MudText>
+                    }
+                </MudCardContent>
+                <MudCardActions>
+                    <MudButton Size="Size.Small" Href="@($"/brand/{b.Id}?name={Uri.EscapeDataString(b.Name)}")"
+                               StartIcon="@Icons.Material.Filled.Visibility">@L["Browse.View"]</MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+@if (_mayHaveMore)
+{
+    <div class="d-flex justify-center mt-4">
+        <MudButton Variant="Variant.Outlined" OnClick="LoadMoreAsync" Disabled="_loading">@L["Browse.LoadMore"]</MudButton>
+    </div>
+}
+
+@code {
+    private const int PageSize = 24;
+
+    private readonly List<Daleel.Web.Data.Brand> _items = new();
+    private string? _query;
+    private bool _loaded;
+    private bool _loading;
+    private bool _mayHaveMore;
+
+    protected override Task OnInitializedAsync() => ReloadAsync();
+
+    private async Task OnQueryChanged(string? value)
+    {
+        _query = value;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _items.Clear();
+        await LoadMoreAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        _loading = true;
+        var page = await BrandsRepo.SearchAsync(_query, _items.Count, PageSize);
+        _items.AddRange(page);
+        _mayHaveMore = page.Count == PageSize;
+        _loading = false;
+    }
+}

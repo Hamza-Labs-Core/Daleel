@@ -666,6 +666,9 @@ public class SubWorkflowTests
             Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
 
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(_store.Count);
+
+        public Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
     }
 
     private sealed class InMemoryStoreRepo : IStoreRepository
@@ -693,6 +696,9 @@ public class SubWorkflowTests
             Task.FromResult<IReadOnlyList<Store>>(Array.Empty<Store>());
 
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(_store.Count);
+
+        public Task<IReadOnlyList<Store>> SearchAsync(string? query, int skip, int take, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Store>>(Array.Empty<Store>());
     }
 
     private sealed class InMemoryProductRepo : IProductProfileRepository

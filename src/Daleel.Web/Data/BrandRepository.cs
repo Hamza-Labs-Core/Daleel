@@ -21,6 +21,9 @@ public interface IBrandRepository
     /// <summary>All saved brand profiles, newest-refreshed first (for the admin list).</summary>
     Task<IReadOnlyList<Brand>> ListAsync(CancellationToken ct = default);
 
+    /// <summary>Name-searched page of brand profiles, alphabetical (the public /brands directory).</summary>
+    Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, CancellationToken ct = default);
+
     /// <summary>Up to <paramref name="max"/> profiles last refreshed before <paramref name="olderThan"/>, oldest first.</summary>
     Task<IReadOnlyList<Brand>> ListStaleAsync(DateTimeOffset olderThan, int max, CancellationToken ct = default);
 
@@ -118,4 +121,17 @@ public sealed class BrandRepository : IBrandRepository
             .ToListAsync(ct);
 
     public Task<int> CountAsync(CancellationToken ct = default) => _db.Brands.CountAsync(ct);
+
+    public async Task<IReadOnlyList<Brand>> SearchAsync(
+        string? query, int skip, int take, CancellationToken ct = default)
+    {
+        IQueryable<Brand> q = _db.Brands.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var needle = $"%{query.Trim()}%";
+            q = q.Where(b => EF.Functions.ILike(b.Name, needle));
+        }
+
+        return await q.OrderBy(b => b.Name).Skip(skip).Take(take).ToListAsync(ct);
+    }
 }

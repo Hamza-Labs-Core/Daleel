@@ -22,6 +22,10 @@ public interface IEntityRecordRepository
     Task<IReadOnlyList<EntityRecord>> ListByBrandAsync(int brandId, CancellationToken ct = default);
 
     Task<int> CountAsync(CancellationToken ct = default);
+
+    /// <summary>Name-searched page of entity index rows, newest first (the public /items directory).</summary>
+    Task<IReadOnlyList<EntityRecord>> SearchAsync(
+        string? query, string? intent, int skip, int take, CancellationToken ct = default);
 }
 
 public sealed class EntityRecordRepository : IEntityRecordRepository
@@ -93,6 +97,24 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
             .ToListAsync(ct);
 
     public Task<int> CountAsync(CancellationToken ct = default) => _db.EntityRecords.CountAsync(ct);
+
+    public async Task<IReadOnlyList<EntityRecord>> SearchAsync(
+        string? query, string? intent, int skip, int take, CancellationToken ct = default)
+    {
+        IQueryable<EntityRecord> q = _db.EntityRecords.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(intent))
+        {
+            q = q.Where(r => r.Intent == intent);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var needle = $"%{query.Trim()}%";
+            q = q.Where(r => EF.Functions.ILike(r.Name, needle));
+        }
+
+        return await q.OrderByDescending(r => r.LastRefreshed).Skip(skip).Take(take).ToListAsync(ct);
+    }
 
     private static void ApplyUpdates(EntityRecord existing, EntityRecord fresh)
     {

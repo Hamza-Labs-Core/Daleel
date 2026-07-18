@@ -140,6 +140,9 @@ public class BrandResearchTests
             Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(Row is null ? 0 : 1);
 
+        public Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
+
         private static Brand Snapshot(Brand b) => new()
         {
             Id = b.Id, Name = b.Name, NameKey = b.NameKey, Website = b.Website,
