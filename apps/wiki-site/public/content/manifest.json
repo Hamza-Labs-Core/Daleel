@@ -3,6 +3,7 @@
 
   { "path": "/search-pipeline", "title": "Search Pipeline", "section": "Pipeline" },
   { "path": "/enrichment-queue", "title": "Enrichment Work Queue", "section": "Pipeline" },
+  { "path": "/elsa-workflows", "title": "Elsa Workflows", "section": "Pipeline" },
 
   { "path": "/providers-scraping", "title": "Providers & Scraping", "section": "Data & LLM" },
   { "path": "/llm-agents", "title": "LLM & Agents", "section": "Data & LLM" },
