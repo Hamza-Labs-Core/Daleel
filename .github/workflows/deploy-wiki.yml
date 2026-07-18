@@ -1,0 +1,46 @@
+# Deploys the developer wiki (apps/wiki-site — Vite React SPA on Cloudflare Workers).
+# Ships from main whenever the site or its content changes; dispatch for a manual re-run.
+# Reuses the fleet's Cloudflare secrets (Workers Scripts: Edit suffices — no queues/KV/DO here).
+name: Deploy wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/wiki-site/**"
+      - ".github/workflows/deploy-wiki.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-wiki
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/wiki-site
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/wiki-site
+          command: deploy --config wrangler.jsonc
