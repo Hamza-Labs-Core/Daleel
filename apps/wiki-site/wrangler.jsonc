@@ -7,8 +7,7 @@
     "directory": "./dist",
     "binding": "ASSETS"
   },
-  // Add a custom domain route here when provisioned, e.g.:
-  // "routes": [{ "pattern": "wiki.daleel.hamzalabs.dev", "custom_domain": true }],
+  "routes": [{ "pattern": "wiki.daleel.hamzalabs.dev", "custom_domain": true }],
   "workers_dev": true,
   "preview_urls": true,
   "observability": { "enabled": true }
