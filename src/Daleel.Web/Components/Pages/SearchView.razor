@@ -40,14 +40,7 @@
 
         @if (_answer?.Products is { } products && (products.HasListings || products.StoreCount > 0 || products.BrandCount > 0 || products.ReviewCount > 0))
         {
-            @if (products.HasListings)
-            {
-                <ProductListings Result="products" InitialPage="CurrentPage" PageChanged="OnPageChanged" />
-            }
-            else
-            {
-                <AdaptiveResults Result="products" />
-            }
+            <AdaptiveResults Result="products" InitialPage="CurrentPage" PageChanged="OnPageChanged" />
         }
         else
         {

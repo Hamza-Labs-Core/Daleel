@@ -9,7 +9,8 @@
     <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" ApplyEffectsToContainer="true" Class="mb-2">
         <MudTabPanel Text="@($"{L["Products.Items"]} ({Result.ProductCount})")"
                      Icon="@Icons.Material.Filled.ShoppingBag">
-            <ProductListings Result="Result" InitialBrand="@_brandFilter" />
+            <ProductListings Result="Result" InitialBrand="@_brandFilter"
+                             InitialPage="InitialPage" PageChanged="PageChanged" />
         </MudTabPanel>
         @if (Result.StoreCount > 0)
         {
@@ -68,6 +69,10 @@ else
 
 @code {
     [Parameter, EditorRequired] public ProductSearchResult Result { get; set; } = default!;
+
+    /// <summary>Forwarded to <see cref="ProductListings"/> (deep-linked ?page=N on /search/{id}).</summary>
+    [Parameter] public int InitialPage { get; set; } = 1;
+    [Parameter] public EventCallback<int> PageChanged { get; set; }
 
     /// <summary>Brand the product list is currently filtered to (set by drilling in from a brand card).</summary>
     private string? _brandFilter;
