@@ -461,6 +461,8 @@
   <data name="Common.Cancel" xml:space="preserve"><value>إلغاء</value></data>
 
   <data name="Sentiment.Title" xml:space="preserve"><value>الانطباع العام</value></data>
+  <data name="Saved.SearchPlaceholder" xml:space="preserve"><value>ابحث في النتائج المحفوظة…</value></data>
+  <data name="Saved.NoMatches" xml:space="preserve"><value>لا توجد نتائج محفوظة مطابقة لبحثك.</value></data>
   <data name="Saved.Title" xml:space="preserve"><value>النتائج المحفوظة</value></data>
   <data name="Account.Title" xml:space="preserve"><value>حسابي</value></data>
 

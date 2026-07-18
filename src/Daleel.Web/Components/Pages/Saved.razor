@@ -41,8 +41,24 @@ else if (_authenticated)
     }
     else
     {
+        <div class="d-flex align-center gap-3 mb-3 flex-wrap">
+            <MudTextField T="string" @bind-Value="_search" Immediate="true" Clearable="true"
+                          Placeholder="@L["Saved.SearchPlaceholder"]" Variant="Variant.Outlined" Margin="Margin.Dense"
+                          Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search" Style="max-width:320px;" />
+            <MudChipSet T="string" SelectionMode="SelectionMode.SingleSelection" SelectedValue="_typeFilter"
+                        SelectedValueChanged="@((string? v) => _typeFilter = v)" CheckMark="true">
+                @foreach (var t in _types)
+                {
+                    <MudChip T="string" Value="@t" Variant="Variant.Outlined" Color="Color.Primary">@TypeLabel(t)</MudChip>
+                }
+            </MudChipSet>
+        </div>
+        @if (Filtered.Count == 0)
+        {
+            <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">@L["Saved.NoMatches"]</MudAlert>
+        }
         <MudGrid Spacing="3">
-            @foreach (var item in _items)
+            @foreach (var item in Filtered)
             {
                 <MudItem xs="12" sm="6" md="4">
                     <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
@@ -82,6 +98,29 @@ else if (_authenticated)
     private bool _authenticated;
     private bool _exportEnabled = true;
     private List<SavedResult> _items = new();
+    private string? _search;
+    private string? _typeFilter;
+
+    /// <summary>Distinct saved types, for the filter chips (only types the user actually has).</summary>
+    private List<string> _types = new();
+
+    /// <summary>Client-side filter: type chip + text over title/notes/type. The list is already small
+    /// (per-user, capped for free users), so no repo round-trip.</summary>
+    private IReadOnlyList<SavedResult> Filtered =>
+        _items.Where(i => _typeFilter is null || string.Equals(i.ResultType, _typeFilter, StringComparison.OrdinalIgnoreCase))
+              .Where(i => string.IsNullOrWhiteSpace(_search) ||
+                          i.Title.Contains(_search, StringComparison.OrdinalIgnoreCase) ||
+                          (i.Notes?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false) ||
+                          i.ResultType.Contains(_search, StringComparison.OrdinalIgnoreCase))
+              .ToList();
+
+    private string TypeLabel(string t) => t switch
+    {
+        "product" or "ask" or "compare" => L["Products.Items"],
+        "stores" => L["Products.Stores"],
+        "brand" => L["Products.Brands"],
+        _ => t
+    };
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -110,6 +149,8 @@ else if (_authenticated)
         }
 
         _items = (await SavedRepo.ListAsync(_userId)).ToList();
+        _types = _items.Select(i => i.ResultType).Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.Ordinal).ToList();
     }
 
     private async Task ViewAsync(SavedResult item)

@@ -461,6 +461,8 @@
   <data name="Common.Cancel" xml:space="preserve"><value>Cancel</value></data>
 
   <data name="Sentiment.Title" xml:space="preserve"><value>Sentiment</value></data>
+  <data name="Saved.SearchPlaceholder" xml:space="preserve"><value>Search saved results…</value></data>
+  <data name="Saved.NoMatches" xml:space="preserve"><value>No saved results match your search.</value></data>
   <data name="Saved.Title" xml:space="preserve"><value>Saved Results</value></data>
   <data name="Account.Title" xml:space="preserve"><value>My Account</value></data>
 
