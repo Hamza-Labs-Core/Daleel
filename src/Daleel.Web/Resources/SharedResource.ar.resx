@@ -463,6 +463,8 @@
   <data name="Sentiment.Title" xml:space="preserve"><value>الانطباع العام</value></data>
   <data name="Saved.SearchPlaceholder" xml:space="preserve"><value>ابحث في النتائج المحفوظة…</value></data>
   <data name="Saved.NoMatches" xml:space="preserve"><value>لا توجد نتائج محفوظة مطابقة لبحثك.</value></data>
+  <data name="Browse.Location" xml:space="preserve"><value>الموقع</value></data>
+  <data name="Browse.Category" xml:space="preserve"><value>الفئة</value></data>
   <data name="Browse.SearchPlaceholder" xml:space="preserve"><value>ابحث بالاسم…</value></data>
   <data name="Browse.NoMatches" xml:space="preserve"><value>لا توجد نتائج مطابقة لبحثك بعد.</value></data>
   <data name="Browse.LoadMore" xml:space="preserve"><value>عرض المزيد</value></data>

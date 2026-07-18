@@ -13,10 +13,26 @@
 </div>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Browse.StoresSubtitle"]</MudText>
 
-<MudTextField T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true" Clearable="true"
-              DebounceInterval="300" Placeholder="@L["Browse.SearchPlaceholder"]" Variant="Variant.Outlined"
-              Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-              Class="mb-4" Style="max-width:420px;" />
+<div class="d-flex align-center gap-3 mb-4 flex-wrap">
+    <MudTextField T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true" Clearable="true"
+                  DebounceInterval="300" Placeholder="@L["Browse.SearchPlaceholder"]" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Style="max-width:320px;" />
+    <MudSelect T="string" Value="_location" ValueChanged="OnLocationChanged" Clearable="true" Dense="true"
+               Label="@L["Browse.Location"]" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:220px;">
+        @foreach (var l in _locations)
+        {
+            <MudSelectItem T="string" Value="@l">@l</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSelect T="string" Value="_type" ValueChanged="OnTypeChanged" Clearable="true" Dense="true"
+               Label="@L["Browse.Category"]" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:240px;">
+        @foreach (var t in _types)
+        {
+            <MudSelectItem T="string" Value="@t">@t</MudSelectItem>
+        }
+    </MudSelect>
+</div>
 
 @if (_loaded && _items.Count == 0)
 {
@@ -69,16 +85,37 @@
     private const int PageSize = 24;
 
     private readonly List<Store> _items = new();
+    private IReadOnlyList<string> _locations = Array.Empty<string>();
+    private IReadOnlyList<string> _types = Array.Empty<string>();
     private string? _query;
+    private string? _location;
+    private string? _type;
     private bool _loaded;
     private bool _loading;
     private bool _mayHaveMore;
 
-    protected override Task OnInitializedAsync() => ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _locations = await StoresRepo.DistinctLocationsAsync();
+        _types = await StoresRepo.DistinctTypesAsync();
+        await ReloadAsync();
+    }
 
     private async Task OnQueryChanged(string? value)
     {
         _query = value;
+        await ReloadAsync();
+    }
+
+    private async Task OnLocationChanged(string? value)
+    {
+        _location = value;
+        await ReloadAsync();
+    }
+
+    private async Task OnTypeChanged(string? value)
+    {
+        _type = value;
         await ReloadAsync();
     }
 
@@ -92,7 +129,7 @@
     private async Task LoadMoreAsync()
     {
         _loading = true;
-        var page = await StoresRepo.SearchAsync(_query, _items.Count, PageSize);
+        var page = await StoresRepo.SearchAsync(_query, _items.Count, PageSize, _location, _type);
         _items.AddRange(page);
         _mayHaveMore = page.Count == PageSize;
         _loading = false;

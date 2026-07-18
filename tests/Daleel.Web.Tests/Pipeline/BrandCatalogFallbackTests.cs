@@ -109,8 +109,11 @@ public class BrandCatalogFallbackTests
             Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(1);
 
-        public Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, string? category = null, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
+
+        public Task<IReadOnlyList<string>> DistinctModelCategoriesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 
     private sealed class RecordingModelRepo : IBrandModelRepository

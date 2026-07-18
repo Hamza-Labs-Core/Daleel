@@ -463,6 +463,8 @@
   <data name="Sentiment.Title" xml:space="preserve"><value>Sentiment</value></data>
   <data name="Saved.SearchPlaceholder" xml:space="preserve"><value>Search saved results…</value></data>
   <data name="Saved.NoMatches" xml:space="preserve"><value>No saved results match your search.</value></data>
+  <data name="Browse.Location" xml:space="preserve"><value>Location</value></data>
+  <data name="Browse.Category" xml:space="preserve"><value>Category</value></data>
   <data name="Browse.SearchPlaceholder" xml:space="preserve"><value>Search by name…</value></data>
   <data name="Browse.NoMatches" xml:space="preserve"><value>Nothing matches your search yet.</value></data>
   <data name="Browse.LoadMore" xml:space="preserve"><value>Load more</value></data>

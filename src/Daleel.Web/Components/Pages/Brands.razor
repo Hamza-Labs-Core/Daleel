@@ -7,10 +7,19 @@
 <MudText Typo="Typo.h4" Class="mb-1">@L["Products.Brands"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Browse.BrandsSubtitle"]</MudText>
 
-<MudTextField T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true" Clearable="true"
-              DebounceInterval="300" Placeholder="@L["Browse.SearchPlaceholder"]" Variant="Variant.Outlined"
-              Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
-              Class="mb-4" Style="max-width:420px;" />
+<div class="d-flex align-center gap-3 mb-4 flex-wrap">
+    <MudTextField T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true" Clearable="true"
+                  DebounceInterval="300" Placeholder="@L["Browse.SearchPlaceholder"]" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Style="max-width:320px;" />
+    <MudSelect T="string" Value="_category" ValueChanged="OnCategoryChanged" Clearable="true" Dense="true"
+               Label="@L["Browse.Category"]" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:240px;">
+        @foreach (var c in _categories)
+        {
+            <MudSelectItem T="string" Value="@c">@c</MudSelectItem>
+        }
+    </MudSelect>
+</div>
 
 @if (_loaded && _items.Count == 0)
 {
@@ -59,16 +68,28 @@
     private const int PageSize = 24;
 
     private readonly List<Daleel.Web.Data.Brand> _items = new();
+    private IReadOnlyList<string> _categories = Array.Empty<string>();
     private string? _query;
+    private string? _category;
     private bool _loaded;
     private bool _loading;
     private bool _mayHaveMore;
 
-    protected override Task OnInitializedAsync() => ReloadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _categories = await BrandsRepo.DistinctModelCategoriesAsync();
+        await ReloadAsync();
+    }
 
     private async Task OnQueryChanged(string? value)
     {
         _query = value;
+        await ReloadAsync();
+    }
+
+    private async Task OnCategoryChanged(string? value)
+    {
+        _category = value;
         await ReloadAsync();
     }
 
@@ -82,7 +103,7 @@
     private async Task LoadMoreAsync()
     {
         _loading = true;
-        var page = await BrandsRepo.SearchAsync(_query, _items.Count, PageSize);
+        var page = await BrandsRepo.SearchAsync(_query, _items.Count, PageSize, _category);
         _items.AddRange(page);
         _mayHaveMore = page.Count == PageSize;
         _loading = false;

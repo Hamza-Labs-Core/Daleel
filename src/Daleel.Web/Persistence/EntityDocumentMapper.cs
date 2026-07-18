@@ -59,6 +59,7 @@ public static class EntityDocumentMapper
             Geo = result.Geo,
             Country = result.Country,
             Query = result.Query,
+            Category = string.IsNullOrWhiteSpace(result.Strategy?.Product) ? null : result.Strategy!.Product.Trim(),
             SearchId = searchId,
             BrandId = brandId,
             StoreId = storeId,

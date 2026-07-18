@@ -494,7 +494,10 @@ public class SynthesisTests
             Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(0);
 
-        public Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, CancellationToken ct = default) =>
+        public Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, string? category = null, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
+
+        public Task<IReadOnlyList<string>> DistinctModelCategoriesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 }

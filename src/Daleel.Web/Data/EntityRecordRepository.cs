@@ -25,7 +25,19 @@ public interface IEntityRecordRepository
 
     /// <summary>Name-searched page of entity index rows, newest first (the public /items directory).</summary>
     Task<IReadOnlyList<EntityRecord>> SearchAsync(
-        string? query, string? intent, int skip, int take, CancellationToken ct = default);
+        string? query, string? intent, int skip, int take,
+        string? geo = null, string? category = null, int? brandId = null, CancellationToken ct = default);
+
+    /// <summary>Distinct geo markets present for an intent (the /items location filter's options).</summary>
+    Task<IReadOnlyList<string>> DistinctGeosAsync(string intent, CancellationToken ct = default);
+
+    /// <summary>Distinct categories present for an intent (the /items category filter's options).</summary>
+    Task<IReadOnlyList<string>> DistinctCategoriesAsync(string intent, CancellationToken ct = default);
+
+    /// <summary>The brands (id + name) that have items in a category — the meta filter that switches
+    /// with the selected category.</summary>
+    Task<IReadOnlyList<(int Id, string Name)>> BrandsInCategoryAsync(
+        string intent, string category, CancellationToken ct = default);
 }
 
 public sealed class EntityRecordRepository : IEntityRecordRepository
@@ -99,12 +111,28 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
     public Task<int> CountAsync(CancellationToken ct = default) => _db.EntityRecords.CountAsync(ct);
 
     public async Task<IReadOnlyList<EntityRecord>> SearchAsync(
-        string? query, string? intent, int skip, int take, CancellationToken ct = default)
+        string? query, string? intent, int skip, int take,
+        string? geo = null, string? category = null, int? brandId = null, CancellationToken ct = default)
     {
         IQueryable<EntityRecord> q = _db.EntityRecords.AsNoTracking();
         if (!string.IsNullOrWhiteSpace(intent))
         {
             q = q.Where(r => r.Intent == intent);
+        }
+
+        if (!string.IsNullOrWhiteSpace(geo))
+        {
+            q = q.Where(r => r.Geo == geo);
+        }
+
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            q = q.Where(r => r.Category == category);
+        }
+
+        if (brandId is { } bid)
+        {
+            q = q.Where(r => r.BrandId == bid);
         }
 
         if (!string.IsNullOrWhiteSpace(query))
@@ -114,6 +142,34 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
         }
 
         return await q.OrderByDescending(r => r.LastRefreshed).Skip(skip).Take(take).ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<string>> DistinctGeosAsync(string intent, CancellationToken ct = default) =>
+        await _db.EntityRecords.AsNoTracking()
+            .Where(r => r.Intent == intent && r.Geo != null && r.Geo != "")
+            .Select(r => r.Geo!)
+            .Distinct()
+            .OrderBy(g => g)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<string>> DistinctCategoriesAsync(string intent, CancellationToken ct = default) =>
+        await _db.EntityRecords.AsNoTracking()
+            .Where(r => r.Intent == intent && r.Category != null && r.Category != "")
+            .Select(r => r.Category!)
+            .Distinct()
+            .OrderBy(c => c)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<(int Id, string Name)>> BrandsInCategoryAsync(
+        string intent, string category, CancellationToken ct = default)
+    {
+        var rows = await _db.EntityRecords.AsNoTracking()
+            .Where(r => r.Intent == intent && r.Category == category && r.BrandId != null)
+            .Join(_db.Brands.AsNoTracking(), r => r.BrandId, b => b.Id, (r, b) => new { b.Id, b.Name })
+            .Distinct()
+            .OrderBy(x => x.Name)
+            .ToListAsync(ct);
+        return rows.Select(x => (x.Id, x.Name)).ToList();
     }
 
     private static void ApplyUpdates(EntityRecord existing, EntityRecord fresh)
@@ -128,6 +184,7 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
         if (!string.IsNullOrWhiteSpace(fresh.NameKey)) existing.NameKey = fresh.NameKey;
         existing.Intent = fresh.Intent;
         existing.Geo = fresh.Geo ?? existing.Geo;
+        existing.Category = fresh.Category ?? existing.Category;
 
         // Relations: only ever fill in a relation we've now resolved; never blank an existing link just
         // because this pass couldn't resolve it (the brand row may simply not be created yet).

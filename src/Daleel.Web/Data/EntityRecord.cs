@@ -31,6 +31,10 @@ public sealed class EntityRecord
     /// <summary>Market key, e.g. "jordan".</summary>
     public string? Geo { get; set; }
 
+    /// <summary>Parsed product-type category (e.g. "air conditioner") — drives the /items filters.
+    /// Null on rows saved before categories existed.</summary>
+    public string? Category { get; set; }
+
     // ── Relations / embedded reference keys (the graph Postgres exists to traverse) ──
     /// <summary>The search run (SearchJob id) that produced this entity.</summary>
     public string? SearchId { get; set; }
