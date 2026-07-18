@@ -1,14 +1,31 @@
-@* Product-search display. The product list is the ONLY primary surface — the research behind it
-   (stores, brands, reviews, mentions) attaches to each product card instead of trailing the grid
-   as "Also found" sections. When a search returns no products at all, the secondary content is
-   shown directly so the page is never empty. Brand cards drill into the product list pre-filtered
-   to that brand. *@
+@* Product-search display. Products are the primary tab; the stores and brands behind them get
+   their own tabs (previously only visible when a search returned zero products). Empty tabs are
+   hidden. When a search returns no products at all, the secondary content is shown directly so
+   the page is never empty. Brand cards drill into the product list pre-filtered to that brand. *@
 @inject IStringLocalizer<SharedResource> L
 
 @if (Result.ProductCount > 0)
 {
-    @* PRIMARY — the product grid (cards → detail dialog with price comparison + reviews). *@
-    <ProductListings Result="Result" InitialBrand="@_brandFilter" />
+    <MudTabs @bind-ActivePanelIndex="_activeTab" Elevation="0" ApplyEffectsToContainer="true" Class="mb-2">
+        <MudTabPanel Text="@($"{L["Products.Items"]} ({Result.ProductCount})")"
+                     Icon="@Icons.Material.Filled.ShoppingBag">
+            <ProductListings Result="Result" InitialBrand="@_brandFilter" />
+        </MudTabPanel>
+        @if (Result.StoreCount > 0)
+        {
+            <MudTabPanel Text="@($"{L["Products.Stores"]} ({Result.StoreCount})")"
+                         Icon="@Icons.Material.Filled.Store">
+                <StoreCards Stores="Result.Stores" />
+            </MudTabPanel>
+        }
+        @if (Result.BrandCount > 0)
+        {
+            <MudTabPanel Text="@($"{L["Products.Brands"]} ({Result.BrandCount})")"
+                         Icon="@Icons.Material.Filled.Verified">
+                <BrandCards Brands="Result.Brands" OnViewProducts="DrillToBrand" />
+            </MudTabPanel>
+        }
+    </MudTabs>
 }
 else if (HasSecondary)
 {
@@ -55,15 +72,33 @@ else
     /// <summary>Brand the product list is currently filtered to (set by drilling in from a brand card).</summary>
     private string? _brandFilter;
 
+    private int _activeTab;
+
+    /// <summary>Streaming identity rule: partial results push a NEW Result reference for the SAME
+    /// search every ~800ms — the selected tab must survive those, and reset only when the search
+    /// itself (Query+Geo) changes.</summary>
+    private string? _identity;
+
     /// <summary>Whether there's any non-product content (stores / brands / reviews / articles) to show.</summary>
     private bool HasSecondary =>
         Result.StoreCount > 0 || Result.BrandCount > 0 || Result.HasUserReviews || Result.ArticleCount > 0;
 
+    protected override void OnParametersSet()
+    {
+        var identity = $"{Result.Query}|{Result.Geo}";
+        if (!string.Equals(identity, _identity, StringComparison.Ordinal))
+        {
+            _identity = identity;
+            _activeTab = 0;
+            _brandFilter = null;
+        }
+    }
+
     private void DrillToBrand(string brand)
     {
-        // Filter the (already-primary) product list to this brand; ProductListings re-reads
-        // InitialBrand on parameter change.
+        // Filter the (already-primary) product list to this brand and jump back to the products tab.
         _brandFilter = brand;
+        _activeTab = 0;
         StateHasChanged();
     }
 }

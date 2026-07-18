@@ -93,6 +93,7 @@
   <data name="Search.NotFound.Back" xml:space="preserve"><value>Start a new search</value></data>
 
   <data name="Products.Products" xml:space="preserve"><value>Products</value></data>
+  <data name="Products.Items" xml:space="preserve"><value>Products</value></data>
   <data name="Products.Brands" xml:space="preserve"><value>Brands</value></data>
   <data name="Products.Stores" xml:space="preserve"><value>Stores</value></data>
   <data name="Products.Reviews" xml:space="preserve"><value>Reviews</value></data>
