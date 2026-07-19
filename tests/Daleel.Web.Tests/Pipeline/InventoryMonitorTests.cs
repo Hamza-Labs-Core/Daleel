@@ -56,6 +56,57 @@ public sealed class InventoryMonitorTests : IDisposable
         ShopifyCatalogClient.Parse("""{"products":[]}""", "x.jo").Should().BeEmpty();
     }
 
+    [Fact]
+    public void WooParse_ReadsStoreApiShape_MinorUnitPrices()
+    {
+        const string json = """
+        [{"name":"Apple iPhone 16 &amp; case","sku":"IP16-128","permalink":"https://leaders.jo/product/iphone-16",
+          "is_in_stock":true,"prices":{"price":"64900","currency_minor_unit":2},
+          "images":[{"src":"https://leaders.jo/wp/i.jpg"}],"categories":[{"name":"Mobiles"}]}]
+        """;
+
+        var l = WooCommerceCatalogClient.Parse(json, "leaders.jo")!.Should().ContainSingle().Subject;
+        l.Name.Should().Be("Apple iPhone 16 & case", "HTML entities are decoded");
+        l.Sku.Should().Be("IP16-128");
+        l.Price.Should().Be(649.00m, "Store-API prices are minor-unit strings");
+        l.Category.Should().Be("Mobiles");
+        WooCommerceCatalogClient.Parse("<html>wall</html>", "x.jo").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Composite_FallsThroughToTheSecondPlatform_AndMemoizes()
+    {
+        var woo = new CountingStub(pages: 1);
+        var composite = new CompositeCatalogClient(new NullStub(), woo);
+
+        (await composite.GetPageAsync("leaders.jo", 1)).Should().NotBeNull();
+        await composite.GetPageAsync("leaders.jo", 2);
+
+        woo.Calls.Should().Be(2);
+    }
+
+    private sealed class NullStub : IStoreCatalogClient
+    {
+        public Task<(IReadOnlyList<InventoryListing> Listings, string RawPayload)?> GetPageAsync(
+            string domain, int page, CancellationToken ct = default) =>
+            Task.FromResult<(IReadOnlyList<InventoryListing>, string)?>(null);
+    }
+
+    private sealed class CountingStub(int pages) : IStoreCatalogClient
+    {
+        public int Calls { get; private set; }
+
+        public Task<(IReadOnlyList<InventoryListing> Listings, string RawPayload)?> GetPageAsync(
+            string domain, int page, CancellationToken ct = default)
+        {
+            Calls++;
+            IReadOnlyList<InventoryListing> listings = page <= pages
+                ? new[] { new InventoryListing("X", null, null, null, 1m, true, null, null) }
+                : Array.Empty<InventoryListing>();
+            return Task.FromResult<(IReadOnlyList<InventoryListing>, string)?>((listings, "{}"));
+        }
+    }
+
     // ── Units ────────────────────────────────────────────────────────────────
 
     [Fact]
