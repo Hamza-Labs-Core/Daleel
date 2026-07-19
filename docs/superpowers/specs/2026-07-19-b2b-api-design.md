@@ -108,7 +108,14 @@ Hard-stop at zero credits (`402`, monitors pause at period end, never mid-cycle)
 packs for Growth+; invoice-first billing, Stripe later. Max-stores stays a plan cap (an abuse
 bound), but the SPEND is all credits.
 
-## API level vs UI level
+## API level vs UI level — the Anthropic model
+
+Shape it exactly like Anthropic's split: **claude.ai** (consumer app, its own subscription) vs
+**console.anthropic.com** (org console: prepaid API credits, keys, workspaces, usage, tier
+limits) — same vendor, two products, two currencies, one login. For us: the consumer app stays
+as-is; the **portal is our Console** — org-scoped, prepaid B2B credits, keys with scopes,
+usage burn-down, rate-limit tier visible. Future (not v1): workspaces under an org for per-team
+keys/attribution, like Console workspaces.
 
 Two surfaces per client, same org account, strictly separated:
 
