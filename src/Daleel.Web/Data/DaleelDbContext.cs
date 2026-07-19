@@ -69,6 +69,19 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<TranslationCacheEntry> TranslationCache => Set<TranslationCacheEntry>();
     public DbSet<RelevanceFlag> RelevanceFlags => Set<RelevanceFlag>();
 
+    // ── B2B API (spec 2026-07-19-b2b-api-design) ──────────────────────────────
+    /// <summary>Registered B2B API client organisations. See <see cref="ApiApplication"/>.</summary>
+    public DbSet<ApiApplication> ApiApplications => Set<ApiApplication>();
+
+    /// <summary>Issued API keys (hash + prefix only — the full key is never stored). See <see cref="ApiKey"/>.</summary>
+    public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
+
+    /// <summary>B2B plans (separate from the consumer <see cref="SubscriptionPlan"/>s). See <see cref="ApiPlan"/>.</summary>
+    public DbSet<ApiPlan> ApiPlans => Set<ApiPlan>();
+
+    /// <summary>Append-only B2B credit ledger; balance = SUM(Delta). See <see cref="ApiCreditLedger"/>.</summary>
+    public DbSet<ApiCreditLedger> ApiCreditLedger => Set<ApiCreditLedger>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -560,6 +573,80 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Category).HasMaxLength(32);
             e.Property(x => x.Note).HasMaxLength(300);
             e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+        });
+
+        // ── B2B API (applications, keys, plans, credit ledger) ────────────────
+        builder.Entity<ApiApplication>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.ContactEmail).HasMaxLength(256);
+            e.Property(x => x.OwnerUserId).HasMaxLength(450); // matches AspNetUsers.Id
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            // Admin table filters by status; owner lookup backs the (later) portal "my applications".
+            e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.OwnerUserId);
+            // Restrict, not the required-FK Cascade default: deleting a plan must never silently
+            // delete the client organisations on it (move them to another plan first).
+            e.HasOne(x => x.Plan).WithMany().HasForeignKey(x => x.ApiPlanId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ApiKey>(e =>
+        {
+            // Auth is an exact hash lookup on every API request — unique + indexed.
+            e.HasIndex(x => x.Hash).IsUnique();
+            e.HasIndex(x => x.ApplicationId);
+            e.Property(x => x.Hash).HasMaxLength(64); // SHA-256 hex
+            e.Property(x => x.Prefix).HasMaxLength(24);
+            e.Property(x => x.Scopes).HasMaxLength(400);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            e.Property(x => x.RevokedAt).HasConversion(toNullableUnixMs);
+            e.Property(x => x.LastUsedAt).HasConversion(toNullableUnixMs);
+
+            // Keys are meaningless without their application — cascade them away.
+            e.HasOne(x => x.Application)
+                .WithMany()
+                .HasForeignKey(x => x.ApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<ApiPlan>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(100);
+            e.Property(x => x.MonthlyPriceUsd).HasColumnType("decimal(10,2)");
+
+            // The three launch tiers from the spec's pricing table (Enterprise stays bespoke — created
+            // by an admin when a deal lands, not seeded). Admin-editable on /admin/api afterwards.
+            e.HasData(
+                new ApiPlan
+                {
+                    Id = ApiPlan.TrialId, Name = "Trial", MonthlyApiCredits = 2_000,
+                    MaxMonitoredStores = 1, WebhooksEnabled = false, MonthlyPriceUsd = 0m
+                },
+                new ApiPlan
+                {
+                    Id = ApiPlan.StarterId, Name = "Starter", MonthlyApiCredits = 60_000,
+                    MaxMonitoredStores = 2, WebhooksEnabled = false, MonthlyPriceUsd = 49m
+                },
+                new ApiPlan
+                {
+                    Id = ApiPlan.GrowthId, Name = "Growth", MonthlyApiCredits = 600_000,
+                    MaxMonitoredStores = 10, WebhooksEnabled = true, MonthlyPriceUsd = 199m
+                });
+        });
+
+        builder.Entity<ApiCreditLedger>(e =>
+        {
+            // Balance = SUM(Delta) per application, and the admin page lists movements newest-first —
+            // both hit the (ApplicationId, CreatedAt) index. CreatedAt is Unix-ms like every ledger here.
+            e.HasIndex(x => new { x.ApplicationId, x.CreatedAt });
+            e.Property(x => x.Reason).HasMaxLength(200);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+
+            e.HasOne(x => x.Application)
+                .WithMany()
+                .HasForeignKey(x => x.ApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<SubscriptionPlan>(e =>

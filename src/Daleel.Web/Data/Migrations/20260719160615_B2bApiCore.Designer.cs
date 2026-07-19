@@ -3,6 +3,7 @@ using System;
 using Daleel.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Daleel.Web.Data.Migrations
 {
     [DbContext(typeof(DaleelDbContext))]
-    partial class DaleelDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260719160615_B2bApiCore")]
+    partial class B2bApiCore
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

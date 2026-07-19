@@ -27,10 +27,12 @@ public interface IEntityRecordRepository
     /// converge a re-extracted duplicate onto the existing entity instead of inserting a new row.</summary>
     Task<EntityRecord?> GetByIdentityKeyAsync(string identityKey, CancellationToken ct = default);
 
-    /// <summary>Name-searched page of entity index rows, newest first (the public /items directory).</summary>
+    /// <summary>Name-searched page of entity index rows, newest first (the public /items directory
+    /// and the B2B /api/v1/items endpoint).</summary>
     Task<IReadOnlyList<EntityRecord>> SearchAsync(
         string? query, string? intent, int skip, int take,
-        string? geo = null, string? category = null, int? brandId = null, CancellationToken ct = default);
+        string? geo = null, string? category = null, int? brandId = null, int? storeId = null,
+        CancellationToken ct = default);
 
     /// <summary>Distinct geo markets present for an intent (the /items location filter's options).</summary>
     Task<IReadOnlyList<string>> DistinctGeosAsync(string intent, CancellationToken ct = default);
@@ -122,7 +124,8 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
 
     public async Task<IReadOnlyList<EntityRecord>> SearchAsync(
         string? query, string? intent, int skip, int take,
-        string? geo = null, string? category = null, int? brandId = null, CancellationToken ct = default)
+        string? geo = null, string? category = null, int? brandId = null, int? storeId = null,
+        CancellationToken ct = default)
     {
         // Alias rows (merged duplicates) never surface in the directory.
         IQueryable<EntityRecord> q = _db.EntityRecords.AsNoTracking().Where(r => r.MergedIntoId == null);
@@ -144,6 +147,11 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
         if (brandId is { } bid)
         {
             q = q.Where(r => r.BrandId == bid);
+        }
+
+        if (storeId is { } sid)
+        {
+            q = q.Where(r => r.StoreId == sid);
         }
 
         if (!string.IsNullOrWhiteSpace(query))

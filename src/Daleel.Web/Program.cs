@@ -686,6 +686,13 @@ builder.Services.AddSingleton<IOpenRouterCatalog, OpenRouterCatalog>();
 // QA-only raw provider diagnostics (gated by DIAGNOSTICS_ENABLED — off in production).
 builder.Services.AddScoped<IProviderDiagnostics, ProviderDiagnostics>();
 
+// ── B2B API core (spec 2026-07-19-b2b-api-design, steps 1–3) ─────────────────
+// Applications + keys + credit metering for the paid data API under /api/v1 (mapped below with
+// MapB2bApiV1). Both services are TRANSIENT wrappers over the transient DaleelDbContext — resolved
+// from each HTTP request's scope, so no request ever shares a context (same rule as the repositories).
+builder.Services.AddTransient<IApiApplicationRepository, ApiApplicationRepository>();
+builder.Services.AddTransient<Daleel.Web.Api.IApiKeyAuthService, Daleel.Web.Api.ApiKeyAuthService>();
+
 // Liveness probe consumed by the Docker HEALTHCHECK, deploy.sh, and Caddy upstream checks.
 builder.Services.AddHealthChecks();
 
@@ -750,6 +757,8 @@ app.MapGet("/set-language", (string culture, string? redirectUri, HttpContext ct
 
 app.MapAuthEndpoints();
 app.MapConversationEndpoints();
+// B2B data API v1 (key-authenticated + credit-metered; see the B2B registrations above).
+Daleel.Web.Api.ApiV1Endpoints.MapB2bApiV1(app);
 app.MapHub<Daleel.Web.Conversation.ConversationHub>("/hubs/conversation");
 
 // Single renderer: the server circuit. No WebAssembly render mode and no component-less Client
