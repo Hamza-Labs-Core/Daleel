@@ -114,6 +114,21 @@ Hard-stop at zero credits (`402`, monitors pause at period end, never mid-cycle)
 packs for Growth+; invoice-first billing, Stripe later. Max-stores stays a plan cap (an abuse
 bound), but the SPEND is all credits.
 
+## Two sites: daleel vs api.daleel
+
+Like claude.ai vs console.anthropic.com, the split is physical — separate hosts:
+
+- **`daleel.hamzalabs.dev`** — the consumer product only. No portal, no `/api/v1`.
+- **`api.daleel.hamzalabs.dev`** — the Applications product: `/api/v1/*` (key-auth), the
+  developer portal (`/` = console: applications, keys, credits, monitors, webhooks), and the API
+  docs/reference. QA mirror: `api.qa-daleel.hamzalabs.dev`.
+
+Implementation: ONE binary, host-gated route groups (consumer Blazor pages bound to the main
+host; API endpoints + portal pages bound to the api host — a wrong-host request 404s). Caddy adds
+the second vhost to the same container (one cert each); deploy.yml renders both domains. Shared
+DB/DI stays one deployment — the separation is product/host-level, not infrastructure-level,
+until scale says otherwise.
+
 ## API level vs UI level — the Anthropic model
 
 Shape it exactly like Anthropic's split: **claude.ai** (consumer app, its own subscription) vs
