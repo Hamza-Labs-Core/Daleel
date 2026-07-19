@@ -85,11 +85,37 @@ often null even when the grid card has one. Two fixes:
   whatever photo actually exists.
 
 **When vision still can't run** (no photo anywhere on one side): fall to spec/text judgment; with
-no distinguishing specs either, the pair STAYS a duplicate — but not forever: the worker is
-RECURRING with memoized verdicts, so the first enrichment/deep-dive that lands a photo or model on
-either row makes the next pass re-judge it for near-zero cost. NO manual merging — the system
-converges on evidence alone; the `/admin/data` report is read-only visibility into what's pending
-and why.
+no distinguishing specs either, the listings are NOT left as sibling duplicates and NOT blind-merged
+into one model — they are grouped under a **generic umbrella item** (below). NO manual merging —
+the system converges on evidence alone; the `/admin/data` report is read-only visibility into
+what's pending and why.
+
+## The generic umbrella item (no-evidence grouping)
+
+Indistinguishable same-brand/same-category listings merge under a **generic item** — identity
+`gen:{geo}:{brandKey}:{categoryKey}` (category from the search strategy, e.g. "Samsung × air
+conditioner × jordan") — reusing the existing `ParentProductKey` linkage rather than a new concept.
+
+- Each absorbed listing lives on as an **offer** under the umbrella, keeping its own store-listing
+  name, URL, price, availability — so *any offer update updates the one item* (`LastRefreshed`,
+  price range, availability roll up).
+- **Graduation:** the recurring worker re-judges offers as evidence lands (vision match, specs, an
+  extracted SKU). An offer identified as a specific model MOVES to that model's entity (created on
+  first identification); the umbrella keeps only the still-unidentified rest, and disappears when
+  empty. Memoized verdicts keep re-judging near-free.
+- The umbrella renders honestly: a generic title ("Samsung air conditioners — N listings"), never a
+  fabricated model name.
+
+## Image ownership: two homes, composed at pull time
+
+- **Item images = brand/canonical** — the brand-catalogue/brand-site photos of the identified
+  model (`BrandModel.ImageUrl` / `ImageR2Urls`). On a generic umbrella item this set is empty.
+- **Offer images = that store's listing shots** — `EntityOffer` gains `ImageUrls` (mirrors
+  `ScrapedPrice.ImageUrl`, which already persists the crawl's per-listing photo).
+- **Listing + detail pages union both at render**: the card shows the item's canonical photo, else
+  the first offer photo (all still gated by the existing verify/moderation screens); the detail
+  page shows the canonical gallery and each seller's shots under its offer. No copy at merge time —
+  composition happens at pull time, so an offer's refreshed photo shows without rewriting the item.
 
 Fail-open: unavailable vision/LLM defers fuzzy pairs to the next run; exact-key merges proceed
 regardless. A pair with no photo overlap AND no distinguishing specs stays unmerged (wrong merge >
