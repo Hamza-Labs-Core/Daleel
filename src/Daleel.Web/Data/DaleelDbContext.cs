@@ -302,6 +302,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.Property(x => x.Url).HasMaxLength(1000);
             e.Property(x => x.ContentHash).HasMaxLength(64);
             e.Property(x => x.LastSeenAt).HasConversion(toUnixMs);
+            e.Property(x => x.NextUrl).HasMaxLength(1000);
             e.HasIndex(x => new { x.Domain, x.Url }).IsUnique();
         });
 

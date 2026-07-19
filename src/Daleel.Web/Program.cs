@@ -661,6 +661,13 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
     Daleel.Web.Pipeline.Inventory.InventorySyncHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Inventory.InventoryPageHandler>();
+// HTML mode: listing-page discovery (sitemap first, one LLM homepage assess as fallback) + the
+// per-listing-page walk unit for stores with no machine-readable catalogue.
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Inventory.IHtmlCatalogDiscovery>(sp =>
+    new Daleel.Web.Pipeline.Inventory.HtmlCatalogDiscovery(
+        sp.GetRequiredService<Daleel.Web.Services.IProviderApi>()));
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Inventory.InventoryHtmlPageHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Inventory.InventoryFinalizeHandler>();
 builder.Services.AddHostedService<Daleel.Web.Pipeline.Inventory.StoreInventoryMonitorService>();
