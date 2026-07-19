@@ -50,31 +50,53 @@ Versioned path (`/api/v1/`), JSON only, cursor pagination, `ETag`/`If-None-Match
 - Every call is metered through the existing event-store path (`ApiCallLog` gains `ClientId`),
   rolled into a per-period `ApiUsage` row (client, period, calls, sync-spend). The admin analytics
   pages already read this store.
-- **Monitored-store sync spend is attributed to the subscribing client**: the sync units run under
-  the client's id and the existing `CostEstimator` meters LLM/fetch spend against it. Shopify
+- **Sync spend is metered per STORE, not per client** (a store synced once may serve N
+  subscribers); each subscriber is charged the credit PRICE of the monitor, and `/admin/api`
+  shows store sync-cost vs subscriber credit revenue side by side. Shopify
   stores ≈ pennies (pure JSON); HTML stores cost LLM only on changed pages — the content-hash
   design keeps recurring cost ∝ change rate, which is what makes a flat per-store fee viable.
 - Enforcement: per-minute rate limit (`ratelimit.api_per_minute`, per key), monthly call quota by
   plan (`429` + `X-RateLimit-*` headers; `402` when a plan lapses). Soft-warn at 80% via email.
 
-## Pricing (seeded plans — numbers are admin-editable on /admin/plans)
+## Pricing — credit-based (reuses `SubscriptionPlan.MonthlyCredits`)
 
-Extend `SubscriptionPlan` (it already has `MonthlyCredits`) with `ApiCallsPerMonth`,
-`MonitoredStores`, `WebhooksEnabled`, `MonthlyPriceUsd`:
+Everything draws from ONE credit pool per client (the same mechanism searches already use), not
+flat per-resource fees. Why credits:
 
-| Plan | API calls/mo | Monitored stores | Webhooks | Price |
+- **A store can be monitored by N clients but is synced ONCE.** The sync is shared infrastructure;
+  each subscriber pays the ACCESS price in credits while our cost stays single-sync — the second
+  subscriber to a store is nearly pure margin, and no client ever pays "per our cost", so
+  attribution stays simple and un-gameable.
+- **Stores cost wildly different amounts** (Shopify JSON ≈ free; HTML+LLM heavier). Credits price
+  that honestly per store instead of one flat fee subsidizing the expensive ones.
+
+Charge sheet (admin-editable `pricing.api.*` SystemConfig rows, like the existing `pricing.*`):
+
+| Action | Credits |
+|---|---|
+| `GET /items` (list page) | 1 |
+| `GET /items/{id}` (full doc) | 2 |
+| stores/brands reads | 1 |
+| `GET /stores/{id}/inventory` | 5 |
+| Monitor subscription, per store per month | by sync class: `shopify` 500 · `html` 2,000 |
+| Webhook delivery | 1 |
+
+Monitor charges post monthly per subscription (not per sync — cadence is ours to optimize).
+The sync's ACTUAL spend is still metered per store on `/admin/api` (CostEstimator), so a
+loss-making sync class is visible and its credit price adjustable without a deploy.
+
+Plans grant credits (seeded, admin-editable on /admin/plans):
+
+| Plan | Credits/mo | Max monitored stores | Webhooks | Price |
 |---|---|---|---|---|
-| Trial (14d) | 1,000 | 1 (Shopify only) | — | $0 |
-| Starter | 50,000 | 1 | — | $49/mo |
-| Growth | 500,000 | 5 | ✓ | $199/mo |
+| Trial (14d) | 2,000 | 1 (shopify class) | — | $0 |
+| Starter | 60,000 | 2 | — | $49/mo |
+| Growth | 600,000 | 10 | ✓ | $199/mo |
 | Enterprise | custom | custom | ✓ | custom |
 
-- Per-store economics: a Shopify store syncs for cents/day; an HTML store's LLM extraction on
-  changed pages is bounded by the hash-skip — target gross margin ≥80% at the Starter fee, and
-  the per-client sync-spend column on `/admin/api` makes a loss-making monitor visible immediately.
-- Overage: hard-stop at quota by default (predictable for the client); optional metered overage
-  per 1k calls for Growth+. Billing is invoice-first (manual, B2B); Stripe integration is a later
-  step and out of scope here.
+Hard-stop at zero credits (`402`, monitors pause at period end, never mid-cycle); top-up credit
+packs for Growth+; invoice-first billing, Stripe later. Max-stores stays a plan cap (an abuse
+bound), but the SPEND is all credits.
 
 ## Admin (`/admin/api`)
 
