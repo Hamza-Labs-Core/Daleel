@@ -35,6 +35,17 @@ public sealed class EntityRecord
     /// Null on rows saved before categories existed.</summary>
     public string? Category { get; set; }
 
+    /// <summary>Save-time convergence key (<c>StableId.IdentityKeyFor</c>): sku:/fp:-tiered, indexed.
+    /// Distinct from <see cref="Id"/> (the routing hash), which never changes. Null until backfilled.</summary>
+    public string? IdentityKey { get; set; }
+
+    /// <summary>
+    /// Set when this row was merged into another entity: the survivor's <see cref="Id"/>. An alias
+    /// row keeps old /product/{id} links resolvable but is excluded from every directory/search
+    /// query (<c>MergedIntoId IS NULL</c>) and from dedup candidate generation.
+    /// </summary>
+    public string? MergedIntoId { get; set; }
+
     // ── Relations / embedded reference keys (the graph Postgres exists to traverse) ──
     /// <summary>The search run (SearchJob id) that produced this entity.</summary>
     public string? SearchId { get; set; }

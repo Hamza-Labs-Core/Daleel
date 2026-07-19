@@ -64,6 +64,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
 
     /// <summary>Index over the R2-stored entity documents (products/services/places). See <see cref="EntityRecord"/>.</summary>
     public DbSet<EntityRecord> EntityRecords => Set<EntityRecord>();
+    public DbSet<EntityMergeLog> EntityMergeLogs => Set<EntityMergeLog>();
     public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
     public DbSet<TranslationCacheEntry> TranslationCache => Set<TranslationCacheEntry>();
     public DbSet<RelevanceFlag> RelevanceFlags => Set<RelevanceFlag>();
@@ -274,6 +275,12 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
             e.HasIndex(x => x.StoreId);
             e.HasIndex(x => x.ProductKey);
             e.HasIndex(x => x.LastRefreshed);
+            e.Property(x => x.Category).HasMaxLength(200);
+            e.Property(x => x.IdentityKey).HasMaxLength(600);
+            e.Property(x => x.MergedIntoId).HasMaxLength(64);
+            // Dedup: converge saves + find duplicate buckets by identity key; skip alias rows fast.
+            e.HasIndex(x => x.IdentityKey);
+            e.HasIndex(x => x.MergedIntoId);
 
             // Relations exist for the graph, but an entity outlives its brand/store: SetNull on delete so
             // pruning a brand/store unlinks the index row rather than deleting it (the R2 doc still stands).
@@ -285,6 +292,18 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany()
                 .HasForeignKey(x => x.StoreId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<EntityMergeLog>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.SurvivorId).HasMaxLength(64);
+            e.Property(x => x.LoserId).HasMaxLength(64);
+            e.Property(x => x.SurvivorName).HasMaxLength(400);
+            e.Property(x => x.LoserName).HasMaxLength(400);
+            e.Property(x => x.Evidence).HasMaxLength(32);
+            e.Property(x => x.CreatedAt).HasConversion(toUnixMs);
+            e.HasIndex(x => x.CreatedAt);
         });
 
         builder.Entity<VisionMatchCache>(e =>

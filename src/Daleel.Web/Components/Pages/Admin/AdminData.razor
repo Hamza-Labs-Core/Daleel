@@ -4,6 +4,8 @@
 @using Daleel.Web.Storage
 @attribute [Authorize(Roles = "Admin")]
 @inject IR2StorageService R2
+@inject IServiceScopeFactory Scopes
+@using Microsoft.EntityFrameworkCore
 @inject IStringLocalizer<SharedResource> L
 
 <PageTitle>دليل · Admin · Data</PageTitle>
@@ -11,6 +13,38 @@
 <AdminNav />
 <MudText Typo="Typo.h4" Class="mb-1">@L["Admin.Data.Title"]</MudText>
 <MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Admin.Data.Subtitle"]</MudText>
+
+@* ── Entity dedup (read-only) ─────────────────────────────────────────────
+   Merges are evidence-driven only (dedup.enabled / dedup.dry_run at /admin/settings) — this is the
+   visibility surface: pending duplicate buckets and the recent merge ledger. No manual merge. *@
+<MudPaper Class="pa-3 mb-4" Elevation="0" Outlined="true">
+    <div class="d-flex align-center gap-3 flex-wrap">
+        <MudText Typo="Typo.h6">Entity dedup</MudText>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                 Color="@(_dedupPendingBuckets > 0 ? Color.Warning : Color.Success)">
+            @_dedupPendingBuckets pending bucket(s)
+        </MudChip>
+        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@_dedupAliases alias row(s)</MudChip>
+    </div>
+    @if (_dedupRecent.Count > 0)
+    {
+        <MudSimpleTable Dense="true" Class="mt-2">
+            <thead><tr><th>When</th><th>Survivor</th><th>Merged away</th><th>Evidence</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var m in _dedupRecent)
+                {
+                    <tr>
+                        <td>@m.CreatedAt.LocalDateTime.ToString("MM-dd HH:mm")</td>
+                        <td dir="@Catalog.Dir(m.SurvivorName)">@m.SurvivorName</td>
+                        <td dir="@Catalog.Dir(m.LoserName)">@m.LoserName</td>
+                        <td>@m.Evidence</td>
+                        <td>@(m.DryRun ? "dry-run" : "merged")</td>
+                    </tr>
+                }
+            </tbody>
+        </MudSimpleTable>
+    }
+</MudPaper>
 
 @if (!R2.IsConfigured)
 {
@@ -372,6 +406,10 @@ else
 </MudDialog>
 
 @code {
+    private int _dedupPendingBuckets;
+    private int _dedupAliases;
+    private List<EntityMergeLog> _dedupRecent = new();
+
     // The four R2 buckets, in selector order. Each is browsed from its root (prefix "").
     private static readonly R2Bucket[] Buckets =
         { R2Bucket.Data, R2Bucket.Specs, R2Bucket.Images, R2Bucket.Logs };
@@ -422,10 +460,36 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && R2.IsConfigured)
+        if (firstRender)
         {
-            await ProbeBucketsAsync();
-            await ReloadAsync();
+            await LoadDedupAsync();
+            if (R2.IsConfigured)
+            {
+                await ProbeBucketsAsync();
+                await ReloadAsync();
+            }
+        }
+    }
+
+    // Read-only dedup visibility: pending exact-key buckets, alias count, recent ledger. Best-effort.
+    private async Task LoadDedupAsync()
+    {
+        try
+        {
+            using var scope = Scopes.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<DaleelDbContext>();
+            _dedupPendingBuckets = await db.EntityRecords
+                .Where(r => r.Intent == "Product" && r.MergedIntoId == null && r.IdentityKey != null)
+                .GroupBy(r => r.IdentityKey!)
+                .CountAsync(g => g.Count() > 1);
+            _dedupAliases = await db.EntityRecords.CountAsync(r => r.MergedIntoId != null);
+            _dedupRecent = await db.EntityMergeLogs
+                .OrderByDescending(m => m.CreatedAt).Take(15).ToListAsync();
+            StateHasChanged();
+        }
+        catch
+        {
+            // visibility only — never break the page
         }
     }
 

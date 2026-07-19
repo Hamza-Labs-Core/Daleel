@@ -89,9 +89,18 @@ public sealed class SearchEntityStore : ISearchEntityStore
         var brandFk = await ResolveBrandFkAsync(document.Brand, ct).ConfigureAwait(false);
         var storeFk = await ResolveStoreFkAsync(document, ct).ConfigureAwait(false);
 
+        // Save-time convergence: products carry a tiered identity key (SKU → brand+model → name
+        // fingerprint). When a LIVE row already holds this identity under a DIFFERENT stable id,
+        // this save merges onto it and the incoming id becomes an alias — the same physical product
+        // re-extracted under a differently-worded listing must not mint a second entity.
+        string? identityKey = document.Intent == SearchIntentType.Product
+            ? StableId.IdentityKeyFor(document.Geo, document.Brand, document.Model, document.Name)
+            : null;
+
         var record = new EntityRecord
         {
             Id = document.Id,
+            IdentityKey = identityKey,
             Intent = document.Intent.ToString(),
             Name = document.Name,
             NameKey = EntityRecord.Normalize(document.Name),
@@ -109,6 +118,48 @@ public sealed class SearchEntityStore : ISearchEntityStore
 
         try
         {
+            if (identityKey is not null &&
+                await _index.GetByIdentityKeyAsync(identityKey, ct).ConfigureAwait(false) is { } survivor &&
+                !string.Equals(survivor.Id, record.Id, StringComparison.Ordinal))
+            {
+                // Merge onto the survivor (additive fill + fresh R2 pointer), then keep the incoming
+                // id resolvable as an alias so this run's grid links don't dangle.
+                var onto = new EntityRecord
+                {
+                    Id = survivor.Id,
+                    Intent = record.Intent,
+                    Name = record.Name,
+                    NameKey = record.NameKey,
+                    Geo = record.Geo,
+                    Category = record.Category,
+                    IdentityKey = identityKey,
+                    SearchId = record.SearchId,
+                    BrandId = record.BrandId,
+                    StoreId = record.StoreId,
+                    ProductKey = record.ProductKey,
+                    ParentProductKey = record.ParentProductKey,
+                    R2Key = record.R2Key,
+                    R2Url = record.R2Url,
+                    LastRefreshed = record.LastRefreshed
+                };
+                var updated = await _index.UpsertAsync(onto, ct).ConfigureAwait(false);
+
+                await _index.UpsertAsync(new EntityRecord
+                {
+                    Id = record.Id,
+                    Intent = record.Intent,
+                    Name = record.Name,
+                    NameKey = record.NameKey,
+                    Geo = record.Geo,
+                    MergedIntoId = survivor.Id,
+                    R2Key = objectKey,
+                    R2Url = r2Url,
+                    LastRefreshed = document.CapturedAt
+                }, ct).ConfigureAwait(false);
+
+                return updated;
+            }
+
             return await _index.UpsertAsync(record, ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
