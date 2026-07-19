@@ -21,4 +21,18 @@ public sealed class StoreCatalogPage
     public string ContentHash { get; set; } = string.Empty;
 
     public DateTimeOffset LastSeenAt { get; set; }
+
+    /// <summary>
+    /// JSON array of the product keys last extracted from this page (HTML mode). An UNCHANGED page's
+    /// products must still advance the presence watermark — without re-running the LLM — and this
+    /// remembered set is how: hash-skip stamps <c>ScrapedPrice.LastSeenAt</c> for exactly these keys.
+    /// Null for machine-readable catalogues (Shopify/Woo), whose parse is free and re-runs every sync.
+    /// </summary>
+    public string? ProductKeysJson { get; set; }
+
+    /// <summary>
+    /// The next-page URL last detected on this page (HTML mode), so an unchanged page's pagination
+    /// walk continues without an LLM call. Null when the page was the last of its listing.
+    /// </summary>
+    public string? NextUrl { get; set; }
 }
