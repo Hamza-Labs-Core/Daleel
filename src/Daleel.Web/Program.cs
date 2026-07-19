@@ -651,8 +651,9 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.CleanShotHandler>();
 // Inventory monitor: Shopify catalogue client + the sync/page/finalize units + the scheduler.
-builder.Services.AddSingleton<Daleel.Web.Pipeline.Inventory.IStoreCatalogClient,
-    Daleel.Web.Pipeline.Inventory.ShopifyCatalogClient>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Inventory.IStoreCatalogClient>(sp =>
+    new Daleel.Web.Pipeline.Inventory.ShopifyCatalogClient(
+        providers: sp.GetRequiredService<Daleel.Web.Services.IProviderApi>()));
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Inventory.InventorySyncHandler>();
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,

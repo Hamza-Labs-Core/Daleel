@@ -31,11 +31,13 @@ public sealed class ShopifyCatalogClient : IStoreCatalogClient, IDisposable
 
     private readonly HttpClient _http;
     private readonly bool _ownsHttp;
+    private readonly Daleel.Web.Services.IProviderApi? _providers;
 
-    public ShopifyCatalogClient(HttpClient? http = null)
+    public ShopifyCatalogClient(HttpClient? http = null, Daleel.Web.Services.IProviderApi? providers = null)
     {
         _ownsHttp = http is null;
         _http = http ?? Daleel.Search.Http.SharedHttpHandler.CreateClient();
+        _providers = providers;
         if (_http.Timeout == default || _http.Timeout == TimeSpan.FromSeconds(100))
         {
             _http.Timeout = TimeSpan.FromSeconds(30);
@@ -46,25 +48,60 @@ public sealed class ShopifyCatalogClient : IStoreCatalogClient, IDisposable
         string domain, int page, CancellationToken ct = default)
     {
         var url = $"https://{domain}/products.json?limit={PageSize}&page={page}";
-        string json;
+
+        // Direct fetch first (cheapest) — but a datacenter IP is often bot-walled where a browser
+        // isn't, so this path MUST fall back through the provider chain (Context.dev → CF Browser),
+        // per the every-fetch-path invariant. QA proof: darcomjo.com 200s from a laptop and walls
+        // the VPS.
+        var json = await FetchDirectAsync(url, ct).ConfigureAwait(false);
+        var listings = json is null ? null : Parse(json, domain);
+        if (listings is null && _providers is not null)
+        {
+            json = await FetchViaProvidersAsync(url, ct).ConfigureAwait(false);
+            listings = json is null ? null : Parse(json, domain);
+        }
+
+        return listings is null || json is null ? null : (listings, json);
+    }
+
+    private async Task<string?> FetchDirectAsync(string url, CancellationToken ct)
+    {
         try
         {
             using var res = await _http.GetAsync(url, ct).ConfigureAwait(false);
-            if (!res.IsSuccessStatusCode)
-            {
-                return null;
-            }
-
-            json = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return res.IsSuccessStatusCode
+                ? await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false)
+                : null;
         }
         catch (OperationCanceledException) { throw; }
         catch
         {
             return null;
         }
+    }
 
-        var listings = Parse(json, domain);
-        return listings is null ? null : (listings, json);
+    /// <summary>Renders the JSON URL through the scrape chain and unwraps it (a browser renders raw
+    /// JSON inside an HTML/pre shell, so cut from the first brace to the last).</summary>
+    private async Task<string?> FetchViaProvidersAsync(string url, CancellationToken ct)
+    {
+        try
+        {
+            var page = await _providers!.ScrapePageAsync(url, Daleel.Search.Abstractions.ScrapeFormat.Html, ct)
+                .ConfigureAwait(false);
+            if (page?.Content is not { Length: > 0 } content)
+            {
+                return null;
+            }
+
+            var start = content.IndexOf('{');
+            var end = content.LastIndexOf('}');
+            return start >= 0 && end > start ? content[start..(end + 1)] : null;
+        }
+        catch (OperationCanceledException) { throw; }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>Null when the payload isn't a Shopify products document at all (a bot-wall HTML page,
