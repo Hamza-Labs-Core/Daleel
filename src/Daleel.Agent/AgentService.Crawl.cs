@@ -96,6 +96,60 @@ public sealed partial class AgentService
         };
     }
 
+    /// <summary>
+    /// Parses one STORE listing/category page in INVENTORY mode — no shopper query: every product card
+    /// on the page matters equally (a full-catalogue sync). Honours the item-yield contract: the page
+    /// is stripped (<see cref="CleanForExtraction"/>) and then SPLIT into bounded chunks that each get
+    /// their own extraction call — never head-truncated, so the product grid past the first
+    /// <see cref="ListingMaxChars"/> characters is read, not thrown away. Pagination is detected once
+    /// over the raw page. Best-effort like every crawl call: failures degrade to fewer/no products.
+    /// </summary>
+    public async Task<ListingPageResult> ExtractStoreCatalogPageAsync(
+        string markdown, string pageUrl, GeoProfile geo, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(markdown))
+        {
+            return new ListingPageResult();
+        }
+
+        var origin = OriginOf(pageUrl);
+        var chunks = ChunkForExtraction(CleanForExtraction(markdown), ListingMaxChars);
+        var products = new List<ProductListing>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var chunk in chunks)
+        {
+            var extracted = await ExtractCrawlProductsAsync(
+                StoreListingSystem, StoreListingPrompt(CatalogSyncQuery, geo, chunk), origin, cancellationToken);
+            foreach (var p in extracted)
+            {
+                if (seen.Add(CrawlListingKey(p)))
+                {
+                    products.Add(p);
+                }
+            }
+        }
+
+        var pagination = await DetectPaginationAsync(markdown, pageUrl, cancellationToken);
+        return new ListingPageResult
+        {
+            Products = products,
+            NextPageUrl = pagination.NextPageUrl,
+            HasLoadMore = pagination.HasLoadMore,
+            TotalPages = pagination.TotalPages
+        };
+    }
+
+    /// <summary>The "query" the store-listing prompt sees during a full-catalogue inventory sync —
+    /// phrased so the extractor treats every card as wanted rather than filtering toward a product.</summary>
+    private const string CatalogSyncQuery = "the store's ENTIRE catalogue (a full inventory sync — every product matters)";
+
+    /// <summary>Identity for cross-chunk dedup: the detail URL when present, else brand+model+name.</summary>
+    private static string CrawlListingKey(ProductListing p) =>
+        !string.IsNullOrWhiteSpace(p.Url)
+            ? p.Url!.Trim().ToLowerInvariant()
+            : string.Join('|', new[] { p.Brand, p.Model, p.Name }
+                .Select(s => (s ?? string.Empty).Trim().ToLowerInvariant()));
+
     // ══ BRAND crawler ════════════════════════════════════════════════════════════
 
     /// <summary>
