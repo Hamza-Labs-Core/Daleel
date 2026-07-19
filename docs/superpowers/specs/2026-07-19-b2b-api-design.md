@@ -108,6 +108,26 @@ Hard-stop at zero credits (`402`, monitors pause at period end, never mid-cycle)
 packs for Growth+; invoice-first billing, Stripe later. Max-stores stays a plan cap (an abuse
 bound), but the SPEND is all credits.
 
+## API level vs UI level
+
+Two surfaces per client, same org account, strictly separated:
+
+- **API level** (`/api/v1/*`, key-authenticated, credit-metered): the machine surface — data
+  reads, inventory, monitors, webhooks. Everything here debits the org's B2B credit ledger and is
+  scope-gated per key. No HTML, no cookies, no Blazor circuit.
+- **UI level — the client portal** (`/portal`, cookie-authenticated as the org OWNER user,
+  `[Authorize]`, FREE — portal actions never burn credits): self-serve org dashboard:
+  - credit balance + burn-down chart, calls this period, per-endpoint usage;
+  - keys: create/revoke/rotate (secret shown once), scopes, last-used;
+  - monitors: subscribe/cancel stores, sync status, last delta;
+  - webhook endpoints + delivery log; plan + invoices.
+  Managing a monitor in the portal and via `POST /monitors` are the SAME operations on the same
+  rows — the portal is a UI over the client's own API-level objects, never a second code path.
+  (Monitor SUBSCRIPTION credits are charged identically whichever surface created them; only
+  reads/browsing in the portal are free.)
+- **Consumer UI** (existing app) stays credit-separate entirely: a shopper browsing /items pays
+  nothing and never touches B2B metering; the B2B API never serves the consumer UI.
+
 ## Admin (`/admin/api`)
 
 - Clients table: org, owner, plan, status, keys (prefix + last-used), calls this period,
@@ -122,6 +142,7 @@ bound), but the SPEND is all credits.
 2. Key middleware (hash lookup, scopes, rate/quota enforcement, metering stamp) + `/api/v1/items`,
    `/items/{id}`, `/stores`, `/brands` read endpoints.
 3. `/admin/api` (clients, keys, usage) + request-access flow on `/settings`.
+3b. Client portal `/portal` (balance, keys, monitors, webhooks — free UI over the client's own objects).
 4. Monitors API on top of the inventory-monitor feature (its spec is the dependency) +
    per-client sync-spend attribution.
 5. Webhooks (delta push from `inventory.finalize`) with signed payloads (HMAC per client secret).
