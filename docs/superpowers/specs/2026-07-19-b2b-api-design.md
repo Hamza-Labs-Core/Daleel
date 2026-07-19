@@ -1,6 +1,11 @@
 # B2B API: expose the entity index + store monitoring as a paid product
 
-**Product.** Two things businesses pay for:
+**The split is CONSUMER vs APPLICATIONS.** The consumer product serves people in the UI. The
+data API serves registered **Applications** — there are no "users" on the API side: an
+Application is the account, the key holder, the credit holder, the monitor subscriber. A person
+(the developer) only appears as the Application's owner login for the portal.
+
+**Product.** Two things applications pay for:
 1. **Data API** — read the entity index (items with all sellers' offers, prices, availability,
    images), stores, brands. The dedup work is the moat: one item, all sellers under it.
 2. **Monitoring-as-a-service** — "keep store X's whole inventory synced" (spec
@@ -9,11 +14,12 @@
 
 ## Accounts
 
-- New `ApiClient` entity: `Id`, `OrgName`, `ContactEmail`, `OwnerUserId` (FK to Identity — a normal
-  login owns the org), `PlanId` (FK `SubscriptionPlan`), `Status` (pending → active → suspended),
-  `CreatedAt`. A client can hold multiple keys and multiple store monitors.
+- New `Application` entity: `Id`, `Name`, `ContactEmail`, `OwnerUserId` (FK to Identity — the
+  developer's login, portal-only), `ApiPlanId`, `Status` (pending → active → suspended),
+  `CreatedAt`. An Application holds keys, a credit ledger, monitors, webhooks. One owner login
+  can own several Applications (per product/environment: `acme-prod`, `acme-staging`).
 - Signup: normal `/register`, then "Request API access" on `/settings` → creates a *pending*
-  `ApiClient` → admin approves on `/admin/api` (the existing global gate
+  `Application` → admin approves on `/admin/api` (the existing global gate
   `feature.api_access_enabled` stays the kill-switch). No self-serve activation at first —
   B2B deals in MENA start with a conversation anyway.
 
@@ -50,7 +56,7 @@ Versioned path (`/api/v1/`), JSON only, cursor pagination, `ETag`/`If-None-Match
 - Every call is metered through the existing event-store path (`ApiCallLog` gains `ClientId`),
   rolled into a per-period `ApiUsage` row (client, period, calls, sync-spend). The admin analytics
   pages already read this store.
-- **Sync spend is metered per STORE, not per client** (a store synced once may serve N
+- **Sync spend is metered per STORE, not per application** (a store synced once may serve N
   subscribers); each subscriber is charged the credit PRICE of the monitor, and `/admin/api`
   shows store sync-cost vs subscriber credit revenue side by side. Shopify
   stores ≈ pennies (pure JSON); HTML stores cost LLM only on changed pages — the content-hash
@@ -67,7 +73,7 @@ untouched — different product, different price points, user-level. B2B credits
 - New `ApiPlan` (not `SubscriptionPlan`): `Name`, `MonthlyApiCredits`, `MaxMonitoredStores`,
   `WebhooksEnabled`, `MonthlyPriceUsd`. Seeded separately; edited on `/admin/api`, not
   `/admin/plans` (that page stays consumer-only).
-- New `ApiCreditLedger` per `ApiClient`: period grants, per-action debits, top-up packs — the same
+- New `ApiCreditLedger` per `Application`: period grants, per-action debits, top-up packs — the same
   *mechanism shape* as the consumer quota code (reuse the patterns, share no rows or balances).
   A user who is both a consumer and an org owner has two unrelated balances.
 
@@ -117,7 +123,7 @@ as-is; the **portal is our Console** — org-scoped, prepaid B2B credits, keys w
 usage burn-down, rate-limit tier visible. Future (not v1): workspaces under an org for per-team
 keys/attribution, like Console workspaces.
 
-Two surfaces per client, same org account, strictly separated:
+Two surfaces per application, same org account, strictly separated:
 
 - **API level** (`/api/v1/*`, key-authenticated, credit-metered): the machine surface — data
   reads, inventory, monitors, webhooks. Everything here debits the org's B2B credit ledger and is
@@ -129,7 +135,7 @@ Two surfaces per client, same org account, strictly separated:
   - monitors: subscribe/cancel stores, sync status, last delta;
   - webhook endpoints + delivery log; plan + invoices.
   Managing a monitor in the portal and via `POST /monitors` are the SAME operations on the same
-  rows — the portal is a UI over the client's own API-level objects, never a second code path.
+  rows — the portal is a UI over the application's own API-level objects, never a second code path.
   (Monitor SUBSCRIPTION credits are charged identically whichever surface created them; only
   reads/browsing in the portal are free.)
 - **Consumer UI** (existing app) stays credit-separate entirely: a shopper browsing /items pays
@@ -137,21 +143,21 @@ Two surfaces per client, same org account, strictly separated:
 
 ## Admin (`/admin/api`)
 
-- Clients table: org, owner, plan, status, keys (prefix + last-used), calls this period,
-  **sync spend this period**, monitors. Actions: approve/suspend client, issue/revoke/rotate key,
+- Applications table: org, owner, plan, status, keys (prefix + last-used), calls this period,
+  **sync spend this period**, monitors. Actions: approve/suspend application, issue/revoke/rotate key,
   change plan, adjust a client's monitor list.
 - Read-only usage drill-down reuses the existing analytics/event-store charts filtered by client.
 - Global kill-switch stays `feature.api_access_enabled`.
 
 ## Order of work
 
-1. Schema: `ApiClient`, `ApiKey`, `ApiPlan`, `ApiCreditLedger`, `ApiUsage` + `ApiCallLog.ClientId` (consumer `SubscriptionPlan` untouched).
+1. Schema: `Application`, `ApiKey`, `ApiPlan`, `ApiCreditLedger`, `ApiUsage` + `ApiCallLog.ClientId` (consumer `SubscriptionPlan` untouched).
 2. Key middleware (hash lookup, scopes, rate/quota enforcement, metering stamp) + `/api/v1/items`,
    `/items/{id}`, `/stores`, `/brands` read endpoints.
 3. `/admin/api` (clients, keys, usage) + request-access flow on `/settings`.
-3b. Client portal `/portal` (balance, keys, monitors, webhooks — free UI over the client's own objects).
+3b. Client portal `/portal` (balance, keys, monitors, webhooks — free UI over the application's own objects).
 4. Monitors API on top of the inventory-monitor feature (its spec is the dependency) +
    per-client sync-spend attribution.
-5. Webhooks (delta push from `inventory.finalize`) with signed payloads (HMAC per client secret).
-6. QA: two test clients on different plans — quota exhaustion (429), suspended client (403),
+5. Webhooks (delta push from `inventory.finalize`) with signed payloads (HMAC per application secret).
+6. QA: two test applications on different plans — quota exhaustion (429), suspended application (403),
    key rotation grace, monitor subscribe → inventory delta via API + webhook.
