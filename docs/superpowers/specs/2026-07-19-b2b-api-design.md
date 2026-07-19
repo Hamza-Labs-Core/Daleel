@@ -58,10 +58,20 @@ Versioned path (`/api/v1/`), JSON only, cursor pagination, `ETag`/`If-None-Match
 - Enforcement: per-minute rate limit (`ratelimit.api_per_minute`, per key), monthly call quota by
   plan (`429` + `X-RateLimit-*` headers; `402` when a plan lapses). Soft-warn at 80% via email.
 
-## Pricing — credit-based (reuses `SubscriptionPlan.MonthlyCredits`)
+## Pricing — credit-based, with a SEPARATE B2B credit ledger
 
-Everything draws from ONE credit pool per client (the same mechanism searches already use), not
-flat per-resource fees. Why credits:
+**B2B credits are a different currency from consumer search credits.** The consumer pool
+(`SubscriptionPlan.MonthlyCredits` → `UserSubscription`/`UserQuota`, charged per search) stays
+untouched — different product, different price points, user-level. B2B credits are ORG-level:
+
+- New `ApiPlan` (not `SubscriptionPlan`): `Name`, `MonthlyApiCredits`, `MaxMonitoredStores`,
+  `WebhooksEnabled`, `MonthlyPriceUsd`. Seeded separately; edited on `/admin/api`, not
+  `/admin/plans` (that page stays consumer-only).
+- New `ApiCreditLedger` per `ApiClient`: period grants, per-action debits, top-up packs — the same
+  *mechanism shape* as the consumer quota code (reuse the patterns, share no rows or balances).
+  A user who is both a consumer and an org owner has two unrelated balances.
+
+Everything B2B draws from that one org pool, not flat per-resource fees. Why credits:
 
 - **A store can be monitored by N clients but is synced ONCE.** The sync is shared infrastructure;
   each subscriber pays the ACCESS price in credits while our cost stays single-sync — the second
@@ -85,9 +95,9 @@ Monitor charges post monthly per subscription (not per sync — cadence is ours 
 The sync's ACTUAL spend is still metered per store on `/admin/api` (CostEstimator), so a
 loss-making sync class is visible and its credit price adjustable without a deploy.
 
-Plans grant credits (seeded, admin-editable on /admin/plans):
+API plans grant B2B credits (seeded, admin-editable on /admin/api):
 
-| Plan | Credits/mo | Max monitored stores | Webhooks | Price |
+| ApiPlan | B2B credits/mo | Max monitored stores | Webhooks | Price |
 |---|---|---|---|---|
 | Trial (14d) | 2,000 | 1 (shopify class) | — | $0 |
 | Starter | 60,000 | 2 | — | $49/mo |
@@ -108,7 +118,7 @@ bound), but the SPEND is all credits.
 
 ## Order of work
 
-1. Schema: `ApiClient`, `ApiKey`, `ApiUsage` + `SubscriptionPlan` columns + `ApiCallLog.ClientId`.
+1. Schema: `ApiClient`, `ApiKey`, `ApiPlan`, `ApiCreditLedger`, `ApiUsage` + `ApiCallLog.ClientId` (consumer `SubscriptionPlan` untouched).
 2. Key middleware (hash lookup, scopes, rate/quota enforcement, metering stamp) + `/api/v1/items`,
    `/items/{id}`, `/stores`, `/brands` read endpoints.
 3. `/admin/api` (clients, keys, usage) + request-access flow on `/settings`.
