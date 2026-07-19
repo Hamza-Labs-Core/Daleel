@@ -672,6 +672,7 @@
   <data name="Admin.Nav.Stores" xml:space="preserve"><value>Stores</value></data>
   <data name="Admin.Nav.Queues" xml:space="preserve"><value>Queues</value></data>
   <data name="Admin.Nav.Credentials" xml:space="preserve"><value>Credentials</value></data>
+  <data name="Admin.Nav.Api" xml:space="preserve"><value>API</value></data>
   <data name="Admin.Nav.Settings" xml:space="preserve"><value>Settings</value></data>
   <data name="Detail.Specifications" xml:space="preserve"><value>Specifications</value></data>
   <data name="Detail.SpecsUnavailable" xml:space="preserve"><value>Detailed specifications aren't available for this product yet.</value></data>

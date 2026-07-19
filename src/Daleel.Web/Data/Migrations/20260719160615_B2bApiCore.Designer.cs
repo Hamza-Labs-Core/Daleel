@@ -3,6 +3,7 @@ using System;
 using Daleel.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Daleel.Web.Data.Migrations
 {
     [DbContext(typeof(DaleelDbContext))]
-    partial class DaleelDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260719160615_B2bApiCore")]
+    partial class B2bApiCore
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1307,9 +1310,6 @@ namespace Daleel.Web.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)");
 
-                    b.Property<DateTimeOffset?>("LastSeenAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<decimal?>("Price")
                         .HasColumnType("decimal(18,2)");
 
@@ -1625,12 +1625,6 @@ namespace Daleel.Web.Data.Migrations
                     b.Property<int?>("GoogleReviewCount")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("LastInventoryCount")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTimeOffset?>("LastInventorySyncAt")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<long>("LastRefreshed")
                         .HasColumnType("bigint");
 
@@ -1643,12 +1637,6 @@ namespace Daleel.Web.Data.Migrations
 
                     b.Property<double?>("Longitude")
                         .HasColumnType("double precision");
-
-                    b.Property<int>("MonitorCadenceHours")
-                        .HasColumnType("integer");
-
-                    b.Property<bool>("MonitorEnabled")
-                        .HasColumnType("boolean");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1687,47 +1675,6 @@ namespace Daleel.Web.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("Stores");
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.StoreCatalogPage", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ContentHash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<string>("Domain")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)");
-
-                    b.Property<long>("LastSeenAt")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("NextUrl")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("ProductKeysJson")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Url")
-                        .IsRequired()
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("Domain", "Url")
-                        .IsUnique();
-
-                    b.ToTable("StoreCatalogPages");
                 });
 
             modelBuilder.Entity("Daleel.Web.Data.SubscriptionPlan", b =>

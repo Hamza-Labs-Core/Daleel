@@ -1,0 +1,303 @@
+@page "/admin/api"
+@attribute [Authorize(Roles = "Admin")]
+@inject IApiApplicationRepository Applications
+@inject ISnackbar Snackbar
+
+<PageTitle>دليل · Admin · API</PageTitle>
+
+<AdminNav />
+<MudText Typo="Typo.h4" Class="mb-1">B2B API applications</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">
+    Registered API client organisations: plan, status, keys and credit balance. Applications start
+    pending — approve to activate. Keys are shown in full exactly once at issue time; only a hash is
+    stored. The global kill-switch is <code>feature.api_access_enabled</code> on Settings.
+</MudText>
+
+@if (_error is not null)
+{
+    <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mb-3">
+        Couldn't load applications: @_error
+        <MudButton Variant="Variant.Text" Color="Color.Error" Class="ms-2" OnClick="LoadAsync">Retry</MudButton>
+    </MudAlert>
+}
+else if (_loading)
+{
+    <MudProgressLinear Indeterminate="true" Color="Color.Primary" />
+}
+else
+{
+    <MudPaper Outlined="true" Elevation="0" Class="pa-4 mb-4">
+        <MudText Typo="Typo.subtitle1" Class="mb-2">Create application</MudText>
+        <div class="d-flex flex-wrap align-center gap-2">
+            <MudTextField @bind-Value="_newName" Label="Name (e.g. acme-prod)" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Style="min-width:220px;" />
+            <MudTextField @bind-Value="_newEmail" Label="Contact email" Variant="Variant.Outlined"
+                          Margin="Margin.Dense" Style="min-width:220px;" />
+            <MudSelect T="int" @bind-Value="_newPlanId" Label="Plan" Variant="Variant.Outlined"
+                       Margin="Margin.Dense" Style="min-width:160px;">
+                @foreach (var p in _plans)
+                {
+                    <MudSelectItem T="int" Value="@p.Id">@p.Name (@p.MonthlyApiCredits.ToString("N0") cr/mo)</MudSelectItem>
+                }
+            </MudSelect>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" Disabled="_busy || !CanCreate"
+                       StartIcon="@Icons.Material.Filled.Add" OnClick="CreateAsync">Create</MudButton>
+        </div>
+    </MudPaper>
+
+    @if (_rows.Count == 0)
+    {
+        <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">
+            No API applications yet — create one above, or wait for a request-access signup.
+        </MudAlert>
+    }
+    else
+    {
+        <MudPaper Outlined="true" Elevation="0" Class="pa-2">
+            <MudSimpleTable Dense="true" Hover="true" Style="overflow-x:auto;">
+                <thead>
+                    <tr>
+                        <th>Application</th>
+                        <th>Plan</th>
+                        <th>Status</th>
+                        <th>Credits</th>
+                        <th>Keys</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _rows)
+                    {
+                        var app = row.Application;
+                        <tr @key="app.Id">
+                            <td>
+                                <strong>@app.Name</strong><br />
+                                <span class="mud-secondary-text" style="font-size:0.8em;">@app.ContactEmail</span>
+                            </td>
+                            <td>@(app.Plan?.Name ?? app.ApiPlanId.ToString())</td>
+                            <td>
+                                <MudChip T="string" Size="Size.Small" Color="@StatusColor(app.Status)">@app.Status</MudChip>
+                            </td>
+                            <td style="white-space:nowrap;">
+                                @row.CreditBalance.ToString("N0")
+                                <MudNumericField T="long" @bind-Value="_grantAmounts[app.Id]" Variant="Variant.Outlined"
+                                                 Margin="Margin.Dense" Style="width:110px; display:inline-block;"
+                                                 HideSpinButtons="true" aria-label="Credits to grant" />
+                                <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy"
+                                           OnClick="@(() => GrantAsync(app.Id))">Grant</MudButton>
+                            </td>
+                            <td>
+                                @if (row.Keys.Count == 0)
+                                {
+                                    <span class="mud-secondary-text">none</span>
+                                }
+                                @foreach (var key in row.Keys)
+                                {
+                                    <div style="white-space:nowrap;" @key="key.Id">
+                                        <code>@key.Prefix…</code>
+                                        @if (key.RevokedAt is not null)
+                                        {
+                                            <MudChip T="string" Size="Size.Small" Color="Color.Default">revoked</MudChip>
+                                        }
+                                        else
+                                        {
+                                            <span class="mud-secondary-text" style="font-size:0.75em;">
+                                                @(key.LastUsedAt is { } used ? $"used {used:yyyy-MM-dd HH:mm}" : "never used")
+                                            </span>
+                                            <MudButton Size="Size.Small" Variant="Variant.Text" Color="Color.Error" Disabled="_busy"
+                                                       OnClick="@(() => RevokeAsync(key.Id))">Revoke</MudButton>
+                                        }
+                                    </div>
+                                }
+                            </td>
+                            <td style="white-space:nowrap;">
+                                @if (app.Status == ApiApplication.StatusPending)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" Disabled="_busy"
+                                               OnClick="@(() => SetStatusAsync(app.Id, ApiApplication.StatusActive))">Approve</MudButton>
+                                }
+                                @if (app.Status == ApiApplication.StatusActive)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Warning" Disabled="_busy"
+                                               OnClick="@(() => SetStatusAsync(app.Id, ApiApplication.StatusSuspended))">Suspend</MudButton>
+                                }
+                                @if (app.Status == ApiApplication.StatusSuspended)
+                                {
+                                    <MudButton Size="Size.Small" Variant="Variant.Outlined" Color="Color.Success" Disabled="_busy"
+                                               OnClick="@(() => SetStatusAsync(app.Id, ApiApplication.StatusActive))">Reactivate</MudButton>
+                                }
+                                <MudButton Size="Size.Small" Variant="Variant.Outlined" Disabled="_busy"
+                                           StartIcon="@Icons.Material.Filled.Key"
+                                           OnClick="@(() => IssueKeyAsync(app.Id))">Issue key</MudButton>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </MudSimpleTable>
+        </MudPaper>
+    }
+}
+
+@* The one place a full key ever appears. Closing the dialog discards it forever — only the hash is stored. *@
+<MudDialog @bind-Visible="_keyDialogOpen" Options="_keyDialogOptions">
+    <TitleContent>
+        <MudText Typo="Typo.h6">API key issued</MudText>
+    </TitleContent>
+    <DialogContent>
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mb-3">
+            Copy this key now — it is shown only once and cannot be recovered.
+        </MudAlert>
+        <MudTextField T="string" Value="@_issuedKey" ReadOnly="true" Variant="Variant.Outlined"
+                      Label="Full API key" />
+    </DialogContent>
+    <DialogActions>
+        <MudButton Color="Color.Primary" Variant="Variant.Filled" OnClick="CloseKeyDialog">Done</MudButton>
+    </DialogActions>
+</MudDialog>
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private IReadOnlyList<ApiApplicationSummary> _rows = Array.Empty<ApiApplicationSummary>();
+    private IReadOnlyList<ApiPlan> _plans = Array.Empty<ApiPlan>();
+    private readonly Dictionary<int, long> _grantAmounts = new();
+
+    private string _newName = string.Empty;
+    private string _newEmail = string.Empty;
+    private int _newPlanId;
+
+    private bool _keyDialogOpen;
+    private string _issuedKey = string.Empty;
+    private readonly DialogOptions _keyDialogOptions = new() { CloseOnEscapeKey = false, BackdropClick = false };
+
+    private bool CanCreate =>
+        !string.IsNullOrWhiteSpace(_newName) && !string.IsNullOrWhiteSpace(_newEmail) && _newPlanId > 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _error = null;
+        _loading = true;
+        StateHasChanged();
+        try
+        {
+            _plans = await Applications.ListPlansAsync();
+            if (_newPlanId == 0 && _plans.Count > 0)
+            {
+                _newPlanId = _plans[0].Id;
+            }
+
+            _rows = await Applications.ListAsync();
+            foreach (var row in _rows)
+            {
+                _grantAmounts.TryAdd(row.Application.Id, 0);
+            }
+
+            _loading = false;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            _loading = false;
+        }
+        StateHasChanged();
+    }
+
+    private async Task CreateAsync()
+    {
+        await RunAsync(async () =>
+        {
+            var app = await Applications.CreateAsync(_newName, _newEmail, _newPlanId);
+            Snackbar.Add($"Created application '{app.Name}' (pending — approve to activate).", Severity.Success);
+            _newName = string.Empty;
+            _newEmail = string.Empty;
+        });
+    }
+
+    private async Task SetStatusAsync(int appId, string status)
+    {
+        await RunAsync(async () =>
+        {
+            await Applications.SetStatusAsync(appId, status);
+            Snackbar.Add($"Application is now {status}.", Severity.Success);
+        });
+    }
+
+    private async Task IssueKeyAsync(int appId)
+    {
+        await RunAsync(async () =>
+        {
+            var generated = await Applications.IssueKeyAsync(appId, Daleel.Web.Api.ApiScopes.DefaultReadOnly);
+            _issuedKey = generated.FullKey;
+            _keyDialogOpen = true;
+        });
+    }
+
+    private async Task RevokeAsync(int keyId)
+    {
+        await RunAsync(async () =>
+        {
+            await Applications.RevokeKeyAsync(keyId);
+            Snackbar.Add("Key revoked.", Severity.Success);
+        });
+    }
+
+    private async Task GrantAsync(int appId)
+    {
+        var amount = _grantAmounts.GetValueOrDefault(appId);
+        if (amount == 0)
+        {
+            Snackbar.Add("Enter a non-zero credit amount first (negative claws back).", Severity.Warning);
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            await Applications.GrantCreditsAsync(appId, amount, "grant.admin");
+            _grantAmounts[appId] = 0;
+            Snackbar.Add($"Adjusted credits by {amount:N0}.", Severity.Success);
+        });
+    }
+
+    private void CloseKeyDialog()
+    {
+        // Drop the plaintext the moment the admin is done — it must not linger in circuit state.
+        _issuedKey = string.Empty;
+        _keyDialogOpen = false;
+    }
+
+    private async Task RunAsync(Func<Task> action)
+    {
+        _busy = true;
+        StateHasChanged();
+        try
+        {
+            await action();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Snackbar.Add(ex.Message, Severity.Error);
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private static Color StatusColor(string status) => status switch
+    {
+        ApiApplication.StatusActive => Color.Success,
+        ApiApplication.StatusSuspended => Color.Error,
+        _ => Color.Warning,
+    };
+}

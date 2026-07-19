@@ -123,6 +123,14 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "pricing.edge_request", Value = "0.0002", Type = "decimal" },
         new SystemConfig { Key = "pricing.edge_drain", Value = "0.0005", Type = "decimal" },
 
+        // B2B API per-call credit charges (spec 2026-07-19-b2b-api-design charge sheet) — what one
+        // metered call debits from an application's ledger. Admin-editable like the pricing.* rows
+        // above so a price change never needs a deploy. Read by ApiKeyAuthService per request.
+        new SystemConfig { Key = Api.ApiPricing.ItemsListKey, Value = "1", Type = "int" },
+        new SystemConfig { Key = Api.ApiPricing.ItemDocKey, Value = "2", Type = "int" },
+        new SystemConfig { Key = Api.ApiPricing.StoresKey, Value = "1", Type = "int" },
+        new SystemConfig { Key = Api.ApiPricing.BrandsKey, Value = "1", Type = "int" },
+
         // Cloudflare execution layer (docs/architecture/cloudflare-workers-pipeline.md). The enable flag
         // routes eligible pipeline work (store catalogue crawls) to the edge workers when the CF_* env
         // endpoints are configured — flipping it back is the instant strangler-fig rollback. The product
