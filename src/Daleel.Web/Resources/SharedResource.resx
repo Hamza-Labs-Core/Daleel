@@ -93,6 +93,7 @@
   <data name="Search.NotFound.Back" xml:space="preserve"><value>Start a new search</value></data>
 
   <data name="Products.Products" xml:space="preserve"><value>Products</value></data>
+  <data name="Products.Items" xml:space="preserve"><value>Products</value></data>
   <data name="Products.Brands" xml:space="preserve"><value>Brands</value></data>
   <data name="Products.Stores" xml:space="preserve"><value>Stores</value></data>
   <data name="Products.Reviews" xml:space="preserve"><value>Reviews</value></data>
@@ -460,6 +461,17 @@
   <data name="Common.Cancel" xml:space="preserve"><value>Cancel</value></data>
 
   <data name="Sentiment.Title" xml:space="preserve"><value>Sentiment</value></data>
+  <data name="Saved.SearchPlaceholder" xml:space="preserve"><value>Search saved results…</value></data>
+  <data name="Saved.NoMatches" xml:space="preserve"><value>No saved results match your search.</value></data>
+  <data name="Browse.Location" xml:space="preserve"><value>Location</value></data>
+  <data name="Browse.Category" xml:space="preserve"><value>Category</value></data>
+  <data name="Browse.SearchPlaceholder" xml:space="preserve"><value>Search by name…</value></data>
+  <data name="Browse.NoMatches" xml:space="preserve"><value>Nothing matches your search yet.</value></data>
+  <data name="Browse.LoadMore" xml:space="preserve"><value>Load more</value></data>
+  <data name="Browse.View" xml:space="preserve"><value>View</value></data>
+  <data name="Browse.ItemsSubtitle" xml:space="preserve"><value>Every product Daleel has researched — search and open its profile.</value></data>
+  <data name="Browse.BrandsSubtitle" xml:space="preserve"><value>Every brand Daleel has researched — search and open its profile.</value></data>
+  <data name="Browse.StoresSubtitle" xml:space="preserve"><value>Every store Daleel knows — search and open its profile.</value></data>
   <data name="Saved.Title" xml:space="preserve"><value>Saved Results</value></data>
   <data name="Account.Title" xml:space="preserve"><value>My Account</value></data>
 

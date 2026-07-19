@@ -21,6 +21,14 @@ public interface IBrandRepository
     /// <summary>All saved brand profiles, newest-refreshed first (for the admin list).</summary>
     Task<IReadOnlyList<Brand>> ListAsync(CancellationToken ct = default);
 
+    /// <summary>Name-searched page of brand profiles, alphabetical (the public /brands directory).
+    /// <paramref name="category"/> keeps only brands with a harvested catalogue model in that category.</summary>
+    Task<IReadOnlyList<Brand>> SearchAsync(
+        string? query, int skip, int take, string? category = null, CancellationToken ct = default);
+
+    /// <summary>Distinct harvested catalogue categories (the /brands category filter options).</summary>
+    Task<IReadOnlyList<string>> DistinctModelCategoriesAsync(CancellationToken ct = default);
+
     /// <summary>Up to <paramref name="max"/> profiles last refreshed before <paramref name="olderThan"/>, oldest first.</summary>
     Task<IReadOnlyList<Brand>> ListStaleAsync(DateTimeOffset olderThan, int max, CancellationToken ct = default);
 
@@ -118,4 +126,30 @@ public sealed class BrandRepository : IBrandRepository
             .ToListAsync(ct);
 
     public Task<int> CountAsync(CancellationToken ct = default) => _db.Brands.CountAsync(ct);
+
+    public async Task<IReadOnlyList<Brand>> SearchAsync(
+        string? query, int skip, int take, string? category = null, CancellationToken ct = default)
+    {
+        IQueryable<Brand> q = _db.Brands.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            q = q.Where(b => _db.BrandModels.Any(m => m.BrandId == b.Id && m.Category == category));
+        }
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var needle = $"%{query.Trim()}%";
+            q = q.Where(b => EF.Functions.ILike(b.Name, needle));
+        }
+
+        return await q.OrderBy(b => b.Name).Skip(skip).Take(take).ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<string>> DistinctModelCategoriesAsync(CancellationToken ct = default) =>
+        await _db.BrandModels.AsNoTracking()
+            .Where(m => m.Category != null && m.Category != "")
+            .Select(m => m.Category!)
+            .Distinct()
+            .OrderBy(c => c)
+            .ToListAsync(ct);
 }

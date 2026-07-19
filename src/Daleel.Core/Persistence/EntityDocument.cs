@@ -53,6 +53,10 @@ public sealed record EntityDocument
     /// <summary>The query that surfaced this entity.</summary>
     public string? Query { get; init; }
 
+    /// <summary>The parsed product type the search was about (SearchStrategy.Product), e.g.
+    /// "air conditioner" — the directory's category label. Null on pre-strategy documents.</summary>
+    public string? Category { get; init; }
+
     // ── Embedded relation IDs (make the document self-contained) ──────────────
     /// <summary>The search run (SearchJob id) that produced this document.</summary>
     public string? SearchId { get; init; }

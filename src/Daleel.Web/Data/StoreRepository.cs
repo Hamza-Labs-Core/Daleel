@@ -14,6 +14,16 @@ public interface IStoreRepository
     Task<IReadOnlyList<Store>> ListAsync(CancellationToken ct = default);
     Task<IReadOnlyList<Store>> ListStaleAsync(DateTimeOffset olderThan, int max, CancellationToken ct = default);
     Task<int> CountAsync(CancellationToken ct = default);
+
+    /// <summary>Name/location-searched page of store profiles, alphabetical (the public /stores/all directory).</summary>
+    Task<IReadOnlyList<Store>> SearchAsync(
+        string? query, int skip, int take, string? location = null, string? type = null, CancellationToken ct = default);
+
+    /// <summary>Distinct store locations (the directory's location filter options).</summary>
+    Task<IReadOnlyList<string>> DistinctLocationsAsync(CancellationToken ct = default);
+
+    /// <summary>Distinct store types (the directory's category filter options).</summary>
+    Task<IReadOnlyList<string>> DistinctTypesAsync(CancellationToken ct = default);
 }
 
 public sealed class StoreRepository : IStoreRepository
@@ -102,4 +112,44 @@ public sealed class StoreRepository : IStoreRepository
             .ToListAsync(ct);
 
     public Task<int> CountAsync(CancellationToken ct = default) => _db.Stores.CountAsync(ct);
+
+    public async Task<IReadOnlyList<Store>> SearchAsync(
+        string? query, int skip, int take, string? location = null, string? type = null, CancellationToken ct = default)
+    {
+        IQueryable<Store> q = _db.Stores.AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(location))
+        {
+            q = q.Where(s => s.Location == location);
+        }
+
+        if (!string.IsNullOrWhiteSpace(type))
+        {
+            q = q.Where(s => s.Type == type);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query))
+        {
+            var needle = $"%{query.Trim()}%";
+            q = q.Where(s => EF.Functions.ILike(s.Name, needle) ||
+                             (s.Location != null && EF.Functions.ILike(s.Location, needle)));
+        }
+
+        return await q.OrderBy(s => s.Name).Skip(skip).Take(take).ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<string>> DistinctLocationsAsync(CancellationToken ct = default) =>
+        await _db.Stores.AsNoTracking()
+            .Where(s => s.Location != null && s.Location != "")
+            .Select(s => s.Location!)
+            .Distinct()
+            .OrderBy(l => l)
+            .ToListAsync(ct);
+
+    public async Task<IReadOnlyList<string>> DistinctTypesAsync(CancellationToken ct = default) =>
+        await _db.Stores.AsNoTracking()
+            .Where(s => s.Type != null && s.Type != "")
+            .Select(s => s.Type!)
+            .Distinct()
+            .OrderBy(t => t)
+            .ToListAsync(ct);
 }

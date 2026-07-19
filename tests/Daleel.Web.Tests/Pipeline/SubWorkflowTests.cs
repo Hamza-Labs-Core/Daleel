@@ -666,6 +666,12 @@ public class SubWorkflowTests
             Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
 
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(_store.Count);
+
+        public Task<IReadOnlyList<Brand>> SearchAsync(string? query, int skip, int take, string? category = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Brand>>(Array.Empty<Brand>());
+
+        public Task<IReadOnlyList<string>> DistinctModelCategoriesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 
     private sealed class InMemoryStoreRepo : IStoreRepository
@@ -693,6 +699,15 @@ public class SubWorkflowTests
             Task.FromResult<IReadOnlyList<Store>>(Array.Empty<Store>());
 
         public Task<int> CountAsync(CancellationToken ct = default) => Task.FromResult(_store.Count);
+
+        public Task<IReadOnlyList<Store>> SearchAsync(string? query, int skip, int take, string? location = null, string? type = null, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Store>>(Array.Empty<Store>());
+
+        public Task<IReadOnlyList<string>> DistinctLocationsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+
+        public Task<IReadOnlyList<string>> DistinctTypesAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
     }
 
     private sealed class InMemoryProductRepo : IProductProfileRepository

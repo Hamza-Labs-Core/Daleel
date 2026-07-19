@@ -96,6 +96,7 @@ public sealed class SearchEntityStore : ISearchEntityStore
             Name = document.Name,
             NameKey = EntityRecord.Normalize(document.Name),
             Geo = document.Geo,
+            Category = document.Category,
             SearchId = document.SearchId,
             BrandId = brandFk,
             StoreId = storeFk,

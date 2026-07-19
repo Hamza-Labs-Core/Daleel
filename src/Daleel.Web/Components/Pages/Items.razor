@@ -1,0 +1,150 @@
+@page "/items"
+@inject IEntityRecordRepository Entities
+@inject IStringLocalizer<SharedResource> L
+
+<PageTitle>دليل · @L["Products.Items"]</PageTitle>
+
+<MudText Typo="Typo.h4" Class="mb-1">@L["Products.Items"]</MudText>
+<MudText Typo="Typo.body2" Color="Color.Secondary" Class="mb-4">@L["Browse.ItemsSubtitle"]</MudText>
+
+<div class="d-flex align-center gap-3 mb-2 flex-wrap">
+    <MudTextField T="string" Value="_query" ValueChanged="OnQueryChanged" Immediate="true" Clearable="true"
+                  DebounceInterval="300" Placeholder="@L["Browse.SearchPlaceholder"]" Variant="Variant.Outlined"
+                  Margin="Margin.Dense" Adornment="Adornment.Start" AdornmentIcon="@Icons.Material.Filled.Search"
+                  Style="max-width:320px;" />
+    <MudSelect T="string" Value="_geo" ValueChanged="OnGeoChanged" Clearable="true" Dense="true"
+               Label="@L["Browse.Location"]" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:200px;">
+        @foreach (var g in _geos)
+        {
+            <MudSelectItem T="string" Value="@g">@g</MudSelectItem>
+        }
+    </MudSelect>
+    <MudSelect T="string" Value="_category" ValueChanged="OnCategoryChanged" Clearable="true" Dense="true"
+               Label="@L["Browse.Category"]" Variant="Variant.Outlined" Margin="Margin.Dense" Style="max-width:240px;">
+        @foreach (var c in _categories)
+        {
+            <MudSelectItem T="string" Value="@c">@c</MudSelectItem>
+        }
+    </MudSelect>
+</div>
+
+@* SMART META FILTER — switches with the selected category: the brands that actually have items in
+   that category become one-tap chips. No category selected = no chips. *@
+@if (_category is not null && _categoryBrands.Count > 0)
+{
+    <MudChipSet T="int?" SelectionMode="SelectionMode.SingleSelection" SelectedValue="_brandId"
+                SelectedValueChanged="@((int? v) => OnBrandChanged(v))" CheckMark="true" Class="mb-3">
+        @foreach (var (id, name) in _categoryBrands)
+        {
+            <MudChip T="int?" Value="@((int?)id)" Variant="Variant.Outlined" Color="Color.Primary">@name</MudChip>
+        }
+    </MudChipSet>
+}
+
+@if (_loaded && _items.Count == 0)
+{
+    <MudAlert Severity="Severity.Info" Variant="Variant.Outlined">@L["Browse.NoMatches"]</MudAlert>
+}
+<MudGrid Spacing="2">
+    @foreach (var r in _items)
+    {
+        <MudItem xs="12" sm="6" md="4">
+            <MudCard Class="daleel-card" Elevation="0" Outlined="true" Style="height:100%;">
+                <MudCardContent>
+                    <MudText Typo="Typo.subtitle1" dir="@Catalog.Dir(r.Name)">@r.Name</MudText>
+                    <div class="d-flex gap-2 mt-1 flex-wrap">
+                        @if (!string.IsNullOrWhiteSpace(r.Category))
+                        {
+                            <MudChip T="string" Size="Size.Small" Color="Color.Primary" Variant="Variant.Outlined">@r.Category</MudChip>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(r.Geo))
+                        {
+                            <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined">@r.Geo</MudChip>
+                        }
+                        <MudText Typo="Typo.caption" Color="Color.Secondary" Class="align-self-center">
+                            @r.LastRefreshed.LocalDateTime.ToString("d")
+                        </MudText>
+                    </div>
+                </MudCardContent>
+                <MudCardActions>
+                    <MudButton Size="Size.Small" Href="@($"/product/{r.Id}?name={Uri.EscapeDataString(r.Name)}")"
+                               StartIcon="@Icons.Material.Filled.Visibility">@L["Browse.View"]</MudButton>
+                </MudCardActions>
+            </MudCard>
+        </MudItem>
+    }
+</MudGrid>
+@if (_mayHaveMore)
+{
+    <div class="d-flex justify-center mt-4">
+        <MudButton Variant="Variant.Outlined" OnClick="LoadMoreAsync" Disabled="_loading">@L["Browse.LoadMore"]</MudButton>
+    </div>
+}
+
+@code {
+    private const int PageSize = 24;
+    private const string Intent = "Product";
+
+    private readonly List<EntityRecord> _items = new();
+    private IReadOnlyList<string> _geos = Array.Empty<string>();
+    private IReadOnlyList<string> _categories = Array.Empty<string>();
+    private IReadOnlyList<(int Id, string Name)> _categoryBrands = Array.Empty<(int, string)>();
+    private string? _query;
+    private string? _geo;
+    private string? _category;
+    private int? _brandId;
+    private bool _loaded;
+    private bool _loading;
+    private bool _mayHaveMore;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _geos = await Entities.DistinctGeosAsync(Intent);
+        _categories = await Entities.DistinctCategoriesAsync(Intent);
+        await ReloadAsync();
+    }
+
+    private async Task OnQueryChanged(string? value)
+    {
+        _query = value;
+        await ReloadAsync();
+    }
+
+    private async Task OnGeoChanged(string? value)
+    {
+        _geo = value;
+        await ReloadAsync();
+    }
+
+    private async Task OnCategoryChanged(string? value)
+    {
+        _category = value;
+        _brandId = null; // the brand chips belong to the previous category
+        _categoryBrands = value is null
+            ? Array.Empty<(int, string)>()
+            : await Entities.BrandsInCategoryAsync(Intent, value);
+        await ReloadAsync();
+    }
+
+    private async Task OnBrandChanged(int? value)
+    {
+        _brandId = value;
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _items.Clear();
+        await LoadMoreAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadMoreAsync()
+    {
+        _loading = true;
+        var page = await Entities.SearchAsync(_query, Intent, _items.Count, PageSize, _geo, _category, _brandId);
+        _items.AddRange(page);
+        _mayHaveMore = page.Count == PageSize;
+        _loading = false;
+    }
+}
