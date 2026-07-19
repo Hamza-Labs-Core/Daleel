@@ -136,6 +136,29 @@ public sealed class InventoryMonitorTests : IDisposable
         (await db2.Stores.SingleAsync(s => s.Id == store.Id)).LastInventorySyncAt.Should().NotBeNull();
     }
 
+    [Fact]
+    public async Task ProfileRefresh_Upsert_NeverWipesTheMonitorFlag()
+    {
+        var sp = Build(new StubCatalog(pages: 1));
+        var repo = new StoreRepository(_pg.NewContext());
+        var store = await repo.UpsertAsync(new Store
+        {
+            Name = "Shop JO", NameKey = Store.Normalize("Shop JO"), Website = "https://shop.jo",
+            LastRefreshed = DateTimeOffset.UtcNow
+        });
+        await new StoreRepository(_pg.NewContext()).SetMonitorAsync(store.Id, enabled: true);
+
+        // A later profile research pass upserts a FRESH object (MonitorEnabled defaults false).
+        await new StoreRepository(_pg.NewContext()).UpsertAsync(new Store
+        {
+            Name = "Shop JO", Website = "https://shop.jo", Type = "electronics",
+            LastRefreshed = DateTimeOffset.UtcNow
+        });
+
+        var reloaded = await new StoreRepository(_pg.NewContext()).GetByIdAsync(store.Id);
+        reloaded!.MonitorEnabled.Should().BeTrue("monitoring is OPERATOR state — profile refreshes must never wipe it");
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────
 
     private static string SyncPayload(Store store) =>

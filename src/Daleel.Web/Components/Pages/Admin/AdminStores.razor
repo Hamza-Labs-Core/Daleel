@@ -117,13 +117,8 @@ else
         _busy = true;
         try
         {
+            await Stores.SetMonitorAsync(s.Id, enabled);
             s.MonitorEnabled = enabled;
-            if (enabled)
-            {
-                s.LastInventorySyncAt = null; // due immediately — the scheduler picks it up next tick
-            }
-
-            await Stores.UpsertAsync(s);
             _status = enabled ? $"Monitoring {s.Name} — first sync within ~15 minutes." : $"Monitoring stopped for {s.Name}.";
         }
         catch (Exception ex)

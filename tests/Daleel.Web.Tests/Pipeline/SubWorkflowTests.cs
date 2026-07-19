@@ -703,6 +703,9 @@ public class SubWorkflowTests
         public Task<IReadOnlyList<Store>> SearchAsync(string? query, int skip, int take, string? location = null, string? type = null, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Store>>(Array.Empty<Store>());
 
+        public Task SetMonitorAsync(int storeId, bool enabled, int? cadenceHours = null, CancellationToken ct = default) =>
+            Task.CompletedTask;
+
         public Task<IReadOnlyList<string>> DistinctLocationsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
 
