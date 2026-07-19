@@ -61,9 +61,21 @@ must never touch a live search. New hosted service `EntityDedupService` mirrorin
 **Stage B — fuzzy candidates (bounded, metered).** Within the same `Geo` (+ same `BrandId` when
 both have one): token-set Jaccard over normalized names above a threshold, and cross-language pairs
 sharing `BrandId` + a model-ish token (digits/latin runs survive Arabic text). Each candidate pair
-goes to **one batched LLM judgment** ("same physical product?") — reuse the `LlmCallSites` registry
-(new `dedup` call site → admin-switchable model, metered like every other call). Fail-open: an
-unavailable LLM defers fuzzy pairs to the next run; exact-key merges proceed regardless.
+is judged on the STRONGEST evidence available, in order:
+
+1. **Vision compare** — when both rows have a product photo, the existing `IVisionMatcher`
+   ("same physical product?") decides; verdicts are memoized in `VisionMatchCacheRepository`, so
+   repeat passes are free. This is deliberately the PRIMARY fuzzy signal: it needs no SKU, no
+   shared language, and no brand catalogue. (Catalogue-based identification is currently
+   unreliable for items — do not build the dedup path on it; when it works it upgrades a row to
+   tier 1/2 *before* stage B, which is a bonus, not a dependency.)
+2. **Spec/text judgment** — photo missing on either side: one batched LLM call over names + specs
+   (tonnage/BTU equivalence, capacity, color). New `dedup` call site in `LlmCallSites` →
+   admin-switchable model, metered like every other call.
+
+Fail-open: unavailable vision/LLM defers fuzzy pairs to the next run; exact-key merges proceed
+regardless. A pair with no photo overlap AND no distinguishing specs stays unmerged (wrong merge >
+duplicate).
 
 **Stage C — merge (the only writer).** Per bucket, inside one transaction:
 1. **Survivor**: the row with a `BrandId`+`ProductKey`, else richest R2 doc (offers+images count),
