@@ -106,6 +106,7 @@ public sealed class SystemConfigService : ISystemConfigService
         // effect on the next screen — no redeploy. It was previously env-only
         // (DALEEL_MODERATION_VISION_MODEL), which still works as the fallback when this row is blank.
         new SystemConfig { Key = LlmCallSites.Vision.ConfigKey, Value = LlmCallSites.Vision.DefaultModel, Type = "string" },
+        new SystemConfig { Key = LlmCallSites.Dedup.ConfigKey, Value = LlmCallSites.Dedup.DefaultModel, Type = "string" },
 
         // Per-provider pricing (USD) — drives the CostEstimator; spend is metered + charged to credits,
         // never used to cap/cancel a running job (R1).
@@ -134,6 +135,8 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = "dedup.enabled", Value = "false", Type = "bool" },
         new SystemConfig { Key = "dedup.dry_run", Value = "true", Type = "bool" },
         new SystemConfig { Key = "dedup.interval_minutes", Value = "360", Type = "int" },
+        // Stage B (vision/LLM fuzzy judgments + generic umbrella grouping) has its own gate.
+        new SystemConfig { Key = "dedup.fuzzy_enabled", Value = "false", Type = "bool" },
 
         // Token authority: rotate worker bearers every N days; 0 = manual-only (/admin/credentials).
         new SystemConfig { Key = Cloudflare.CredentialRotationService.RotationDaysKey, Value = "0", Type = "int" },

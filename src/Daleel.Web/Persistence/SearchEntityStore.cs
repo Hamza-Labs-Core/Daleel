@@ -93,9 +93,10 @@ public sealed class SearchEntityStore : ISearchEntityStore
         // fingerprint). When a LIVE row already holds this identity under a DIFFERENT stable id,
         // this save merges onto it and the incoming id becomes an alias — the same physical product
         // re-extracted under a differently-worded listing must not mint a second entity.
-        string? identityKey = document.Intent == SearchIntentType.Product
-            ? StableId.IdentityKeyFor(document.Geo, document.Brand, document.Model, document.Name)
-            : null;
+        string? identityKey = document.IdentityKey
+            ?? (document.Intent == SearchIntentType.Product
+                ? StableId.IdentityKeyFor(document.Geo, document.Brand, document.Model, document.Name)
+                : null);
 
         var record = new EntityRecord
         {
