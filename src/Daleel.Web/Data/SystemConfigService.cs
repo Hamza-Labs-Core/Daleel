@@ -129,6 +129,12 @@ public sealed class SystemConfigService : ISystemConfigService
         new SystemConfig { Key = Cloudflare.CloudflareWorkerOptions.EnabledFlag, Value = "false", Type = "bool" },
         new SystemConfig { Key = Cloudflare.CloudflareWorkerOptions.CatalogMaxProductsKey, Value = "0", Type = "int" },
 
+        // Entity dedup worker (spec 2026-07-19): OFF + dry-run by default — flip enabled first,
+        // read the /admin/data merge report, then disable dry_run. Evidence-driven only.
+        new SystemConfig { Key = "dedup.enabled", Value = "false", Type = "bool" },
+        new SystemConfig { Key = "dedup.dry_run", Value = "true", Type = "bool" },
+        new SystemConfig { Key = "dedup.interval_minutes", Value = "360", Type = "int" },
+
         // Token authority: rotate worker bearers every N days; 0 = manual-only (/admin/credentials).
         new SystemConfig { Key = Cloudflare.CredentialRotationService.RotationDaysKey, Value = "0", Type = "int" },
     };

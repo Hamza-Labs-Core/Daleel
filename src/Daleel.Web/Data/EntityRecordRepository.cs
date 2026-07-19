@@ -23,6 +23,10 @@ public interface IEntityRecordRepository
 
     Task<int> CountAsync(CancellationToken ct = default);
 
+    /// <summary>The LIVE (non-alias) row with this identity key, or null. The save path uses this to
+    /// converge a re-extracted duplicate onto the existing entity instead of inserting a new row.</summary>
+    Task<EntityRecord?> GetByIdentityKeyAsync(string identityKey, CancellationToken ct = default);
+
     /// <summary>Name-searched page of entity index rows, newest first (the public /items directory).</summary>
     Task<IReadOnlyList<EntityRecord>> SearchAsync(
         string? query, string? intent, int skip, int take,
@@ -110,11 +114,18 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
 
     public Task<int> CountAsync(CancellationToken ct = default) => _db.EntityRecords.CountAsync(ct);
 
+    public Task<EntityRecord?> GetByIdentityKeyAsync(string identityKey, CancellationToken ct = default) =>
+        _db.EntityRecords.AsNoTracking()
+            .Where(r => r.IdentityKey == identityKey && r.MergedIntoId == null)
+            .OrderByDescending(r => r.LastRefreshed)
+            .FirstOrDefaultAsync(ct);
+
     public async Task<IReadOnlyList<EntityRecord>> SearchAsync(
         string? query, string? intent, int skip, int take,
         string? geo = null, string? category = null, int? brandId = null, CancellationToken ct = default)
     {
-        IQueryable<EntityRecord> q = _db.EntityRecords.AsNoTracking();
+        // Alias rows (merged duplicates) never surface in the directory.
+        IQueryable<EntityRecord> q = _db.EntityRecords.AsNoTracking().Where(r => r.MergedIntoId == null);
         if (!string.IsNullOrWhiteSpace(intent))
         {
             q = q.Where(r => r.Intent == intent);
@@ -146,7 +157,7 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
 
     public async Task<IReadOnlyList<string>> DistinctGeosAsync(string intent, CancellationToken ct = default) =>
         await _db.EntityRecords.AsNoTracking()
-            .Where(r => r.Intent == intent && r.Geo != null && r.Geo != "")
+            .Where(r => r.Intent == intent && r.MergedIntoId == null && r.Geo != null && r.Geo != "")
             .Select(r => r.Geo!)
             .Distinct()
             .OrderBy(g => g)
@@ -154,7 +165,7 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
 
     public async Task<IReadOnlyList<string>> DistinctCategoriesAsync(string intent, CancellationToken ct = default) =>
         await _db.EntityRecords.AsNoTracking()
-            .Where(r => r.Intent == intent && r.Category != null && r.Category != "")
+            .Where(r => r.Intent == intent && r.MergedIntoId == null && r.Category != null && r.Category != "")
             .Select(r => r.Category!)
             .Distinct()
             .OrderBy(c => c)
@@ -164,7 +175,7 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
         string intent, string category, CancellationToken ct = default)
     {
         var rows = await _db.EntityRecords.AsNoTracking()
-            .Where(r => r.Intent == intent && r.Category == category && r.BrandId != null)
+            .Where(r => r.Intent == intent && r.MergedIntoId == null && r.Category == category && r.BrandId != null)
             .Join(_db.Brands.AsNoTracking(), r => r.BrandId, b => b.Id, (r, b) => new { b.Id, b.Name })
             .Distinct()
             .OrderBy(x => x.Name)
@@ -185,6 +196,9 @@ public sealed class EntityRecordRepository : IEntityRecordRepository
         existing.Intent = fresh.Intent;
         existing.Geo = fresh.Geo ?? existing.Geo;
         existing.Category = fresh.Category ?? existing.Category;
+        existing.IdentityKey = fresh.IdentityKey ?? existing.IdentityKey;
+        // An alias marker is carried, never cleared here — un-aliasing is the worker's job alone.
+        existing.MergedIntoId = fresh.MergedIntoId ?? existing.MergedIntoId;
 
         // Relations: only ever fill in a relation we've now resolved; never blank an existing link just
         // because this pass couldn't resolve it (the brand row may simply not be created yet).

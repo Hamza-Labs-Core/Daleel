@@ -113,6 +113,58 @@ public sealed class SearchEntityStoreTests : IDisposable
         row!.Name.Should().Be("Second Name");
     }
 
+    // ── Dedup: save-time convergence ─────────────────────────────────────────
+
+    [Fact]
+    public async Task SaveAsync_ConvergesADifferentlyWordedDuplicate_OntoTheExistingEntity()
+    {
+        var store = NewStore();
+
+        // Same physical product, extracted twice with different wording → different stable ids.
+        var first = new EntityDocument
+        {
+            Id = StableId.ForEntity(SearchIntentType.Product, null, null, "Gree AC 12000"),
+            Intent = SearchIntentType.Product, Name = "Gree AC 12000", Geo = "jordan",
+            CapturedAt = DateTimeOffset.UnixEpoch
+        };
+        var second = new EntityDocument
+        {
+            Id = StableId.ForEntity(SearchIntentType.Product, null, null, "AC Gree 12000 best price"),
+            Intent = SearchIntentType.Product, Name = "AC Gree 12000 best price", Geo = "jordan",
+            CapturedAt = DateTimeOffset.UnixEpoch.AddDays(1)
+        };
+        second.Id.Should().NotBe(first.Id, "the routing ids differ — that IS the duplicate bug");
+
+        var a = await store.SaveAsync(first);
+        var b = await store.SaveAsync(second);
+
+        b!.Id.Should().Be(a!.Id, "the identity key converges the second save onto the first entity");
+        var repo = new EntityRecordRepository(_pg.NewContext());
+        var alias = await repo.GetByIdAsync(second.Id);
+        alias!.MergedIntoId.Should().Be(a.Id, "the incoming id stays resolvable as an alias");
+        (await repo.SearchAsync(null, "Product", 0, 10)).Should().ContainSingle(
+            "the directory shows ONE item, not the alias");
+    }
+
+    [Fact]
+    public async Task SaveAsync_KeepsDifferentProducts_Separate()
+    {
+        var store = NewStore();
+        await store.SaveAsync(new EntityDocument
+        {
+            Id = "p_a", Intent = SearchIntentType.Product, Name = "Gree AC 12000", Geo = "jordan",
+            CapturedAt = DateTimeOffset.UnixEpoch
+        });
+        await store.SaveAsync(new EntityDocument
+        {
+            Id = "p_b", Intent = SearchIntentType.Product, Name = "Gree AC 18000", Geo = "jordan",
+            CapturedAt = DateTimeOffset.UnixEpoch
+        });
+
+        (await new EntityRecordRepository(_pg.NewContext()).SearchAsync(null, "Product", 0, 10))
+            .Should().HaveCount(2, "different capacities are different products — never merged by hash");
+    }
+
     public void Dispose() => _pg.Dispose();
 
     /// <summary>An in-memory R2 that records JSON writes and serves them back (only the two methods the store uses).</summary>

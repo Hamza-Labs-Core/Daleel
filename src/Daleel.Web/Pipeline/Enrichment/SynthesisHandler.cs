@@ -85,7 +85,42 @@ public sealed class SynthesisHandler : IEnrichmentUnitHandler
         await SynthesizeProductsAsync(item, ctx, agent, store, products, contexts, ct);
         await SynthesizeSearchAsync(item, ctx, agent, store, products, contexts, ct);
 
+        await ResaveEntitiesAsync(item, ctx, products, ct);
+
         return UnitOutcome.Ok;
+    }
+
+    /// <summary>
+    /// Re-saves the entity documents from the SETTLED result. The mid-run save (SearchActivities)
+    /// snapshots entities BEFORE the drain lands images/prices, so docs held pre-enrichment data —
+    /// the dedup worker's vision compare then found no photos to judge. This settle-time rewrite
+    /// (same deterministic keys, upsert) makes the documents carry the final grid. Best-effort:
+    /// entity persistence must never fail synthesis.
+    /// </summary>
+    private static async Task ResaveEntitiesAsync(
+        EnrichmentWorkItem item, EnrichmentUnitContext ctx, Daleel.Core.Models.ProductSearchResult products,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (ctx.Services.GetService<Daleel.Web.Persistence.ISearchEntityStore>() is not { } entities)
+            {
+                return;
+            }
+
+            var docs = Daleel.Web.Persistence.EntityDocumentMapper.ToDocuments(
+                products, products.Strategy?.Intent ?? Daleel.Core.Models.SearchIntentType.Product,
+                item.SearchJobId.ToString(), DateTimeOffset.UtcNow);
+            await entities.SaveAllAsync(docs, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch
+        {
+            // Fail-soft by design.
+        }
     }
 
     // ── Products ─────────────────────────────────────────────────────────────────────────────────

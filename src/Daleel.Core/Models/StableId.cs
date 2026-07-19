@@ -73,6 +73,53 @@ public static class StableId
         };
 
     /// <summary>
+    /// The save-time CONVERGENCE key for a product entity — deliberately distinct from the routing
+    /// id (<see cref="ForProduct"/>), which must stay stable for shared /product/{id} links. Two
+    /// listings of the same physical product should produce the same identity key even when their
+    /// names differ; strongest available evidence wins:
+    /// <list type="number">
+    ///   <item><b>sku:</b> brand + separator-squashed model — "TAC-24CHSD/TPH11I", "TAC 24CHSD
+    ///   TPH11I" and "tac24chsdtph11i" all collide.</item>
+    ///   <item><b>fp:</b> geo-scoped name fingerprint — normalized, marketing/stopword tokens
+    ///   dropped, remaining tokens SORTED (order-insensitive), brand prepended when known. A
+    ///   name-only identity is only trustworthy within one market.</item>
+    /// </list>
+    /// What this deliberately does NOT catch: cross-language duplicates and model-string vs
+    /// marketing-name variants. Those need judgment (vision/LLM), not hashing — a too-aggressive
+    /// key would merge DIFFERENT products, and a wrong merge is worse than a duplicate.
+    /// </summary>
+    public static string IdentityKeyFor(string? geo, string? brand, string? model, string? name)
+    {
+        var brandKey = NormalizeIdentity(brand);
+        if (!string.IsNullOrWhiteSpace(model))
+        {
+            // Squash separators INSIDE the model string so vendor punctuation variants collide.
+            var modelKey = new string(model.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+            if (modelKey.Length > 0)
+            {
+                return $"sku:{brandKey}:{modelKey}";
+            }
+        }
+
+        var tokens = NormalizeIdentity(name)
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .Where(t => !FingerprintStopwords.Contains(t))
+            .Concat(brandKey.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+            .Distinct()
+            .OrderBy(t => t, StringComparer.Ordinal);
+        var geoKey = NormalizeIdentity(geo);
+        return $"fp:{geoKey}:{string.Join(' ', tokens)}";
+    }
+
+    /// <summary>Marketing filler that varies per store without changing what the product IS.</summary>
+    private static readonly HashSet<string> FingerprintStopwords = new(StringComparer.Ordinal)
+    {
+        "original", "new", "offer", "sale", "best", "price", "free", "delivery", "shipping",
+        "official", "genuine", "hot", "2024", "2025", "2026",
+        "أصلي", "جديد", "عرض", "خصم", "تخفيض", "مجاني", "توصيل", "أفضل", "سعر"
+    };
+
+    /// <summary>
     /// Lower-cased, trimmed value hashed to 8 bytes of SHA-256 (16 hex chars) and prefixed with the
     /// entity kind. 64 bits is far more than enough to avoid collisions within a single result set,
     /// while staying short enough to read in a URL.

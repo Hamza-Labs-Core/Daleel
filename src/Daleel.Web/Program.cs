@@ -486,6 +486,9 @@ builder.Services.AddScoped<Daleel.Web.Profiles.IBrandProfileService, Daleel.Web.
 builder.Services.AddScoped<Daleel.Web.Profiles.IStoreProfileService, Daleel.Web.Profiles.StoreProfileService>();
 builder.Services.AddScoped<Daleel.Web.Profiles.IBrandCatalogService, Daleel.Web.Profiles.BrandCatalogService>();
 builder.Services.AddHostedService<Daleel.Web.Profiles.ProfileRefreshService>();
+// Entity dedup: recurring identity-key backfill + exact-duplicate merge (off/dry-run by default).
+builder.Services.AddSingleton<Daleel.Web.Persistence.EntityDedupService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<Daleel.Web.Persistence.EntityDedupService>());
 
 // Smart product identification: matches a (often vaguely-named) Jordanian store listing to the canonical
 // brand model — text match → cross-region catalogue discovery → cached vision match — then runs the spec
