@@ -87,6 +87,15 @@ public static class PipelineLimits
     /// </summary>
     public static int CrawlConcurrency { get; } = FromEnv("PIPELINE_CRAWL_CONCURRENCY", fallback: 8);
 
+    /// <summary>
+    /// How many pages one inventory HTML-mode unit walks along a single LISTING's pagination chain —
+    /// a loop-safety ceiling like <see cref="CrawlMaxPages"/> (the walk also stops the moment the
+    /// page reports no next link, and every page walked lands its products regardless). NOT a result
+    /// cap: a category deeper than this indicates a paging loop, not inventory. Restrainable via
+    /// <c>PIPELINE_INVENTORY_HTML_MAX_PAGES</c>.
+    /// </summary>
+    public static int InventoryHtmlMaxPages { get; } = FromEnv("PIPELINE_INVENTORY_HTML_MAX_PAGES", fallback: 100);
+
     private static int FromEnv(string name, int fallback)
     {
         var raw = Environment.GetEnvironmentVariable(name);

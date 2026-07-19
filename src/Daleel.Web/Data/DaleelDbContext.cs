@@ -65,6 +65,7 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
     /// <summary>Index over the R2-stored entity documents (products/services/places). See <see cref="EntityRecord"/>.</summary>
     public DbSet<EntityRecord> EntityRecords => Set<EntityRecord>();
     public DbSet<EntityMergeLog> EntityMergeLogs => Set<EntityMergeLog>();
+    public DbSet<StoreCatalogPage> StoreCatalogPages => Set<StoreCatalogPage>();
     public DbSet<VisionMatchCache> VisionMatchCaches => Set<VisionMatchCache>();
     public DbSet<TranslationCacheEntry> TranslationCache => Set<TranslationCacheEntry>();
     public DbSet<RelevanceFlag> RelevanceFlags => Set<RelevanceFlag>();
@@ -305,6 +306,17 @@ public sealed class DaleelDbContext : IdentityDbContext<ApplicationUser>
                 .WithMany()
                 .HasForeignKey(x => x.StoreId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<StoreCatalogPage>(e =>
+        {
+            e.HasKey(x => x.Id);
+            e.Property(x => x.Domain).HasMaxLength(255);
+            e.Property(x => x.Url).HasMaxLength(1000);
+            e.Property(x => x.ContentHash).HasMaxLength(64);
+            e.Property(x => x.LastSeenAt).HasConversion(toUnixMs);
+            e.Property(x => x.NextUrl).HasMaxLength(1000);
+            e.HasIndex(x => new { x.Domain, x.Url }).IsUnique();
         });
 
         builder.Entity<EntityMergeLog>(e =>

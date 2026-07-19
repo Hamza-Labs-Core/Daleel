@@ -3,6 +3,7 @@ using System;
 using Daleel.Web.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Daleel.Web.Data.Migrations
 {
     [DbContext(typeof(DaleelDbContext))]
-    partial class DaleelDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260719134536_StoreInventoryMonitor")]
+    partial class StoreInventoryMonitor
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -85,50 +88,6 @@ namespace Daleel.Web.Data.Migrations
                     b.ToTable("AnalyticsEvents");
                 });
 
-            modelBuilder.Entity("Daleel.Web.Data.ApiApplication", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApiPlanId")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("ContactEmail")
-                        .IsRequired()
-                        .HasMaxLength(256)
-                        .HasColumnType("character varying(256)");
-
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.Property<string>("OwnerUserId")
-                        .HasMaxLength(450)
-                        .HasColumnType("character varying(450)");
-
-                    b.Property<string>("Status")
-                        .IsRequired()
-                        .HasMaxLength(16)
-                        .HasColumnType("character varying(16)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ApiPlanId");
-
-                    b.HasIndex("OwnerUserId");
-
-                    b.HasIndex("Status");
-
-                    b.ToTable("ApiApplications");
-                });
-
             modelBuilder.Entity("Daleel.Web.Data.ApiCallLog", b =>
                 {
                     b.Property<long>("Id")
@@ -197,139 +156,6 @@ namespace Daleel.Web.Data.Migrations
                     b.HasIndex("UserId", "CreatedAt");
 
                     b.ToTable("ApiCallLogs");
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.ApiCreditLedger", b =>
-                {
-                    b.Property<long>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bigint");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
-
-                    b.Property<int>("ApplicationId")
-                        .HasColumnType("integer");
-
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("bigint");
-
-                    b.Property<long>("Delta")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Reason")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ApplicationId", "CreatedAt");
-
-                    b.ToTable("ApiCreditLedger");
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.ApiKey", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("ApplicationId")
-                        .HasColumnType("integer");
-
-                    b.Property<long>("CreatedAt")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Hash")
-                        .IsRequired()
-                        .HasMaxLength(64)
-                        .HasColumnType("character varying(64)");
-
-                    b.Property<long?>("LastUsedAt")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Prefix")
-                        .IsRequired()
-                        .HasMaxLength(24)
-                        .HasColumnType("character varying(24)");
-
-                    b.Property<long?>("RevokedAt")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("Scopes")
-                        .IsRequired()
-                        .HasMaxLength(400)
-                        .HasColumnType("character varying(400)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ApplicationId");
-
-                    b.HasIndex("Hash")
-                        .IsUnique();
-
-                    b.ToTable("ApiKeys");
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.ApiPlan", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("MaxMonitoredStores")
-                        .HasColumnType("integer");
-
-                    b.Property<int>("MonthlyApiCredits")
-                        .HasColumnType("integer");
-
-                    b.Property<decimal>("MonthlyPriceUsd")
-                        .HasColumnType("decimal(10,2)");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<bool>("WebhooksEnabled")
-                        .HasColumnType("boolean");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("ApiPlans");
-
-                    b.HasData(
-                        new
-                        {
-                            Id = 1,
-                            MaxMonitoredStores = 1,
-                            MonthlyApiCredits = 2000,
-                            MonthlyPriceUsd = 0m,
-                            Name = "Trial",
-                            WebhooksEnabled = false
-                        },
-                        new
-                        {
-                            Id = 2,
-                            MaxMonitoredStores = 2,
-                            MonthlyApiCredits = 60000,
-                            MonthlyPriceUsd = 49m,
-                            Name = "Starter",
-                            WebhooksEnabled = false
-                        },
-                        new
-                        {
-                            Id = 3,
-                            MaxMonitoredStores = 10,
-                            MonthlyApiCredits = 600000,
-                            MonthlyPriceUsd = 199m,
-                            Name = "Growth",
-                            WebhooksEnabled = true
-                        });
                 });
 
             modelBuilder.Entity("Daleel.Web.Data.ApplicationUser", b =>
@@ -1710,13 +1536,6 @@ namespace Daleel.Web.Data.Migrations
                     b.Property<long>("LastSeenAt")
                         .HasColumnType("bigint");
 
-                    b.Property<string>("NextUrl")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<string>("ProductKeysJson")
-                        .HasColumnType("text");
-
                     b.Property<string>("Url")
                         .IsRequired()
                         .HasMaxLength(1000)
@@ -2178,39 +1997,6 @@ namespace Daleel.Web.Data.Migrations
                     b.HasKey("UserId", "LoginProvider", "Name");
 
                     b.ToTable("AspNetUserTokens", (string)null);
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.ApiApplication", b =>
-                {
-                    b.HasOne("Daleel.Web.Data.ApiPlan", "Plan")
-                        .WithMany()
-                        .HasForeignKey("ApiPlanId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Plan");
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.ApiCreditLedger", b =>
-                {
-                    b.HasOne("Daleel.Web.Data.ApiApplication", "Application")
-                        .WithMany()
-                        .HasForeignKey("ApplicationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Application");
-                });
-
-            modelBuilder.Entity("Daleel.Web.Data.ApiKey", b =>
-                {
-                    b.HasOne("Daleel.Web.Data.ApiApplication", "Application")
-                        .WithMany()
-                        .HasForeignKey("ApplicationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Application");
                 });
 
             modelBuilder.Entity("Daleel.Web.Data.BrandModel", b =>

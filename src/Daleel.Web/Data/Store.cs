@@ -69,6 +69,18 @@ public sealed class Store
 
     public DateTimeOffset LastRefreshed { get; set; }
 
+    // ── Inventory monitor (spec 2026-07-19-store-inventory-monitor) ─────────
+    /// <summary>When true the whole catalogue is kept synced on a cadence.</summary>
+    public bool MonitorEnabled { get; set; }
+
+    /// <summary>Hours between full-inventory syncs.</summary>
+    public int MonitorCadenceHours { get; set; } = 24;
+
+    public DateTimeOffset? LastInventorySyncAt { get; set; }
+
+    /// <summary>Distinct items seen in the last completed sync.</summary>
+    public int? LastInventoryCount { get; set; }
+
     /// <summary>True once the store has been cross-referenced against a Google Places entry.</summary>
     public bool IsVerified => !string.IsNullOrEmpty(GooglePlaceId);
 

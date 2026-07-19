@@ -650,6 +650,27 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
 // Re-reads the detail page of an item the product-shot screen left imageless (ImageCheck enqueues it).
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.CleanShotHandler>();
+// Inventory monitor: Shopify catalogue client + the sync/page/finalize units + the scheduler.
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Inventory.IStoreCatalogClient>(sp =>
+    new Daleel.Web.Pipeline.Inventory.CompositeCatalogClient(
+        new Daleel.Web.Pipeline.Inventory.ShopifyCatalogClient(
+            providers: sp.GetRequiredService<Daleel.Web.Services.IProviderApi>()),
+        new Daleel.Web.Pipeline.Inventory.WooCommerceCatalogClient(
+            providers: sp.GetRequiredService<Daleel.Web.Services.IProviderApi>())));
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Inventory.InventorySyncHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Inventory.InventoryPageHandler>();
+// HTML mode: listing-page discovery (sitemap first, one LLM homepage assess as fallback) + the
+// per-listing-page walk unit for stores with no machine-readable catalogue.
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Inventory.IHtmlCatalogDiscovery>(sp =>
+    new Daleel.Web.Pipeline.Inventory.HtmlCatalogDiscovery(
+        sp.GetRequiredService<Daleel.Web.Services.IProviderApi>()));
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Inventory.InventoryHtmlPageHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Inventory.InventoryFinalizeHandler>();
+builder.Services.AddHostedService<Daleel.Web.Pipeline.Inventory.StoreInventoryMonitorService>();
 builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
 // Read-side of /admin/queues (scoped: one DbContext per dashboard refresh tick).
 builder.Services.AddScoped<Daleel.Web.Pipeline.Enrichment.IQueueDashboardService,

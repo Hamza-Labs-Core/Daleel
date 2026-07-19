@@ -127,6 +127,9 @@ public sealed record EntityOffer
     /// <summary>"new" / "used" / "refurbished" for products; null otherwise.</summary>
     public string? Condition { get; init; }
 
+    /// <summary>"in stock" / "out of stock" / "unavailable" (delisted from the store) when known.</summary>
+    public string? Availability { get; init; }
+
     /// <summary>The STORE's listing photos for this offer (item-level images stay brand/canonical;
     /// surfaces union both at render). Filled when a merged-in listing's images move onto its offer.</summary>
     public IReadOnlyList<string> ImageUrls { get; init; } = Array.Empty<string>();

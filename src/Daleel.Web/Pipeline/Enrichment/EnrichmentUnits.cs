@@ -66,6 +66,24 @@ public static class EnrichmentUnit
     /// </summary>
     public const string ImageCheck = "enrich.imagecheck";
 
+    // ── Inventory monitor (spec 2026-07-19-store-inventory-monitor) ──────────────────────────
+    /// <summary>Per monitored store: resolve the catalogue interface and fan out page units.</summary>
+    public const string InventorySync = "inventory.sync";
+
+    /// <summary>One catalogue page: fetch, hash-skip if unchanged, else parse + upsert entities/prices.</summary>
+    public const string InventoryPage = "inventory.page";
+
+    /// <summary>
+    /// One LISTING/category page of an HTML store (no machine-readable catalogue): fetch through the
+    /// full provider chain, hash-skip when unchanged (presence stamped from the page's remembered
+    /// product keys, zero LLM), else LLM-extract every card, then follow the page's own pagination up
+    /// to a loop-safety ceiling. Fanned out one unit per listing page — never one per product.
+    /// </summary>
+    public const string InventoryHtmlPage = "inventory.htmlpage";
+
+    /// <summary>Settle-gated: presence flips for items missing this sync, stamp the store row.</summary>
+    public const string InventoryFinalize = "inventory.finalize";
+
     /// <summary>Job-level: smart-cache gap refill (the ServeAndEnrich path) as one durable unit.</summary>
     public const string CacheGapRefill = "enrich.regaps";
 
@@ -97,6 +115,16 @@ public sealed record BrandPayload(string Brand);
 
 /// <summary>One page to verify + the models it was selected for (mention pages create offers).</summary>
 public sealed record VerifyPagePayload(string Url, List<string> ModelNames, bool FromMention = false);
+
+/// <summary>One inventory sync run. <paramref name="SyncStartedAt"/> is the presence watermark:
+/// rows last seen before it were not on the store this run.</summary>
+public sealed record InventorySyncPayload(int StoreId, string Domain, DateTimeOffset SyncStartedAt);
+
+public sealed record InventoryPagePayload(int StoreId, string Domain, int Page, DateTimeOffset SyncStartedAt);
+
+/// <summary>One HTML listing/category page of an inventory sync. The unit walks the page's own
+/// pagination chain itself (bounded by a loop-safety ceiling), so the payload carries the entry URL.</summary>
+public sealed record InventoryHtmlPagePayload(int StoreId, string Domain, string Url, DateTimeOffset SyncStartedAt);
 
 /// <summary>Names already attempted by prior image-lookup passes — so the chain advances, never loops.</summary>
 public sealed record ImageLookupPayload(List<string> Attempted);

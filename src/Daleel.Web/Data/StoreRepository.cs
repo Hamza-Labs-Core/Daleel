@@ -19,6 +19,13 @@ public interface IStoreRepository
     Task<IReadOnlyList<Store>> SearchAsync(
         string? query, int skip, int take, string? location = null, string? type = null, CancellationToken ct = default);
 
+    /// <summary>
+    /// Sets the inventory-monitor OPERATOR state on a store. Deliberately its own method:
+    /// <see cref="UpsertAsync"/> carries researched PROFILE data and must never touch monitor
+    /// flags (a profile refresh would silently disable monitoring).
+    /// </summary>
+    Task SetMonitorAsync(int storeId, bool enabled, int? cadenceHours = null, CancellationToken ct = default);
+
     /// <summary>Distinct store locations (the directory's location filter options).</summary>
     Task<IReadOnlyList<string>> DistinctLocationsAsync(CancellationToken ct = default);
 
@@ -135,6 +142,28 @@ public sealed class StoreRepository : IStoreRepository
         }
 
         return await q.OrderBy(s => s.Name).Skip(skip).Take(take).ToListAsync(ct);
+    }
+
+    public async Task SetMonitorAsync(int storeId, bool enabled, int? cadenceHours = null, CancellationToken ct = default)
+    {
+        var store = await _db.Stores.FirstOrDefaultAsync(s => s.Id == storeId, ct);
+        if (store is null)
+        {
+            return;
+        }
+
+        store.MonitorEnabled = enabled;
+        if (cadenceHours is { } h)
+        {
+            store.MonitorCadenceHours = Math.Max(1, h);
+        }
+
+        if (enabled)
+        {
+            store.LastInventorySyncAt = null; // due immediately — the scheduler picks it up next tick
+        }
+
+        await _db.SaveChangesAsync(ct);
     }
 
     public async Task<IReadOnlyList<string>> DistinctLocationsAsync(CancellationToken ct = default) =>
