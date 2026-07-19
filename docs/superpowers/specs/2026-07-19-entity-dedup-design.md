@@ -73,6 +73,23 @@ is judged on the STRONGEST evidence available, in order:
    (tonnage/BTU equivalence, capacity, color). New `dedup` call site in `LlmCallSites` →
    admin-switchable model, metered like every other call.
 
+**Image timing — the trap.** Entity documents are saved MID-RUN (`SearchActivities` at extract,
+`CrawlSupport` during crawls) — *before* the enrichment drain lands images — so a doc's photo is
+often null even when the grid card has one. Two fixes:
+
+- **Entity re-save at settle.** The settle-gated `enrich.synthesize` unit already waits for the
+  queue to drain; piggyback an entity-doc refresh there so docs carry the FINAL images/offers.
+  (Fixes stale offers in docs generally, not just dedup.)
+- **The worker reads photos from the best source, not just the doc**: entity doc images →
+  the identified `BrandModel.ImageR2Urls` → the enriched result (via `SearchId`). Vision runs on
+  whatever photo actually exists.
+
+**When vision still can't run** (no photo anywhere on one side): fall to spec/text judgment; with
+no distinguishing specs either, the pair STAYS a duplicate — but not silently forever:
+- it remains listed on the `/admin/data` candidates report (eyeball-mergeable by an admin), and
+- the worker is RECURRING with memoized verdicts: the first enrichment/deep-dive that lands a
+  photo or model on either row makes the next pass re-judge it for near-zero cost.
+
 Fail-open: unavailable vision/LLM defers fuzzy pairs to the next run; exact-key merges proceed
 regardless. A pair with no photo overlap AND no distinguishing specs stays unmerged (wrong merge >
 duplicate).
