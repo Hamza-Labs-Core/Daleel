@@ -43,6 +43,11 @@ public sealed class ScrapedPrice
     /// </summary>
     public string? ImageUrl { get; set; }
 
+    /// <summary>Inventory-monitor presence stamp: when a sync last saw this listing live on the
+    /// store. A monitored item missing across a whole sync gets its offer availability flipped —
+    /// never deleted.</summary>
+    public DateTimeOffset? LastSeenAt { get; set; }
+
     /// <summary>The store's stock wording as extracted ("in stock", "متوفر", "sold out"), when shown.
     /// Classified for display by <c>StockStatus</c>; free-form here so nothing is lost in transit.</summary>
     public string? Availability { get; set; }

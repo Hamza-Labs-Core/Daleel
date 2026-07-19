@@ -650,6 +650,16 @@ builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHand
 // Re-reads the detail page of an item the product-shot screen left imageless (ImageCheck enqueues it).
 builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
     Daleel.Web.Pipeline.Enrichment.CleanShotHandler>();
+// Inventory monitor: Shopify catalogue client + the sync/page/finalize units + the scheduler.
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Inventory.IStoreCatalogClient,
+    Daleel.Web.Pipeline.Inventory.ShopifyCatalogClient>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Inventory.InventorySyncHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Inventory.InventoryPageHandler>();
+builder.Services.AddSingleton<Daleel.Web.Pipeline.Enrichment.IEnrichmentUnitHandler,
+    Daleel.Web.Pipeline.Inventory.InventoryFinalizeHandler>();
+builder.Services.AddHostedService<Daleel.Web.Pipeline.Inventory.StoreInventoryMonitorService>();
 builder.Services.AddHostedService<Daleel.Web.Pipeline.Enrichment.EnrichmentQueueService>();
 // Read-side of /admin/queues (scoped: one DbContext per dashboard refresh tick).
 builder.Services.AddScoped<Daleel.Web.Pipeline.Enrichment.IQueueDashboardService,

@@ -57,6 +57,7 @@ else
                         <th>Rating</th>
                         <th>Brands carried</th>
                         <th>Refreshed (UTC)</th>
+                        <th>Monitor</th>
                         <th></th>
                     </tr>
                 </thead>
@@ -70,6 +71,20 @@ else
                             <td>@(s.Rating is { } r ? $"{r:0.0}/5" : "—")</td>
                             <td style="max-width:280px;">@(s.BrandsCarried.Count > 0 ? string.Join(", ", s.BrandsCarried.Take(5)) : "—")</td>
                             <td style="white-space:nowrap;">@s.LastRefreshed.ToString("yyyy-MM-dd HH:mm")</td>
+                            <td style="white-space:nowrap;">
+                                @* Inventory monitor: full-catalogue sync on a cadence (spec 2026-07-19).
+                                   Only meaningful for stores with a website; the scheduler skips the rest. *@
+                                <MudSwitch T="bool" Value="@s.MonitorEnabled" Color="Color.Primary"
+                                           Disabled="@(_busy || string.IsNullOrWhiteSpace(s.Website))"
+                                           ValueChanged="@(v => ToggleMonitorAsync(s, v))" />
+                                @if (s.MonitorEnabled)
+                                {
+                                    <MudText Typo="Typo.caption" Color="Color.Secondary">
+                                        @(s.LastInventoryCount is { } c ? $"{c} items" : "pending")
+                                        @(s.LastInventorySyncAt is { } t ? $" · {t.ToString("MM-dd HH:mm")}" : "")
+                                    </MudText>
+                                }
+                            </td>
                             <td>
                                 <MudButton Size="Size.Small" Variant="Variant.Text" Disabled="_busy"
                                            OnClick="@(() => RefreshOneAsync(s.Name))">Refresh</MudButton>
@@ -94,6 +109,31 @@ else
         if (firstRender)
         {
             await LoadAsync();
+        }
+    }
+
+    private async Task ToggleMonitorAsync(Store s, bool enabled)
+    {
+        _busy = true;
+        try
+        {
+            s.MonitorEnabled = enabled;
+            if (enabled)
+            {
+                s.LastInventorySyncAt = null; // due immediately — the scheduler picks it up next tick
+            }
+
+            await Stores.UpsertAsync(s);
+            _status = enabled ? $"Monitoring {s.Name} — first sync within ~15 minutes." : $"Monitoring stopped for {s.Name}.";
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
         }
     }
 
