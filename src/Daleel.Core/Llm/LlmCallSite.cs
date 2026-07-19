@@ -43,11 +43,14 @@ public static class LlmCallSites
     /// </summary>
     public static readonly LlmCallSite Vision = new("vision", "Image moderation (vision)", DefaultModel);
 
+    /// <summary>The dedup worker's "same physical product?" judgment over names + specs (stage B).</summary>
+    public static readonly LlmCallSite Dedup = new("dedup", "Entity dedup judge", DefaultModel);
+
     /// <summary>Every registered call-site — drives config seeding and the admin model editor.</summary>
     public static readonly IReadOnlyList<LlmCallSite> All = new[]
     {
         Planner, Category, Extraction, Relevance, Analyst, Synthesis, BrandReputation, EnrichModel, Crawl,
-        Vision,
+        Vision, Dedup,
     };
 
     private static readonly IReadOnlyDictionary<string, LlmCallSite> ByKey =

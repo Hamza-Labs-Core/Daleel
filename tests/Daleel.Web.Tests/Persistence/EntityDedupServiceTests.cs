@@ -24,10 +24,20 @@ public sealed class EntityDedupServiceTests : IDisposable
 
     public void Dispose() => _pg.Dispose();
 
-    private IServiceProvider BuildServices()
+    private IServiceProvider BuildServices(
+        Daleel.Web.Identification.IVisionMatcher? vision = null, string? llmVerdict = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<IR2StorageService>(_r2);
+        if (vision is not null)
+        {
+            services.AddSingleton(vision);
+        }
+
+        if (llmVerdict is not null)
+        {
+            services.AddSingleton<Daleel.Web.Services.IAgentFactory>(new StubAgentFactory(llmVerdict));
+        }
         services.AddTransient(_ => _pg.NewContext());
         services.AddTransient<IEntityRecordRepository>(sp => new EntityRecordRepository(sp.GetRequiredService<DaleelDbContext>()));
         services.AddTransient<IBrandRepository>(sp => new BrandRepository(sp.GetRequiredService<DaleelDbContext>()));
@@ -38,6 +48,7 @@ public sealed class EntityDedupServiceTests : IDisposable
             sp.GetRequiredService<IBrandRepository>(),
             sp.GetRequiredService<IStoreRepository>(),
             NullLogger<SearchEntityStore>.Instance));
+        services.AddSingleton<ISystemConfigService>(new FakeConfig());
         return services.BuildServiceProvider();
     }
 
@@ -106,6 +117,117 @@ public sealed class EntityDedupServiceTests : IDisposable
         (await db.EntityRecords.CountAsync(r => r.MergedIntoId != null)).Should().Be(0, "dry-run merges nothing");
         (await db.EntityMergeLogs.CountAsync()).Should().Be(1);
         (await db.EntityMergeLogs.SingleAsync()).DryRun.Should().BeTrue();
+    }
+
+    // ── Stage B: fuzzy judgments + umbrella ──────────────────────────────────
+
+    private async Task SeedFuzzyPairAsync(IServiceProvider sp, string? imgA, string? imgB)
+    {
+        var brand = await new BrandRepository(_pg.NewContext()).UpsertAsync(new Brand { Name = "Samsung", NameKey = Brand.Normalize("Samsung") });
+        var store = sp.GetRequiredService<ISearchEntityStore>();
+        await store.SaveAsync(new EntityDocument
+        {
+            Id = "p_fz1", Intent = SearchIntentType.Product, Name = "Samsung inverter AC deluxe", Geo = "jordan",
+            Brand = "Samsung", Category = "air conditioner", ImageUrl = imgA,
+            Offers = new[] { new EntityOffer { Source = "leaders.jo", Price = 500, Currency = "JOD", Url = "https://leaders.jo/x" } },
+            CapturedAt = DateTimeOffset.UnixEpoch
+        });
+        await store.SaveAsync(new EntityDocument
+        {
+            Id = "p_fz2", Intent = SearchIntentType.Product, Name = "سامسونج مكيف انفرتر", Geo = "jordan",
+            Brand = "Samsung", Category = "air conditioner", ImageUrl = imgB,
+            Offers = new[] { new EntityOffer { Source = "darcomjo.com", Price = 490, Currency = "JOD", Url = "https://darcomjo.com/y" } },
+            CapturedAt = DateTimeOffset.UnixEpoch.AddDays(1)
+        });
+        var db = sp.GetRequiredService<DaleelDbContext>();
+        (await db.EntityRecords.CountAsync(r => r.MergedIntoId == null)).Should().Be(2,
+            "cross-language names share no tokens, so the hash keeps them apart — stage B's job");
+    }
+
+    [Fact]
+    public async Task VisionMatch_MergesTheCrossLanguagePair()
+    {
+        var sp = BuildServices(vision: new StubVision(same: true, confidence: 0.95));
+        await SeedFuzzyPairAsync(sp, "https://a/img1.jpg", "https://b/img2.jpg");
+
+        await NewService(sp).RunPassAsync(sp, dryRun: false, default);
+
+        var db = sp.GetRequiredService<DaleelDbContext>();
+        (await db.EntityRecords.CountAsync(r => r.MergedIntoId == null)).Should().Be(1);
+        (await db.EntityMergeLogs.Where(m => m.Evidence == "vision").CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task UnclearVerdict_GroupsUnderTheGenericUmbrella_WithMemberOffersAndImages()
+    {
+        // No photos → vision can't run; the LLM judge says "unclear" → umbrella, never a blind merge.
+        var sp = BuildServices(llmVerdict: "unclear");
+        await SeedFuzzyPairAsync(sp, imgA: null, imgB: null);
+
+        await NewService(sp).RunPassAsync(sp, dryRun: false, default);
+
+        var db = sp.GetRequiredService<DaleelDbContext>();
+        var live = await db.EntityRecords.Where(r => r.MergedIntoId == null).ToListAsync();
+        live.Should().ContainSingle();
+        live[0].Name.Should().Be("Samsung air conditioner", "the umbrella carries an honest generic title");
+        live[0].IdentityKey.Should().StartWith("gen:", "an umbrella must never attract specific products");
+
+        var doc = await sp.GetRequiredService<ISearchEntityStore>().GetAsync(live[0].Id, SearchIntentType.Product);
+        doc!.Offers.Should().HaveCount(2, "each member lives on as an offer under the one item");
+        doc.Offers.Select(o => o.ListingName).Should().Contain(new[] { "Samsung inverter AC deluxe", "سامسونج مكيف انفرتر" });
+        (await db.EntityMergeLogs.CountAsync(m => m.Evidence == "umbrella")).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task DifferentVerdict_IsLedgered_AndNeverReJudged()
+    {
+        var sp = BuildServices(llmVerdict: "different");
+        await SeedFuzzyPairAsync(sp, imgA: null, imgB: null);
+
+        var svc = NewService(sp);
+        await svc.RunPassAsync(sp, dryRun: false, default);
+        await svc.RunPassAsync(sp, dryRun: false, default);
+
+        var db = sp.GetRequiredService<DaleelDbContext>();
+        (await db.EntityRecords.CountAsync(r => r.MergedIntoId == null)).Should().Be(2, "different products stay apart");
+        (await db.EntityMergeLogs.CountAsync()).Should().Be(1, "the negative verdict is ledgered ONCE — never re-billed");
+    }
+
+    private sealed class StubVision(bool same, double confidence) : Daleel.Web.Identification.IVisionMatcher
+    {
+        public bool IsConfigured => true;
+        public Task<Daleel.Web.Identification.VisionMatchResult> CompareAsync(
+            string a, string b, string? hint, CancellationToken ct = default) =>
+            Task.FromResult(new Daleel.Web.Identification.VisionMatchResult(same, confidence, null));
+    }
+
+    private sealed class StubAgentFactory(string verdict) : Daleel.Web.Services.IAgentFactory
+    {
+        public bool HasLlm() => true;
+        public Daleel.Web.Services.ProviderStatus Describe() => new(true, false, false, false, false);
+        public Daleel.Agent.AgentService Build(Daleel.Web.Services.AgentRequest request) => throw new NotSupportedException();
+        public string? Resolve(string name) => null;
+        public Daleel.Core.Llm.ILlmClient? TryBuildLlm(string? model = null) => new StubLlm(verdict);
+    }
+
+    private sealed class StubLlm(string verdict) : Daleel.Core.Llm.ILlmClient
+    {
+        public string Provider => "stub";
+        public Task<Daleel.Core.Llm.LlmResponse> CompleteAsync(
+            string systemPrompt, IReadOnlyList<Daleel.Core.Llm.LlmMessage> messages, CancellationToken ct = default) =>
+            Task.FromResult(new Daleel.Core.Llm.LlmResponse { Content = $$"""{"verdict":"{{verdict}}"}""" });
+    }
+
+    private sealed class FakeConfig : ISystemConfigService
+    {
+        public Task<string?> GetAsync(string key, CancellationToken ct = default) => Task.FromResult<string?>(null);
+        public Task<int> GetIntAsync(string key, int fallback, CancellationToken ct = default) => Task.FromResult(fallback);
+        public Task<bool> GetBoolAsync(string key, bool fallback, CancellationToken ct = default) =>
+            Task.FromResult(key is "dedup.fuzzy_enabled" or "dedup.enabled" || fallback);
+        public Task SetAsync(string key, string value, string type = "string", CancellationToken ct = default) => Task.CompletedTask;
+        public Task<IReadOnlyList<SystemConfig>> AllAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<SystemConfig>>(Array.Empty<SystemConfig>());
+        public Task SeedDefaultsAsync(CancellationToken ct = default) => Task.CompletedTask;
     }
 
     private sealed class InMemoryR2 : IR2StorageService

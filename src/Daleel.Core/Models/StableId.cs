@@ -111,6 +111,17 @@ public static class StableId
         return $"fp:{geoKey}:{string.Join(' ', tokens)}";
     }
 
+    /// <summary>
+    /// Routing id + identity key for a GENERIC umbrella item — the brand+category entity that
+    /// indistinguishable no-evidence listings group under until evidence graduates them. The "gen:"
+    /// identity prefix guarantees a specific product's sku:/fp: key never collides with an umbrella.
+    /// </summary>
+    public static (string Id, string IdentityKey) ForUmbrella(string? geo, string? brand, string? category)
+    {
+        var basis = $"gen {NormalizeIdentity(geo)} {NormalizeIdentity(brand)} {NormalizeIdentity(category)}";
+        return (Hash("p", basis), $"gen:{NormalizeIdentity(geo)}:{NormalizeIdentity(brand)}:{NormalizeIdentity(category)}");
+    }
+
     /// <summary>Marketing filler that varies per store without changing what the product IS.</summary>
     private static readonly HashSet<string> FingerprintStopwords = new(StringComparer.Ordinal)
     {

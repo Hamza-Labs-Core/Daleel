@@ -57,6 +57,11 @@ public sealed record EntityDocument
     /// "air conditioner" — the directory's category label. Null on pre-strategy documents.</summary>
     public string? Category { get; init; }
 
+    /// <summary>Explicit identity-key override. Null for normal products (the save path computes the
+    /// tiered key); set on GENERIC umbrella documents ("gen:…") so an umbrella never converges with —
+    /// or attracts — a specific product whose name happens to fingerprint identically.</summary>
+    public string? IdentityKey { get; init; }
+
     // ── Embedded relation IDs (make the document self-contained) ──────────────
     /// <summary>The search run (SearchJob id) that produced this document.</summary>
     public string? SearchId { get; init; }
@@ -121,4 +126,12 @@ public sealed record EntityOffer
 
     /// <summary>"new" / "used" / "refurbished" for products; null otherwise.</summary>
     public string? Condition { get; init; }
+
+    /// <summary>The STORE's listing photos for this offer (item-level images stay brand/canonical;
+    /// surfaces union both at render). Filled when a merged-in listing's images move onto its offer.</summary>
+    public IReadOnlyList<string> ImageUrls { get; init; } = Array.Empty<string>();
+
+    /// <summary>The absorbed listing's own wording, kept when it differs from the item name (umbrella
+    /// members keep their identity as offers).</summary>
+    public string? ListingName { get; init; }
 }
