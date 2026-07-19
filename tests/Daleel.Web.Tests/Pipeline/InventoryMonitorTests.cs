@@ -71,6 +71,7 @@ public sealed class InventoryMonitorTests : IDisposable
         l.Price.Should().Be(649.00m, "Store-API prices are minor-unit strings");
         l.Category.Should().Be("Mobiles");
         WooCommerceCatalogClient.Parse("<html>wall</html>", "x.jo").Should().BeNull();
+        WooCommerceCatalogClient.Parse("[]", "x.jo").Should().BeEmpty("a past-the-end 400 maps to the empty page, not a dead unit");
     }
 
     [Fact]

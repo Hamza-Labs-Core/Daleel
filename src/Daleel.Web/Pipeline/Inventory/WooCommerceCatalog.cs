@@ -51,9 +51,25 @@ public sealed class WooCommerceCatalogClient : IStoreCatalogClient, IDisposable
         try
         {
             using var res = await _http.GetAsync(url, ct).ConfigureAwait(false);
-            return res.IsSuccessStatusCode
-                ? await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false)
-                : null;
+            if (res.IsSuccessStatusCode)
+            {
+                return await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            }
+
+            // Unlike Shopify (empty array past the end), the Store API 400s on an out-of-range page
+            // (rest_invalid_param). That is END-OF-CATALOGUE, not an outage — surfacing it as
+            // unreadable killed 200 units per big-store sync on QA.
+            if (res.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                var body = await res.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                if (body.Contains("rest_invalid", StringComparison.OrdinalIgnoreCase) ||
+                    body.Contains("rest_", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "[]";
+                }
+            }
+
+            return null;
         }
         catch (OperationCanceledException) { throw; }
         catch
